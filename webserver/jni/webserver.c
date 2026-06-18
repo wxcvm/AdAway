@@ -15,7 +15,19 @@
 #define OOM_ADJ_PATH    "/proc/self/oom_score_adj"
 #define OOM_ADJ_NOKILL  -17
 
+// The web server only ever needs to sink one-off requests for blocked ad and
+// tracker domains: it has no legitimate reason to keep a connection open
+// after answering it, nor to let an accepted connection sit idle forever.
+// Without bounds on this, connections accumulate without limit over the
+// uptime of the process (e.g. a stalled TLS handshake, or a client that
+// opens a socket and never sends a request), and servicing a growing
+// connection list on every poll cycle is what causes the abnormal CPU usage
+// reported in https://github.com/AdAway/AdAway/issues/4174.
+#define MAX_CONNECTIONS 256
+#define IDLE_TIMEOUT_MS 10000
+
 static volatile sig_atomic_t s_sig_num = 0;
+static int s_active_connections = 0;
 
 struct settings {
     bool init;
@@ -27,23 +39,65 @@ struct settings {
 };
 
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
-    if (ev == MG_EV_ACCEPT && c->is_tls && c->fn_data != NULL) {
-        struct settings *s = (struct settings *) c->fn_data;
-        mg_tls_init(c, &s->tls_opts);
+    if (ev == MG_EV_ACCEPT) {
+        // Shed load before doing any expensive work (in particular, before
+        // the TLS handshake, which is the costliest part): once the cap is
+        // reached, just drop the connection.
+        if (s_active_connections >= MAX_CONNECTIONS) {
+            c->is_closing = 1;
+            return;
+        }
+        s_active_connections++;
+        // Remember when this connection was accepted, so MG_EV_POLL below
+        // can enforce an idle timeout on it. The byte right after the
+        // timestamp marks this connection as counted, so MG_EV_CLOSE below
+        // only decrements s_active_connections for connections that were
+        // actually counted here (and not ones rejected above for being over
+        // the cap).
+        uint64_t accepted_at = mg_millis();
+        memcpy(c->data, &accepted_at, sizeof(accepted_at));
+        c->data[sizeof(accepted_at)] = 1;
+        if (c->is_tls && c->fn_data != NULL) {
+            struct settings *s = (struct settings *) c->fn_data;
+            mg_tls_init(c, &s->tls_opts);
+        }
+    } else if (ev == MG_EV_CLOSE) {
+        if (c->data[sizeof(uint64_t)] == 1) {
+            s_active_connections--;
+        }
+    } else if (ev == MG_EV_POLL && c->is_accepted) {
+        // Safety net for connections that never reach MG_EV_HTTP_MSG, e.g. a
+        // TLS handshake that never completes, or a client that opens a
+        // socket and never sends a request: close them once they have been
+        // open for too long instead of letting them linger forever. Guarded
+        // by is_accepted so this never touches the two listening sockets.
+        if (!c->is_draining && !c->is_closing) {
+            uint64_t accepted_at, now = mg_millis();
+            memcpy(&accepted_at, c->data, sizeof(accepted_at));
+            if (now - accepted_at > IDLE_TIMEOUT_MS) {
+                c->is_closing = 1;
+            }
+        }
     } else if (ev == MG_EV_HTTP_MSG && c->fn_data != NULL) {
         struct mg_http_message *hm = (struct mg_http_message *) ev_data;
         struct settings *s = (struct settings *) c->fn_data;
         if (mg_strcmp(hm->uri, mg_str("/internal-test")) == 0) {
             struct mg_http_serve_opts opts;
             memset(&opts, 0, sizeof(opts));
+            opts.extra_headers = "Connection: close\r\n";
             mg_http_serve_file(c, hm, s->test_path, &opts);
         } else if (s->icon) {
             struct mg_http_serve_opts opts;
             memset(&opts, 0, sizeof(opts));
+            opts.extra_headers = "Connection: close\r\n";
             mg_http_serve_file(c, hm, s->icon_path, &opts);
         } else {
-            mg_http_reply(c, 200, "", "");
+            mg_http_reply(c, 200, "Connection: close\r\n", "");
         }
+        // Never keep a connection alive after answering it: this used to
+        // default to HTTP keep-alive, which is how connections piled up
+        // without bound in the first place.
+        c->is_draining = 1;
     }
 }
 
