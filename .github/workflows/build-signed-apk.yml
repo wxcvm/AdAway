@@ -1,0 +1,55 @@
+name: Build self-signed APK (manual)
+
+# Manual-only: build a release-shaped APK signed with a throwaway,
+# CI-generated keystore, and attach it as a workflow run artifact.
+# This never creates a GitHub Release and never publishes anywhere -
+# the APK only ever lives as a downloadable artifact on this run, for
+# personal testing/install.
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build self-signed release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'gradle'
+
+      - name: Generate a throwaway self-signed keystore
+        run: |
+          mkdir -p "$HOME/.gradle"
+          keytool -genkeypair \
+            -keystore "$HOME/adaway-selfsigned.jks" \
+            -alias adaway \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "adaway-ci-build" \
+            -keypass "adaway-ci-build" \
+            -dname "CN=AdAway CI Build, OU=CI, O=AdAway, L=Unknown, ST=Unknown, C=US"
+          {
+            echo "signingStoreLocation=$HOME/adaway-selfsigned.jks"
+            echo "signingStorePassword=adaway-ci-build"
+            echo "signingKeyAlias=adaway"
+            echo "signingKeyPassword=adaway-ci-build"
+          } >> "$HOME/.gradle/gradle.properties"
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdAway-self-signed
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 14
