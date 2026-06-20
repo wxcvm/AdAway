@@ -37,11 +37,26 @@ public final class ShellUtils {
     }
 
     public static boolean runBundledExecutable(Context context, String executable, String parameters) {
+        return Shell.cmd(buildCommand(context, executable, parameters) + " &").exec().isSuccess();
+    }
+
+    /**
+     * Run a bundled executable synchronously (blocking until it exits), for
+     * one-shot invocations whose result must be available before the caller
+     * continues — e.g. generating the web server's TLS certificate before
+     * starting the server with it.
+     *
+     * @return <code>true</code> if the executable ran and exited successfully.
+     */
+    public static boolean runBundledExecutableSync(Context context, String executable, String parameters) {
+        return Shell.cmd(buildCommand(context, executable, parameters)).exec().isSuccess();
+    }
+
+    private static String buildCommand(Context context, String executable, String parameters) {
         String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
-        String command = "LD_LIBRARY_PATH=" + nativeLibraryDir + " " +
+        return "LD_LIBRARY_PATH=" + nativeLibraryDir + " " +
                 nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + " " +
-                parameters + " &";
-        return Shell.cmd(command).exec().isSuccess();
+                parameters;
     }
 
     public static void killBundledExecutable(String executable) {
