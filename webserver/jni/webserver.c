@@ -4,6 +4,11 @@
 #include <signal.h>
 #include <android/log.h>
 #include <errno.h>
+#include <sys/stat.h>
+#include <openssl/evp.h>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+#include <openssl/rand.h>
 #include "mongoose/mongoose.h"
 
 #define THIS_FILE "WebServer"
@@ -148,6 +153,91 @@ void oom_adjust_setup(void) {
     fclose(fp);
 }
 
+/*
+ * Generates a fresh, unique RSA key pair and a self-signed "localhost"
+ * certificate, and writes them out as PEM files at cert_path/key_path.
+ *
+ * This replaces what used to be a single static certificate (and its
+ * private key) bundled as a plain asset inside every copy of the APK and
+ * checked into the public source repository: that meant every single
+ * install of AdAway shared the exact same TLS private key, which anyone
+ * could extract from the repo or the APK and use to impersonate any site
+ * to any device that had the certificate installed in its trust store.
+ * Generating a unique key pair locally, at first use, means the private
+ * key never leaves the device and is never shared across installs.
+ */
+static int generate_self_signed_cert(const char *cert_path, const char *key_path) {
+    int ret = EXIT_FAILURE;
+    EVP_PKEY_CTX *pctx = NULL;
+    EVP_PKEY *pkey = NULL;
+    X509 *x509 = NULL;
+    X509_NAME *name = NULL;
+    FILE *key_file = NULL;
+    FILE *cert_file = NULL;
+    uint64_t serial = 0;
+
+    pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+    if (pctx == NULL || EVP_PKEY_keygen_init(pctx) <= 0 ||
+        EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0 ||
+        EVP_PKEY_keygen(pctx, &pkey) <= 0) {
+        __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "Failed to generate RSA key pair.");
+        goto cleanup;
+    }
+
+    x509 = X509_new();
+    if (x509 == NULL) {
+        goto cleanup;
+    }
+
+    if (RAND_bytes((unsigned char *) &serial, sizeof(serial)) != 1) {
+        // Not security-critical (the serial only needs to be unlikely to
+        // collide, not unpredictable), so fall back rather than fail.
+        serial = (uint64_t) mg_millis();
+    }
+    serial &= 0x7FFFFFFFFFFFFFFFULL;  // keep it a positive ASN1 integer
+    ASN1_INTEGER_set_uint64(X509_get_serialNumber(x509), serial);
+
+    X509_gmtime_adj(X509_get_notBefore(x509), 0);
+    X509_gmtime_adj(X509_get_notAfter(x509), (long) 60 * 60 * 24 * 3650);  // 10 years
+    X509_set_pubkey(x509, pkey);
+
+    name = X509_get_subject_name(x509);
+    X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                                (const unsigned char *) "localhost", -1, -1, 0);
+    X509_set_issuer_name(x509, name);  // self-signed: issuer == subject
+
+    if (X509_sign(x509, pkey, EVP_sha256()) == 0) {
+        __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "Failed to sign certificate.");
+        goto cleanup;
+    }
+
+    key_file = fopen(key_path, "wb");
+    if (key_file == NULL ||
+        PEM_write_PrivateKey(key_file, pkey, NULL, NULL, 0, NULL, NULL) == 0) {
+        __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "Failed to write private key.");
+        goto cleanup;
+    }
+    fclose(key_file);
+    key_file = NULL;
+    chmod(key_path, S_IRUSR | S_IWUSR);  // private key: owner read/write only
+
+    cert_file = fopen(cert_path, "wb");
+    if (cert_file == NULL || PEM_write_X509(cert_file, x509) == 0) {
+        __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "Failed to write certificate.");
+        goto cleanup;
+    }
+
+    ret = EXIT_SUCCESS;
+
+cleanup:
+    if (key_file != NULL) fclose(key_file);
+    if (cert_file != NULL) fclose(cert_file);
+    if (x509 != NULL) X509_free(x509);
+    if (pkey != NULL) EVP_PKEY_free(pkey);
+    if (pctx != NULL) EVP_PKEY_CTX_free(pctx);
+    return ret;
+}
+
 struct settings parse_cli_parameters(int argc, char *argv[]) {
     struct settings s = {
             .init = false,
@@ -183,6 +273,19 @@ struct settings parse_cli_parameters(int argc, char *argv[]) {
 }
 
 int main(int argc, char *argv[]) {
+    // --gen-cert <dir> is a standalone mode: generate a fresh self-signed
+    // "localhost" certificate and private key into <dir>/localhost-2410.{crt,key}
+    // and exit, without starting the web server. This is invoked once, on
+    // first use, from the Android app, before the server itself is ever
+    // started with --resources <dir>.
+    if (argc == 3 && strcmp(argv[1], "--gen-cert") == 0) {
+        char cert_path[100];
+        char key_path[100];
+        snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", argv[2]);
+        snprintf(key_path, sizeof(key_path), "%s/localhost-2410.key", argv[2]);
+        return generate_self_signed_cert(cert_path, key_path);
+    }
+
     struct mg_mgr mgr;
     struct mg_connection *http_connection;
     struct mg_connection *https_connection;

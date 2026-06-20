@@ -33,9 +33,7 @@ import androidx.annotation.StringRes;
 import org.adaway.R;
 import org.adaway.helper.PreferenceHelper;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ConnectException;
 import java.nio.file.Files;
@@ -53,6 +51,7 @@ import timber.log.Timber;
 import static org.adaway.model.root.ShellUtils.isBundledExecutableRunning;
 import static org.adaway.model.root.ShellUtils.killBundledExecutable;
 import static org.adaway.model.root.ShellUtils.runBundledExecutable;
+import static org.adaway.model.root.ShellUtils.runBundledExecutableSync;
 
 /**
  * This class is an utility class to control web server execution.
@@ -73,8 +72,8 @@ public class WebServerUtils {
     public static void startWebServer(Context context) {
         Timber.d("Starting web server…");
 
-        Path resourcePath = context.getFilesDir().toPath().resolve(WEB_SERVER_EXECUTABLE);
-        inflateResources(context, resourcePath);
+        Path resourcePath = getResourcePath(context);
+        ensureResources(context, resourcePath);
 
         String parameters = "--resources " + resourcePath.toAbsolutePath() +
                 (PreferenceHelper.getWebServerIcon(context) ? " --icon" : "") +
@@ -125,19 +124,22 @@ public class WebServerUtils {
 
     /**
      * Prompt user to install web server certificate.
+     * <p>
+     * The certificate is generated locally for this install/device the first
+     * time it is needed (see {@link #ensureResources}), rather than being a
+     * fixed certificate bundled with the app: a certificate shared by every
+     * install would mean its private key is effectively public (it ships
+     * inside the APK), letting anyone impersonate any site to any device
+     * that trusts it.
      *
      * @param context The application context.
      */
     public static void installCertificate(Context context) {
-        AssetManager assetManager = context.getAssets();
-        try (InputStream inputStream = assetManager.open(LOCALHOST_CERTIFICATE);
-             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[1024];
-            int read;
-            while ((read = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, read);
-            }
-            byte[] bytes = outputStream.toByteArray();
+        Path resourcePath = getResourcePath(context);
+        ensureResources(context, resourcePath);
+        Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
+        try {
+            byte[] bytes = Files.readAllBytes(certFile);
             X509Certificate x509 = X509Certificate.getInstance(bytes);
             Intent intent = KeyChain.createInstallIntent();
             intent.putExtra(KeyChain.EXTRA_CERTIFICATE, x509.getEncoded());
@@ -151,39 +153,65 @@ public class WebServerUtils {
     }
 
     public static void copyCertificate(ContextThemeWrapper wrapper, Uri uri) {
+        Path resourcePath = getResourcePath(wrapper);
+        ensureResources(wrapper, resourcePath);
+        Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
         ContentResolver contentResolver = wrapper.getContentResolver();
-        AssetManager assetManager = wrapper.getAssets();
-        try (InputStream inputStream = assetManager.open(LOCALHOST_CERTIFICATE);
-             OutputStream outputStream = contentResolver.openOutputStream(uri)) {
+        try (OutputStream outputStream = contentResolver.openOutputStream(uri)) {
             if (outputStream == null) {
-                throw new IOException("Failed to open "+uri);
+                throw new IOException("Failed to open " + uri);
             }
-            byte[] buffer = new byte[1024];
-            int read;
-            while ((read = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, read);
-            }
+            Files.copy(certFile, outputStream);
         } catch (IOException e) {
             Timber.w(e, "Failed to copy certificate.");
         }
     }
 
-    private static void inflateResources(Context context, Path target) {
+    private static Path getResourcePath(Context context) {
+        return context.getFilesDir().toPath().resolve(WEB_SERVER_EXECUTABLE);
+    }
+
+    /**
+     * Makes sure the web server's resource directory exists, has the static
+     * assets (icon, test page), and has a certificate/key pair - generating
+     * a fresh one on this device if it doesn't already have one.
+     */
+    private static void ensureResources(Context context, Path target) {
         AssetManager assetManager = context.getAssets();
         try {
-            inflateResource(assetManager, LOCALHOST_CERTIFICATE, target);
-            inflateResource(assetManager, LOCALHOST_CERTIFICATE_KEY, target);
+            if (!Files.isDirectory(target)) {
+                Files.createDirectories(target);
+            }
             inflateResource(assetManager, "icon.svg", target);
             inflateResource(assetManager, "test.html", target);
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
         }
+        ensureCertificateGenerated(context, target);
+    }
+
+    /**
+     * Generates this device's web server certificate/key pair if it doesn't
+     * already exist. Idempotent: once generated, the same pair is reused for
+     * the lifetime of the app install, so the certificate the user installs
+     * in their system trust store keeps matching what the server actually
+     * presents.
+     */
+    private static void ensureCertificateGenerated(Context context, Path resourcePath) {
+        Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
+        Path keyFile = resourcePath.resolve(LOCALHOST_CERTIFICATE_KEY);
+        if (Files.isRegularFile(certFile) && Files.isRegularFile(keyFile)) {
+            return;
+        }
+        Timber.d("Generating web server certificate…");
+        String parameters = "--gen-cert " + resourcePath.toAbsolutePath();
+        boolean success = runBundledExecutableSync(context, WEB_SERVER_EXECUTABLE, parameters);
+        if (!success || !Files.isRegularFile(certFile) || !Files.isRegularFile(keyFile)) {
+            Timber.w("Failed to generate web server certificate.");
+        }
     }
 
     private static void inflateResource(AssetManager assetManager, String resource, Path target) throws IOException {
-        if (!Files.isDirectory(target)) {
-            Files.createDirectories(target);
-        }
         Path targetFile = target.resolve(resource);
         if (!Files.isRegularFile(targetFile)) {
             Files.copy(assetManager.open(resource), targetFile);
