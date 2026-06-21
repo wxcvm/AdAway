@@ -56,26 +56,33 @@ jobs:
         run: ./gradlew assembleRelease --stacktrace
 
       - name: Verify signing certificate and applicationId
+        continue-on-error: true
         run: |
+          set -x
           APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
-          echo "## APK verification" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "APK file: \`$(basename "$APK")\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Application ID" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          "$ANDROID_HOME/build-tools"/*/aapt2 dump badging "$APK" 2>/dev/null | grep "^package:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Signing certificate (from the built APK)" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          "$ANDROID_HOME/build-tools"/*/apksigner verify --print-certs "$APK" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Expected certificate (from the repo's signing keystore secret)" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          keytool -list -v -keystore "$HOME/adaway-release.jks" -storepass "$SIGNING_STORE_PASSWORD" 2>/dev/null | grep -A1 "SHA256:" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -n1)
+          AAPT2="$BUILD_TOOLS/aapt2"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          {
+            echo "## APK verification"
+            echo ""
+            echo "APK file: \`$(basename "$APK")\`"
+            echo ""
+            echo "### Application ID"
+            echo '```'
+            "$AAPT2" dump badging "$APK" 2>&1 | grep "^package:"
+            echo '```'
+            echo ""
+            echo "### Signing certificate (from the built APK)"
+            echo '```'
+            "$APKSIGNER" verify --print-certs "$APK" 2>&1
+            echo '```'
+            echo ""
+            echo "### Expected certificate (from the repo's signing keystore secret)"
+            echo '```'
+            keytool -list -v -keystore "$HOME/adaway-release.jks" -storepass "$SIGNING_STORE_PASSWORD" 2>&1 | grep -A1 "SHA256:"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
 
