@@ -55,6 +55,30 @@ jobs:
       - name: Build release APK
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Verify signing certificate and applicationId
+        run: |
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
+          echo "## APK verification" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "APK file: \`$(basename "$APK")\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Application ID" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          "$ANDROID_HOME/build-tools"/*/aapt2 dump badging "$APK" 2>/dev/null | grep "^package:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Signing certificate (from the built APK)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          "$ANDROID_HOME/build-tools"/*/apksigner verify --print-certs "$APK" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Expected certificate (from the repo's signing keystore secret)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          keytool -list -v -keystore "$HOME/adaway-release.jks" -storepass "$SIGNING_STORE_PASSWORD" 2>/dev/null | grep -A1 "SHA256:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
