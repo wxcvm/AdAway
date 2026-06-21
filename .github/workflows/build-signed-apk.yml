@@ -1,10 +1,15 @@
 name: Build self-signed APK (manual)
 
-# Manual-only: build a release-shaped APK signed with a throwaway,
-# CI-generated keystore, and attach it as a workflow run artifact.
-# This never creates a GitHub Release and never publishes anywhere -
-# the APK only ever lives as a downloadable artifact on this run, for
-# personal testing/install.
+# Manual-only: build a release-shaped APK signed with this fork's own
+# persistent signing key (stored as repo secrets, never committed), and
+# attach it as a workflow run artifact. This never creates a GitHub
+# Release and never publishes anywhere - the APK only ever lives as a
+# downloadable artifact on this run, for personal install/update.
+#
+# Because every run signs with the SAME key (unlike the previous
+# version of this workflow, which generated a fresh throwaway key each
+# time), APKs built here can be installed over a previous install of
+# this same fork as an update, instead of requiring an uninstall first.
 on:
   workflow_dispatch: {}
 
@@ -14,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build self-signed release APK
+    name: Build signed release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -27,21 +32,24 @@ jobs:
           java-version: 21
           cache: 'gradle'
 
-      - name: Generate a throwaway self-signed keystore
+      - name: Decode signing keystore
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
         run: |
           mkdir -p "$HOME/.gradle"
-          keytool -genkeypair \
-            -keystore "$HOME/adaway-selfsigned.jks" \
-            -alias adaway \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass "adaway-ci-build" \
-            -keypass "adaway-ci-build" \
-            -dname "CN=AdAway CI Build, OU=CI, O=AdAway, L=Unknown, ST=Unknown, C=US"
+          echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$HOME/adaway-release.jks"
+
+      - name: Write signing config
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
           {
-            echo "signingStoreLocation=$HOME/adaway-selfsigned.jks"
-            echo "signingStorePassword=adaway-ci-build"
-            echo "signingKeyAlias=adaway"
-            echo "signingKeyPassword=adaway-ci-build"
+            echo "signingStoreLocation=$HOME/adaway-release.jks"
+            echo "signingStorePassword=$SIGNING_STORE_PASSWORD"
+            echo "signingKeyAlias=$SIGNING_KEY_ALIAS"
+            echo "signingKeyPassword=$SIGNING_KEY_PASSWORD"
           } >> "$HOME/.gradle/gradle.properties"
 
       - name: Build release APK
@@ -50,6 +58,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AdAway-self-signed
+          name: AdAway-signed
           path: app/build/outputs/apk/release/*.apk
           retention-days: 14
+
