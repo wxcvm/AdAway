@@ -19,6 +19,7 @@ android {
     namespace 'org.adaway'
 
     defaultConfig {
+        applicationId 'com.wxcvm.Adaway'
         minSdk 26
         targetSdk 33
         versionCode libs.versions.appCode.get() as int
