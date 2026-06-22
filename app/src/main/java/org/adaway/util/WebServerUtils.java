@@ -194,7 +194,7 @@ public class WebServerUtils {
             if (!Files.isDirectory(target)) {
                 Files.createDirectories(target);
             }
-            inflateResource(assetManager, "icon.svg", target);
+            inflateResource(assetManager, "icon.webp", target);
             inflateResource(assetManager, "test.html", target);
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
