@@ -73,9 +73,10 @@ jobs:
           set -euo pipefail
           APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
           BT=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -n1)
+          echo "Build-tools: $BT"
+          echo "APK: $APK"
 
-          echo "=== APK: $APK ==="
-
+          # 1. Check applicationId
           echo ""
           echo "=== applicationId ==="
           "$BT/aapt2" dump badging "$APK" | grep "^package:" | tee /tmp/apk_pkg.txt
@@ -83,22 +84,31 @@ jobs:
             && echo "OK: applicationId = com.wxcvm.Adaway" \
             || { echo "ERROR: wrong applicationId"; exit 1; }
 
+          # 2. Extract APK signing certificate SHA-256
           echo ""
-          echo "=== Fingerprint from APK ==="
-          APK_FP=$("$BT/apksigner" verify --print-certs "$APK" \
-            | grep "Signer #1 certificate SHA-256 digest:" \
-            | awk '{print $NF}')
-          echo "APK SHA-256: $APK_FP"
+          echo "=== apksigner output (raw) ==="
+          "$BT/apksigner" verify --print-certs "$APK" | tee /tmp/apksigner_out.txt
 
+          # apksigner >= 0.9 says "Signer #1 certificate SHA-256 digest:"
+          # older versions say "certificate SHA-256 digest:"
+          APK_FP=$(grep -i "SHA-256 digest" /tmp/apksigner_out.txt | head -1 | awk '{print tolower($NF)}' | tr -d ':')
           echo ""
-          echo "=== Fingerprint from keystore secret ==="
-          KS_FP=$(keytool -list -v \
+          echo "APK signing cert SHA-256: '$APK_FP'"
+          [ -n "$APK_FP" ] || { echo "ERROR: could not extract APK cert fingerprint"; exit 1; }
+
+          # 3. Extract keystore certificate SHA-256
+          echo ""
+          echo "=== keytool output (raw) ==="
+          keytool -list -v \
             -keystore "$HOME/adaway-release.jks" \
-            -storepass "$SIGNING_STORE_PASSWORD" 2>/dev/null \
-            | grep "SHA256:" | head -1 \
-            | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-F' 'a-f')
-          echo "Keystore SHA-256: $KS_FP"
+            -storepass "$SIGNING_STORE_PASSWORD" 2>&1 | tee /tmp/keytool_out.txt
 
+          KS_FP=$(grep "SHA256:" /tmp/keytool_out.txt | head -1 | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-F' 'a-f')
+          echo ""
+          echo "Keystore cert SHA-256: '$KS_FP'"
+          [ -n "$KS_FP" ] || { echo "ERROR: could not extract keystore cert fingerprint"; exit 1; }
+
+          # 4. Compare
           echo ""
           [ "$APK_FP" = "$KS_FP" ] \
             && echo "OK: fingerprints match — APK is signed with the persistent fork key" \
