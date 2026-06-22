@@ -1,15 +1,19 @@
-name: Build self-signed APK (manual)
+name: Build APK (manual)
 
-# Manual-only: build a release-shaped APK signed with this fork's own
-# persistent signing key (stored as repo secrets, never committed), and
-# attach it as a workflow run artifact. This never creates a GitHub
-# Release and never publishes anywhere - the APK only ever lives as a
-# downloadable artifact on this run, for personal install/update.
+# Manual-only workflow. Builds a release APK signed with this fork's own
+# persistent signing key (stored as encrypted repo secrets, never committed).
+# Every run produces an APK signed with the SAME key, so each build can be
+# installed as an update over a previous one from this workflow, without
+# needing to uninstall first.
 #
-# Because every run signs with the SAME key (unlike the previous
-# version of this workflow, which generated a fresh throwaway key each
-# time), APKs built here can be installed over a previous install of
-# this same fork as an update, instead of requiring an uninstall first.
+# Required repo secrets:
+#   SIGNING_KEYSTORE_BASE64  – base64-encoded .jks keystore file
+#   SIGNING_STORE_PASSWORD   – keystore password
+#   SIGNING_KEY_ALIAS        – key alias inside the keystore
+#   SIGNING_KEY_PASSWORD     – key password (same as store for PKCS12)
+#
+# The APK is attached as a workflow artifact (14-day retention).
+# No GitHub Release is created; nothing is published anywhere.
 on:
   workflow_dispatch: {}
 
@@ -25,12 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: set up JDK 21
+      - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: 21
-          cache: 'gradle'
+          cache: gradle
 
       - name: Decode signing keystore
         env:
@@ -39,52 +43,21 @@ jobs:
           mkdir -p "$HOME/.gradle"
           echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$HOME/adaway-release.jks"
 
-      - name: Write signing config
+      - name: Write Gradle signing properties
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_KEY_ALIAS:      ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD:   ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
-          {
-            echo "signingStoreLocation=$HOME/adaway-release.jks"
-            echo "signingStorePassword=$SIGNING_STORE_PASSWORD"
-            echo "signingKeyAlias=$SIGNING_KEY_ALIAS"
-            echo "signingKeyPassword=$SIGNING_KEY_PASSWORD"
-          } >> "$HOME/.gradle/gradle.properties"
+          cat >> "$HOME/.gradle/gradle.properties" << PROPS
+          signingStoreLocation=$HOME/adaway-release.jks
+          signingStorePassword=$SIGNING_STORE_PASSWORD
+          signingKeyAlias=$SIGNING_KEY_ALIAS
+          signingKeyPassword=$SIGNING_KEY_PASSWORD
+          PROPS
 
       - name: Build release APK
         run: ./gradlew assembleRelease --stacktrace
-
-      - name: Verify signing certificate and applicationId
-        continue-on-error: true
-        run: |
-          set -x
-          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
-          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -n1)
-          AAPT2="$BUILD_TOOLS/aapt2"
-          APKSIGNER="$BUILD_TOOLS/apksigner"
-          {
-            echo "## APK verification"
-            echo ""
-            echo "APK file: \`$(basename "$APK")\`"
-            echo ""
-            echo "### Application ID"
-            echo '```'
-            "$AAPT2" dump badging "$APK" 2>&1 | grep "^package:"
-            echo '```'
-            echo ""
-            echo "### Signing certificate (from the built APK)"
-            echo '```'
-            "$APKSIGNER" verify --print-certs "$APK" 2>&1
-            echo '```'
-            echo ""
-            echo "### Expected certificate (from the repo's signing keystore secret)"
-            echo '```'
-            keytool -list -v -keystore "$HOME/adaway-release.jks" -storepass "$SIGNING_STORE_PASSWORD" 2>&1 | grep -A1 "SHA256:"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-        env:
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -92,4 +65,42 @@ jobs:
           name: AdAway-signed
           path: app/build/outputs/apk/release/*.apk
           retention-days: 14
+
+      - name: Verify applicationId and signing certificate match keystore
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
+          BT=$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -n1)
+
+          echo "=== APK: $APK ==="
+
+          echo ""
+          echo "=== applicationId ==="
+          "$BT/aapt2" dump badging "$APK" | grep "^package:" | tee /tmp/apk_pkg.txt
+          grep -q 'com.wxcvm.Adaway' /tmp/apk_pkg.txt \
+            && echo "OK: applicationId = com.wxcvm.Adaway" \
+            || { echo "ERROR: wrong applicationId"; exit 1; }
+
+          echo ""
+          echo "=== Fingerprint from APK ==="
+          APK_FP=$("$BT/apksigner" verify --print-certs "$APK" \
+            | grep "Signer #1 certificate SHA-256 digest:" \
+            | awk '{print $NF}')
+          echo "APK SHA-256: $APK_FP"
+
+          echo ""
+          echo "=== Fingerprint from keystore secret ==="
+          KS_FP=$(keytool -list -v \
+            -keystore "$HOME/adaway-release.jks" \
+            -storepass "$SIGNING_STORE_PASSWORD" 2>/dev/null \
+            | grep "SHA256:" | head -1 \
+            | sed 's/.*SHA256: //' | tr -d ':' | tr 'A-F' 'a-f')
+          echo "Keystore SHA-256: $KS_FP"
+
+          echo ""
+          [ "$APK_FP" = "$KS_FP" ] \
+            && echo "OK: fingerprints match — APK is signed with the persistent fork key" \
+            || { echo "MISMATCH: APK signed with wrong key!"; exit 1; }
 
