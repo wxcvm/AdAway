@@ -33,5 +33,6 @@
     <string name="pref_webserver_state_not_running">Not running</string>
     <string name="pref_webserver_state_running_not_installed">Running but certificate not installed</string>
     <string name="pref_webserver_state_running_and_installed">Running and certificate installed</string>
+    <string name="pref_webserver_certificate_enable_first">Please enable the web server first, then tap \"Install certificate\" again.</string>
     <string name="pref_webserver_icon">Replace blank ad space by app icon</string>
 </resources>
