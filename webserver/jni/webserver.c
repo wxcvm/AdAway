@@ -92,17 +92,14 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             memset(&opts, 0, sizeof(opts));
             opts.extra_headers = "Connection: close\r\n";
             mg_http_serve_file(c, hm, s->test_path, &opts);
-        } else if (s->icon) {
+        } else {
+            // Serve the custom block-response image for every intercepted
+            // request (the icon_path always points to the bundled image).
             struct mg_http_serve_opts opts;
             memset(&opts, 0, sizeof(opts));
             opts.extra_headers = "Connection: close\r\n";
             mg_http_serve_file(c, hm, s->icon_path, &opts);
-        } else {
-            mg_http_reply(c, 200, "Connection: close\r\n", "");
         }
-        // Never keep a connection alive after answering it: this used to
-        // default to HTTP keep-alive, which is how connections piled up
-        // without bound in the first place.
         c->is_draining = 1;
     }
 }
@@ -329,7 +326,7 @@ struct settings parse_cli_parameters(int argc, char *argv[]) {
             s.tls_opts.key  = mg_file_read(&mg_fs_posix, key_path);
             // Initialize resource paths
             strcpy(s.icon_path, resource_path);
-            strcat(s.icon_path, "/icon.svg");
+            strcat(s.icon_path, "/icon.webp");
             strcpy(s.test_path, resource_path);
             strcat(s.test_path, "/test.html");
             s.init = true;
