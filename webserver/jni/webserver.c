@@ -35,31 +35,23 @@
 static volatile sig_atomic_t s_sig_num = 0;
 static int s_active_connections = 0;
 
+#define BLOCK_IMAGE_COUNT 7
+
 struct settings {
     bool init;
     struct mg_tls_opts tls_opts;
     char test_path[100];
-    char icon_path[100];
-    bool icon;
+    char resource_dir[100];  // directory containing img_00.webp .. img_06.webp
     bool debug;
 };
 
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev == MG_EV_ACCEPT) {
-        // Shed load before doing any expensive work (in particular, before
-        // the TLS handshake, which is the costliest part): once the cap is
-        // reached, just drop the connection.
         if (s_active_connections >= MAX_CONNECTIONS) {
             c->is_closing = 1;
             return;
         }
         s_active_connections++;
-        // Remember when this connection was accepted, so MG_EV_POLL below
-        // can enforce an idle timeout on it. The byte right after the
-        // timestamp marks this connection as counted, so MG_EV_CLOSE below
-        // only decrements s_active_connections for connections that were
-        // actually counted here (and not ones rejected above for being over
-        // the cap).
         uint64_t accepted_at = mg_millis();
         memcpy(c->data, &accepted_at, sizeof(accepted_at));
         c->data[sizeof(accepted_at)] = 1;
@@ -72,11 +64,6 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             s_active_connections--;
         }
     } else if (ev == MG_EV_POLL && c->is_accepted) {
-        // Safety net for connections that never reach MG_EV_HTTP_MSG, e.g. a
-        // TLS handshake that never completes, or a client that opens a
-        // socket and never sends a request: close them once they have been
-        // open for too long instead of letting them linger forever. Guarded
-        // by is_accepted so this never touches the two listening sockets.
         if (!c->is_draining && !c->is_closing) {
             uint64_t accepted_at, now = mg_millis();
             memcpy(&accepted_at, c->data, sizeof(accepted_at));
@@ -93,12 +80,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             opts.extra_headers = "Connection: close\r\n";
             mg_http_serve_file(c, hm, s->test_path, &opts);
         } else {
-            // Serve the custom block-response image for every intercepted
-            // request (the icon_path always points to the bundled image).
+            // Pick a random image from img_00.webp .. img_06.webp using
+            // the current millisecond timestamp as a lightweight entropy
+            // source — good enough for visual variety, no crypto needed.
+            char img_path[120];
+            int idx = (int)(mg_millis() % BLOCK_IMAGE_COUNT);
+            snprintf(img_path, sizeof(img_path),
+                     "%s/img_%02d.webp", s->resource_dir, idx);
             struct mg_http_serve_opts opts;
             memset(&opts, 0, sizeof(opts));
             opts.extra_headers = "Connection: close\r\n";
-            mg_http_serve_file(c, hm, s->icon_path, &opts);
+            mg_http_serve_file(c, hm, img_path, &opts);
         }
         c->is_draining = 1;
     }
@@ -286,7 +278,6 @@ struct settings parse_cli_parameters(int argc, char *argv[]) {
     struct settings s = {
             .init = false,
             .tls_opts = { 0 },
-            .icon = false,
             .debug = false
     };
     for (int i = 1; i < argc; i++) {
@@ -325,13 +316,10 @@ struct settings parse_cli_parameters(int argc, char *argv[]) {
             s.tls_opts.cert = mg_file_read(&mg_fs_posix, cert_path);
             s.tls_opts.key  = mg_file_read(&mg_fs_posix, key_path);
             // Initialize resource paths
-            strcpy(s.icon_path, resource_path);
-            strcat(s.icon_path, "/icon.webp");
+            strcpy(s.resource_dir, resource_path);
             strcpy(s.test_path, resource_path);
             strcat(s.test_path, "/test.html");
             s.init = true;
-        } else if (strcmp(argv[i], "--icon") == 0) {
-            s.icon = true;
         } else if (strcmp(argv[i], "--debug") == 0) {
             s.debug = true;
         }

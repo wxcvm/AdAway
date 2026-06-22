@@ -79,9 +79,7 @@ public class WebServerUtils {
         Timber.d("Starting web server…");
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
-        String parameters = "--resources " + resourcePath.toAbsolutePath() +
-                (PreferenceHelper.getWebServerIcon(context) ? " --icon" : "") +
-                " > /dev/null 2>&1";
+        String parameters = "--resources " + resourcePath.toAbsolutePath() + " > /dev/null 2>&1";
         runBundledExecutable(context, WEB_SERVER_EXECUTABLE, parameters);
     }
 
@@ -194,8 +192,10 @@ public class WebServerUtils {
             if (!Files.isDirectory(target)) {
                 Files.createDirectories(target);
             }
-            inflateResource(assetManager, "icon.webp", target);
             inflateResource(assetManager, "test.html", target);
+            for (int i = 0; i < 7; i++) {
+                inflateResource(assetManager, String.format("img_%02d.webp", i), target);
+            }
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
         }
