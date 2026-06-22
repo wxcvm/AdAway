@@ -161,9 +161,7 @@ public class WebServerUtils {
         } catch (IOException e) {
             Timber.w(e, "Failed to read certificate.");
         } catch (CertificateException e) {
-            Timber.w(e, "Failed to parse certificate.");
-        } catch (java.security.cert.CertificateEncodingException e) {
-            Timber.w(e, "Failed to encode certificate.");
+            Timber.w(e, "Failed to parse or encode certificate.");
         }
     }
 
