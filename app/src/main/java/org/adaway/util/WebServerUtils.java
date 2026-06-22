@@ -34,14 +34,16 @@ import org.adaway.R;
 import org.adaway.helper.PreferenceHelper;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ConnectException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 
 import javax.net.ssl.SSLHandshakeException;
-import javax.security.cert.CertificateException;
-import javax.security.cert.X509Certificate;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -139,16 +141,29 @@ public class WebServerUtils {
         ensureResources(context, resourcePath);
         Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
         try {
-            byte[] bytes = Files.readAllBytes(certFile);
-            X509Certificate x509 = X509Certificate.getInstance(bytes);
+            // Use CertificateFactory (java.security.cert) rather than the
+            // deprecated javax.security.cert.X509Certificate.getInstance().
+            // The factory's generateCertificate() reads directly from an
+            // InputStream and correctly handles PEM-encoded certificates
+            // (the format our --gen-cert produces), whereas getInstance()
+            // only accepts raw DER bytes and would silently produce a broken
+            // certificate object when given PEM input, causing Android to
+            // reject the certificate with "private key required".
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            X509Certificate cert;
+            try (InputStream is = Files.newInputStream(certFile)) {
+                cert = (X509Certificate) cf.generateCertificate(is);
+            }
             Intent intent = KeyChain.createInstallIntent();
-            intent.putExtra(KeyChain.EXTRA_CERTIFICATE, x509.getEncoded());
+            intent.putExtra(KeyChain.EXTRA_CERTIFICATE, cert.getEncoded());
             intent.putExtra(KeyChain.EXTRA_NAME, "AdAway");
             context.startActivity(intent);
         } catch (IOException e) {
             Timber.w(e, "Failed to read certificate.");
         } catch (CertificateException e) {
             Timber.w(e, "Failed to parse certificate.");
+        } catch (java.security.cert.CertificateEncodingException e) {
+            Timber.w(e, "Failed to encode certificate.");
         }
     }
 
