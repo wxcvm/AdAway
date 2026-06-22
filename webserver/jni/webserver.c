@@ -295,15 +295,38 @@ struct settings parse_cli_parameters(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--resources") == 0 && i < argc - 1) {
             char *resource_path = argv[++i];
-            // Initialize TLS options
             char cert_path[100];
             char key_path[100];
-            strcpy(cert_path, resource_path);
-            strcat(cert_path, "/localhost-2410.crt");
-            strcpy(key_path, resource_path);
-            strcat(key_path, "/localhost-2410.key");
+            snprintf(cert_path, sizeof(cert_path),
+                     "%s/localhost-2410.crt", resource_path);
+            snprintf(key_path, sizeof(key_path),
+                     "%s/localhost-2410.key", resource_path);
+
+            // Auto-generate the TLS certificate/key on first start, or if
+            // either file has gone missing. This runs inside the server
+            // process (which is already running as root via the root shell),
+            // so no blocking shell invocation is needed from the Java UI
+            // thread - the app just starts the server and the server takes
+            // care of provisioning its own certificate.
+            FILE *cert_probe = fopen(cert_path, "rb");
+            FILE *key_probe  = fopen(key_path,  "rb");
+            bool cert_missing = (cert_probe == NULL || key_probe == NULL);
+            if (cert_probe != NULL) fclose(cert_probe);
+            if (key_probe  != NULL) fclose(key_probe);
+
+            if (cert_missing) {
+                __android_log_print(ANDROID_LOG_INFO, THIS_FILE,
+                        "Certificate not found, generating...");
+                if (generate_self_signed_cert(cert_path, key_path) != EXIT_SUCCESS) {
+                    __android_log_print(ANDROID_LOG_FATAL, THIS_FILE,
+                            "Failed to generate certificate, aborting.");
+                    return s;   // s.init stays false → main() exits cleanly
+                }
+            }
+
+            // Initialize TLS options from the (now guaranteed-to-exist) files
             s.tls_opts.cert = mg_file_read(&mg_fs_posix, cert_path);
-            s.tls_opts.key = mg_file_read(&mg_fs_posix, key_path);
+            s.tls_opts.key  = mg_file_read(&mg_fs_posix, key_path);
             // Initialize resource paths
             strcpy(s.icon_path, resource_path);
             strcat(s.icon_path, "/icon.svg");

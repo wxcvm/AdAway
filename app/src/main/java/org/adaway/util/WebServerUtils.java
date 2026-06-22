@@ -27,6 +27,7 @@ import android.content.res.AssetManager;
 import android.net.Uri;
 import android.security.KeyChain;
 import android.view.ContextThemeWrapper;
+import android.widget.Toast;
 
 import androidx.annotation.StringRes;
 
@@ -53,7 +54,6 @@ import timber.log.Timber;
 import static org.adaway.model.root.ShellUtils.isBundledExecutableRunning;
 import static org.adaway.model.root.ShellUtils.killBundledExecutable;
 import static org.adaway.model.root.ShellUtils.runBundledExecutable;
-import static org.adaway.model.root.ShellUtils.runBundledExecutableSync;
 
 /**
  * This class is an utility class to control web server execution.
@@ -64,52 +64,48 @@ public class WebServerUtils {
     public static final String TEST_URL = "https://localhost/internal-test";
     private static final String WEB_SERVER_EXECUTABLE = "webserver";
     private static final String LOCALHOST_CERTIFICATE = "localhost-2410.crt";
-    private static final String LOCALHOST_CERTIFICATE_KEY = "localhost-2410.key";
 
     /**
-     * Start the web server in new thread with RootTools
+     * Start the web server.
+     * <p>
+     * The native server binary checks for its TLS certificate on startup and
+     * generates a fresh per-device self-signed CA certificate if one is not
+     * present, so no certificate generation step is needed here — and
+     * crucially, no blocking root-shell call is made on the UI thread.
      *
      * @param context The application context.
      */
     public static void startWebServer(Context context) {
         Timber.d("Starting web server…");
-
         Path resourcePath = getResourcePath(context);
-        ensureResources(context, resourcePath);
-
+        ensureStaticResources(context, resourcePath);
         String parameters = "--resources " + resourcePath.toAbsolutePath() +
                 (PreferenceHelper.getWebServerIcon(context) ? " --icon" : "") +
                 " > /dev/null 2>&1";
         runBundledExecutable(context, WEB_SERVER_EXECUTABLE, parameters);
     }
 
-    /**
-     * Stop the web server.
-     */
+    /** Stop the web server. */
     public static void stopWebServer() {
         killBundledExecutable(WEB_SERVER_EXECUTABLE);
     }
 
     /**
-     * Checks if web server is running
-     *
-     * @return <code>true</code> if webs server is running, <code>false</code> otherwise.
+     * @return {@code true} if the web server process is currently running.
      */
     public static boolean isWebServerRunning() {
         return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
     }
 
     /**
-     * Get the web server state description.
+     * Get the web server state description resource id.
      *
-     * @return The web server state description.
+     * @return A string resource describing the current web server state.
      */
     @StringRes
     public static int getWebServerState() {
         OkHttpClient client = new OkHttpClient();
-        Request request = new Request.Builder()
-                .url(TEST_URL)
-                .build();
+        Request request = new Request.Builder().url(TEST_URL).build();
         try (Response response = client.newCall(request).execute()) {
             return response.isSuccessful() ?
                     R.string.pref_webserver_state_running_and_installed :
@@ -125,30 +121,29 @@ public class WebServerUtils {
     }
 
     /**
-     * Prompt user to install web server certificate.
+     * Prompt the user to install the web server's self-signed CA certificate.
      * <p>
-     * The certificate is generated locally for this install/device the first
-     * time it is needed (see {@link #ensureResources}), rather than being a
-     * fixed certificate bundled with the app: a certificate shared by every
-     * install would mean its private key is effectively public (it ships
-     * inside the APK), letting anyone impersonate any site to any device
-     * that trusts it.
+     * The certificate is generated per-device by the native server binary on
+     * its first start (never bundled in the APK), so it will only be present
+     * on disk after the web server has been enabled and run at least once.
+     * If the certificate file is not yet present, a Toast guides the user to
+     * enable the web server first.
      *
      * @param context The application context.
      */
     public static void installCertificate(Context context) {
-        Path resourcePath = getResourcePath(context);
-        ensureResources(context, resourcePath);
-        Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
+        Path certFile = getResourcePath(context).resolve(LOCALHOST_CERTIFICATE);
+        if (!Files.isRegularFile(certFile)) {
+            Toast.makeText(context,
+                    R.string.pref_webserver_certificate_enable_first,
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         try {
-            // Use CertificateFactory (java.security.cert) rather than the
-            // deprecated javax.security.cert.X509Certificate.getInstance().
-            // The factory's generateCertificate() reads directly from an
-            // InputStream and correctly handles PEM-encoded certificates
-            // (the format our --gen-cert produces), whereas getInstance()
-            // only accepts raw DER bytes and would silently produce a broken
-            // certificate object when given PEM input, causing Android to
-            // reject the certificate with "private key required".
+            // CertificateFactory handles PEM-encoded input directly (unlike
+            // the deprecated javax.security.cert.X509Certificate.getInstance()
+            // which requires raw DER bytes and breaks silently on PEM input,
+            // causing Android to report "private key required").
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             X509Certificate cert;
             try (InputStream is = Files.newInputStream(certFile)) {
@@ -166,9 +161,13 @@ public class WebServerUtils {
     }
 
     public static void copyCertificate(ContextThemeWrapper wrapper, Uri uri) {
-        Path resourcePath = getResourcePath(wrapper);
-        ensureResources(wrapper, resourcePath);
-        Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
+        Path certFile = getResourcePath(wrapper).resolve(LOCALHOST_CERTIFICATE);
+        if (!Files.isRegularFile(certFile)) {
+            Toast.makeText(wrapper,
+                    R.string.pref_webserver_certificate_enable_first,
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         ContentResolver contentResolver = wrapper.getContentResolver();
         try (OutputStream outputStream = contentResolver.openOutputStream(uri)) {
             if (outputStream == null) {
@@ -185,11 +184,11 @@ public class WebServerUtils {
     }
 
     /**
-     * Makes sure the web server's resource directory exists, has the static
-     * assets (icon, test page), and has a certificate/key pair - generating
-     * a fresh one on this device if it doesn't already have one.
+     * Inflates only the static assets (icon, test page) into the resource
+     * directory. Certificate generation is handled by the native server binary
+     * itself on first start, so no blocking shell call is needed here.
      */
-    private static void ensureResources(Context context, Path target) {
+    private static void ensureStaticResources(Context context, Path target) {
         AssetManager assetManager = context.getAssets();
         try {
             if (!Files.isDirectory(target)) {
@@ -200,60 +199,10 @@ public class WebServerUtils {
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
         }
-        ensureCertificateGenerated(context, target);
     }
 
-    /**
-     * Generates this device's web server certificate/key pair if it doesn't
-     * already exist, or if the existing certificate lacks the X.509v3
-     * BasicConstraints CA:TRUE extension (certificates generated by an older
-     * version of this app did not include that extension, causing Android to
-     * classify them as user/client certificates and refuse to install them
-     * without a private key). Idempotent once a valid CA certificate exists.
-     */
-    private static void ensureCertificateGenerated(Context context, Path resourcePath) {
-        Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
-        Path keyFile = resourcePath.resolve(LOCALHOST_CERTIFICATE_KEY);
-        boolean needsRegen = !Files.isRegularFile(certFile) || !Files.isRegularFile(keyFile);
-        if (!needsRegen) {
-            needsRegen = !isCaCertificate(certFile);
-            if (needsRegen) {
-                Timber.d("Existing web server certificate lacks CA extensions; regenerating…");
-            }
-        }
-        if (!needsRegen) {
-            return;
-        }
-        Timber.d("Generating web server certificate…");
-        String parameters = "--gen-cert " + resourcePath.toAbsolutePath();
-        boolean success = runBundledExecutableSync(context, WEB_SERVER_EXECUTABLE, parameters);
-        if (!success || !Files.isRegularFile(certFile) || !Files.isRegularFile(keyFile)) {
-            Timber.w("Failed to generate web server certificate.");
-        }
-    }
-
-    /**
-     * Returns true if the certificate at {@code certFile} is an X.509 CA
-     * certificate (i.e. has BasicConstraints with cA=true). Returns false if
-     * the file cannot be read, parsed, or does not have that extension.
-     */
-    private static boolean isCaCertificate(Path certFile) {
-        try {
-            CertificateFactory cf = CertificateFactory.getInstance("X.509");
-            X509Certificate cert;
-            try (InputStream is = Files.newInputStream(certFile)) {
-                cert = (X509Certificate) cf.generateCertificate(is);
-            }
-            // getBasicConstraints() returns -1 for non-CA certificates,
-            // or >= 0 (the path-length constraint) for CA certificates.
-            return cert.getBasicConstraints() >= 0;
-        } catch (Exception e) {
-            Timber.w(e, "Could not inspect existing certificate; will regenerate.");
-            return false;
-        }
-    }
-
-    private static void inflateResource(AssetManager assetManager, String resource, Path target) throws IOException {
+    private static void inflateResource(AssetManager assetManager, String resource, Path target)
+            throws IOException {
         Path targetFile = target.resolve(resource);
         if (!Files.isRegularFile(targetFile)) {
             Files.copy(assetManager.open(resource), targetFile);
