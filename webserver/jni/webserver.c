@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
 #include "mongoose/mongoose.h"
@@ -188,6 +189,7 @@ static int generate_self_signed_cert(const char *cert_path, const char *key_path
     if (x509 == NULL) {
         goto cleanup;
     }
+    X509_set_version(x509, 2);  // 0=v1, 1=v2, 2=v3; extensions require v3
 
     if (RAND_bytes((unsigned char *) &serial, sizeof(serial)) != 1) {
         // Not security-critical (the serial only needs to be unlikely to
@@ -205,6 +207,51 @@ static int generate_self_signed_cert(const char *cert_path, const char *key_path
     X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
                                 (const unsigned char *) "localhost", -1, -1, 0);
     X509_set_issuer_name(x509, name);  // self-signed: issuer == subject
+
+    // X.509v3 extensions required for Android to recognise this as an
+    // installable CA certificate (without them Android treats it as a
+    // client/user certificate and demands the private key):
+    //
+    //   BasicConstraints  critical, CA:TRUE
+    //     - Marks the certificate as a Certificate Authority.
+    //     - Without this, KeyChain's install flow shows "private key
+    //       required" because the system categorises it as a user cert.
+    //
+    //   SubjectKeyIdentifier  hash
+    //     - Standard extension for CA certificates; used by chains to
+    //       identify the issuing key.
+    //
+    //   KeyUsage  critical, keyCertSign, cRLSign
+    //     - Explicitly restricts the key's allowed uses to signing
+    //       certificates and CRLs, which is what a root CA key does.
+    {
+        X509V3_CTX ext_ctx;
+        X509V3_set_ctx_nodb(&ext_ctx);
+        // Self-signed: both issuer and subject are this certificate.
+        X509V3_set_ctx(&ext_ctx, x509, x509, NULL, NULL, 0);
+
+        static const struct { int nid; const char *value; } exts[] = {
+            { NID_basic_constraints,      "critical,CA:TRUE"              },
+            { NID_subject_key_identifier, "hash"                          },
+            { NID_key_usage,              "critical,keyCertSign,cRLSign"  },
+        };
+        for (int i = 0; i < (int)(sizeof(exts) / sizeof(exts[0])); i++) {
+            X509_EXTENSION *ext = X509V3_EXT_conf_nid(
+                    NULL, &ext_ctx, exts[i].nid, exts[i].value);
+            if (ext == NULL) {
+                __android_log_print(ANDROID_LOG_FATAL, THIS_FILE,
+                        "Failed to build certificate extension %d.", exts[i].nid);
+                goto cleanup;
+            }
+            int ok = X509_add_ext(x509, ext, -1);
+            X509_EXTENSION_free(ext);
+            if (!ok) {
+                __android_log_print(ANDROID_LOG_FATAL, THIS_FILE,
+                        "Failed to add certificate extension %d.", exts[i].nid);
+                goto cleanup;
+            }
+        }
+    }
 
     if (X509_sign(x509, pkey, EVP_sha256()) == 0) {
         __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "Failed to sign certificate.");
