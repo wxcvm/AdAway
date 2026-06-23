@@ -92,30 +92,24 @@ public class WebServerUtils {
         return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
     }
 
-    /**
-     * Returns the current web server state as a string resource id.
-     *
-     * <p>Two-step check:
-     * <ol>
-     *   <li>Plain HTTP to {@code http://127.0.0.1/internal-test} — reliably
-     *       tells us whether the server process is running without touching
-     *       SSL or being affected by VPN routing / localhost resolution.
-     *   <li>HTTPS to {@code https://localhost/internal-test} with the system
-     *       trust store — succeeds only if the per-device CA certificate has
-     *       been installed at the system or user level. Any SSL failure means
-     *       "running but certificate not installed".
-     * </ol>
-     */
     @StringRes
     public static int getWebServerState() {
+        // Fast pre-check: if the process isn't running at all, skip the
+        // network calls entirely.
+        if (!isWebServerRunning()) {
+            return R.string.pref_webserver_state_not_running;
+        }
+
         OkHttpClient client = new OkHttpClient.Builder()
                 .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
                 .build();
 
-        // Step 1 — is the server running?
+        // Step 1 — is the server reachable?
         // Use plain HTTP to 127.0.0.1 so VPN routing and SSL state cannot
         // affect the outcome. ConnectException / any IOException = not running.
+        // network_security_config.xml explicitly allows cleartext to 127.0.0.1
+        // so Android 9+ doesn't block this request before it even leaves the app.
         try {
             Request req = new Request.Builder()
                     .url("http://127.0.0.1/internal-test")
