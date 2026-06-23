@@ -3,6 +3,16 @@
     <domain-config>
         <domain includeSubdomains="true">localhost</domain>
         <trust-anchors>
+            <!-- Trust system-installed CA certificates for localhost so that
+                 the app's own HTTPS check in getWebServerState() can confirm
+                 the user has installed the web server certificate at the system
+                 level (e.g. via Magisk). Without 'system' here, an OkHttp
+                 request to https://localhost always fails SSL validation even
+                 when the cert is correctly installed in the system trust store,
+                 making the "running and installed" state unreachable. -->
+            <certificates src="system" />
+            <!-- Also trust user-level certificates, for devices where the user
+                 installs the cert at the user level via KeyChain. -->
             <certificates src="user" />
         </trust-anchors>
     </domain-config>

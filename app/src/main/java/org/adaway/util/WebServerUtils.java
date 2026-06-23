@@ -37,14 +37,11 @@ import org.adaway.helper.PreferenceHelper;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.ConnectException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
-
-import javax.net.ssl.SSLHandshakeException;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -96,26 +93,81 @@ public class WebServerUtils {
     }
 
     /**
-     * Get the web server state description resource id.
+     * Returns the current web server state as a string resource id.
      *
-     * @return A string resource describing the current web server state.
+     * <p>Two-step check:
+     * <ol>
+     *   <li>Plain HTTP to {@code http://127.0.0.1/internal-test} — reliably
+     *       tells us whether the server process is running without touching
+     *       SSL or being affected by VPN routing / localhost resolution.
+     *   <li>HTTPS to {@code https://localhost/internal-test} with the system
+     *       trust store — succeeds only if the per-device CA certificate has
+     *       been installed at the system or user level. Any SSL failure means
+     *       "running but certificate not installed".
+     * </ol>
      */
     @StringRes
     public static int getWebServerState() {
-        OkHttpClient client = new OkHttpClient();
-        Request request = new Request.Builder().url(TEST_URL).build();
-        try (Response response = client.newCall(request).execute()) {
-            return response.isSuccessful() ?
-                    R.string.pref_webserver_state_running_and_installed :
-                    R.string.pref_webserver_state_not_running;
-        } catch (SSLHandshakeException e) {
-            return R.string.pref_webserver_state_running_not_installed;
-        } catch (ConnectException e) {
-            return R.string.pref_webserver_state_not_running;
+        OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                .build();
+
+        // Step 1 — is the server running?
+        // Use plain HTTP to 127.0.0.1 so VPN routing and SSL state cannot
+        // affect the outcome. ConnectException / any IOException = not running.
+        try {
+            Request req = new Request.Builder()
+                    .url("http://127.0.0.1/internal-test")
+                    .build();
+            try (Response resp = client.newCall(req).execute()) {
+                if (!resp.isSuccessful()) {
+                    return R.string.pref_webserver_state_not_running;
+                }
+            }
         } catch (IOException e) {
-            Timber.w(e, "Failed to test web server.");
             return R.string.pref_webserver_state_not_running;
         }
+
+        // Step 2 — is the certificate installed in the trust store?
+        // The network_security_config trusts both system and user anchors for
+        // localhost, so this HTTPS request succeeds only when the user has
+        // actually installed the generated CA cert. Walk the full cause chain
+        // so OkHttp's exception wrapping doesn't hide the SSL root cause.
+        try {
+            Request req = new Request.Builder()
+                    .url(TEST_URL)   // https://localhost/internal-test
+                    .build();
+            try (Response resp = client.newCall(req).execute()) {
+                return resp.isSuccessful()
+                        ? R.string.pref_webserver_state_running_and_installed
+                        : R.string.pref_webserver_state_running_not_installed;
+            }
+        } catch (IOException e) {
+            if (isSslError(e)) {
+                return R.string.pref_webserver_state_running_not_installed;
+            }
+            Timber.w(e, "Unexpected error checking HTTPS state.");
+            return R.string.pref_webserver_state_running_not_installed;
+        }
+    }
+
+    /**
+     * Walks the full cause chain of {@code t} looking for an SSL/certificate
+     * exception. OkHttp sometimes wraps {@link javax.net.ssl.SSLException}
+     * inside a plain {@link IOException}, so checking only the top-level type
+     * is not reliable.
+     */
+    private static boolean isSslError(Throwable t) {
+        while (t != null) {
+            if (t instanceof javax.net.ssl.SSLException
+                    || t instanceof java.security.cert.CertificateException
+                    || t instanceof java.security.cert.CertPathValidatorException) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 
     /**
