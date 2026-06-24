@@ -197,32 +197,47 @@ static int generate_self_signed_cert(const char *cert_path, const char *key_path
                                 (const unsigned char *) "localhost", -1, -1, 0);
     X509_set_issuer_name(x509, name);  // self-signed: issuer == subject
 
-    // X.509v3 extensions required for Android to recognise this as an
-    // installable CA certificate (without them Android treats it as a
-    // client/user certificate and demands the private key):
+    // X.509v3 extensions.  We need a superset of what a pure CA certificate
+    // carries, because this certificate serves double duty:
+    //
+    //   (a) it is installed as a trusted CA in the Android trust store so that
+    //       the system (and OkHttp) will accept TLS connections it signs, and
+    //   (b) it IS the server certificate used directly by Mongoose for the
+    //       localhost HTTPS listener (self-signed: issuer == subject).
+    //
+    // Modern browsers and OkHttp enforce that a TLS server certificate has:
+    //
+    //   KeyUsage        digitalSignature  (mandatory for TLS server auth)
+    //   ExtendedKeyUsage  serverAuth      (required since Chrome 58 / TLS 1.3)
+    //   SubjectAltName  DNS:localhost     (CN alone is no longer accepted;
+    //                                      without SAN browsers report
+    //                                      ERR_SSL_KEY_USAGE_INCOMPATIBLE)
+    //
+    // And for the CA / Android KeyChain install side:
     //
     //   BasicConstraints  critical, CA:TRUE
-    //     - Marks the certificate as a Certificate Authority.
-    //     - Without this, KeyChain's install flow shows "private key
-    //       required" because the system categorises it as a user cert.
-    //
     //   SubjectKeyIdentifier  hash
-    //     - Standard extension for CA certificates; used by chains to
-    //       identify the issuing key.
+    //   KeyUsage  keyCertSign, cRLSign
     //
-    //   KeyUsage  critical, keyCertSign, cRLSign
-    //     - Explicitly restricts the key's allowed uses to signing
-    //       certificates and CRLs, which is what a root CA key does.
+    // All of these must be present in a single certificate.
     {
         X509V3_CTX ext_ctx;
         X509V3_set_ctx_nodb(&ext_ctx);
-        // Self-signed: both issuer and subject are this certificate.
         X509V3_set_ctx(&ext_ctx, x509, x509, NULL, NULL, 0);
 
         static const struct { int nid; const char *value; } exts[] = {
-            { NID_basic_constraints,      "critical,CA:TRUE"              },
-            { NID_subject_key_identifier, "hash"                          },
-            { NID_key_usage,              "critical,keyCertSign,cRLSign"  },
+            // CA identity extensions
+            { NID_basic_constraints,      "critical,CA:TRUE"                          },
+            { NID_subject_key_identifier, "hash"                                      },
+            // Key usage: CA signing bits + TLS server auth bit (digitalSignature).
+            // Without digitalSignature the TLS stack rejects the cert with
+            // ERR_SSL_KEY_USAGE_INCOMPATIBLE.
+            { NID_key_usage,              "critical,digitalSignature,keyCertSign,cRLSign" },
+            // Extended key usage: required by Chrome / Android WebView since TLS 1.3
+            { NID_ext_key_usage,          "serverAuth"                                },
+            // Subject Alternative Name: modern TLS ignores CN for hostname
+            // verification; the SAN DNS entry is mandatory.
+            { NID_subject_alt_name,       "DNS:localhost"                             },
         };
         for (int i = 0; i < (int)(sizeof(exts) / sizeof(exts[0])); i++) {
             X509_EXTENSION *ext = X509V3_EXT_conf_nid(
