@@ -61,6 +61,7 @@ public class WebServerUtils {
     public static final String TEST_URL = "https://localhost/internal-test";
     private static final String WEB_SERVER_EXECUTABLE = "webserver";
     private static final String LOCALHOST_CERTIFICATE = "localhost-2410.crt";
+    private static final String LOCALHOST_CERTIFICATE_KEY = "localhost-2410.key";
 
     /**
      * Start the web server.
@@ -94,22 +95,20 @@ public class WebServerUtils {
 
     @StringRes
     public static int getWebServerState() {
-        // Fast pre-check: if the process isn't running at all, skip the
-        // network calls entirely.
         if (!isWebServerRunning()) {
             return R.string.pref_webserver_state_not_running;
         }
 
+        // Bypass the system HTTP proxy so that tools like Clash/Sing-box with
+        // "attach HTTP proxy to VPN" enabled cannot intercept or block these
+        // loopback health-check requests.
         OkHttpClient client = new OkHttpClient.Builder()
+                .proxy(java.net.Proxy.NO_PROXY)
                 .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
                 .build();
 
-        // Step 1 — is the server reachable?
-        // Use plain HTTP to 127.0.0.1 so VPN routing and SSL state cannot
-        // affect the outcome. ConnectException / any IOException = not running.
-        // network_security_config.xml explicitly allows cleartext to 127.0.0.1
-        // so Android 9+ doesn't block this request before it even leaves the app.
+        // Step 1 — is the server reachable via plain HTTP to 127.0.0.1?
         try {
             Request req = new Request.Builder()
                     .url("http://127.0.0.1/internal-test")
@@ -124,13 +123,9 @@ public class WebServerUtils {
         }
 
         // Step 2 — is the certificate installed in the trust store?
-        // The network_security_config trusts both system and user anchors for
-        // localhost, so this HTTPS request succeeds only when the user has
-        // actually installed the generated CA cert. Walk the full cause chain
-        // so OkHttp's exception wrapping doesn't hide the SSL root cause.
         try {
             Request req = new Request.Builder()
-                    .url(TEST_URL)   // https://localhost/internal-test
+                    .url(TEST_URL)
                     .build();
             try (Response resp = client.newCall(req).execute()) {
                 return resp.isSuccessful()
@@ -244,6 +239,46 @@ public class WebServerUtils {
             }
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
+        }
+        // Delete any previously generated certificate that is missing the
+        // SubjectAltName (DNS:localhost) or ExtendedKeyUsage (serverAuth)
+        // extensions — certificates without these cause ERR_SSL_KEY_USAGE_INCOMPATIBLE
+        // in Chrome/WebView and OkHttp, making HTTPS completely non-functional.
+        // Deleting the stale cert forces the native server to regenerate a
+        // correct one on its next startup.
+        deleteStaleServerCert(target);
+    }
+
+    private static void deleteStaleServerCert(Path resourcePath) {
+        Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
+        if (!Files.isRegularFile(certFile)) return;
+        try {
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            java.security.cert.X509Certificate cert;
+            try (InputStream is = Files.newInputStream(certFile)) {
+                cert = (java.security.cert.X509Certificate) cf.generateCertificate(is);
+            }
+            // Check for SubjectAltName (OID 2.5.29.17)
+            boolean hasSan = cert.getSubjectAlternativeNames() != null &&
+                    !cert.getSubjectAlternativeNames().isEmpty();
+            // Check for ExtendedKeyUsage (OID 2.5.29.37)
+            java.util.List<String> eku = cert.getExtendedKeyUsage();
+            boolean hasServerAuth = eku != null && eku.contains("1.3.6.1.5.5.7.3.1");
+            // Check for digitalSignature bit in KeyUsage (bit 0)
+            boolean[] ku = cert.getKeyUsage();
+            boolean hasDigitalSig = ku != null && ku[0];
+
+            if (!hasSan || !hasServerAuth || !hasDigitalSig) {
+                Timber.d("Stale web server certificate (missing SAN/EKU/digitalSignature); deleting for regeneration.");
+                Files.deleteIfExists(certFile);
+                Files.deleteIfExists(resourcePath.resolve(LOCALHOST_CERTIFICATE_KEY));
+            }
+        } catch (Exception e) {
+            Timber.w(e, "Could not inspect server certificate; deleting for safety.");
+            try {
+                Files.deleteIfExists(certFile);
+                Files.deleteIfExists(resourcePath.resolve(LOCALHOST_CERTIFICATE_KEY));
+            } catch (IOException ignored) {}
         }
     }
 
