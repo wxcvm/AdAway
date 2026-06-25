@@ -38,27 +38,78 @@ import timber.log.Timber;
 /**
  * This broadcast receiver is executed after boot.
  *
+ * <p>All work runs on a background thread via {@link #goAsync()} so that
+ * blocking root-shell operations cannot trigger the 10-second
+ * BroadcastReceiver timeout that would cause the process to be killed
+ * before the web server command is even dispatched.
+ *
+ * <p>After the boot work is done the Java process terminates itself.
+ * The web server ({@code libwebserver_exec.so}) is a detached native
+ * process that survives independently, so no memory is wasted keeping
+ * the Java runtime alive just to maintain something that is already
+ * running in its own process.
+ *
  * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
  */
 public class BootReceiver extends BroadcastReceiver {
+
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
-            Timber.d("BootReceiver invoked.");
-            AdBlockMethod adBlockMethod = PreferenceHelper.getAdBlockMethod(context);
-            // Start web server on boot if enabled in preferences
-            if (adBlockMethod == ROOT && PreferenceHelper.getWebServerEnabled(context)) {
-                WebServerUtils.startWebServer(context);
-            }
-            if (adBlockMethod == VPN && PreferenceHelper.getVpnServiceOnBoot(context)) {
-                // Ensure VPN is prepared
-                Intent prepareIntent = android.net.VpnService.prepare(context);
-                if (prepareIntent != null) {
-                    context.startActivity(prepareIntent);
+        if (!ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
+            return;
+        }
+
+        Timber.d("BootReceiver invoked.");
+
+        // goAsync() tells Android not to kill this process when onReceive()
+        // returns, giving the background thread time to finish its work.
+        final PendingResult pendingResult = goAsync();
+
+        new Thread(() -> {
+            try {
+                doBootWork(context);
+            } catch (Exception e) {
+                Timber.e(e, "BootReceiver: unexpected error during boot initialisation.");
+            } finally {
+                // Allow Android to clean up the broadcast state.
+                pendingResult.finish();
+
+                // Give the native server process 2 seconds to fully start
+                // (write its cert, bind its ports) before we exit, just in
+                // case the shell needs the parent process alive momentarily.
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
                 }
-                // Start VPN service if enabled in preferences
-                VpnServiceControls.start(context);
+
+                // Terminate the Java process. The web server is a separate
+                // native process and is unaffected by this. Any future user
+                // interaction will restart the Java process normally.
+                Timber.d("BootReceiver: boot work done, releasing Java process.");
+                android.os.Process.killProcess(android.os.Process.myPid());
             }
+        }, "boot-init").start();
+    }
+
+    private void doBootWork(Context context) {
+        AdBlockMethod adBlockMethod = PreferenceHelper.getAdBlockMethod(context);
+
+        if (adBlockMethod == ROOT && PreferenceHelper.getWebServerEnabled(context)) {
+            Timber.d("BootReceiver: starting web server.");
+            WebServerUtils.startWebServer(context);
+        }
+
+        if (adBlockMethod == VPN && PreferenceHelper.getVpnServiceOnBoot(context)) {
+            Timber.d("BootReceiver: starting VPN service.");
+            Intent prepareIntent = android.net.VpnService.prepare(context);
+            if (prepareIntent != null) {
+                // VPN needs user interaction to be prepared; can't do that
+                // at boot time without a UI, so skip.
+                Timber.w("BootReceiver: VPN not prepared, skipping auto-start.");
+                return;
+            }
+            VpnServiceControls.start(context);
         }
     }
 }
