@@ -36,80 +36,135 @@ import org.adaway.vpn.VpnServiceControls;
 import timber.log.Timber;
 
 /**
- * This broadcast receiver is executed after boot.
+ * Receives BOOT_COMPLETED and starts the web server (and/or VPN) as configured.
  *
- * <p>All work runs on a background thread via {@link #goAsync()} so that
- * blocking root-shell operations cannot trigger the 10-second
- * BroadcastReceiver timeout that would cause the process to be killed
- * before the web server command is even dispatched.
+ * <h3>Why goAsync() + background thread?</h3>
+ * BroadcastReceiver.onReceive() runs on the main thread and has a hard ~10 s
+ * deadline. Shell.cmd().exec() (the root shell call inside startWebServer) is
+ * blocking and can easily exceed that limit, especially when the root shell
+ * itself is being initialised for the first time in the boot context. Moving
+ * all work off the main thread via goAsync() avoids that timeout.
  *
- * <p>After the boot work is done the Java process terminates itself.
- * The web server ({@code libwebserver_exec.so}) is a detached native
- * process that survives independently, so no memory is wasted keeping
- * the Java runtime alive just to maintain something that is already
- * running in its own process.
+ * <h3>Why the initial delay?</h3>
+ * BOOT_COMPLETED fires before Magisk's root daemon (magiskd) has finished
+ * initialising on many devices. Attempting a root shell too early silently
+ * fails. A 15-second delay gives magiskd time to become available; if the
+ * first attempt still fails the receiver retries twice more at 20-second
+ * intervals before giving up (~55 s total, well under Android's 60 s ANR
+ * limit for async broadcast receivers).
  *
- * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
+ * <h3>Why self-terminate?</h3>
+ * The web server (libwebserver_exec.so) is a separate native process that
+ * survives independently of the Java runtime. The Java process is no longer
+ * needed once boot work is done; killing it frees ~30–50 MB of RAM.
  */
 public class BootReceiver extends BroadcastReceiver {
+
+    /** Wait this long before the first attempt (ms). Gives magiskd time to start. */
+    private static final long INITIAL_DELAY_MS = 15_000L;
+
+    /** Wait this long between retry attempts (ms). */
+    private static final long RETRY_DELAY_MS = 20_000L;
+
+    /** How many times to try starting the server (first attempt + retries). */
+    private static final int MAX_ATTEMPTS = 3;
+
+    /** How long to wait after a start attempt before checking if the server is up (ms). */
+    private static final long START_VERIFY_MS = 3_000L;
+
+    /** How long to linger after confirming the server is running before killing the process (ms). */
+    private static final long EXIT_GRACE_MS = 3_000L;
 
     @Override
     public void onReceive(Context context, Intent intent) {
         if (!ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
             return;
         }
+        Timber.d("BootReceiver: BOOT_COMPLETED received.");
 
-        Timber.d("BootReceiver invoked.");
-
-        // goAsync() tells Android not to kill this process when onReceive()
-        // returns, giving the background thread time to finish its work.
+        // goAsync() keeps the BroadcastReceiver state alive while the
+        // background thread does its work.
         final PendingResult pendingResult = goAsync();
 
         new Thread(() -> {
             try {
                 doBootWork(context);
             } catch (Exception e) {
-                Timber.e(e, "BootReceiver: unexpected error during boot initialisation.");
+                Timber.e(e, "BootReceiver: unexpected error.");
             } finally {
-                // Allow Android to clean up the broadcast state.
                 pendingResult.finish();
-
-                // Give the native server process 2 seconds to fully start
-                // (write its cert, bind its ports) before we exit, just in
-                // case the shell needs the parent process alive momentarily.
-                try {
-                    Thread.sleep(2000);
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                }
-
-                // Terminate the Java process. The web server is a separate
-                // native process and is unaffected by this. Any future user
-                // interaction will restart the Java process normally.
-                Timber.d("BootReceiver: boot work done, releasing Java process.");
+                sleep(EXIT_GRACE_MS);
+                // The web server is already a detached native process
+                // (it calls setsid() on startup). Killing the Java process
+                // will not affect it.
+                Timber.d("BootReceiver: boot work done, terminating Java process.");
                 android.os.Process.killProcess(android.os.Process.myPid());
             }
         }, "boot-init").start();
     }
 
-    private void doBootWork(Context context) {
-        AdBlockMethod adBlockMethod = PreferenceHelper.getAdBlockMethod(context);
+    // -------------------------------------------------------------------------
 
-        if (adBlockMethod == ROOT && PreferenceHelper.getWebServerEnabled(context)) {
-            Timber.d("BootReceiver: starting web server.");
-            WebServerUtils.startWebServer(context);
+    private void doBootWork(Context context) {
+        AdBlockMethod method = PreferenceHelper.getAdBlockMethod(context);
+
+        if (method == ROOT && PreferenceHelper.getWebServerEnabled(context)) {
+            startWebServerReliably(context);
         }
 
-        if (adBlockMethod == VPN && PreferenceHelper.getVpnServiceOnBoot(context)) {
+        if (method == VPN && PreferenceHelper.getVpnServiceOnBoot(context)) {
             Timber.d("BootReceiver: starting VPN service.");
-            Intent prepareIntent = android.net.VpnService.prepare(context);
-            if (prepareIntent != null) {
-                // VPN needs user interaction to be prepared; can't do that
-                // at boot time without a UI, so skip.
-                Timber.w("BootReceiver: VPN not prepared, skipping auto-start.");
+            if (android.net.VpnService.prepare(context) != null) {
+                // VPN not yet prepared – needs user interaction, skip.
+                Timber.w("BootReceiver: VPN not prepared, skipping.");
+            } else {
+                VpnServiceControls.start(context);
+            }
+        }
+    }
+
+    /**
+     * Tries to start the web server up to {@link #MAX_ATTEMPTS} times.
+     *
+     * <p>The first attempt is preceded by {@link #INITIAL_DELAY_MS} to allow
+     * Magisk's root daemon to finish initialising. Subsequent attempts wait
+     * {@link #RETRY_DELAY_MS} between them. After each launch the receiver
+     * waits {@link #START_VERIFY_MS} and then checks whether the server
+     * process is actually running.
+     */
+    private void startWebServerReliably(Context context) {
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            if (attempt == 1) {
+                Timber.d("BootReceiver: waiting %d ms for Magisk root to be ready…",
+                        INITIAL_DELAY_MS);
+                sleep(INITIAL_DELAY_MS);
+            } else {
+                Timber.d("BootReceiver: retry %d/%d in %d ms…",
+                        attempt, MAX_ATTEMPTS, RETRY_DELAY_MS);
+                sleep(RETRY_DELAY_MS);
+            }
+
+            Timber.d("BootReceiver: starting web server (attempt %d/%d).",
+                    attempt, MAX_ATTEMPTS);
+            WebServerUtils.startWebServer(context);
+
+            // Give the native binary time to bind its ports and write the cert.
+            sleep(START_VERIFY_MS);
+
+            if (WebServerUtils.isWebServerRunning()) {
+                Timber.d("BootReceiver: web server confirmed running after attempt %d.", attempt);
                 return;
             }
-            VpnServiceControls.start(context);
+            Timber.w("BootReceiver: web server not running after attempt %d.", attempt);
+        }
+        Timber.e("BootReceiver: web server failed to start after %d attempts.", MAX_ATTEMPTS);
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }

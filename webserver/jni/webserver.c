@@ -356,6 +356,17 @@ int main(int argc, char *argv[]) {
         return generate_self_signed_cert(cert_path, key_path);
     }
 
+    // Detach from the calling shell's process group by starting a new
+    // session.  Without this, the server is a child of the LibSu root shell;
+    // when that shell exits (e.g. because the Java app process killed itself
+    // after dispatching the boot command), some shells send SIGHUP to their
+    // process group, which would kill the server.  setsid() makes this
+    // process its own session leader, so no SIGHUP is ever delivered.
+    // setsid() is a no-op if we are already a session leader (e.g. when
+    // started from an interactive terminal during development), so it is
+    // always safe to call.
+    setsid();
+
     struct mg_mgr mgr;
     struct mg_connection *http_connection;
     struct mg_connection *https_connection;
