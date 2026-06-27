@@ -30,10 +30,6 @@ public final class NotificationHelper {
      */
     public static final String UPDATE_NOTIFICATION_CHANNEL = "UpdateChannel";
     /**
-     * The notification channel for VPN service.
-     */
-    public static final String VPN_SERVICE_NOTIFICATION_CHANNEL = "VpnServiceChannel";
-    /**
      * The update hosts notification identifier.
      */
     private static final int UPDATE_HOSTS_NOTIFICATION_ID = 10;
@@ -41,14 +37,6 @@ public final class NotificationHelper {
      * The update application notification identifier.
      */
     private static final int UPDATE_APP_NOTIFICATION_ID = 11;
-    /**
-     * The VPN running service notification identifier.
-     */
-    public static final int VPN_RUNNING_SERVICE_NOTIFICATION_ID = 20;
-    /**
-     * The VPN resume service notification identifier.
-     */
-    public static final int VPN_RESUME_SERVICE_NOTIFICATION_ID = 21;
 
     /**
      * Private constructor.
@@ -70,18 +58,10 @@ public final class NotificationHelper {
                 NotificationManager.IMPORTANCE_LOW
         );
         updateChannel.setDescription(context.getString(R.string.notification_update_channel_description));
-        // Create VPN service notification channel
-        NotificationChannel vpnServiceChannel = new NotificationChannel(
-                VPN_SERVICE_NOTIFICATION_CHANNEL,
-                context.getString(R.string.notification_vpn_channel_name),
-                NotificationManager.IMPORTANCE_LOW
-        );
-        updateChannel.setDescription(context.getString(R.string.notification_vpn_channel_description));
         // Register the channels with the system; you can't change the importance or other notification behaviors after this
         NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
         if (notificationManager != null) {
             notificationManager.createNotificationChannel(updateChannel);
-            notificationManager.createNotificationChannel(vpnServiceChannel);
         }
     }
 

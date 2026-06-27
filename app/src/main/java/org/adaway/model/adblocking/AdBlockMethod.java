@@ -15,11 +15,7 @@ public enum AdBlockMethod {
     /**
      * The system hosts file ad block method.
      */
-    ROOT(1),
-    /**
-     * The VPN based ad block method.
-     */
-    VPN(2);
+    ROOT(1);
 
     private int code;
 

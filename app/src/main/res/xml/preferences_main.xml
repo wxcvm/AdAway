@@ -23,11 +23,6 @@
             app:icon="@drawable/ic_superuser_24dp"
             app:key="@string/pref_root_ad_block_method_key"
             app:title="@string/pref_root_ad_blocker_configuration" />
-        <Preference
-            app:fragment="org.adaway.ui.prefs.PrefsVpnFragment"
-            app:icon="@drawable/ic_vpn_key_24dp"
-            app:key="@string/pref_vpn_ad_block_method_key"
-            app:title="@string/pref_vpn_ad_blocker_configuration" />
         <SwitchPreferenceCompat
             app:defaultValue="@bool/pref_enable_ipv6_def"
             app:icon="@drawable/ic_ipv6_24dp"

@@ -3,7 +3,6 @@ package org.adaway.ui.home;
 import static com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_HALF_EXPANDED;
 import static com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_HIDDEN;
 import static org.adaway.model.adblocking.AdBlockMethod.UNDEFINED;
-import static org.adaway.model.adblocking.AdBlockMethod.VPN;
 import static org.adaway.ui.Animations.removeView;
 import static org.adaway.ui.Animations.showView;
 import static org.adaway.ui.lists.ListsActivity.ALLOWED_HOSTS_TAB;
@@ -16,15 +15,12 @@ import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
-import android.net.VpnService;
 import android.os.Bundle;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.TextView;
 
 import androidx.activity.OnBackPressedCallback;
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult;
 import androidx.annotation.IdRes;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
@@ -69,7 +65,6 @@ public class HomeActivity extends AppCompatActivity {
     private BottomSheetBehavior<View> drawerBehavior;
     private OnBackPressedCallback onBackPressedCallback;
     private HomeViewModel homeViewModel;
-    private ActivityResultLauncher<Intent> prepareVpnLauncher;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -101,10 +96,6 @@ public class HomeActivity extends AppCompatActivity {
             return false; // TODO Handle selection
         });
 
-        this.prepareVpnLauncher = registerForActivityResult(new StartActivityForResult(), result -> {
-
-        });
-
         if (savedInstanceState == null) {
             checkUpdateAtStartup();
         }
@@ -123,14 +114,10 @@ public class HomeActivity extends AppCompatActivity {
 
     private void checkFirstStep() {
         AdBlockMethod adBlockMethod = PreferenceHelper.getAdBlockMethod(this);
-        Intent prepareIntent;
         if (adBlockMethod == UNDEFINED) {
             // Start welcome activity
             startActivity(new Intent(this, WelcomeActivity.class));
             finish();
-        } else if (adBlockMethod == VPN && (prepareIntent = VpnService.prepare(this)) != null) {
-            // Prepare VPN
-            this.prepareVpnLauncher.launch(prepareIntent);
         }
     }
 

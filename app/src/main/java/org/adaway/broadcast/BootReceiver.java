@@ -21,22 +21,19 @@
 package org.adaway.broadcast;
 
 import static android.content.Intent.ACTION_BOOT_COMPLETED;
-import static org.adaway.model.adblocking.AdBlockMethod.ROOT;
-import static org.adaway.model.adblocking.AdBlockMethod.VPN;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
 import org.adaway.helper.PreferenceHelper;
-import org.adaway.model.adblocking.AdBlockMethod;
 import org.adaway.util.WebServerUtils;
-import org.adaway.vpn.VpnServiceControls;
 
 import timber.log.Timber;
 
 /**
- * Receives BOOT_COMPLETED and starts the web server (and/or VPN) as configured.
+ * Receives BOOT_COMPLETED (and vendor-specific quick-boot equivalents) and
+ * starts the web server (ROOT mode) as configured.
  *
  * <h3>Why goAsync() + background thread?</h3>
  * BroadcastReceiver.onReceive() runs on the main thread and has a hard ~10 s
@@ -55,8 +52,9 @@ import timber.log.Timber;
  *
  * <h3>Why self-terminate?</h3>
  * The web server (libwebserver_exec.so) is a separate native process that
- * survives independently of the Java runtime. The Java process is no longer
- * needed once boot work is done; killing it frees ~30–50 MB of RAM.
+ * calls setsid() on startup and survives independently of the Java runtime.
+ * The Java process is no longer needed once boot work is done; killing it
+ * frees ~30–50 MB of RAM.
  */
 public class BootReceiver extends BroadcastReceiver {
 
@@ -75,52 +73,43 @@ public class BootReceiver extends BroadcastReceiver {
     /** How long to linger after confirming the server is running before killing the process (ms). */
     private static final long EXIT_GRACE_MS = 3_000L;
 
+    /** All boot-completed actions this receiver recognises. */
+    private static final java.util.Set<String> BOOT_ACTIONS = new java.util.HashSet<>(java.util.Arrays.asList(
+            ACTION_BOOT_COMPLETED,
+            "android.intent.action.QUICKBOOT_POWERON",
+            "com.htc.intent.action.QUICKBOOT_POWERON"
+    ));
+
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (!ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
+        final String action = intent.getAction();
+        if (action == null || !BOOT_ACTIONS.contains(action)) {
             return;
         }
-        Timber.d("BootReceiver: BOOT_COMPLETED received.");
+        Timber.d("BootReceiver: %s received.", action);
 
-        // goAsync() keeps the BroadcastReceiver state alive while the
-        // background thread does its work.
+        if (!PreferenceHelper.getWebServerEnabled(context)) {
+            Timber.d("BootReceiver: web server not enabled, skipping.");
+            return;
+        }
+
         final PendingResult pendingResult = goAsync();
 
         new Thread(() -> {
             try {
-                doBootWork(context);
+                startWebServerReliably(context);
             } catch (Exception e) {
                 Timber.e(e, "BootReceiver: unexpected error.");
             } finally {
                 pendingResult.finish();
                 sleep(EXIT_GRACE_MS);
-                // The web server is already a detached native process
-                // (it calls setsid() on startup). Killing the Java process
-                // will not affect it.
+                // The native web server binary calls setsid() on startup, so it
+                // is a detached process that outlives the Java runtime.
+                // Killing the Java process here is safe and frees ~30–50 MB of RAM.
                 Timber.d("BootReceiver: boot work done, terminating Java process.");
                 android.os.Process.killProcess(android.os.Process.myPid());
             }
         }, "boot-init").start();
-    }
-
-    // -------------------------------------------------------------------------
-
-    private void doBootWork(Context context) {
-        AdBlockMethod method = PreferenceHelper.getAdBlockMethod(context);
-
-        if (method == ROOT && PreferenceHelper.getWebServerEnabled(context)) {
-            startWebServerReliably(context);
-        }
-
-        if (method == VPN && PreferenceHelper.getVpnServiceOnBoot(context)) {
-            Timber.d("BootReceiver: starting VPN service.");
-            if (android.net.VpnService.prepare(context) != null) {
-                // VPN not yet prepared – needs user interaction, skip.
-                Timber.w("BootReceiver: VPN not prepared, skipping.");
-            } else {
-                VpnServiceControls.start(context);
-            }
-        }
     }
 
     /**
@@ -148,7 +137,6 @@ public class BootReceiver extends BroadcastReceiver {
                     attempt, MAX_ATTEMPTS);
             WebServerUtils.startWebServer(context);
 
-            // Give the native binary time to bind its ports and write the cert.
             sleep(START_VERIFY_MS);
 
             if (WebServerUtils.isWebServerRunning()) {
