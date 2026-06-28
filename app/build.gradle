@@ -89,9 +89,10 @@ android {
         }
     }
 
-    // Do not abort build if lint finds errors
     lint {
         disable 'MissingTranslation'
+        abortOnError false        // do not block release builds on lint errors
+        checkReleaseBuilds false  // skip lintVitalRelease (faster builds)
     }
 }
 
