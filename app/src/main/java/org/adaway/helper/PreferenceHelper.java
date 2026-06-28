@@ -230,4 +230,42 @@ public final class PreferenceHelper {
         editor.apply();
     }
 
+    public static boolean getDebugEnabled(Context context) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        return prefs.getBoolean(
+                context.getString(R.string.pref_enable_debug_key),
+                context.getResources().getBoolean(R.bool.pref_enable_debug_def)
+        );
+    }
+
+    public static boolean getTelemetryEnabled(Context context) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        return prefs.getBoolean(
+                context.getString(R.string.pref_enable_telemetry_key),
+                context.getResources().getBoolean(R.bool.pref_enable_telemetry_def)
+        );
+    }
+
+    public static void setTelemetryEnabled(Context context, boolean enabled) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putBoolean(context.getString(R.string.pref_enable_telemetry_key), enabled);
+        editor.apply();
+    }
+
+    public static boolean getDisplayTelemetryConsent(Context context) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        return prefs.getBoolean(
+                context.getString(R.string.pref_display_telemetry_consent_key),
+                context.getResources().getBoolean(R.bool.pref_display_telemetry_consent_def)
+        );
+    }
+
+    public static void setDisplayTelemetryConsent(Context context, boolean display) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putBoolean(context.getString(R.string.pref_display_telemetry_consent_key), display);
+        editor.apply();
+    }
+
 }
