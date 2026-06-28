@@ -66,23 +66,35 @@ jobs:
             exit 1
           }
 
-      - name: Rename APK to versioned filename
+      - name: Find and rename APK
         id: apk
         run: |
           TAG="${GITHUB_REF_NAME}"
-          echo "## APK search results" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          find app/build/outputs -name '*.apk' 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY" || echo "(none)" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          ls -la app/build/outputs/apk/release/ 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY" || true
-          SRC=$(find app/build/outputs -name '*.apk' | head -n1)
-          echo "Selected: $SRC" >> "$GITHUB_STEP_SUMMARY"
-          if [ -z "$SRC" ]; then echo "No APK found!"; exit 1; fi
+          # Dump entire outputs tree to a log we can artifact-upload
+          echo "=== find outputs ===" > /tmp/apk_search.txt
+          find app/build/outputs -type f 2>/dev/null >> /tmp/apk_search.txt || echo "(empty)" >> /tmp/apk_search.txt
+          echo "=== ls release dir ===" >> /tmp/apk_search.txt
+          ls -laR app/build/outputs/apk/ 2>/dev/null >> /tmp/apk_search.txt || echo "(no apk dir)" >> /tmp/apk_search.txt
+          cat /tmp/apk_search.txt
+
+          SRC=$(find app/build/outputs -name '*.apk' -not -path '*/intermediates/*' | head -n1)
+          if [ -z "$SRC" ]; then
+            echo "ERROR: no APK found; see apk-search artifact"
+            exit 1
+          fi
           DEST="app/build/outputs/apk/release/AdAway-${TAG}.apk"
           mkdir -p "$(dirname "$DEST")"
           cp "$SRC" "$DEST"
-          echo "path=$DEST"  >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG"    >> "$GITHUB_OUTPUT"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"   >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK search log (diagnosis)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-search-log
+          path: /tmp/apk_search.txt
+          retention-days: 1
 
       - name: Generate changelog
         id: changelog
