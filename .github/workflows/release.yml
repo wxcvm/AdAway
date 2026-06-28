@@ -36,6 +36,7 @@ jobs:
           mkdir -p "$HOME/.gradle"
           echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$HOME/adaway-release.jks"
           echo "Keystore size: $(wc -c < "$HOME/adaway-release.jks") bytes"
+          file "$HOME/adaway-release.jks"
 
       - name: Write Gradle signing properties
         env:
@@ -44,42 +45,31 @@ jobs:
           SIGNING_KEY_PASSWORD:   ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           PROPS_FILE="$HOME/.gradle/gradle.properties"
-          mkdir -p "$(dirname "$PROPS_FILE")"
           printf 'signingStoreLocation=%s/adaway-release.jks\n' "$HOME"   >> "$PROPS_FILE"
           printf 'signingStorePassword=%s\n' "$SIGNING_STORE_PASSWORD"    >> "$PROPS_FILE"
           printf 'signingKeyAlias=%s\n'      "$SIGNING_KEY_ALIAS"         >> "$PROPS_FILE"
           printf 'signingKeyPassword=%s\n'   "$SIGNING_KEY_PASSWORD"      >> "$PROPS_FILE"
-          echo "Signing properties written:"
+          echo "=== Written signing properties (passwords masked) ==="
           grep "signing" "$PROPS_FILE" | sed 's/Password=.*/Password=***/'
 
       - name: Build signed release APK
-        run: ./gradlew :app:assembleRelease --stacktrace --info 2>&1 | grep -E "(BUILD|FAILED|error:|> Task|Found signature)" | tail -30
+        run: ./gradlew :app:assembleRelease --stacktrace
 
-      - name: Find and rename APK
+      - name: Locate APK
         id: apk
         run: |
           TAG="${GITHUB_REF_NAME}"
-          echo "=== All build outputs ==="
+          echo "=== All APK outputs ==="
+          find app/build/outputs -type f -name "*.apk" 2>/dev/null || echo "(none)"
+          echo "=== Full outputs tree ==="
           find app/build/outputs -type f 2>/dev/null || echo "(empty)"
           SRC=$(find app/build/outputs -name '*.apk' -not -path '*/intermediates/*' | head -n1)
-          if [ -z "$SRC" ]; then
-            echo "ERROR: no APK found"
-            exit 1
-          fi
-          DEST="app/build/outputs/apk/release/AdAway-${TAG}.apk"
-          mkdir -p "$(dirname "$DEST")"
+          if [ -z "$SRC" ]; then echo "No APK found"; exit 1; fi
+          DEST="AdAway-${TAG}.apk"
           cp "$SRC" "$DEST"
-          echo "path=$DEST" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG"   >> "$GITHUB_OUTPUT"
-
-      - name: Upload APK search log (diagnosis)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-outputs-listing
-          path: |
-            app/build/outputs/mapping/
-          retention-days: 3
+          echo "path=$DEST"  >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"    >> "$GITHUB_OUTPUT"
+          echo "Packaged: $DEST ($(wc -c < "$DEST") bytes)"
 
       - name: Generate changelog
         id: changelog
@@ -96,9 +86,7 @@ jobs:
               git log --pretty=format:"- %s (%h)" "${TAG}" -- | head -30 || true
             fi
             echo ""
-            if [ -n "$PREV" ]; then
-              echo "**Full diff:** https://github.com/${{ github.repository }}/compare/${PREV}...${TAG}"
-            fi
+            [ -n "$PREV" ] && echo "**Full diff:** https://github.com/${{ github.repository }}/compare/${PREV}...${TAG}"
             echo "EOF_CHANGELOG"
           } >> "$GITHUB_OUTPUT"
 
