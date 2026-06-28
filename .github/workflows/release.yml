@@ -70,8 +70,15 @@ jobs:
         id: apk
         run: |
           TAG="${GITHUB_REF_NAME}"
-          SRC=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
+          echo "Looking for APK in:"
+          find app/build/outputs -name '*.apk' 2>/dev/null || echo "(none found)"
+          SRC=$(find app/build/outputs -name '*.apk' | grep -v unsigned | head -n1)
+          if [ -z "$SRC" ]; then
+            SRC=$(find app/build/outputs -name '*.apk' | head -n1)
+          fi
+          echo "Found: $SRC"
           DEST="app/build/outputs/apk/release/AdAway-${TAG}.apk"
+          mkdir -p "$(dirname "$DEST")"
           mv "$SRC" "$DEST"
           echo "path=$DEST"  >> "$GITHUB_OUTPUT"
           echo "tag=$TAG"    >> "$GITHUB_OUTPUT"
