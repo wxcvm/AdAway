@@ -5,7 +5,6 @@
 -keep public class org.adaway.ui.prefs.PrefsBackupRestoreFragment
 -keep public class org.adaway.ui.prefs.PrefsRootFragment
 -keep public class org.adaway.ui.prefs.PrefsUpdateFragment
--keep public class org.adaway.ui.prefs.PrefsVpnFragment
 
 -keepclassmembers class io.sentry.Sentry {
     public static final boolean STUB;
@@ -32,7 +31,3 @@
 -dontwarn org.bouncycastle.jsse.**
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
-
-### dnsjava ###
--dontwarn lombok.Generated
--dontwarn sun.net.spi.nameservice.NameServiceDescriptor

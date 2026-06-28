@@ -3,17 +3,11 @@ name: Release
 # Triggered by pushing a version tag, e.g.:
 #   git tag v6.1.0 && git push origin v6.1.0
 #
-# Required repo secrets (same as build-signed-apk.yml):
+# Required repo secrets:
 #   SIGNING_KEYSTORE_BASE64  – base64-encoded .jks keystore
 #   SIGNING_STORE_PASSWORD   – keystore password
 #   SIGNING_KEY_ALIAS        – key alias
 #   SIGNING_KEY_PASSWORD     – key password
-#
-# The workflow:
-#   1. Builds a signed release APK
-#   2. Renames it to  AdAway-<tag>.apk
-#   3. Creates a GitHub Release (draft=false, prerelease auto-detected)
-#   4. Uploads the APK as a release asset
 
 on:
   push:
@@ -29,23 +23,21 @@ jobs:
     name: Build & publish release
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # needed to create GitHub Releases
+      contents: write
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 0   # full history for changelog generation
+          fetch-depth: 0
 
-      # ── Java ──────────────────────────────────────────────────────────────
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21
           cache: gradle
 
-      # ── Signing ──────────────────────────────────────────────────────────
       - name: Decode signing keystore
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
@@ -66,52 +58,40 @@ jobs:
           signingKeyPassword=$SIGNING_KEY_PASSWORD
           PROPS
 
-      # ── Build ─────────────────────────────────────────────────────────────
       - name: Build signed release APK
         run: ./gradlew assembleRelease --stacktrace
 
-      # ── Rename APK ────────────────────────────────────────────────────────
       - name: Rename APK to versioned filename
         id: apk
         run: |
-          TAG="${GITHUB_REF_NAME}"            # e.g.  v6.1.0
+          TAG="${GITHUB_REF_NAME}"
           SRC=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
           DEST="app/build/outputs/apk/release/AdAway-${TAG}.apk"
           mv "$SRC" "$DEST"
-          echo "path=$DEST" >> "$GITHUB_OUTPUT"
-          echo "name=AdAway-${TAG}.apk"      >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG"                    >> "$GITHUB_OUTPUT"
+          echo "path=$DEST"  >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"    >> "$GITHUB_OUTPUT"
 
-      # ── Auto changelog from git log ───────────────────────────────────────
       - name: Generate changelog
         id: changelog
         run: |
           TAG="${{ steps.apk.outputs.tag }}"
-          # Find previous tag to compute the diff range
           PREV=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -n1)
-          if [ -n "$PREV" ]; then
-            RANGE="${PREV}..${TAG}"
-            echo "Changelog from $PREV to $TAG:"
-          else
-            RANGE="${TAG}"
-            echo "First release:"
-          fi
           {
             echo "body<<EOF_CHANGELOG"
             echo "## What's changed"
             echo ""
             if [ -n "$PREV" ]; then
-              git log --pretty=format:"- %s (%h)" "$RANGE" -- || true
+              git log --pretty=format:"- %s (%h)" "${PREV}..${TAG}" -- || true
             else
-              git log --pretty=format:"- %s (%h)" "$TAG" -- | head -30 || true
+              git log --pretty=format:"- %s (%h)" "${TAG}" -- | head -30 || true
             fi
             echo ""
-            echo ""
-            echo "**Full diff:** https://github.com/${{ github.repository }}/compare/${PREV}...${TAG}"
+            if [ -n "$PREV" ]; then
+              echo "**Full diff:** https://github.com/${{ github.repository }}/compare/${PREV}...${TAG}"
+            fi
             echo "EOF_CHANGELOG"
           } >> "$GITHUB_OUTPUT"
 
-      # ── GitHub Release ────────────────────────────────────────────────────
       - name: Create GitHub Release and upload APK
         uses: softprops/action-gh-release@v2
         with:

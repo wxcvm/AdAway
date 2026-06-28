@@ -136,12 +136,6 @@ dependencies {
     // Root related
     implementation libs.libsu
 
-    // VPN related
-    implementation libs.bundles.pcap4j
-    implementation libs.dnsjava
-    implementation libs.slf4j.android
-    implementation libs.okhttp.dnsoverhttps
-
     // Test related
     testImplementation libs.junit
     testImplementation libs.json
