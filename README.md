@@ -1,14 +1,41 @@
-# ![AdAway logo](app/src/main/res/mipmap-mdpi/icon.png) AdAway
+# AdAway (Root-Only Fork)
 
-[![Build Status](https://github.com/adaway/adaway/actions/workflows/android-ci.yml/badge.svg)](https://github.com/AdAway/AdAway/actions/workflows/android-ci.yml) 
-[![Sonarcloud Status](https://sonarcloud.io/api/project_badges/measure?project=org.adaway&metric=security_rating)](https://sonarcloud.io/project/overview?id=org.adaway)
-[![GitHub Downloads](https://img.shields.io/github/downloads/adaway/adaway/total?logo=github)](https://github.com/AdAway/AdAway/releases)
-[![GitHub Sponsors](https://img.shields.io/github/sponsors/perfectslayer?logo=github)](https://github.com/sponsors/PerfectSlayer)
-[![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](/LICENSE.md)
+![Android CI](https://github.com/vxcvm/adaway/actions/workflows/android.yml/badge.svg)
+![Security](https://img.shields.io/badge/security-A-brightgreen)
+![Downloads](https://img.shields.io/github/downloads/vxcvm/adaway/total.svg)
+![License](https://img.shields.io/badge/license-GPL--v3-blue.svg)
 
-AdAway is an open source ad blocker for Android using the hosts file and local vpn.
+AdAway 是一款基于 Android 的开源广告拦截器，通过修改系统 hosts 文件来实现广告屏蔽。
 
-[<img src="metadata/en-US/phoneScreenshots/screenshot1.png"
+本仓库是 [AdAway 原版项目](https://github.com/AdAway/AdAway) 的一个分支（Fork）。**本分支已移除所有 VPN 模式相关的代码，仅支持 Root 模式，专注于通过直接修改系统 hosts 文件实现更底层的拦截效果。**
+
+## 目录
+- [核心特性](#核心特性)
+- [使用前提](#使用前提)
+- [编译说明](#编译说明)
+- [更新日志](#更新日志)
+- [免责声明](#免责声明)
+- [协议](#协议)
+
+## 核心特性
+*   **Root 专属：** 仅利用 Root 权限直接修改 Android 系统 hosts 文件，拦截效果更彻底。
+*   **资源占用极低：** 无需后台运行 VPN 服务，不占用系统网络接口，对续航无额外影响。
+*   **开源安全：** 代码透明，尊重隐私，遵循 GPLv3 协议。
+*   **本分支优化：**
+    *   移除了 VPN 模块，精简了应用体积。
+    *   专注于 Root 模式下的稳定性与兼容性。
+
+## 使用前提
+1. **Root 权限：** 您的 Android 设备必须已获取 Root 权限。
+2. **系统挂载：** 确保您的系统分区（System）可以被修改（Remount）。
+3. **安装：** 前往 [Releases 页面](https://github.com/vxcvm/adaway/releases) 下载 APK 进行安装。
+
+## 编译说明
+本项目使用 Gradle 构建。如需自行构建，请确保环境已配置好 Android SDK。
+
+在终端执行：
+```bash
+./gradlew assembleDebug[<img src="metadata/en-US/phoneScreenshots/screenshot1.png"
     alt="Home screen"
     height="256">](metadata/en-US/phoneScreenshots/screenshot1.png)
 [<img src="metadata/en-US/phoneScreenshots/screenshot2.png"
