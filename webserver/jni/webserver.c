@@ -20,7 +20,7 @@
 #define HTTPS_URL "https://localhost:443"
 
 #define OOM_ADJ_PATH    "/proc/self/oom_score_adj"
-#define OOM_ADJ_NOKILL  -17
+#define OOM_ADJ_NOKILL  -1000  /* OOM_SCORE_ADJ_MIN: kernel never kills this process */
 
 // The web server only ever needs to sink one-off requests for blocked ad and
 // tracker domains: it has no legitimate reason to keep a connection open
@@ -104,9 +104,17 @@ static void signal_handler(int sig_num) {
 void setup_signal_handler() {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
+
+    /* Ignore SIGPIPE: a client closing the connection mid-response must not
+     * kill the server process — mongoose handles write errors via return codes. */
+    sa.sa_handler = SIG_IGN;
+    sigaction(SIGPIPE, &sa, NULL);
+
+    /* Catch shutdown signals for graceful teardown. */
     sa.sa_handler = signal_handler;
-    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGHUP,  &sa, NULL);   /* Android may deliver SIGHUP on process reparenting */
 }
 
 /*
@@ -398,12 +406,19 @@ int main(int argc, char *argv[]) {
     }
 
     setup_signal_handler();
-    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, "Starting server.");
+    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, "Starting server (arm64, Mongoose " MG_VERSION ").");
     while (s_sig_num == 0) {
         mg_mgr_poll(&mgr, 1000);
     }
 
+    /* Graceful teardown: drain in-flight connections before exiting. */
+    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, "Signal %d received, shutting down.", s_sig_num);
     mg_mgr_free(&mgr);
-    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, "Stopping server on signal %d.", s_sig_num);
+
+    /* Free TLS buffer allocations made by mg_file_read() in parse_cli_parameters(). */
+    free((void *) s.tls_opts.cert.buf);
+    free((void *) s.tls_opts.key.buf);
+
+    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, "Server stopped cleanly.");
     return EXIT_SUCCESS;
 }

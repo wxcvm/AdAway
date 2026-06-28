@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.AdAway" parent="Base.AdAway" />
+
+    <!-- Base theme: Material3 DayNight -->
+    <style name="Base.AdAway" parent="Theme.Material3.DayNight">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/onPrimary</item>
+        <item name="colorPrimaryContainer">@color/primaryContainer</item>
+        <item name="colorOnPrimaryContainer">@color/onPrimaryContainer</item>
+        <item name="colorSecondary">@color/secondary</item>
+        <item name="colorOnSecondary">@color/onPrimary</item>
+        <item name="colorTertiary">@color/tertiary</item>
+    </style>
+
+    <style name="Theme.AdAway.NoActionBar" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/onPrimary</item>
+        <item name="colorPrimaryContainer">@color/primaryContainer</item>
+        <item name="colorOnPrimaryContainer">@color/onPrimaryContainer</item>
+        <item name="colorSecondary">@color/secondary</item>
+        <item name="colorTertiary">@color/tertiary</item>
+        <item name="android:statusBarColor">?attr/colorPrimary</item>
+    </style>
+
+    <style name="Theme.AdAway.NoActionBar.Red" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/welcomeBackground</item>
+        <item name="colorOnPrimary">@color/onPrimary</item>
+        <item name="android:statusBarColor">@color/welcomeBackground</item>
+        <item name="android:navigationBarColor">@color/welcomeBackground</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+</resources>

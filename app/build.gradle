@@ -14,14 +14,17 @@ repositories {
 }
 
 android {
-    compileSdk 34
-    ndkVersion '27.2.12479018'
+    compileSdk 35
+    ndkVersion '28.1.13356709'
     namespace 'org.adaway'
 
     defaultConfig {
         applicationId 'com.wxcvm.Adaway'
         minSdk 26
-        targetSdk 33
+        targetSdk 35
+        ndk {
+            abiFilters "arm64-v8a"
+        }
         versionCode libs.versions.appCode.get() as int
         versionName libs.versions.appName.get()
 
@@ -117,7 +120,7 @@ dependencies {
     annotationProcessor 'androidx.room:room-compiler:2.6.1'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     implementation 'androidx.work:work-runtime:2.8.1'
-    implementation 'com.google.android.material:material:1.9.0'
+    implementation 'com.google.android.material:material:1.12.0'
 
     // Collections related
     implementation libs.guava
