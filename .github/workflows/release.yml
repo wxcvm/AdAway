@@ -59,7 +59,12 @@ jobs:
           PROPS
 
       - name: Build signed release APK
-        run: ./gradlew assembleRelease --stacktrace
+        run: |
+          ./gradlew assembleRelease --stacktrace --info 2>&1 | tee /tmp/gradle.log || {
+            echo "=== GRADLE ERRORS ==="
+            grep -E "^(e:|error:|FAILED|Exception|Cannot|Could not|Caused by)" /tmp/gradle.log | tail -60
+            exit 1
+          }
 
       - name: Rename APK to versioned filename
         id: apk
