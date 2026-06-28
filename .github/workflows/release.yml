@@ -1,14 +1,5 @@
 name: Release
 
-# Triggered by pushing a version tag, e.g.:
-#   git tag v6.1.0 && git push origin v6.1.0
-#
-# Required repo secrets:
-#   SIGNING_KEYSTORE_BASE64  – base64-encoded .jks keystore
-#   SIGNING_STORE_PASSWORD   – keystore password
-#   SIGNING_KEY_ALIAS        – key alias
-#   SIGNING_KEY_PASSWORD     – key password
-
 on:
   push:
     tags:
@@ -44,6 +35,7 @@ jobs:
         run: |
           mkdir -p "$HOME/.gradle"
           echo "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$HOME/adaway-release.jks"
+          echo "Keystore size: $(wc -c < "$HOME/adaway-release.jks") bytes"
 
       - name: Write Gradle signing properties
         env:
@@ -51,35 +43,27 @@ jobs:
           SIGNING_KEY_ALIAS:      ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD:   ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
-          cat >> "$HOME/.gradle/gradle.properties" << PROPS
-          signingStoreLocation=$HOME/adaway-release.jks
-          signingStorePassword=$SIGNING_STORE_PASSWORD
-          signingKeyAlias=$SIGNING_KEY_ALIAS
-          signingKeyPassword=$SIGNING_KEY_PASSWORD
-          PROPS
+          PROPS_FILE="$HOME/.gradle/gradle.properties"
+          mkdir -p "$(dirname "$PROPS_FILE")"
+          printf 'signingStoreLocation=%s/adaway-release.jks\n' "$HOME"   >> "$PROPS_FILE"
+          printf 'signingStorePassword=%s\n' "$SIGNING_STORE_PASSWORD"    >> "$PROPS_FILE"
+          printf 'signingKeyAlias=%s\n'      "$SIGNING_KEY_ALIAS"         >> "$PROPS_FILE"
+          printf 'signingKeyPassword=%s\n'   "$SIGNING_KEY_PASSWORD"      >> "$PROPS_FILE"
+          echo "Signing properties written:"
+          grep "signing" "$PROPS_FILE" | sed 's/Password=.*/Password=***/'
 
       - name: Build signed release APK
-        run: |
-          ./gradlew assembleRelease --stacktrace --info 2>&1 | tee /tmp/gradle.log || {
-            echo "=== GRADLE ERRORS ==="
-            grep -E "^(e:|error:|FAILED|Exception|Cannot|Could not|Caused by)" /tmp/gradle.log | tail -60
-            exit 1
-          }
+        run: ./gradlew :app:assembleRelease --stacktrace --info 2>&1 | grep -E "(BUILD|FAILED|error:|> Task|Found signature)" | tail -30
 
       - name: Find and rename APK
         id: apk
         run: |
           TAG="${GITHUB_REF_NAME}"
-          # Dump entire outputs tree to a log we can artifact-upload
-          echo "=== find outputs ===" > /tmp/apk_search.txt
-          find app/build/outputs -type f 2>/dev/null >> /tmp/apk_search.txt || echo "(empty)" >> /tmp/apk_search.txt
-          echo "=== ls release dir ===" >> /tmp/apk_search.txt
-          ls -laR app/build/outputs/apk/ 2>/dev/null >> /tmp/apk_search.txt || echo "(no apk dir)" >> /tmp/apk_search.txt
-          cat /tmp/apk_search.txt
-
+          echo "=== All build outputs ==="
+          find app/build/outputs -type f 2>/dev/null || echo "(empty)"
           SRC=$(find app/build/outputs -name '*.apk' -not -path '*/intermediates/*' | head -n1)
           if [ -z "$SRC" ]; then
-            echo "ERROR: no APK found; see apk-search artifact"
+            echo "ERROR: no APK found"
             exit 1
           fi
           DEST="app/build/outputs/apk/release/AdAway-${TAG}.apk"
@@ -92,9 +76,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: apk-search-log
-          path: /tmp/apk_search.txt
-          retention-days: 1
+          name: build-outputs-listing
+          path: |
+            app/build/outputs/mapping/
+          retention-days: 3
 
       - name: Generate changelog
         id: changelog
