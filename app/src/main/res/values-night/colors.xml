@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Material theming black theme -->
-    <color name="primary">#B71C1C</color>
-    <color name="primaryVariant">#e53935</color>
-    <color name="onPrimary">#ffffff</color>
+    <!-- Dark theme overrides -->
+    <color name="primary">#EF5350</color>
+    <color name="primaryVariant">#C62828</color>
+    <color name="onPrimary">#FFFFFF</color>
+    <color name="primaryContainer">#7F0000</color>
+    <color name="onPrimaryContainer">#FFCDD2</color>
+    <!-- Host list state chips (lighter tones for dark bg) -->
     <color name="blocked">#EF9A9A</color>
     <color name="allowed">#80CBC4</color>
     <color name="redirected">#9FA8DA</color>
