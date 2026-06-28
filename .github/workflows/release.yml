@@ -70,16 +70,17 @@ jobs:
         id: apk
         run: |
           TAG="${GITHUB_REF_NAME}"
-          echo "Looking for APK in:"
-          find app/build/outputs -name '*.apk' 2>/dev/null || echo "(none found)"
-          SRC=$(find app/build/outputs -name '*.apk' | grep -v unsigned | head -n1)
-          if [ -z "$SRC" ]; then
-            SRC=$(find app/build/outputs -name '*.apk' | head -n1)
-          fi
-          echo "Found: $SRC"
+          echo "## APK search results" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          find app/build/outputs -name '*.apk' 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY" || echo "(none)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -la app/build/outputs/apk/release/ 2>/dev/null | tee -a "$GITHUB_STEP_SUMMARY" || true
+          SRC=$(find app/build/outputs -name '*.apk' | head -n1)
+          echo "Selected: $SRC" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$SRC" ]; then echo "No APK found!"; exit 1; fi
           DEST="app/build/outputs/apk/release/AdAway-${TAG}.apk"
           mkdir -p "$(dirname "$DEST")"
-          mv "$SRC" "$DEST"
+          cp "$SRC" "$DEST"
           echo "path=$DEST"  >> "$GITHUB_OUTPUT"
           echo "tag=$TAG"    >> "$GITHUB_OUTPUT"
 
