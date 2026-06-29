@@ -24,7 +24,7 @@ LOCAL_CFLAGS	       := -D MG_ENABLE_IPV6 -DMG_TLS=MG_TLS_OPENSSL -std=c99 -O2 -W
 LOCAL_MODULE           := webserver
 LOCAL_SRC_FILES        := webserver.c mongoose/mongoose.c
 LOCAL_SHARED_LIBRARIES := ssl crypto
-LOCAL_LDLIBS           := -llog
+LOCAL_LDLIBS           := -llog -lpthread
 
 include $(BUILD_EXECUTABLE)
 

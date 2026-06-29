@@ -43,4 +43,6 @@
     <!-- Error dialog -->
     <string name="error_dialog_help">Please read Help for more information.</string>
 
+    <string name="hosts_sources_title">Sources</string>
+    <string name="home_tools_section">Tools</string>
 </resources>

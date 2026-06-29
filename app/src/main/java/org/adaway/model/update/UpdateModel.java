@@ -34,8 +34,8 @@ import timber.log.Timber;
  * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
  */
 public class UpdateModel {
-    private static final String MANIFEST_URL = "https://app.adaway.org/manifest.json";
-    private static final String DOWNLOAD_URL = "https://app.adaway.org/adaway.apk?versionCode=";
+    private static final String MANIFEST_URL = "https://github.com/wxcvm/AdAway/releases/latest/download/manifest.json";
+    private static final String DOWNLOAD_URL = "https://github.com/wxcvm/AdAway/releases/latest/download/AdAway-latest.apk?versionCode=";
     private final Context context;
     private final VersionInfo versionInfo;
     private final OkHttpClient client;

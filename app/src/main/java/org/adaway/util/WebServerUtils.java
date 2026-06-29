@@ -75,9 +75,22 @@ public class WebServerUtils {
      */
     public static void startWebServer(Context context) {
         Timber.d("Starting web server…");
+        // Kill any stale instance first so its port 80/443 bindings are
+        // released before we try to listen on them.  Without this a server
+        // left over from a previous crash will cause the new one to fail
+        // to bind and exit immediately.
+        if (isWebServerRunning()) {
+            Timber.d("Killing stale web server instance before restart.");
+            killBundledExecutable(WEB_SERVER_EXECUTABLE);
+            // Give the kernel time to release SO_REUSEADDR ports.
+            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+        }
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
-        String parameters = "--resources " + resourcePath.toAbsolutePath() + " > /dev/null 2>&1";
+        // Redirect both stdout and stderr to the Android log via logcat.
+        // This makes certificate-generation errors visible without needing
+        // a separate debugging build.
+        String parameters = "--resources " + resourcePath.toAbsolutePath();
         runBundledExecutable(context, WEB_SERVER_EXECUTABLE, parameters);
     }
 

@@ -71,6 +71,24 @@ jobs:
           echo "tag=$TAG"    >> "$GITHUB_OUTPUT"
           echo "Packaged: $DEST ($(wc -c < "$DEST") bytes)"
 
+
+      - name: Generate manifest.json for in-app update check
+        id: manifest
+        run: |
+          TAG="${{ steps.apk.outputs.tag }}"
+          VERSION="${TAG#v}"
+          VCODE=$(grep "appCode" gradle/libs.versions.toml | grep -o "[0-9]*")
+          APK_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/AdAway-${TAG}.apk"
+          cat > manifest.json << MANIFEST
+          {
+            "version": "${VERSION}",
+            "versionCode": ${VCODE},
+            "apkUrl": "${APK_URL}",
+            "changelog": "See https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+          }
+          MANIFEST
+          echo "manifest_path=manifest.json" >> "$GITHUB_OUTPUT"
+
       - name: Generate changelog
         id: changelog
         run: |
@@ -98,5 +116,7 @@ jobs:
           body:       ${{ steps.changelog.outputs.body }}
           draft:      false
           prerelease: ${{ contains(steps.apk.outputs.tag, '-') }}
-          files:      ${{ steps.apk.outputs.path }}
+          files: |
+            ${{ steps.apk.outputs.path }}
+            ${{ steps.manifest.outputs.manifest_path }}
           fail_on_unmatched_files: true
