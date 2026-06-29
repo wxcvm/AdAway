@@ -13,7 +13,9 @@ import static org.adaway.util.Constants.PREFS_NAME;
 import static org.adaway.util.WebServerUtils.TEST_URL;
 import static org.adaway.util.WebServerUtils.copyCertificate;
 import static org.adaway.util.WebServerUtils.getWebServerState;
-import static org.adaway.util.WebServerUtils.installCertificate;
+import static org.adaway.util.WebServerUtils.installUserCertificate;
+import static org.adaway.util.WebServerUtils.installSystemCertificate;
+import static org.adaway.util.WebServerUtils.isSystemCertificateInstalled;
 import static org.adaway.util.WebServerUtils.isWebServerRunning;
 import static org.adaway.util.WebServerUtils.startWebServer;
 import static org.adaway.util.WebServerUtils.stopWebServer;
@@ -232,7 +234,25 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         assert webServerTest != null : PREFERENCE_NOT_FOUND;
         webServerTest.setOnPreferenceClickListener(preference -> {
             if (SDK_INT < VERSION_CODES.R) {
-                installCertificate(requireContext());
+                // Offer system CA install (trusted by all apps / VPNs) if not yet done
+                Context ctx = requireContext();
+                if (isSystemCertificateInstalled(ctx)) {
+                    installUserCertificate(ctx);
+                } else {
+                    new com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                        .setTitle(R.string.pref_webserver_certificate_dialog_title)
+                        .setMessage(R.string.pref_webserver_system_ca_prompt)
+                        .setPositiveButton(R.string.pref_webserver_system_ca_install, (d, w) -> {
+                            boolean ok = installSystemCertificate(ctx);
+                            int msg = ok ? R.string.pref_webserver_system_ca_success
+                                         : R.string.pref_webserver_system_ca_failed;
+                            android.widget.Toast.makeText(ctx, msg,
+                                android.widget.Toast.LENGTH_LONG).show();
+                        })
+                        .setNegativeButton(R.string.pref_webserver_certificate_user_only,
+                            (d, w) -> installUserCertificate(ctx))
+                        .show();
+                }
             } else {
                 this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt");
             }

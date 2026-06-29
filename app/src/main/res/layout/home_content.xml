@@ -1,78 +1,83 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Home screen — Rikka / Shizuku inspired design:
-  • Status banner with large icon + toggle (replaces FAB)
-  • Stat row (Blocked / Allowed / Redirected)
-  • Source management section
-  • Quick-access section (Log, Help)
-  All items sit in a single NestedScrollView with no negative margins.
+  Rikka-style home content.
+  Root is NestedScrollView with bottom padding so content clears the BottomAppBar.
 -->
 <androidx.core.widget.NestedScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/scrollView"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true">
+    android:clipToPadding="false"
+    android:paddingBottom="80dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingBottom="88dp">
+        android:orientation="vertical">
 
-        <!-- ── Status banner ──────────────────────────── -->
-        <LinearLayout
+        <!-- ── Hero: icon + name + status ───────────────────────── -->
+        <FrameLayout
             android:id="@+id/headerFrameLayout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="?attr/colorPrimary"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
-            android:paddingTop="32dp"
-            android:paddingBottom="28dp">
+            android:background="?attr/colorSurface"
+            android:paddingTop="48dp"
+            android:paddingBottom="24dp">
 
-            <ImageView
-                android:id="@+id/logoImageView"
-                android:layout_width="72dp"
-                android:layout_height="72dp"
-                android:contentDescription="@string/app_logo"
-                app:srcCompat="@mipmap/icon_round" />
-
-            <TextView
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="@string/app_name"
-                android:textAppearance="?attr/textAppearanceTitleLarge"
-                android:textColor="?attr/colorOnPrimary"
-                android:textStyle="bold" />
+                android:gravity="center"
+                android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/versionTextView"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
-                android:alpha="0.75"
-                android:textAppearance="?attr/textAppearanceLabelMedium"
-                android:textColor="?attr/colorOnPrimary"
-                tools:text="v6.2.0" />
+                <!-- Shield icon -->
+                <ImageView
+                    android:id="@+id/logoImageView"
+                    android:layout_width="72dp"
+                    android:layout_height="72dp"
+                    android:contentDescription="@string/app_logo"
+                    app:srcCompat="@mipmap/icon_round" />
 
-        </LinearLayout>
+                <!-- App name -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/app_name"
+                    android:textAppearance="?attr/textAppearanceHeadlineMedium"
+                    android:textStyle="bold" />
 
-        <!-- ── Stat chips ─────────────────────────────── -->
+                <!-- Version -->
+                <TextView
+                    android:id="@+id/versionTextView"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:alpha="0.6"
+                    android:textAppearance="?attr/textAppearanceLabelLarge"
+                    tools:text="v6.2.0" />
+
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- ── Stats row ─────────────────────────────────────────── -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
             android:orientation="horizontal"
-            android:paddingHorizontal="12dp">
+            android:paddingHorizontal="8dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
 
+            <!-- Blocked -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/blockedHostCardView"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="4dp"
+                android:layout_margin="6dp"
                 android:layout_weight="1"
                 android:clickable="true"
                 android:focusable="true"
@@ -86,17 +91,16 @@
                     android:layout_height="wrap_content"
                     android:gravity="center"
                     android:orientation="vertical"
-                    android:paddingVertical="16dp"
-                    android:paddingHorizontal="4dp">
+                    android:paddingVertical="16dp">
 
                     <TextView
                         android:id="@+id/blockedHostCounterTextView"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+                        android:textAppearance="?attr/textAppearanceTitleLarge"
                         android:textColor="@color/blocked"
                         android:textStyle="bold"
-                        tools:text="2.2k" />
+                        tools:text="226k" />
 
                     <TextView
                         android:layout_width="wrap_content"
@@ -109,11 +113,12 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- Allowed -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/allowedHostCardView"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="4dp"
+                android:layout_margin="6dp"
                 android:layout_weight="1"
                 android:clickable="true"
                 android:focusable="true"
@@ -127,14 +132,13 @@
                     android:layout_height="wrap_content"
                     android:gravity="center"
                     android:orientation="vertical"
-                    android:paddingVertical="16dp"
-                    android:paddingHorizontal="4dp">
+                    android:paddingVertical="16dp">
 
                     <TextView
                         android:id="@+id/allowedHostCounterTextView"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+                        android:textAppearance="?attr/textAppearanceTitleLarge"
                         android:textColor="@color/allowed"
                         android:textStyle="bold"
                         tools:text="25" />
@@ -150,11 +154,12 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- Redirected -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/redirectHostCardView"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="4dp"
+                android:layout_margin="6dp"
                 android:layout_weight="1"
                 android:clickable="true"
                 android:focusable="true"
@@ -168,14 +173,13 @@
                     android:layout_height="wrap_content"
                     android:gravity="center"
                     android:orientation="vertical"
-                    android:paddingVertical="16dp"
-                    android:paddingHorizontal="4dp">
+                    android:paddingVertical="16dp">
 
                     <TextView
                         android:id="@+id/redirectHostCounterTextView"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textAppearance="?attr/textAppearanceHeadlineSmall"
+                        android:textAppearance="?attr/textAppearanceTitleLarge"
                         android:textColor="@color/redirected"
                         android:textStyle="bold"
                         tools:text="2" />
@@ -193,23 +197,132 @@
 
         </LinearLayout>
 
-        <!-- ── Sources section header ─────────────────── -->
-        <TextView
+        <!-- Divider -->
+        <com.google.android.material.divider.MaterialDivider
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="20dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="4dp"
-            android:text="@string/hosts_sources_title"
-            android:textAppearance="?attr/textAppearanceLabelMedium"
-            android:textColor="?attr/colorPrimary"
-            android:textAllCaps="false" />
+            android:layout_marginHorizontal="16dp" />
 
+        <!-- ── Sources ────────────────────────────────────────────── -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/sourcesCardView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_margin="12dp"
+            android:clickable="true"
+            android:focusable="true"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="0dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:strokeWidth="1dp">
+
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingVertical="14dp"
+                android:paddingHorizontal="16dp">
+
+                <ImageView
+                    android:id="@+id/sourceImageView"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:contentDescription="@string/icon_update_status"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:srcCompat="@drawable/ic_collections_bookmark_24dp"
+                    app:tint="?attr/colorPrimary" />
+
+                <TextView
+                    android:id="@+id/upToDateSourcesTextView"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    app:layout_constraintEnd_toStartOf="@id/checkForUpdateImageView"
+                    app:layout_constraintStart_toEndOf="@id/sourceImageView"
+                    app:layout_constraintTop_toTopOf="@id/sourceImageView"
+                    tools:text="3 sources up to date" />
+
+                <TextView
+                    android:id="@+id/outdatedSourcesTextView"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_marginTop="2dp"
+                    android:alpha="0.6"
+                    android:textAppearance="?attr/textAppearanceLabelMedium"
+                    app:layout_constraintEnd_toStartOf="@id/checkForUpdateImageView"
+                    app:layout_constraintStart_toEndOf="@id/sourceImageView"
+                    app:layout_constraintTop_toBottomOf="@id/upToDateSourcesTextView"
+                    tools:text="2 outdated" />
+
+                <ImageView
+                    android:id="@+id/checkForUpdateImageView"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="4dp"
+                    android:contentDescription="@string/check_hosts_update_description"
+                    android:padding="4dp"
+                    app:layout_constraintEnd_toStartOf="@id/updateImageView"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:srcCompat="@drawable/ic_sync_24dp"
+                    app:tint="?attr/colorPrimary" />
+
+                <ImageView
+                    android:id="@+id/updateImageView"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:contentDescription="@string/update_hosts_description"
+                    android:padding="4dp"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintTop_toTopOf="parent"
+                    app:srcCompat="@drawable/ic_get_app_24dp"
+                    app:tint="?attr/colorPrimary" />
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/sourcesProgressBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="2dp"
+                    android:layout_marginTop="10dp"
+                    android:indeterminate="true"
+                    android:visibility="gone"
+                    app:layout_constraintEnd_toEndOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toBottomOf="@id/outdatedSourcesTextView"
+                    tools:visibility="visible" />
+
+                <TextView
+                    android:id="@+id/stateTextView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textAppearance="?attr/textAppearanceLabelSmall"
+                    android:alpha="0.7"
+                    android:visibility="gone"
+                    app:layout_constraintBottom_toBottomOf="parent"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toBottomOf="@id/sourcesProgressBar"
+                    tools:text="Downloading…"
+                    tools:visibility="visible" />
+
+            </androidx.constraintlayout.widget.ConstraintLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Divider -->
+        <com.google.android.material.divider.MaterialDivider
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="16dp" />
+
+        <!-- ── Quick actions (Rikka-style list items) ─────────────── -->
+
+        <!-- DNS Log -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/logCardView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:layout_marginHorizontal="12dp"
+            android:layout_marginTop="8dp"
             android:clickable="true"
             android:focusable="true"
             app:cardCornerRadius="16dp"
@@ -220,147 +333,45 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
                 android:paddingHorizontal="16dp"
-                android:paddingTop="14dp"
-                android:paddingBottom="4dp">
+                android:paddingVertical="18dp">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <ImageView
-                        android:layout_width="20dp"
-                        android:layout_height="20dp"
-                        android:contentDescription="@string/icon_update_status"
-                        app:srcCompat="@drawable/ic_collections_bookmark_24dp"
-                        app:tint="?attr/colorPrimary" />
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="12dp"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:id="@+id/upToDateSourcesTextView"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:textAppearance="?attr/textAppearanceBodyMedium"
-                            tools:text="3 sources up to date" />
-
-                        <TextView
-                            android:id="@+id/outdatedSourcesTextView"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:alpha="0.6"
-                            android:textAppearance="?attr/textAppearanceBodySmall"
-                            tools:text="1 source outdated" />
-
-                    </LinearLayout>
-
-                </LinearLayout>
-
-                <!-- Divider -->
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginTop="10dp"
-                    android:background="?attr/colorOutlineVariant"
-                    android:alpha="0.5" />
-
-                <!-- Check / Apply row -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:id="@+id/checkForUpdateImageView"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:gravity="center"
-                        android:minHeight="48dp"
-                        android:drawableTop="@drawable/ic_sync_24dp"
-                        android:drawablePadding="4dp"
-                        app:drawableTint="?attr/colorPrimary"
-                        android:text="@string/check_hosts_update_description"
-                        android:textAppearance="?attr/textAppearanceLabelSmall"
-                        android:textColor="?attr/colorPrimary" />
-
-                    <View
-                        android:layout_width="1dp"
-                        android:layout_height="match_parent"
-                        android:background="?attr/colorOutlineVariant"
-                        android:alpha="0.5" />
-
-                    <TextView
-                        android:id="@+id/updateImageView"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:gravity="center"
-                        android:minHeight="48dp"
-                        android:drawableTop="@drawable/ic_get_app_24dp"
-                        android:drawablePadding="4dp"
-                        app:drawableTint="?attr/colorPrimary"
-                        android:text="@string/update_hosts_description"
-                        android:textAppearance="?attr/textAppearanceLabelSmall"
-                        android:textColor="?attr/colorPrimary" />
-
-                </LinearLayout>
-
-                <!-- State / progress -->
-                <com.google.android.material.progressindicator.LinearProgressIndicator
-                    android:id="@+id/sourcesProgressBar"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="8dp"
-                    android:indeterminate="true"
-                    android:visibility="gone"
-                    app:trackCornerRadius="2dp"
-                    tools:visibility="visible" />
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:contentDescription="@string/log_label"
+                    app:srcCompat="@drawable/ic_outline_rule_24"
+                    app:tint="?attr/colorPrimary" />
 
                 <TextView
-                    android:id="@+id/stateTextView"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="12dp"
-                    android:gravity="center"
-                    android:textAppearance="?attr/textAppearanceBodySmall"
-                    android:alpha="0.7"
-                    android:visibility="gone"
-                    tools:text="Applying…"
-                    tools:visibility="visible" />
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:text="@string/log_label"
+                    android:textAppearance="?attr/textAppearanceBodyLarge" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@null"
+                    android:alpha="0.4"
+                    app:srcCompat="@drawable/ic_chevron_right_24dp" />
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- ── Tools section header ───────────────────── -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="20dp"
-            android:layout_marginTop="24dp"
-            android:layout_marginBottom="4dp"
-            android:text="@string/home_tools_section"
-            android:textAppearance="?attr/textAppearanceLabelMedium"
-            android:textColor="?attr/colorPrimary"
-            android:textAllCaps="false"
-            tools:text="Tools" />
-
+        <!-- Help -->
         <com.google.android.material.card.MaterialCardView
+            android:id="@+id/helpCardView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginHorizontal="12dp"
+            android:layout_marginTop="8dp"
+            android:clickable="true"
+            android:focusable="true"
             app:cardCornerRadius="16dp"
             app:cardElevation="0dp"
             app:strokeColor="?attr/colorOutlineVariant"
@@ -369,91 +380,40 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="18dp">
 
-                <!-- DNS Log row -->
-                <LinearLayout
-                    android:id="@+id/logCardView"
-                    android:layout_width="match_parent"
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:contentDescription="@string/help_label"
+                    app:srcCompat="@drawable/ic_help_24dp"
+                    app:tint="?attr/colorPrimary" />
+
+                <TextView
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:background="?attr/selectableItemBackground"
-                    android:gravity="center_vertical"
-                    android:minHeight="56dp"
-                    android:orientation="horizontal"
-                    android:paddingHorizontal="16dp">
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:text="@string/help_label"
+                    android:textAppearance="?attr/textAppearanceBodyLarge" />
 
-                    <ImageView
-                        android:layout_width="24dp"
-                        android:layout_height="24dp"
-                        android:contentDescription="@string/log_label"
-                        app:srcCompat="@drawable/ic_outline_rule_24"
-                        app:tint="?attr/colorOnSurface" />
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:layout_weight="1"
-                        android:text="@string/log_label"
-                        android:textAppearance="?attr/textAppearanceBodyLarge" />
-
-                    <ImageView
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:alpha="0.4"
-                        app:srcCompat="@drawable/ic_chevron_right_24dp"
-                        app:tint="?attr/colorOnSurface" />
-
-                </LinearLayout>
-
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginStart="56dp"
-                    android:background="?attr/colorOutlineVariant"
-                    android:alpha="0.5" />
-
-                <!-- Help row -->
-                <LinearLayout
-                    android:id="@+id/helpCardView"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:clickable="true"
-                    android:focusable="true"
-                    android:background="?attr/selectableItemBackground"
-                    android:gravity="center_vertical"
-                    android:minHeight="56dp"
-                    android:orientation="horizontal"
-                    android:paddingHorizontal="16dp">
-
-                    <ImageView
-                        android:layout_width="24dp"
-                        android:layout_height="24dp"
-                        android:contentDescription="@string/help_label"
-                        app:srcCompat="@drawable/ic_help_24dp"
-                        app:tint="?attr/colorOnSurface" />
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="16dp"
-                        android:layout_weight="1"
-                        android:text="@string/help_label"
-                        android:textAppearance="?attr/textAppearanceBodyLarge" />
-
-                    <ImageView
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:alpha="0.4"
-                        app:srcCompat="@drawable/ic_chevron_right_24dp"
-                        app:tint="?attr/colorOnSurface" />
-
-                </LinearLayout>
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@null"
+                    android:alpha="0.4"
+                    app:srcCompat="@drawable/ic_chevron_right_24dp" />
 
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
+
+        <!-- ── Footer spacer ─────────────────────────────────────── -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="24dp" />
 
     </LinearLayout>
 

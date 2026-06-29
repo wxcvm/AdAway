@@ -1,38 +1,15 @@
-/*
- * Copyright (C) 2011-2012 Dominik Schürmann <dominik@dominikschuermann.de>
- *
- * This file is part of AdAway.
- *
- * AdAway is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * AdAway is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with AdAway.  If not, see <http://www.gnu.org/licenses/>.
- *
- */
-
 package org.adaway.util;
 
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.AssetManager;
 import android.net.Uri;
-import android.security.KeyChain;
 import android.view.ContextThemeWrapper;
 import android.widget.Toast;
 
 import androidx.annotation.StringRes;
 
 import org.adaway.R;
-import org.adaway.helper.PreferenceHelper;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,6 +19,7 @@ import java.nio.file.Path;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -52,254 +30,267 @@ import static org.adaway.model.root.ShellUtils.isBundledExecutableRunning;
 import static org.adaway.model.root.ShellUtils.killBundledExecutable;
 import static org.adaway.model.root.ShellUtils.runBundledExecutable;
 
-/**
- * This class is an utility class to control web server execution.
- *
- * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
- */
+import com.topjohnwu.superuser.Shell;
+
 public class WebServerUtils {
+
     public static final String TEST_URL = "https://localhost/internal-test";
     private static final String WEB_SERVER_EXECUTABLE = "webserver";
-    private static final String LOCALHOST_CERTIFICATE = "localhost-2410.crt";
-    private static final String LOCALHOST_CERTIFICATE_KEY = "localhost-2410.key";
+    private static final String CA_CERT_FILE = "localhost-2410.crt";
+    private static final String CA_KEY_FILE  = "localhost-2410.key";
 
     /**
-     * Start the web server.
-     * <p>
-     * The native server binary checks for its TLS certificate on startup and
-     * generates a fresh per-device self-signed CA certificate if one is not
-     * present, so no certificate generation step is needed here — and
-     * crucially, no blocking root-shell call is made on the UI thread.
-     *
-     * @param context The application context.
+     * Start the web server, killing any stale instance first and waiting for
+     * the port to be released before relaunching.
      */
     public static void startWebServer(Context context) {
         Timber.d("Starting web server…");
-        // Kill any stale instance first so its port 80/443 bindings are
-        // released before we try to listen on them.  Without this a server
-        // left over from a previous crash will cause the new one to fail
-        // to bind and exit immediately.
-        if (isWebServerRunning()) {
-            Timber.d("Killing stale web server instance before restart.");
-            killBundledExecutable(WEB_SERVER_EXECUTABLE);
-            // Give the kernel time to release SO_REUSEADDR ports.
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-        }
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
-        // Redirect both stdout and stderr to the Android log via logcat.
-        // This makes certificate-generation errors visible without needing
-        // a separate debugging build.
-        String parameters = "--resources " + resourcePath.toAbsolutePath();
-        runBundledExecutable(context, WEB_SERVER_EXECUTABLE, parameters);
+
+        // Kill any previous instance and wait for port 80/443 to be released.
+        if (isBundledExecutableRunning(WEB_SERVER_EXECUTABLE)) {
+            Timber.d("Stopping stale webserver instance before restart.");
+            killBundledExecutable(WEB_SERVER_EXECUTABLE);
+            try { Thread.sleep(600); } catch (InterruptedException ignored) {}
+        }
+
+        String params = "--resources " + resourcePath.toAbsolutePath();
+        runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
     }
 
-    /** Stop the web server. */
     public static void stopWebServer() {
         killBundledExecutable(WEB_SERVER_EXECUTABLE);
     }
 
-    /**
-     * @return {@code true} if the web server process is currently running.
-     */
     public static boolean isWebServerRunning() {
         return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
     }
 
     @StringRes
     public static int getWebServerState() {
-        if (!isWebServerRunning()) {
-            return R.string.pref_webserver_state_not_running;
-        }
+        if (!isWebServerRunning()) return R.string.pref_webserver_state_not_running;
 
-        // Bypass the system HTTP proxy so that tools like Clash/Sing-box with
-        // "attach HTTP proxy to VPN" enabled cannot intercept or block these
-        // loopback health-check requests.
         OkHttpClient client = new OkHttpClient.Builder()
                 .proxy(java.net.Proxy.NO_PROXY)
-                .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(3, TimeUnit.SECONDS)
+                .readTimeout(3, TimeUnit.SECONDS)
                 .build();
 
-        // Step 1 — is the server reachable via plain HTTP to 127.0.0.1?
         try {
-            Request req = new Request.Builder()
-                    .url("http://127.0.0.1/internal-test")
-                    .build();
-            try (Response resp = client.newCall(req).execute()) {
-                if (!resp.isSuccessful()) {
-                    return R.string.pref_webserver_state_not_running;
-                }
+            try (Response r = client.newCall(
+                    new Request.Builder().url("http://127.0.0.1/internal-test").build()
+            ).execute()) {
+                if (!r.isSuccessful()) return R.string.pref_webserver_state_not_running;
             }
         } catch (IOException e) {
             return R.string.pref_webserver_state_not_running;
         }
 
-        // Step 2 — is the certificate installed in the trust store?
         try {
-            Request req = new Request.Builder()
-                    .url(TEST_URL)
-                    .build();
-            try (Response resp = client.newCall(req).execute()) {
-                return resp.isSuccessful()
+            try (Response r = client.newCall(
+                    new Request.Builder().url(TEST_URL).build()
+            ).execute()) {
+                return r.isSuccessful()
                         ? R.string.pref_webserver_state_running_and_installed
                         : R.string.pref_webserver_state_running_not_installed;
             }
         } catch (IOException e) {
-            if (isSslError(e)) {
-                return R.string.pref_webserver_state_running_not_installed;
-            }
-            Timber.w(e, "Unexpected error checking HTTPS state.");
-            return R.string.pref_webserver_state_running_not_installed;
+            return isSslError(e)
+                    ? R.string.pref_webserver_state_running_not_installed
+                    : R.string.pref_webserver_state_not_running;
         }
     }
 
     /**
-     * Walks the full cause chain of {@code t} looking for an SSL/certificate
-     * exception. OkHttp sometimes wraps {@link javax.net.ssl.SSLException}
-     * inside a plain {@link IOException}, so checking only the top-level type
-     * is not reliable.
+     * Install AdAway's CA into the user trust store (KeyChain).
+     * Works on all Android versions but requires the user to confirm.
      */
-    private static boolean isSslError(Throwable t) {
-        while (t != null) {
-            if (t instanceof javax.net.ssl.SSLException
-                    || t instanceof java.security.cert.CertificateException
-                    || t instanceof java.security.cert.CertPathValidatorException) {
-                return true;
-            }
-            t = t.getCause();
-        }
-        return false;
-    }
-
-    /**
-     * Prompt the user to install the web server's self-signed CA certificate.
-     * <p>
-     * The certificate is generated per-device by the native server binary on
-     * its first start (never bundled in the APK), so it will only be present
-     * on disk after the web server has been enabled and run at least once.
-     * If the certificate file is not yet present, a Toast guides the user to
-     * enable the web server first.
-     *
-     * @param context The application context.
-     */
-    public static void installCertificate(Context context) {
-        Path certFile = getResourcePath(context).resolve(LOCALHOST_CERTIFICATE);
+    public static void installUserCertificate(Context context) {
+        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) {
-            Toast.makeText(context,
-                    R.string.pref_webserver_certificate_enable_first,
+            Toast.makeText(context, R.string.pref_webserver_certificate_enable_first,
                     Toast.LENGTH_LONG).show();
             return;
         }
         try {
-            // CertificateFactory handles PEM-encoded input directly (unlike
-            // the deprecated javax.security.cert.X509Certificate.getInstance()
-            // which requires raw DER bytes and breaks silently on PEM input,
-            // causing Android to report "private key required").
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
             X509Certificate cert;
             try (InputStream is = Files.newInputStream(certFile)) {
                 cert = (X509Certificate) cf.generateCertificate(is);
             }
-            Intent intent = KeyChain.createInstallIntent();
-            intent.putExtra(KeyChain.EXTRA_CERTIFICATE, cert.getEncoded());
-            intent.putExtra(KeyChain.EXTRA_NAME, "AdAway");
+            Intent intent = android.security.KeyChain.createInstallIntent();
+            intent.putExtra(android.security.KeyChain.EXTRA_CERTIFICATE, cert.getEncoded());
+            intent.putExtra(android.security.KeyChain.EXTRA_NAME, "AdAway CA");
             context.startActivity(intent);
-        } catch (IOException e) {
-            Timber.w(e, "Failed to read certificate.");
-        } catch (CertificateException e) {
-            Timber.w(e, "Failed to parse or encode certificate.");
+        } catch (IOException | CertificateException e) {
+            Timber.w(e, "Failed to prepare certificate for install.");
         }
     }
 
-    public static void copyCertificate(ContextThemeWrapper wrapper, Uri uri) {
-        Path certFile = getResourcePath(wrapper).resolve(LOCALHOST_CERTIFICATE);
+    /**
+     * Install AdAway's CA into the SYSTEM trust store using root shell.
+     * This makes AdAway's block-page HTTPS trusted by ALL apps (including VPN
+     * tools) without any per-app or per-user confirmation dialog.
+     *
+     * Strategy:
+     *   Android ≤ 13 : write directly to /system/etc/security/cacerts/
+     *   Android 14+  : use tmpfs overlay (same technique as Magisk)
+     *
+     * @return true if installation succeeded.
+     */
+    public static boolean installSystemCertificate(Context context) {
+        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) {
-            Toast.makeText(wrapper,
-                    R.string.pref_webserver_certificate_enable_first,
+            Timber.w("CA cert not present — enable web server first.");
+            return false;
+        }
+        String certPath = certFile.toAbsolutePath().toString();
+
+        // Use OpenSSL to compute the subject_hash_old (trust-store filename)
+        String hashResult = Shell.cmd(
+                "openssl x509 -subject_hash_old -noout -in " + certPath
+        ).exec().getOut().stream().findFirst().orElse("");
+
+        if (hashResult.isEmpty()) {
+            Timber.e("Failed to compute certificate hash.");
+            return false;
+        }
+        String certHash = hashResult.trim();
+        String destName = certHash + ".0";
+
+        int sdk = android.os.Build.VERSION.SDK_INT;
+        boolean ok;
+
+        if (sdk >= 34) {
+            // Android 14+: mount a tmpfs over /system/etc/security/cacerts,
+            // copy existing certs into it, then add ours.
+            ok = Shell.cmd(
+                "mkdir -p /data/local/tmp/adaway_cacerts",
+                "cp /system/etc/security/cacerts/* /data/local/tmp/adaway_cacerts/ 2>/dev/null || true",
+                "cp " + certPath + " /data/local/tmp/adaway_cacerts/" + destName,
+                "chmod 644 /data/local/tmp/adaway_cacerts/" + destName,
+                "mount -t tmpfs tmpfs /system/etc/security/cacerts",
+                "cp /data/local/tmp/adaway_cacerts/* /system/etc/security/cacerts/",
+                "chown -R root:root /system/etc/security/cacerts",
+                "chmod 644 /system/etc/security/cacerts/*",
+                "rm -rf /data/local/tmp/adaway_cacerts"
+            ).exec().isSuccess();
+        } else {
+            // Android ≤ 13: remount /system rw and write directly.
+            ok = Shell.cmd(
+                "mount -o remount,rw /system 2>/dev/null || true",
+                "cp " + certPath + " /system/etc/security/cacerts/" + destName,
+                "chmod 644 /system/etc/security/cacerts/" + destName,
+                "chown root:root /system/etc/security/cacerts/" + destName,
+                "mount -o remount,ro /system 2>/dev/null || true"
+            ).exec().isSuccess();
+        }
+
+        if (ok) {
+            Timber.i("System CA installed: /system/etc/security/cacerts/%s", destName);
+            // Reload cert store (sends SIGUSR1 to system_server on some ROMs)
+            Shell.cmd("am broadcast -a android.intent.action.CONFIGURATION_CHANGED")
+                 .exec();
+        } else {
+            Timber.e("System CA installation failed.");
+        }
+        return ok;
+    }
+
+    /**
+     * Check whether AdAway's CA is already present in the system trust store.
+     */
+    public static boolean isSystemCertificateInstalled(Context context) {
+        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+        if (!Files.isRegularFile(certFile)) return false;
+        String certPath = certFile.toAbsolutePath().toString();
+        String hash = Shell.cmd(
+                "openssl x509 -subject_hash_old -noout -in " + certPath
+        ).exec().getOut().stream().findFirst().orElse("").trim();
+        if (hash.isEmpty()) return false;
+        return Shell.cmd("test -f /system/etc/security/cacerts/" + hash + ".0")
+                    .exec().isSuccess();
+    }
+
+    public static void copyCertificate(ContextThemeWrapper wrapper, Uri uri) {
+        Path certFile = getResourcePath(wrapper).resolve(CA_CERT_FILE);
+        if (!Files.isRegularFile(certFile)) {
+            Toast.makeText(wrapper, R.string.pref_webserver_certificate_enable_first,
                     Toast.LENGTH_LONG).show();
             return;
         }
-        ContentResolver contentResolver = wrapper.getContentResolver();
-        try (OutputStream outputStream = contentResolver.openOutputStream(uri)) {
-            if (outputStream == null) {
-                throw new IOException("Failed to open " + uri);
-            }
-            Files.copy(certFile, outputStream);
+        ContentResolver cr = wrapper.getContentResolver();
+        try (OutputStream os = cr.openOutputStream(uri)) {
+            if (os == null) throw new IOException("Cannot open " + uri);
+            Files.copy(certFile, os);
         } catch (IOException e) {
             Timber.w(e, "Failed to copy certificate.");
         }
     }
 
-    private static Path getResourcePath(Context context) {
+    public static Path getResourcePath(Context context) {
         return context.getFilesDir().toPath().resolve(WEB_SERVER_EXECUTABLE);
     }
 
-    /**
-     * Inflates only the static assets (icon, test page) into the resource
-     * directory. Certificate generation is handled by the native server binary
-     * itself on first start, so no blocking shell call is needed here.
-     */
+    // ── Private helpers ──────────────────────────────────────────
+
     private static void ensureStaticResources(Context context, Path target) {
-        AssetManager assetManager = context.getAssets();
+        android.content.res.AssetManager am = context.getAssets();
         try {
-            if (!Files.isDirectory(target)) {
-                Files.createDirectories(target);
-            }
-            inflateResource(assetManager, "test.html", target);
-            for (int i = 0; i < 7; i++) {
-                inflateResource(assetManager, String.format("img_%02d.webp", i), target);
-            }
+            if (!Files.isDirectory(target)) Files.createDirectories(target);
+            inflateResource(am, "test.html", target);
+            for (int i = 0; i < 7; i++)
+                inflateResource(am, String.format("img_%02d.webp", i), target);
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
         }
-        // Delete any previously generated certificate that is missing the
-        // SubjectAltName (DNS:localhost) or ExtendedKeyUsage (serverAuth)
-        // extensions — certificates without these cause ERR_SSL_KEY_USAGE_INCOMPATIBLE
-        // in Chrome/WebView and OkHttp, making HTTPS completely non-functional.
-        // Deleting the stale cert forces the native server to regenerate a
-        // correct one on its next startup.
+        // Delete stale cert (missing SAN / EKU) so server regenerates on next start
         deleteStaleServerCert(target);
     }
 
-    private static void deleteStaleServerCert(Path resourcePath) {
-        Path certFile = resourcePath.resolve(LOCALHOST_CERTIFICATE);
+    private static void deleteStaleServerCert(Path dir) {
+        Path certFile = dir.resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) return;
         try {
             CertificateFactory cf = CertificateFactory.getInstance("X.509");
-            java.security.cert.X509Certificate cert;
+            X509Certificate cert;
             try (InputStream is = Files.newInputStream(certFile)) {
-                cert = (java.security.cert.X509Certificate) cf.generateCertificate(is);
+                cert = (X509Certificate) cf.generateCertificate(is);
             }
-            // Check for SubjectAltName (OID 2.5.29.17)
-            boolean hasSan = cert.getSubjectAlternativeNames() != null &&
-                    !cert.getSubjectAlternativeNames().isEmpty();
-            // Check for ExtendedKeyUsage (OID 2.5.29.37)
+            boolean hasSan = cert.getSubjectAlternativeNames() != null
+                    && !cert.getSubjectAlternativeNames().isEmpty();
             java.util.List<String> eku = cert.getExtendedKeyUsage();
             boolean hasServerAuth = eku != null && eku.contains("1.3.6.1.5.5.7.3.1");
-            // Check for digitalSignature bit in KeyUsage (bit 0)
             boolean[] ku = cert.getKeyUsage();
             boolean hasDigitalSig = ku != null && ku[0];
 
             if (!hasSan || !hasServerAuth || !hasDigitalSig) {
-                Timber.d("Stale web server certificate (missing SAN/EKU/digitalSignature); deleting for regeneration.");
+                Timber.d("Stale CA cert detected — deleting for regeneration.");
                 Files.deleteIfExists(certFile);
-                Files.deleteIfExists(resourcePath.resolve(LOCALHOST_CERTIFICATE_KEY));
+                Files.deleteIfExists(dir.resolve(CA_KEY_FILE));
             }
         } catch (Exception e) {
-            Timber.w(e, "Could not inspect server certificate; deleting for safety.");
-            try {
-                Files.deleteIfExists(certFile);
-                Files.deleteIfExists(resourcePath.resolve(LOCALHOST_CERTIFICATE_KEY));
-            } catch (IOException ignored) {}
+            Timber.w(e, "Could not inspect cert; deleting for safety.");
+            try { Files.deleteIfExists(certFile); Files.deleteIfExists(dir.resolve(CA_KEY_FILE)); }
+            catch (IOException ignored) {}
         }
     }
 
-    private static void inflateResource(AssetManager assetManager, String resource, Path target)
-            throws IOException {
-        Path targetFile = target.resolve(resource);
-        if (!Files.isRegularFile(targetFile)) {
-            Files.copy(assetManager.open(resource), targetFile);
+    private static void inflateResource(android.content.res.AssetManager am,
+                                        String name, Path target) throws IOException {
+        Path out = target.resolve(name);
+        if (!Files.isRegularFile(out)) Files.copy(am.open(name), out);
+    }
+
+    private static boolean isSslError(Throwable t) {
+        while (t != null) {
+            if (t instanceof javax.net.ssl.SSLException
+                    || t instanceof java.security.cert.CertificateException
+                    || t instanceof java.security.cert.CertPathValidatorException)
+                return true;
+            t = t.getCause();
         }
+        return false;
     }
 }

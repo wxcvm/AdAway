@@ -259,4 +259,12 @@
     <string name="permission_send_command_label">Send commands to AdAway</string>
     <string name="permission_send_command_description">Allow to send commands to AdAway like enabling or disabling the system-wide ad-blocking</string>
 
+
+    <!-- System CA installation (WebServerUtils) -->
+    <string name="pref_webserver_system_ca_prompt">Install as system CA so ALL apps (including VPN/proxy) trust AdAway's block page — no more certificate errors on HTTPS ads. Requires root.</string>
+    <string name="pref_webserver_system_ca_install">Install System CA</string>
+    <string name="pref_webserver_certificate_user_only">User CA only</string>
+    <string name="pref_webserver_system_ca_success">System CA installed — restart apps to apply</string>
+    <string name="pref_webserver_system_ca_failed">System CA install failed (check logcat)</string>
+
 </resources>
