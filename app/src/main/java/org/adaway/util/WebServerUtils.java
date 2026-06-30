@@ -11,6 +11,7 @@ import androidx.annotation.StringRes;
 
 import org.adaway.R;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -48,6 +49,22 @@ public class WebServerUtils {
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
 
+        // Verify binary exists and is executable (using java.io.File for better compatibility)
+        File nativeLibDir = new File(context.getApplicationInfo().nativeLibraryDir);
+        File binFile = new File(nativeLibDir, "lib" + WEB_SERVER_EXECUTABLE + "_exec.so");
+        
+        if (!binFile.exists()) {
+            Timber.e("Webserver binary not found: %s", binFile.getAbsolutePath());
+            Toast.makeText(context, "Webserver executable missing; please reinstall or check device compatibility.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        
+        if (!binFile.canRead()) {
+            Timber.e("Webserver binary is not readable: %s", binFile.getAbsolutePath());
+            Toast.makeText(context, "Webserver binary is not readable; check permissions.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
         // Kill any previous instance and wait for port 80/443 to be released.
         if (isBundledExecutableRunning(WEB_SERVER_EXECUTABLE)) {
             Timber.d("Stopping stale webserver instance before restart.");
@@ -55,8 +72,14 @@ public class WebServerUtils {
             try { Thread.sleep(600); } catch (InterruptedException ignored) {}
         }
 
-        String params = "--resources " + resourcePath.toAbsolutePath();
-        runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
+        String params = "--resources " + resourcePath.toAbsolutePath() + " --debug";
+        boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
+        if (!started) {
+            Timber.e("Webserver failed to start; check logs in /data/local/tmp/webserver_start_*.log for details.");
+            Toast.makeText(context, R.string.pref_webserver_start_failed, Toast.LENGTH_LONG).show();
+        } else {
+            Timber.i("Webserver started successfully");
+        }
     }
 
     public static void stopWebServer() {

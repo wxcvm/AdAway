@@ -33,11 +33,60 @@ public final class ShellUtils {
     }
 
     public static boolean isBundledExecutableRunning(String executable) {
-        return Shell.cmd("ps -A | grep " + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX).exec().isSuccess();
+        try {
+            // Prefer pgrep (less parsing) when available
+            Shell.Result r = Shell.cmd("pgrep -f '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' >/dev/null 2>&1").exec();
+            if (r.isSuccess()) return true;
+        } catch (Exception ignored) {}
+        // Fallback to ps + guarded grep to avoid matching the grep process itself
+        String grepCmd = "ps -A 2>/dev/null | grep -E \"[l]ib" + executable + "_exec\\.so\" >/dev/null 2>&1";
+        return Shell.cmd(grepCmd).exec().isSuccess();
     }
 
     public static boolean runBundledExecutable(Context context, String executable, String parameters) {
-        return Shell.cmd(buildCommand(context, executable, parameters) + " &").exec().isSuccess();
+        String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
+        String binPath = nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
+        
+        // Use /data/local/tmp for logging instead of app filesDir to avoid permission issues
+        String logPath = "/data/local/tmp/webserver_start_" + System.currentTimeMillis() + ".log";
+
+        // Start in background, redirect stdout/stderr to a log file
+        String cmd = "LD_LIBRARY_PATH=" + nativeLibraryDir + " " + binPath + " " + parameters +
+                " > " + logPath + " 2>&1 &";
+        
+        Timber.d("Executing: %s", cmd);
+        Shell.Result result = Shell.cmd(cmd).exec();
+        
+        if (!result.isSuccess()) {
+            Timber.e("Launch command failed with exit code %d: %s", result.getCode(), mergeAllLines(result.getErr()));
+            return false;
+        }
+        
+        // Wait briefly for the process to appear
+        for (int i = 0; i < 10; i++) {
+            if (isBundledExecutableRunning(executable)) {
+                Timber.i("Webserver process detected after %d attempts", i + 1);
+                return true;
+            }
+            try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+        }
+        
+        // If process didn't start, dump last lines from log for diagnostics
+        try {
+            File logFile = new File(logPath);
+            if (logFile.exists()) {
+                List<String> lines = java.nio.file.Files.readAllLines(logFile.toPath());
+                int from = Math.max(0, lines.size() - 30);
+                List<String> tail = lines.subList(from, lines.size());
+                Timber.e("Webserver failed to start, log (last %d lines) from %s:\n%s", tail.size(), logPath, mergeAllLines(tail));
+            } else {
+                Timber.e("Webserver failed to start and no log file found at %s", logPath);
+            }
+        } catch (Exception e) {
+            Timber.w(e, "Could not read webserver log from %s", logPath);
+        }
+        
+        return false;
     }
 
     /**
@@ -60,7 +109,8 @@ public final class ShellUtils {
     }
 
     public static void killBundledExecutable(String executable) {
-        Shell.cmd("killall " + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX).exec();
+        // Try pkill/pkill -f then killall as fallback; ignore errors
+        Shell.cmd("pkill -f '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' || killall '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' || true").exec();
     }
 
 
