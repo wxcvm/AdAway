@@ -7,8 +7,6 @@ import android.content.Context;
 import com.topjohnwu.superuser.Shell;
 
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Optional;
 
@@ -48,11 +46,14 @@ public final class ShellUtils {
     public static boolean runBundledExecutable(Context context, String executable, String parameters) {
         String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
         String binPath = nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
-        String logPath = context.getFilesDir().getAbsolutePath() + "/webserver_start.log";
+        String logPath = context.getFilesDir().getAbsolutePath() + File.separator + "webserver_start.log";
 
         // Ensure parent dir exists
         try {
-            Files.createDirectories(Paths.get(context.getFilesDir().getAbsolutePath()));
+            File filesDir = context.getFilesDir();
+            if (!filesDir.exists()) {
+                filesDir.mkdirs();
+            }
         } catch (Exception ignored) {}
 
         // Start in background, redirect stdout/stderr to a log file
@@ -70,10 +71,15 @@ public final class ShellUtils {
         }
         // If process didn't start, dump last lines from log for diagnostics
         try {
-            List<String> lines = Files.readAllLines(Paths.get(logPath));
-            int from = Math.max(0, lines.size() - 20);
-            List<String> tail = lines.subList(from, lines.size());
-            Timber.e("Webserver failed to start, log (last %d lines):\n%s", tail.size(), mergeAllLines(tail));
+            File logFile = new File(logPath);
+            if (logFile.exists()) {
+                List<String> lines = java.nio.file.Files.readAllLines(logFile.toPath());
+                int from = Math.max(0, lines.size() - 20);
+                List<String> tail = lines.subList(from, lines.size());
+                Timber.e("Webserver failed to start, log (last %d lines):\n%s", tail.size(), mergeAllLines(tail));
+            } else {
+                Timber.e("Webserver failed to start and no log file found at %s", logPath);
+            }
         } catch (Exception e) {
             Timber.w(e, "Could not read webserver log.");
         }
