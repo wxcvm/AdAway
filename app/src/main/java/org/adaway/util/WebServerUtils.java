@@ -75,7 +75,7 @@ public class WebServerUtils {
         String params = "--resources " + resourcePath.toAbsolutePath() + " --debug";
         boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
         if (!started) {
-            Timber.e("Webserver failed to start; check webserver_start.log in app files directory for details.");
+            Timber.e("Webserver failed to start; check logs in /data/local/tmp/webserver_start_*.log for details.");
             Toast.makeText(context, R.string.pref_webserver_start_failed, Toast.LENGTH_LONG).show();
         } else {
             Timber.i("Webserver started successfully");
