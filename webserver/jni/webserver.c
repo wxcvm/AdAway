@@ -231,6 +231,7 @@ fail:
 }
 
 static int sni_callback(SSL *ssl, int *ad, void *arg) {
+    (void)ad;  /* unused: required by OpenSSL callback signature */
     const char *host = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
     if (!host || strcmp(host, "localhost") == 0)
         return SSL_TLSEXT_ERR_OK;  /* keep default localhost cert */
