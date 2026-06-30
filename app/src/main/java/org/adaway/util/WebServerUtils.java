@@ -11,12 +11,12 @@ import androidx.annotation.StringRes;
 
 import org.adaway.R;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -49,11 +49,19 @@ public class WebServerUtils {
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
 
-        // Verify binary exists and is executable
-        String nativeLib = context.getApplicationInfo().nativeLibraryDir + java.io.File.separator + "lib" + WEB_SERVER_EXECUTABLE + "_exec.so";
-        if (!Files.exists(Paths.get(nativeLib))) {
-            Timber.e("Webserver binary not found: %s", nativeLib);
+        // Verify binary exists and is executable (using java.io.File for better compatibility)
+        File nativeLibDir = new File(context.getApplicationInfo().nativeLibraryDir);
+        File binFile = new File(nativeLibDir, "lib" + WEB_SERVER_EXECUTABLE + "_exec.so");
+        
+        if (!binFile.exists()) {
+            Timber.e("Webserver binary not found: %s", binFile.getAbsolutePath());
             Toast.makeText(context, "Webserver executable missing; please reinstall or check device compatibility.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        
+        if (!binFile.canRead()) {
+            Timber.e("Webserver binary is not readable: %s", binFile.getAbsolutePath());
+            Toast.makeText(context, "Webserver binary is not readable; check permissions.", Toast.LENGTH_LONG).show();
             return;
         }
 
@@ -69,6 +77,8 @@ public class WebServerUtils {
         if (!started) {
             Timber.e("Webserver failed to start; check webserver_start.log in app files directory for details.");
             Toast.makeText(context, R.string.pref_webserver_start_failed, Toast.LENGTH_LONG).show();
+        } else {
+            Timber.i("Webserver started successfully");
         }
     }
 
