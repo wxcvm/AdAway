@@ -9,6 +9,7 @@
     <!-- List -->
     <string name="hosts_not_available">not available</string>
     <string name="hosts_count">%s hosts</string>
+    <string name="hosts_sources_summary">共 %1$d 个已启用来源 · %2$d 条规则</string>
     <!-- Edition dialog -->
     <string name="hosts_add_dialog_title">Add source</string>
     <string name="hosts_edit_dialog_title">Edit source</string>

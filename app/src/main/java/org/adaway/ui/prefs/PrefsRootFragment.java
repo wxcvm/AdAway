@@ -116,10 +116,15 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
         Context context = requireContext();
         // Restart web server on icon change
-        if (context.getString(R.string.pref_webserver_icon_key).equals(key) && isWebServerRunning()) {
-            stopWebServer();
-            startWebServer(context);
-            updateWebServerState();
+        if (context.getString(R.string.pref_webserver_icon_key).equals(key)) {
+            AppExecutors executors = AppExecutors.getInstance();
+            executors.diskIO().execute(() -> {
+                if (isWebServerRunning()) {
+                    stopWebServer();
+                    startWebServer(context);
+                }
+                executors.mainThread().execute(this::updateWebServerState);
+            });
         }
     }
 
@@ -201,22 +206,78 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
 
     private void bindWebServerPrefAction() {
         Context context = requireContext();
-        // Start web server when preference is enabled
         SwitchPreferenceCompat webServerEnabledPref = findPreference(getString(R.string.pref_webserver_enabled_key));
         assert webServerEnabledPref != null : PREFERENCE_NOT_FOUND;
         webServerEnabledPref.setOnPreferenceChangeListener((preference, newValue) -> {
-            if (newValue.equals(true)) {
-                // Start web server
-                startWebServer(context);
-                updateWebServerState();
-                return isWebServerRunning();
-            } else {
-                // Stop web server
-                stopWebServer();
-                updateWebServerState();
-                return !isWebServerRunning();
-            }
+            boolean enable = Boolean.TRUE.equals(newValue);
+            // BUG FIX: starting the bundled webserver goes through a root
+            // shell (Shell.cmd().exec() — blocking) and the forked process
+            // then needs real time to generate/load its TLS certificate
+            // (RSA-2048 keygen) and bind sockets before `ps` can see it.
+            // The old code called isWebServerRunning() synchronously,
+            // microseconds after backgrounding the process, which was
+            // ALWAYS false — so the Preference framework instantly
+            // reverted the switch back to OFF on every single attempt,
+            // making the feature look completely broken.
+            //
+            // Fix: accept the toggle immediately (no UI jank, no ANR risk
+            // from blocking root calls on the main thread), do the actual
+            // start/stop + verification on a background thread with a
+            // short retry/poll window, then correct the switch afterwards
+            // if it didn't actually take.
+            AppExecutors executors = AppExecutors.getInstance();
+            executors.diskIO().execute(() -> {
+                boolean success;
+                if (enable) {
+                    startWebServer(context);
+                    success = waitForWebServerState(true);
+                } else {
+                    stopWebServer();
+                    success = waitForWebServerState(false);
+                }
+                executors.mainThread().execute(() -> {
+                    if (!success) {
+                        webServerEnabledPref.setChecked(!enable);
+                        Toast.makeText(
+                                context,
+                                enable
+                                        ? R.string.pref_webserver_start_failed
+                                        : R.string.pref_webserver_stop_failed,
+                                Toast.LENGTH_LONG
+                        ).show();
+                    }
+                    updateWebServerState();
+                });
+            });
+            // Accept the change optimistically; corrected above if it fails.
+            return true;
         });
+    }
+
+    /**
+     * Poll {@link org.adaway.util.WebServerUtils#isWebServerRunning()} for up
+     * to ~3 seconds. The bundled executable is forked via a root shell and
+     * needs real time to fork, generate or load its certificate, and bind
+     * its listening sockets before it becomes observable via {@code ps}.
+     *
+     * @param expectedRunning {@code true} when waiting for the server to
+     *                        come up, {@code false} when waiting for it to
+     *                        fully stop.
+     * @return whether the expected state was reached within the timeout.
+     */
+    private boolean waitForWebServerState(boolean expectedRunning) {
+        for (int attempt = 0; attempt < 6; attempt++) {
+            if (isWebServerRunning() == expectedRunning) {
+                return true;
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return isWebServerRunning() == expectedRunning;
     }
 
     private void bindWebServerTest() {

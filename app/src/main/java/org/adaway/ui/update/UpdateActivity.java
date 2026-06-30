@@ -3,10 +3,9 @@ package org.adaway.ui.update;
 import static android.view.View.GONE;
 import static android.view.View.INVISIBLE;
 import static android.view.View.VISIBLE;
-import static org.adaway.ui.support.SupportActivity.SPONSORSHIP_LINK;
-import static org.adaway.ui.support.SupportActivity.SUPPORT_LINK;
 import static org.adaway.ui.support.SupportActivity.bindLink;
 
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 
@@ -25,6 +24,9 @@ import org.adaway.model.update.Manifest;
  * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
  */
 public class UpdateActivity extends AppCompatActivity {
+    private static final Uri REPO_LINK = Uri.parse("https://github.com/wxcvm/AdAway");
+    private static final Uri ISSUES_LINK = Uri.parse("https://github.com/wxcvm/AdAway/issues");
+
     private UpdateActityBinding binding;
     private UpdateViewModel updateViewModel;
 
@@ -43,8 +45,8 @@ public class UpdateActivity extends AppCompatActivity {
 
     private void bindListeners() {
         this.binding.updateButton.setOnClickListener(this::startUpdate);
-        bindLink(this, this.binding.updateDonateButton, SUPPORT_LINK);
-        bindLink(this, this.binding.updateSponsorButton, SPONSORSHIP_LINK);
+        bindLink(this, this.binding.updateDonateButton, REPO_LINK);
+        bindLink(this, this.binding.updateSponsorButton, ISSUES_LINK);
     }
 
     private void bindManifest() {

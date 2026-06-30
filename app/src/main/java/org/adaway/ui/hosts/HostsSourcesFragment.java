@@ -79,15 +79,37 @@ public class HostsSourcesFragment extends Fragment implements HostsSourcesViewCa
          */
         // Store recycler view
         RecyclerView recyclerView = view.findViewById(R.id.hosts_sources_list);
-        recyclerView.setHasFixedSize(true);
+        recyclerView.setHasFixedSize(false);
+        recyclerView.setNestedScrollingEnabled(false);
         // Defile recycler layout
         LinearLayoutManager linearLayoutManager = new LinearLayoutManager(activity);
         recyclerView.setLayoutManager(linearLayoutManager);
+        recyclerView.addItemDecoration(new androidx.recyclerview.widget.DividerItemDecoration(
+                activity, linearLayoutManager.getOrientation()));
         // Create recycler adapter
         HostsSourcesAdapter adapter = new HostsSourcesAdapter(this);
         recyclerView.setAdapter(adapter);
         // Bind adapter to view model
         this.mViewModel.getHostsSources().observe(lifecycleOwner, adapter::submitList);
+        /*
+         * Bind summary footer (anchors the screen instead of leaving an
+         * empty void below a short list).
+         */
+        android.widget.TextView summaryTextView = view.findViewById(R.id.hosts_sources_summary);
+        this.mViewModel.getHostsSources().observe(lifecycleOwner, sources -> {
+            int enabledCount = 0;
+            long totalHosts = 0;
+            for (HostsSource source : sources) {
+                if (source.isEnabled()) {
+                    enabledCount++;
+                    if (source.getSize() > 0) {
+                        totalHosts += source.getSize();
+                    }
+                }
+            }
+            summaryTextView.setText(getString(
+                    R.string.hosts_sources_summary, enabledCount, totalHosts));
+        });
         /*
          * Add floating action button.
          */

@@ -67,7 +67,11 @@ jobs:
           if [ -z "$SRC" ]; then echo "No APK found"; exit 1; fi
           DEST="AdAway-${TAG}.apk"
           cp "$SRC" "$DEST"
+          # UpdateModel.java's DOWNLOAD_URL points to a stable "latest" filename
+          # so the in-app updater always resolves regardless of version tag.
+          cp "$SRC" "AdAway-latest.apk"
           echo "path=$DEST"  >> "$GITHUB_OUTPUT"
+          echo "latest_path=AdAway-latest.apk" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG"    >> "$GITHUB_OUTPUT"
           echo "Packaged: $DEST ($(wc -c < "$DEST") bytes)"
 
@@ -118,5 +122,6 @@ jobs:
           prerelease: ${{ contains(steps.apk.outputs.tag, '-') }}
           files: |
             ${{ steps.apk.outputs.path }}
+            ${{ steps.apk.outputs.latest_path }}
             ${{ steps.manifest.outputs.manifest_path }}
           fail_on_unmatched_files: true

@@ -49,4 +49,20 @@
             app:title="@string/pref_enable_debug" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/pref_about_category">
+        <Preference
+            app:icon="@drawable/ic_github_24dp"
+            app:key="@string/pref_about_repo_key"
+            app:title="@string/pref_about_repo_title" />
+        <Preference
+            app:icon="@drawable/ic_error_outline_24dp"
+            app:key="@string/pref_about_issues_key"
+            app:title="@string/pref_about_issues_title" />
+        <Preference
+            app:icon="@drawable/ic_collections_bookmark_24dp"
+            app:key="@string/pref_about_version_key"
+            app:selectable="false"
+            app:title="@string/pref_about_version_title" />
+    </PreferenceCategory>
+
 </PreferenceScreen>
