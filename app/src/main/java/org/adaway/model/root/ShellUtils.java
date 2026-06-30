@@ -46,43 +46,46 @@ public final class ShellUtils {
     public static boolean runBundledExecutable(Context context, String executable, String parameters) {
         String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
         String binPath = nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
-        String logPath = context.getFilesDir().getAbsolutePath() + File.separator + "webserver_start.log";
-
-        // Ensure parent dir exists
-        try {
-            File filesDir = context.getFilesDir();
-            if (!filesDir.exists()) {
-                filesDir.mkdirs();
-            }
-        } catch (Exception ignored) {}
+        
+        // Use /data/local/tmp for logging instead of app filesDir to avoid permission issues
+        String logPath = "/data/local/tmp/webserver_start_" + System.currentTimeMillis() + ".log";
 
         // Start in background, redirect stdout/stderr to a log file
         String cmd = "LD_LIBRARY_PATH=" + nativeLibraryDir + " " + binPath + " " + parameters +
                 " > " + logPath + " 2>&1 &";
+        
+        Timber.d("Executing: %s", cmd);
         Shell.Result result = Shell.cmd(cmd).exec();
+        
         if (!result.isSuccess()) {
-            Timber.e("Launch command failed: %s", mergeAllLines(result.getErr()));
+            Timber.e("Launch command failed with exit code %d: %s", result.getCode(), mergeAllLines(result.getErr()));
             return false;
         }
+        
         // Wait briefly for the process to appear
         for (int i = 0; i < 10; i++) {
-            if (isBundledExecutableRunning(executable)) return true;
+            if (isBundledExecutableRunning(executable)) {
+                Timber.i("Webserver process detected after %d attempts", i + 1);
+                return true;
+            }
             try { Thread.sleep(200); } catch (InterruptedException ignored) {}
         }
+        
         // If process didn't start, dump last lines from log for diagnostics
         try {
             File logFile = new File(logPath);
             if (logFile.exists()) {
                 List<String> lines = java.nio.file.Files.readAllLines(logFile.toPath());
-                int from = Math.max(0, lines.size() - 20);
+                int from = Math.max(0, lines.size() - 30);
                 List<String> tail = lines.subList(from, lines.size());
-                Timber.e("Webserver failed to start, log (last %d lines):\n%s", tail.size(), mergeAllLines(tail));
+                Timber.e("Webserver failed to start, log (last %d lines) from %s:\n%s", tail.size(), logPath, mergeAllLines(tail));
             } else {
                 Timber.e("Webserver failed to start and no log file found at %s", logPath);
             }
         } catch (Exception e) {
-            Timber.w(e, "Could not read webserver log.");
+            Timber.w(e, "Could not read webserver log from %s", logPath);
         }
+        
         return false;
     }
 
