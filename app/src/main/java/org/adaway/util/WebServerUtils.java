@@ -16,6 +16,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -48,6 +49,14 @@ public class WebServerUtils {
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
 
+        // Verify binary exists and is executable
+        String nativeLib = context.getApplicationInfo().nativeLibraryDir + java.io.File.separator + "lib" + WEB_SERVER_EXECUTABLE + "_exec.so";
+        if (!Files.exists(Paths.get(nativeLib))) {
+            Timber.e("Webserver binary not found: %s", nativeLib);
+            Toast.makeText(context, "Webserver executable missing; please reinstall or check device compatibility.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
         // Kill any previous instance and wait for port 80/443 to be released.
         if (isBundledExecutableRunning(WEB_SERVER_EXECUTABLE)) {
             Timber.d("Stopping stale webserver instance before restart.");
@@ -55,8 +64,12 @@ public class WebServerUtils {
             try { Thread.sleep(600); } catch (InterruptedException ignored) {}
         }
 
-        String params = "--resources " + resourcePath.toAbsolutePath();
-        runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
+        String params = "--resources " + resourcePath.toAbsolutePath() + " --debug";
+        boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
+        if (!started) {
+            Timber.e("Webserver failed to start; check webserver_start.log in app files directory for details.");
+            Toast.makeText(context, R.string.pref_webserver_start_failed, Toast.LENGTH_LONG).show();
+        }
     }
 
     public static void stopWebServer() {
