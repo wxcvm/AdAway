@@ -3,13 +3,13 @@ import com.android.build.gradle.internal.tasks.LibraryJniLibsTask
 apply plugin: 'com.android.library'
 
 android {
-    compileSdk 33
+    compileSdk 35
     ndkVersion '28.1.13356709'
     namespace 'org.adaway.webserver'
 
     defaultConfig {
         minSdk 26
-        targetSdk 33
+        targetSdk 35
     }
 
     buildFeatures {
