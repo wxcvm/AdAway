@@ -98,7 +98,19 @@ public final class ShellUtils {
      * @return <code>true</code> if the executable ran and exited successfully.
      */
     public static boolean runBundledExecutableSync(Context context, String executable, String parameters) {
-        return Shell.cmd(buildCommand(context, executable, parameters)).exec().isSuccess();
+        String cmd = buildCommand(context, executable, parameters);
+        Timber.d("Executing sync: %s", cmd);
+        
+        Shell.Result result = Shell.cmd(cmd).exec();
+        boolean success = result.isSuccess();
+        
+        if (!success) {
+            Timber.e("Sync command failed with exit code %d: %s", result.getCode(), mergeAllLines(result.getErr()));
+        } else {
+            Timber.i("Sync command succeeded");
+        }
+        
+        return success;
     }
 
     private static String buildCommand(Context context, String executable, String parameters) {
