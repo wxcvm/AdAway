@@ -40,9 +40,9 @@ jobs:
           TASK_INPUT: ${{ github.event.inputs.task }}
         run: |
           python3 << 'PYEOF'
-          import requests, json, os, subprocess
+          import requests, json, os, subprocess, re
 
-          api_key = os.environ['DEEPSEEK_KEY'].strip()
+          api_key = re.sub(r'\s+', '', os.environ['DEEPSEEK_KEY'])
           task = os.environ['TASK_INPUT']
 
           files = subprocess.run(
@@ -100,6 +100,129 @@ jobs:
       - name: 🔧 AI 自动修改代码
         env:
           DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python3 << 'PYEOF'
+          import requests, os, subprocess, re
+
+          api_key = re.sub(r'\s+', '', os.environ['DEEPSEEK_KEY'])
+
+          with open('ai_output.md', encoding='utf-8') as f:
+              ai_output = f.read()
+
+          file_blocks = re.findall(
+              r'---FILE:(.*?)---\s*\n(.*?)(?=---FILE:|---$)',
+              ai_output, re.DOTALL
+          )
+
+          if file_blocks:
+              print(f"📝 检测到 {len(file_blocks)} 个文件需要修改")
+              for filepath, content in file_blocks:
+                  filepath = filepath.strip()
+                  content = content.strip()
+                  code_match = re.search(r'```(?:\w+)?\n(.*?)```', content, re.DOTALL)
+                  if code_match:
+                      content = code_match.group(1)
+                  os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
+                  with open(filepath, 'w', encoding='utf-8') as f:
+                      f.write(content)
+                  print(f"  ✅ 已写入：{filepath}")
+          else:
+              print("⚠️ 未检测到结构化修改，尝试让 AI 生成 shell 脚本...")
+
+              files_content = subprocess.run(
+                  ['find', '.', '-type', 'f',
+                   '!', '-path', './.git/*',
+                   '!', '-path', './.github/*',
+                   '!', '-name', '*.db'],
+                  capture_output=True, text=True
+              ).stdout[:6000]
+
+              response = requests.post(
+                  "https://api.deepseek.com/v1/chat/completions",
+                  headers={
+                      "Authorization": f"Bearer {api_key}",
+                      "Content-Type": "application/json"
+                  },
+                  json={
+                      "model": "deepseek-chat",
+                      "messages": [
+                          {
+                              "role": "system",
+                              "content": (
+                                  "根据任务生成 bash 脚本。每个文件用 cat << 'EOF' > 路径 写入。"
+                                  "输出格式：\n```bash\n#!/bin/bash\n# 命令\n```"
+                              )
+                          },
+                          {
+                              "role": "user",
+                              "content": f"分析结果：\n{ai_output}\n\n文件内容：\n{files_content}"
+                          }
+                      ]
+                  }
+              )
+
+              result = response.json()
+              shell_text = result['choices'][0]['message']['content']
+              match = re.search(r'```bash\n(.*?)```', shell_text, re.DOTALL)
+              if match:
+                  script = match.group(1)
+                  with open('fix.sh', 'w') as f:
+                      f.write(script)
+                  subprocess.run(['bash', 'fix.sh'])
+                  print("✅ Shell 脚本执行完成")
+              else:
+                  print("❌ 无法提取 shell 脚本")
+                  print(shell_text)
+                  exit(1)
+          PYEOF
+
+      - name: 📝 Git 提交到新分支
+        run: |
+          git config user.name "🤖 AI Bot"
+          git config user.email "ai-bot@github.com"
+
+          BRANCH="ai-fix-$(date +'%Y%m%d-%H%M%S')"
+          git checkout -b "$BRANCH"
+
+          git add .
+          if git diff --staged --quiet; then
+            echo "⚠️ 没有代码变更"
+            echo "NO_CHANGE=true" >> $GITHUB_ENV
+          else
+            git commit -m "🤖 AI: ${{ github.event.inputs.task }}"
+            git push origin "$BRANCH"
+            echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+            echo "✅ 已推送到分支: $BRANCH"
+          fi
+
+      - name: 🔀 创建 PR
+        if: env.NO_CHANGE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --title "🤖 AI: ${{ github.event.inputs.task }}" \
+            --body "$(cat ai_output.md | head -c 60000)" \
+            --head "$BRANCH" \
+            --base main
+          echo "✅ PR 已创建！"
+
+      - name: 🏷️ 自动打 Tag
+        if: env.NO_CHANGE != 'true'
+        run: |
+          TAG="ai-$(date +'%Y%m%d-%H%M%S')"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "✅ 已打 Tag: $TAG"
+
+      - name: 📊 总结
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "🤖 AI 自动任务完成！"
+          echo "📋 任务：${{ github.event.inputs.task }}"
+          echo "🔗 仓库：${{ github.server_url }}/${{ github.repository }}"
+          echo "=========================================="          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           python3 << 'PYEOF'
           import requests, os, subprocess, re
