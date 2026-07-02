@@ -8,12 +8,15 @@ on:
         required: true
         default: '查看最新 issue，修复 bug，提 PR'
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
 jobs:
   ai-fix:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
 
     steps:
       - name: 📥 拉取代码
@@ -30,7 +33,6 @@ jobs:
         run: pip install requests
 
       - name: 🤖 调用 DeepSeek 分析任务
-        id: ai
         env:
           DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           TASK_INPUT: ${{ github.event.inputs.task }}
@@ -103,9 +105,8 @@ jobs:
           with open('ai_output.md', encoding='utf-8') as f:
               ai_output = f.read()
 
-          # 解析文件修改指令
           file_blocks = re.findall(
-              r'---FILE:(.*?)---\s*\n(.*?)(?=---FILE:|---$|$)',
+              r'---FILE:(.*?)---\s*\n(.*?)(?=---FILE:|---$)',
               ai_output, re.DOTALL
           )
 
@@ -114,17 +115,15 @@ jobs:
               for filepath, content in file_blocks:
                   filepath = filepath.strip()
                   content = content.strip()
-                  # 提取代码块
                   code_match = re.search(r'```(?:\w+)?\n(.*?)```', content, re.DOTALL)
                   if code_match:
                       content = code_match.group(1)
-                  # 写入文件
                   os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
                   with open(filepath, 'w', encoding='utf-8') as f:
                       f.write(content)
                   print(f"  ✅ 已写入：{filepath}")
           else:
-              print("⚠️ 未检测到结构化修改指令，尝试让 AI 生成 shell 脚本...")
+              print("⚠️ 未检测到结构化修改，尝试让 AI 生成 shell 脚本...")
 
               files_content = subprocess.run(
                   ['find', '.', '-type', 'f',
@@ -146,18 +145,13 @@ jobs:
                           {
                               "role": "system",
                               "content": (
-                                  "你是一个 AI 编程助手。根据任务和分析结果，生成一个 bash 脚本来执行文件修改。\n"
-                                  "输出格式：\n```bash\n#!/bin/bash\n# 你的命令\n```\n"
-                                  "每个修改的文件用 cat << 'EOF' > 文件路径 的方式写入。"
+                                  "根据任务生成 bash 脚本。每个文件用 cat << 'EOF' > 路径 写入。"
+                                  "输出格式：\n```bash\n#!/bin/bash\n# 命令\n```"
                               )
                           },
                           {
                               "role": "user",
-                              "content": (
-                                  f"分析结果：\n{ai_output}\n\n"
-                                  f"部分文件内容：\n{files_content}\n\n"
-                                  f"请生成 bash 脚本来执行修改。"
-                              )
+                              "content": f"分析结果：\n{ai_output}\n\n文件内容：\n{files_content}"
                           }
                       ]
                   }
@@ -178,32 +172,39 @@ jobs:
                   exit(1)
           PYEOF
 
-      - name: 📝 Git 提交
+      - name: 📝 Git 提交到新分支
         run: |
           git config user.name "🤖 AI Bot"
           git config user.email "ai-bot@github.com"
+
+          BRANCH="ai-fix-$(date +'%Y%m%d-%H%M%S')"
+          git checkout -b "$BRANCH"
+
           git add .
           if git diff --staged --quiet; then
             echo "⚠️ 没有代码变更"
+            echo "NO_CHANGE=true" >> $GITHUB_ENV
           else
             git commit -m "🤖 AI: ${{ github.event.inputs.task }}"
-            git push
-            echo "✅ 已提交并推送"
+            git push origin "$BRANCH"
+            echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+            echo "✅ 已推送到分支: $BRANCH"
           fi
 
       - name: 🔀 创建 PR
+        if: env.NO_CHANGE != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set +e
           gh pr create \
             --title "🤖 AI: ${{ github.event.inputs.task }}" \
             --body "$(cat ai_output.md | head -c 60000)" \
-            --base main \
-            2>&1 || echo "⚠️ PR 创建可能失败，检查是否已有同名 PR"
+            --head "$BRANCH" \
+            --base main
+          echo "✅ PR 已创建！"
 
       - name: 🏷️ 自动打 Tag
-        if: success()
+        if: env.NO_CHANGE != 'true'
         run: |
           TAG="ai-$(date +'%Y%m%d-%H%M%S')"
           git tag "$TAG"
@@ -216,5 +217,5 @@ jobs:
           echo "=========================================="
           echo "🤖 AI 自动任务完成！"
           echo "📋 任务：${{ github.event.inputs.task }}"
-          echo "🔗 查看仓库：${{ github.server_url }}/${{ github.repository }}"
+          echo "🔗 仓库：${{ github.server_url }}/${{ github.repository }}"
           echo "=========================================="
