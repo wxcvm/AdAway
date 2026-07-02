@@ -7,14 +7,14 @@ on:
         description: '你想让 AI 干什么？'
         required: true
         default: '查看最新 issue，修复 bug，提 PR'
-      repo_url:
-        description: '仓库 URL（默认当前仓库）'
-        required: false
 
 jobs:
   ai-fix:
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: write
+      pull-requests: write
+
     steps:
       - name: 📥 拉取代码
         uses: actions/checkout@v4
@@ -33,102 +33,188 @@ jobs:
         id: ai
         env:
           DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          TASK_INPUT: ${{ github.event.inputs.task }}
         run: |
-          python << 'EOF'
-          import requests, json, os
-          
-          task = "${{ github.event.inputs.task }}"
-          
-          # 读取仓库文件结构
-          import subprocess
-          files = subprocess.run(['find', '.', '-type', 'f', '-name', '*.py'], 
-                                capture_output=True, text=True).stdout[:3000]
-          
+          python3 << 'PYEOF'
+          import requests, json, os, subprocess
+
+          api_key = os.environ['DEEPSEEK_KEY'].strip()
+          task = os.environ['TASK_INPUT']
+
+          files = subprocess.run(
+              ['find', '.', '-type', 'f',
+               '!', '-path', './.git/*',
+               '!', '-path', './.github/*',
+               '!', '-name', '*.db',
+               '!', '-name', '*.pyc'],
+              capture_output=True, text=True
+          ).stdout[:5000]
+
           response = requests.post(
               "https://api.deepseek.com/v1/chat/completions",
-              headers={"Authorization": f"Bearer {os.environ['DEEPSEEK_KEY']}"},
+              headers={
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type": "application/json"
+              },
               json={
                   "model": "deepseek-chat",
                   "messages": [
-                      {"role": "system", "content": "你是一个 AI 编程助手。根据任务分析代码并给出修改方案。输出格式：先给出分析，然后把需要修改的文件用 ```file:文件路径``` 标记，代码块用 ```语言 标记。"},
-                      {"role": "user", "content": f"任务：{task}\n\n仓库文件结构：\n{files}"}
+                      {
+                          "role": "system",
+                          "content": (
+                              "你是一个 AI 编程助手。根据用户任务分析当前代码并给出修改方案。\n"
+                              "输出格式要求：\n"
+                              "1. 先写出分析思路\n"
+                              "2. 需要修改的文件用 ---FILE:文件路径--- 标记\n"
+                              "3. 新文件内容用代码块包裹\n"
+                              "4. 最后写一个简短总结"
+                          )
+                      },
+                      {
+                          "role": "user",
+                          "content": f"任务：{task}\n\n仓库文件列表：\n{files}"
+                      }
                   ]
               }
           )
-          
+
           result = response.json()
+          if 'choices' not in result:
+              print(f"❌ API 返回异常：{json.dumps(result, ensure_ascii=False)}")
+              exit(1)
+
           content = result['choices'][0]['message']['content']
           print(content)
-          
-          # 保存结果
-          with open('ai_output.md', 'w') as f:
-              f.write(content)
-          EOF
 
-      - name: 🔧 应用修改（让 AI 生成 shell 命令）
+          with open('ai_output.md', 'w', encoding='utf-8') as f:
+              f.write(content)
+          print("✅ 分析完成，已保存到 ai_output.md")
+          PYEOF
+
+      - name: 🔧 AI 自动修改代码
         env:
           DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          python << 'EOF'
-          import requests, os, subprocess
-          
-          with open('ai_output.md') as f:
-              ai_output = f.read()
-          
-          task = "${{ github.event.inputs.task }}"
-          
-          # 读取当前代码
-          files = subprocess.run(['find', '.', '-type', 'f', '!', '-path', './.git/*'],
-                                capture_output=True, text=True).stdout[:5000]
-          
-          response = requests.post(
-              "https://api.deepseek.com/v1/chat/completions",
-              headers={"Authorization": f"Bearer {os.environ['DEEPSEEK_KEY']}"},
-              json={
-                  "model": "deepseek-chat",
-                  "messages": [
-                      {"role": "system", "content": "你是一个 AI 编程助手。根据前面的分析和当前代码，生成一个 shell 脚本来执行修改。输出纯 shell 脚本，用 ```bash 包裹。只输出需要执行的命令，不要解释。修改完成后 git add、git commit。"},
-                      {"role": "user", "content": f"前面分析的结果：\n{ai_output}\n\n当前文件内容：\n{files}\n\n任务：{task}\n\n请生成 shell 脚本来执行修改。"}
-                  ]
-              }
-          )
-          
-          result = response.json()
-          shell_script = result['choices'][0]['message']['content']
-          
-          # 提取 bash 代码块
-          import re
-          match = re.search(r'```bash\n(.*?)```', shell_script, re.DOTALL)
-          if match:
-              script = match.group(1)
-              with open('fix.sh', 'w') as f:
-                  f.write(script)
-              subprocess.run(['bash', 'fix.sh'])
-          EOF
+          python3 << 'PYEOF'
+          import requests, os, subprocess, re
 
-      - name: 🚀 提交并推送
+          api_key = os.environ['DEEPSEEK_KEY'].strip()
+
+          with open('ai_output.md', encoding='utf-8') as f:
+              ai_output = f.read()
+
+          # 解析文件修改指令
+          file_blocks = re.findall(
+              r'---FILE:(.*?)---\s*\n(.*?)(?=---FILE:|---$|$)',
+              ai_output, re.DOTALL
+          )
+
+          if file_blocks:
+              print(f"📝 检测到 {len(file_blocks)} 个文件需要修改")
+              for filepath, content in file_blocks:
+                  filepath = filepath.strip()
+                  content = content.strip()
+                  # 提取代码块
+                  code_match = re.search(r'```(?:\w+)?\n(.*?)```', content, re.DOTALL)
+                  if code_match:
+                      content = code_match.group(1)
+                  # 写入文件
+                  os.makedirs(os.path.dirname(filepath) or '.', exist_ok=True)
+                  with open(filepath, 'w', encoding='utf-8') as f:
+                      f.write(content)
+                  print(f"  ✅ 已写入：{filepath}")
+          else:
+              print("⚠️ 未检测到结构化修改指令，尝试让 AI 生成 shell 脚本...")
+
+              files_content = subprocess.run(
+                  ['find', '.', '-type', 'f',
+                   '!', '-path', './.git/*',
+                   '!', '-path', './.github/*',
+                   '!', '-name', '*.db'],
+                  capture_output=True, text=True
+              ).stdout[:6000]
+
+              response = requests.post(
+                  "https://api.deepseek.com/v1/chat/completions",
+                  headers={
+                      "Authorization": f"Bearer {api_key}",
+                      "Content-Type": "application/json"
+                  },
+                  json={
+                      "model": "deepseek-chat",
+                      "messages": [
+                          {
+                              "role": "system",
+                              "content": (
+                                  "你是一个 AI 编程助手。根据任务和分析结果，生成一个 bash 脚本来执行文件修改。\n"
+                                  "输出格式：\n```bash\n#!/bin/bash\n# 你的命令\n```\n"
+                                  "每个修改的文件用 cat << 'EOF' > 文件路径 的方式写入。"
+                              )
+                          },
+                          {
+                              "role": "user",
+                              "content": (
+                                  f"分析结果：\n{ai_output}\n\n"
+                                  f"部分文件内容：\n{files_content}\n\n"
+                                  f"请生成 bash 脚本来执行修改。"
+                              )
+                          }
+                      ]
+                  }
+              )
+
+              result = response.json()
+              shell_text = result['choices'][0]['message']['content']
+              match = re.search(r'```bash\n(.*?)```', shell_text, re.DOTALL)
+              if match:
+                  script = match.group(1)
+                  with open('fix.sh', 'w') as f:
+                      f.write(script)
+                  subprocess.run(['bash', 'fix.sh'])
+                  print("✅ Shell 脚本执行完成")
+              else:
+                  print("❌ 无法提取 shell 脚本")
+                  print(shell_text)
+                  exit(1)
+          PYEOF
+
+      - name: 📝 Git 提交
         run: |
           git config user.name "🤖 AI Bot"
           git config user.email "ai-bot@github.com"
           git add .
-          git diff --staged --quiet || git commit -m "🤖 AI: ${{ github.event.inputs.task }}"
-          git push
+          if git diff --staged --quiet; then
+            echo "⚠️ 没有代码变更"
+          else
+            git commit -m "🤖 AI: ${{ github.event.inputs.task }}"
+            git push
+            echo "✅ 已提交并推送"
+          fi
 
-      - name: 📝 创建 Issue / PR 报告
+      - name: 🔀 创建 PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set +e
           gh pr create \
             --title "🤖 AI: ${{ github.event.inputs.task }}" \
-            --body "$(cat ai_output.md)" \
+            --body "$(cat ai_output.md | head -c 60000)" \
             --base main \
-            --head ${{ github.ref_name }} \
-            || echo "PR 已存在或无需创建"
+            2>&1 || echo "⚠️ PR 创建可能失败，检查是否已有同名 PR"
 
-      - name: 🏷️ 打 Tag（可选）
+      - name: 🏷️ 自动打 Tag
         if: success()
         run: |
-          TAG="v$(date +'%Y%m%d-%H%M%S')"
+          TAG="ai-$(date +'%Y%m%d-%H%M%S')"
           git tag "$TAG"
           git push origin "$TAG"
           echo "✅ 已打 Tag: $TAG"
+
+      - name: 📊 总结
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "🤖 AI 自动任务完成！"
+          echo "📋 任务：${{ github.event.inputs.task }}"
+          echo "🔗 查看仓库：${{ github.server_url }}/${{ github.repository }}"
+          echo "=========================================="
