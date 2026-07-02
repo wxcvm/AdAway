@@ -1,0 +1,134 @@
+name: 🤖 AI 自动修 Bug
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: '你想让 AI 干什么？'
+        required: true
+        default: '查看最新 issue，修复 bug，提 PR'
+      repo_url:
+        description: '仓库 URL（默认当前仓库）'
+        required: false
+
+jobs:
+  ai-fix:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 拉取代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 安装依赖
+        run: pip install requests
+
+      - name: 🤖 调用 DeepSeek 分析任务
+        id: ai
+        env:
+          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python << 'EOF'
+          import requests, json, os
+          
+          task = "${{ github.event.inputs.task }}"
+          
+          # 读取仓库文件结构
+          import subprocess
+          files = subprocess.run(['find', '.', '-type', 'f', '-name', '*.py'], 
+                                capture_output=True, text=True).stdout[:3000]
+          
+          response = requests.post(
+              "https://api.deepseek.com/v1/chat/completions",
+              headers={"Authorization": f"Bearer {os.environ['DEEPSEEK_KEY']}"},
+              json={
+                  "model": "deepseek-chat",
+                  "messages": [
+                      {"role": "system", "content": "你是一个 AI 编程助手。根据任务分析代码并给出修改方案。输出格式：先给出分析，然后把需要修改的文件用 ```file:文件路径``` 标记，代码块用 ```语言 标记。"},
+                      {"role": "user", "content": f"任务：{task}\n\n仓库文件结构：\n{files}"}
+                  ]
+              }
+          )
+          
+          result = response.json()
+          content = result['choices'][0]['message']['content']
+          print(content)
+          
+          # 保存结果
+          with open('ai_output.md', 'w') as f:
+              f.write(content)
+          EOF
+
+      - name: 🔧 应用修改（让 AI 生成 shell 命令）
+        env:
+          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python << 'EOF'
+          import requests, os, subprocess
+          
+          with open('ai_output.md') as f:
+              ai_output = f.read()
+          
+          task = "${{ github.event.inputs.task }}"
+          
+          # 读取当前代码
+          files = subprocess.run(['find', '.', '-type', 'f', '!', '-path', './.git/*'],
+                                capture_output=True, text=True).stdout[:5000]
+          
+          response = requests.post(
+              "https://api.deepseek.com/v1/chat/completions",
+              headers={"Authorization": f"Bearer {os.environ['DEEPSEEK_KEY']}"},
+              json={
+                  "model": "deepseek-chat",
+                  "messages": [
+                      {"role": "system", "content": "你是一个 AI 编程助手。根据前面的分析和当前代码，生成一个 shell 脚本来执行修改。输出纯 shell 脚本，用 ```bash 包裹。只输出需要执行的命令，不要解释。修改完成后 git add、git commit。"},
+                      {"role": "user", "content": f"前面分析的结果：\n{ai_output}\n\n当前文件内容：\n{files}\n\n任务：{task}\n\n请生成 shell 脚本来执行修改。"}
+                  ]
+              }
+          )
+          
+          result = response.json()
+          shell_script = result['choices'][0]['message']['content']
+          
+          # 提取 bash 代码块
+          import re
+          match = re.search(r'```bash\n(.*?)```', shell_script, re.DOTALL)
+          if match:
+              script = match.group(1)
+              with open('fix.sh', 'w') as f:
+                  f.write(script)
+              subprocess.run(['bash', 'fix.sh'])
+          EOF
+
+      - name: 🚀 提交并推送
+        run: |
+          git config user.name "🤖 AI Bot"
+          git config user.email "ai-bot@github.com"
+          git add .
+          git diff --staged --quiet || git commit -m "🤖 AI: ${{ github.event.inputs.task }}"
+          git push
+
+      - name: 📝 创建 Issue / PR 报告
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create \
+            --title "🤖 AI: ${{ github.event.inputs.task }}" \
+            --body "$(cat ai_output.md)" \
+            --base main \
+            --head ${{ github.ref_name }} \
+            || echo "PR 已存在或无需创建"
+
+      - name: 🏷️ 打 Tag（可选）
+        if: success()
+        run: |
+          TAG="v$(date +'%Y%m%d-%H%M%S')"
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "✅ 已打 Tag: $TAG"
