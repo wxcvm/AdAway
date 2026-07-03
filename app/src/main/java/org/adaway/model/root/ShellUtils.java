@@ -77,25 +77,31 @@ public final class ShellUtils {
             try { Thread.sleep(200); } catch (InterruptedException ignored) {}
         }
         
-        // If process didn't start, dump last lines from log for diagnostics
-        try {
-            File logFile = new File(logPath);
-            if (logFile.exists()) {
-                List<String> lines = java.nio.file.Files.readAllLines(logFile.toPath());
-                int from = Math.max(0, lines.size() - 30);
-                List<String> tail = lines.subList(from, lines.size());
-                Timber.e("Webserver failed to start, log (last %d lines) from %s:\n%s", tail.size(), logPath, mergeAllLines(tail));
-            } else {
-                Timber.e("Webserver failed to start and no log file found at %s", logPath);
-            }
-        } catch (Exception e) {
-            Timber.w(e, "Could not read webserver log from %s", logPath);
-        } finally {
-            // Diagnostics have already been copied into the app log above,
-            // so the on-disk copy is no longer needed.
-            deleteLogFile(logPath);
+        // If process didn't start, dump last lines from log for diagnostics.
+        // BUG FIX: use a root shell (cat/tail) rather than java.io/nio file
+        // APIs to read this file. It was created by the root shell in
+        // /data/local/tmp, and on many ROMs the app's own (non-root)
+        // process is blocked from reading it by SELinux even when the DAC
+        // permissions look world-readable — so the previous
+        // Files.readAllLines() call would silently fail here on exactly
+        // the devices where this diagnostic is most needed.
+        Shell.Result tailResult = Shell.cmd("tail -n 30 " + escapedString(logPath)).exec();
+        if (tailResult.isSuccess() && !tailResult.getOut().isEmpty()) {
+            Timber.e("Webserver failed to start, log (last %d lines) from %s:\n%s",
+                    tailResult.getOut().size(), logPath, mergeAllLines(tailResult.getOut()));
+        } else {
+            Timber.e("Webserver failed to start and log at %s could not be read (exit code %d).",
+                    logPath, tailResult.getCode());
         }
-        
+        // BUG FIX: don't delete the log on failure. Timber only reaches
+        // logcat on debug builds or with the in-app debug preference
+        // enabled (see ApplicationLog.init()), so on a normal release
+        // build this file was the only surviving copy of the failure
+        // reason — and it was being deleted moments after being written,
+        // making the root cause of "Web server failed to start" reports
+        // unrecoverable. Leave it in /data/local/tmp so it can still be
+        // pulled with a root file manager or `adb shell` after the fact.
+
         return false;
     }
 
