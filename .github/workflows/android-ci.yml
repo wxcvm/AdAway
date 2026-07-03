@@ -51,6 +51,7 @@ jobs:
           gradle-build-configuration: "releaseCompileClasspath"
 
       - name: Analyze project
+        continue-on-error: true # SonarCloud project belongs to upstream AdAway/AdAway; this fork has no access to it. See build.gradle sonar { } block (projectKey/organization) — point it at your own SonarCloud project + SONAR_TOKEN to make this step meaningful again.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
