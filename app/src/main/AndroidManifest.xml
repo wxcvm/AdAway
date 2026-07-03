@@ -34,6 +34,27 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!--
+        ROOT CAUSE FIX (issue #2): targetSdk 30+ enables package visibility
+        filtering. Without declaring the implicit intents this app resolves
+        via startActivity(), PackageManager hides all matching apps from
+        resolveActivity()/queryIntentActivities() — even when a browser or
+        text editor IS installed — causing ActivityNotFoundException at the
+        call sites in PrefsRootFragment (web server test URL, hosts file
+        viewer) and crashing the app back to the home screen.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+
     <application
         android:name=".AdAwayApplication"
         android:allowBackup="true"
