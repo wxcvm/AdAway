@@ -41,6 +41,26 @@ public class WebServerUtils {
     private static final String CA_KEY_FILE  = "localhost-2410.key";
 
     /**
+     * BUG FIX: Toast.show() must run on the main thread. startWebServer()
+     * is invoked from RootModel.syncPreferences(), which runs on a
+     * background disk-IO executor every time the app is opened (if the
+     * user has the web server preference enabled). Calling Toast.show()
+     * directly there throws an uncaught
+     * android.view.ViewRootImpl$CalledFromWrongThreadException, crashing
+     * the app on every launch. Route all toasts in this file through the
+     * main looper instead.
+     */
+    private static void showToast(Context context, @StringRes int resId) {
+        new android.os.Handler(android.os.Looper.getMainLooper())
+                .post(() -> Toast.makeText(context, resId, Toast.LENGTH_LONG).show());
+    }
+
+    private static void showToast(Context context, String text) {
+        new android.os.Handler(android.os.Looper.getMainLooper())
+                .post(() -> Toast.makeText(context, text, Toast.LENGTH_LONG).show());
+    }
+
+    /**
      * Start the web server, killing any stale instance first and waiting for
      * the port to be released before relaunching.
      */
@@ -55,13 +75,13 @@ public class WebServerUtils {
         
         if (!binFile.exists()) {
             Timber.e("Webserver binary not found: %s", binFile.getAbsolutePath());
-            Toast.makeText(context, "Webserver executable missing; please reinstall or check device compatibility.", Toast.LENGTH_LONG).show();
+            showToast(context, "Webserver executable missing; please reinstall or check device compatibility.");
             return;
         }
         
         if (!binFile.canRead()) {
             Timber.e("Webserver binary is not readable: %s", binFile.getAbsolutePath());
-            Toast.makeText(context, "Webserver binary is not readable; check permissions.", Toast.LENGTH_LONG).show();
+            showToast(context, "Webserver binary is not readable; check permissions.");
             return;
         }
 
@@ -76,7 +96,7 @@ public class WebServerUtils {
         boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
         if (!started) {
             Timber.e("Webserver failed to start; check logs in /data/local/tmp/webserver_start_*.log for details.");
-            Toast.makeText(context, R.string.pref_webserver_start_failed, Toast.LENGTH_LONG).show();
+            showToast(context, R.string.pref_webserver_start_failed);
         } else {
             Timber.i("Webserver started successfully");
         }
