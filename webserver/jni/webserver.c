@@ -19,6 +19,27 @@
 #define HTTP_URL  "http://localhost:80"
 #define HTTPS_URL "https://localhost:443"
 
+/* BUG FIX: __android_log_print() only reaches logcat, never the process's
+   own stdout/stderr. The Java side (ShellUtils.runBundledExecutable)
+   launches this binary with `> logfile 2>&1`, expecting to capture
+   startup failures (bad args, CA generation failure, port bind failure,
+   etc.) in that file — but since nothing was ever written to
+   stdout/stderr, that file was always empty regardless of what actually
+   went wrong. Log to both destinations for anything that matters for
+   diagnosing a failed/successful startup. */
+#define LOG_FATAL(fmt, ...) do { \
+    __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, fmt, ##__VA_ARGS__); \
+    fprintf(stderr, "[FATAL] " fmt "\n", ##__VA_ARGS__); fflush(stderr); \
+} while (0)
+#define LOG_WARN(fmt, ...) do { \
+    __android_log_print(ANDROID_LOG_WARN, THIS_FILE, fmt, ##__VA_ARGS__); \
+    fprintf(stderr, "[WARN] " fmt "\n", ##__VA_ARGS__); fflush(stderr); \
+} while (0)
+#define LOG_INFO(fmt, ...) do { \
+    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, fmt, ##__VA_ARGS__); \
+    fprintf(stdout, "[INFO] " fmt "\n", ##__VA_ARGS__); fflush(stdout); \
+} while (0)
+
 #define OOM_ADJ_PATH   "/proc/self/oom_score_adj"
 #define OOM_ADJ_NOKILL -1000   /* OOM_SCORE_ADJ_MIN */
 
@@ -155,8 +176,7 @@ static int make_cert(const char  *hostname,
             if (!exts[i].nid || !exts[i].val) continue;
             X509_EXTENSION *ext = X509V3_EXT_conf_nid(
                 NULL, &ctx, exts[i].nid, exts[i].val);
-            if (!ext) { __android_log_print(ANDROID_LOG_FATAL, THIS_FILE,
-                "Ext %d failed", exts[i].nid); goto done; }
+            if (!ext) { LOG_FATAL("Ext %d failed", exts[i].nid); goto done; }
             int ok = X509_add_ext(x, ext, -1);
             X509_EXTENSION_free(ext);
             if (!ok) goto done;
@@ -247,8 +267,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
     struct ca_state *ca = (struct ca_state *)arg;
     SSL_CTX *ctx = make_domain_ctx(host, ca);
     if (!ctx) {
-        __android_log_print(ANDROID_LOG_WARN, THIS_FILE,
-            "SNI: failed to create ctx for %s", host);
+        LOG_WARN("SNI: failed to create ctx for %s", host);
         return SSL_TLSEXT_ERR_NOACK;
     }
 
@@ -340,16 +359,16 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             /* Generate CA cert on first use */
             bool missing = (access(cert_path, F_OK) != 0 || access(key_path, F_OK) != 0);
             if (missing) {
-                __android_log_print(ANDROID_LOG_INFO, THIS_FILE, "Generating root CA…");
+                LOG_INFO("Generating root CA…");
                 if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
-                    __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "CA generation failed");
+                    LOG_FATAL("CA generation failed");
                     return s;
                 }
             }
 
             /* Load CA into memory for SNI signing */
             if (load_ca(cert_path, key_path, &s.ca) != EXIT_SUCCESS) {
-                __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "Failed to load CA");
+                LOG_FATAL("Failed to load CA");
                 return s;
             }
 
@@ -372,7 +391,7 @@ int main(int argc, char *argv[]) {
 
     struct settings s = parse_cli_parameters(argc, argv);
     if (!s.init) {
-        __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "Bad parameters.");
+        LOG_FATAL("Bad parameters.");
         return EXIT_FAILURE;
     }
     if (s.debug) mg_log_set(MG_LL_DEBUG);
@@ -383,23 +402,21 @@ int main(int argc, char *argv[]) {
     mg_mgr_init(&mgr);
 
     if (!mg_http_listen(&mgr, HTTP_URL,  fn, &s)) {
-        __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "HTTP bind failed (port 80).");
+        LOG_FATAL("HTTP bind failed (port 80).");
         mg_mgr_free(&mgr); return EXIT_FAILURE;
     }
     if (!mg_http_listen(&mgr, HTTPS_URL, fn, &s)) {
-        __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, "HTTPS bind failed (port 443).");
+        LOG_FATAL("HTTPS bind failed (port 443).");
         mg_mgr_free(&mgr); return EXIT_FAILURE;
     }
 
     setup_signal_handler();
-    __android_log_print(ANDROID_LOG_INFO, THIS_FILE,
-        "AdAway webserver ready — arm64, Mongoose " MG_VERSION
+    LOG_INFO("AdAway webserver ready — arm64, Mongoose " MG_VERSION
         ", SNI cert issuance enabled.");
 
     while (s_sig_num == 0) mg_mgr_poll(&mgr, 1000);
 
-    __android_log_print(ANDROID_LOG_INFO, THIS_FILE,
-        "Signal %d — shutting down.", s_sig_num);
+    LOG_INFO("Signal %d — shutting down.", s_sig_num);
     mg_mgr_free(&mgr);
 
     /* Free SNI cache */
