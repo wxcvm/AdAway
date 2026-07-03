@@ -285,7 +285,25 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         assert webServerTest != null : PREFERENCE_NOT_FOUND;
         webServerTest.setOnPreferenceClickListener(preference -> {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(TEST_URL));
-            startActivity(intent);
+            try {
+                startActivity(intent);
+            } catch (ActivityNotFoundException e) {
+                // BUG FIX: no app could resolve the implicit ACTION_VIEW
+                // intent for TEST_URL (e.g. no browser installed, or the
+                // intent is filtered out by package-visibility rules on
+                // Android 11+). Previously this threw an uncaught
+                // ActivityNotFoundException here, crashing the activity
+                // and kicking the user all the way back to the home
+                // screen (see issue #2). Catch it and show a toast
+                // instead, matching how openHostsFile() already handles
+                // the same class of failure.
+                Timber.e(e, "No application found to open the web server test URL.");
+                Toast.makeText(
+                        requireContext(),
+                        R.string.pref_webserver_test_no_browser,
+                        Toast.LENGTH_LONG
+                ).show();
+            }
             return true;
         });
     }

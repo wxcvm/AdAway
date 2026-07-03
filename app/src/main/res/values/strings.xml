@@ -269,6 +269,7 @@
 
     <string name="pref_webserver_start_failed">Web 服务器启动失败，请检查 Root 授权</string>
     <string name="pref_webserver_stop_failed">Web 服务器停止失败</string>
+    <string name="pref_webserver_test_no_browser">未找到可以打开测试地址的浏览器应用</string>
 
     <!-- About section (preferences_main.xml footer) -->
     <string name="pref_about_category">关于</string>
