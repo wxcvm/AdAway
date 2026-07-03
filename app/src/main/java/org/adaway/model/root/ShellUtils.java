@@ -66,6 +66,12 @@ public final class ShellUtils {
         for (int i = 0; i < 10; i++) {
             if (isBundledExecutableRunning(executable)) {
                 Timber.i("Webserver process detected after %d attempts", i + 1);
+                // The process still holds its stdout/stderr open on this file;
+                // unlinking it now (rather than leaving it behind) prevents
+                // /data/local/tmp from accumulating one log file per launch
+                // (e.g. every boot or every time the web server is toggled)
+                // while the process keeps writing to it until it exits.
+                deleteLogFile(logPath);
                 return true;
             }
             try { Thread.sleep(200); } catch (InterruptedException ignored) {}
@@ -84,9 +90,25 @@ public final class ShellUtils {
             }
         } catch (Exception e) {
             Timber.w(e, "Could not read webserver log from %s", logPath);
+        } finally {
+            // Diagnostics have already been copied into the app log above,
+            // so the on-disk copy is no longer needed.
+            deleteLogFile(logPath);
         }
         
         return false;
+    }
+
+    /**
+     * Best-effort deletion of a temporary launch log written to
+     * /data/local/tmp, ignoring any failure since it is not critical to the
+     * caller's outcome.
+     */
+    private static void deleteLogFile(String logPath) {
+        try {
+            Shell.cmd("rm -f " + escapedString(logPath)).exec();
+        } catch (Exception ignored) {
+        }
     }
 
     /**

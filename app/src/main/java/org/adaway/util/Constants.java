@@ -27,6 +27,15 @@ public class Constants {
     public static final String LOCALHOST_IPV6 = "::1";
     public static final String BOGUS_IPV4 = "0.0.0.0";
     public static final String LOCALHOST_HOSTNAME = "localhost";
+    /*
+     * Android's system hosts file conventionally maps the IPv6 loopback
+     * address to "ip6-localhost" (and "ip6-loopback"), not "localhost".
+     * Some system components and connectivity/integrity checks rely on
+     * "ip6-localhost" being resolvable over IPv6 and report no network
+     * connectivity when it is missing, even though "::1 localhost" is
+     * present. See https://github.com/AdAway/AdAway/issues/4248
+     */
+    public static final String LOCALHOST_HOSTNAME_IPV6 = "ip6-localhost";
 
     public static final String HOSTS_FILENAME = "hosts";
     public static final String DEFAULT_HOSTS_FILENAME = "default_hosts";
