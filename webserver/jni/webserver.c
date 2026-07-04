@@ -11,6 +11,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
+#include <openssl/bio.h>
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 #include "mongoose/mongoose.h"
@@ -117,12 +118,17 @@ static void oom_adjust_setup(void) {
 /* ── Certificate generation ───────────────────────────────────── */
 
 /* Generate a certificate signed by ca_cert/ca_key for 'hostname'.
-   If ca_cert==NULL the cert is self-signed (used for the root CA itself). */
+   If ca_cert==NULL the cert is self-signed (used for the root CA itself).
+   san_override, if non-NULL, replaces the default "DNS:hostname" SAN
+   string — used for the localhost leaf cert, which needs both
+   "DNS:localhost" and "IP:127.0.0.1" since clients connecting to the
+   literal loopback address check the IP SAN, not just the CN. */
 static int make_cert(const char  *hostname,
                      X509        *ca_cert,   /* NULL → self-signed root CA */
                      EVP_PKEY    *ca_key,    /* signing key                */
                      int          is_ca,     /* 1 → add CA extensions      */
                      int          validity_days,
+                     const char  *san_override,
                      X509       **out_cert,
                      EVP_PKEY   **out_key) {
     int ret = EXIT_FAILURE;
@@ -166,9 +172,14 @@ static int make_cert(const char  *hostname,
         X509V3_set_ctx_nodb(&ctx);
         X509V3_set_ctx(&ctx, ca_cert ? ca_cert : x, x, NULL, NULL, 0);
 
-        /* SAN string: "DNS:hostname" */
+        /* SAN string: "DNS:hostname" unless the caller supplied an
+           explicit override (see san_override doc comment above). */
         char san[288];
-        snprintf(san, sizeof(san), "DNS:%s", hostname);
+        if (san_override) {
+            snprintf(san, sizeof(san), "%s", san_override);
+        } else {
+            snprintf(san, sizeof(san), "DNS:%s", hostname);
+        }
 
         /* Key usage depends on role */
         const char *ku = is_ca
@@ -214,7 +225,7 @@ done:
 /* Generate root CA cert + key and write as PEM files */
 static int generate_root_ca(const char *cert_path, const char *key_path) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
-    int ret = make_cert("AdAway Root CA", NULL, NULL, 1, 3650, &cert, &key);
+    int ret = make_cert("AdAway Root CA", NULL, NULL, 1, 3650, NULL, &cert, &key);
     if (ret != EXIT_SUCCESS) return ret;
     ret = EXIT_FAILURE;
     FILE *f;
@@ -245,11 +256,65 @@ static int load_ca(const char *cert_path, const char *key_path,
     return (out->cert && out->key) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
+/* Serialize an X509 cert / private key to PEM into a freshly malloc'd
+   buffer (via a memory BIO, then copied out so the result is owned by
+   plain malloc/free like the rest of this file — not OpenSSL's
+   allocator). Returns a zeroed mg_str on failure. */
+static struct mg_str cert_to_pem_mgstr(X509 *cert) {
+    struct mg_str out = {0};
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (!bio) return out;
+    if (PEM_write_bio_X509(bio, cert) != 1) { BIO_free(bio); return out; }
+    char *data; long len = BIO_get_mem_data(bio, &data);
+    char *buf = malloc((size_t)len);
+    if (buf) { memcpy(buf, data, (size_t)len); out.buf = buf; out.len = (size_t)len; }
+    BIO_free(bio);
+    return out;
+}
+static struct mg_str key_to_pem_mgstr(EVP_PKEY *key) {
+    struct mg_str out = {0};
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (!bio) return out;
+    if (PEM_write_bio_PrivateKey(bio, key, NULL, NULL, 0, NULL, NULL) != 1) {
+        BIO_free(bio); return out;
+    }
+    char *data; long len = BIO_get_mem_data(bio, &data);
+    char *buf = malloc((size_t)len);
+    if (buf) { memcpy(buf, data, (size_t)len); out.buf = buf; out.len = (size_t)len; }
+    BIO_free(bio);
+    return out;
+}
+
+/* Issue the leaf cert used as the *default* TLS identity for direct
+   connections to this device (https://localhost/..., https://127.0.0.1/...)
+   — i.e. anything that doesn't send SNI for a blocked ad domain and so
+   never reaches sni_callback()/make_domain_ctx().
+   BUG FIX: this used to be the raw root CA cert itself (CN "AdAway Root
+   CA", no SAN matching "localhost" or "127.0.0.1" at all). Any client
+   that checks the presented cert's SAN against the hostname/IP it
+   dialed — which is effectively all of them — would fail to validate
+   it even though the CA is trusted, since the CA's own identity isn't
+   a valid SAN for the server it's terminating TLS for. Sign a proper
+   short-lived leaf cert for "localhost" with both a DNS and an IP SAN
+   and use *that* as the default, matching how every other hostname
+   already gets a purpose-issued leaf cert via make_domain_ctx(). */
+static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts) {
+    X509 *cert = NULL; EVP_PKEY *key = NULL;
+    if (make_cert("localhost", ca->cert, ca->key, 0, 397,
+                  "DNS:localhost,IP:127.0.0.1", &cert, &key) != EXIT_SUCCESS)
+        return EXIT_FAILURE;
+    out_opts->cert = cert_to_pem_mgstr(cert);
+    out_opts->key  = key_to_pem_mgstr(key);
+    X509_free(cert);
+    EVP_PKEY_free(key);
+    return (out_opts->cert.buf && out_opts->key.buf) ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 /* ── SNI per-domain certificate ───────────────────────────────── */
 
 static SSL_CTX *make_domain_ctx(const char *hostname, struct ca_state *ca) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
-    if (make_cert(hostname, ca->cert, ca->key, 0, 1, &cert, &key) != EXIT_SUCCESS)
+    if (make_cert(hostname, ca->cert, ca->key, 0, 1, NULL, &cert, &key) != EXIT_SUCCESS)
         return NULL;
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) goto fail;
@@ -390,9 +455,14 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             }
             LOG_INFO("CA loaded OK");
 
-            /* TLS opts for the localhost listener (uses the CA cert directly) */
-            s.tls_opts.cert = mg_file_read(&mg_fs_posix, cert_path);
-            s.tls_opts.key  = mg_file_read(&mg_fs_posix, key_path);
+            /* TLS opts for the localhost listener: a leaf cert issued
+               specifically for "localhost"/127.0.0.1, not the raw CA
+               cert (see make_localhost_leaf() for why). */
+            if (make_localhost_leaf(&s.ca, &s.tls_opts) != EXIT_SUCCESS) {
+                LOG_FATAL("Failed to issue localhost leaf cert");
+                return s;
+            }
+            LOG_INFO("localhost leaf cert issued OK");
             snprintf(s.resource_dir, sizeof(s.resource_dir), "%s", rpath);
             snprintf(s.test_path,    sizeof(s.test_path),    "%s/test.html", rpath);
             s.init = true;
