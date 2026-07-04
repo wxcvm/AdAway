@@ -59,6 +59,25 @@ jobs:
       - name: Build release APK
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Verify libwebserver_exec.so is the real binary, not the placeholder stub
+        # BUG FIX: this repo ships libwebserver_exec.so as a renamed copy of
+        # a plain executable, swapped in over a tiny placeholder stub.so by
+        # a Gradle task (see webserver/build.gradle) whose wiring to the
+        # native-lib packaging step previously depended on an internal AGP
+        # class that silently matched zero tasks — so the placeholder stub
+        # (~3.7KB) shipped in every release build for an unknown amount of
+        # time with no build failure, no warning, nothing. The web server
+        # obviously can never start if this happens again. Fail loudly here
+        # instead of finding out from a user's bug report.
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
+          SIZE=$(unzip -l "$APK" | grep 'lib/arm64-v8a/libwebserver_exec.so' | awk '{print $1}')
+          echo "libwebserver_exec.so size in APK: ${SIZE:-<not found>} bytes"
+          [ -n "${SIZE:-}" ] || { echo "ERROR: libwebserver_exec.so not found in APK"; exit 1; }
+          [ "$SIZE" -gt 51200 ] || { echo "ERROR: libwebserver_exec.so is only $SIZE bytes — this looks like the placeholder stub, not the real webserver binary. Check webserver/build.gradle's renameJniLibAsExecutable wiring."; exit 1; }
+          echo "OK: binary size looks like a real build, not the stub."
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
