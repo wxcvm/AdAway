@@ -13,6 +13,23 @@
 
         <!--Remap legacy AppCompat attributes to MaterialComponent attributes-->
         <item name="colorPrimaryDark">?colorPrimary</item>
+
+        <!--
+          BUG FIX: targetSdk 35 (Android 15) forces edge-to-edge display, and
+          none of this app's screens handle WindowInsets, so content draws
+          underneath the status bar / ActionBar (toolbar-over-list-content
+          overlap on HostsSourcesActivity, PrefsActivity, etc.).
+          WindowCompat.setDecorFitsSystemWindows(window, true) does NOT undo
+          this on API 35 — Google intentionally neutered that call once
+          edge-to-edge is enforced (it's a no-op: `if (mEdgeToEdgeEnforced)
+          return;` in the platform source). The only mechanism API 35
+          actually honors is this theme attribute. It's documented as
+          temporary and slated for removal in a future SDK level (Android
+          16+ apparently drops it), so this is a stopgap, not a permanent
+          fix — proper insets handling per-screen is still the real
+          long-term fix.
+        -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
     </style>
 
     <style name="Theme.AdAway.NoActionBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
@@ -24,6 +41,7 @@
         <item name="colorOnSecondary">@color/onPrimary</item>
 
         <item name="android:statusBarColor">?colorPrimary</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
     </style>
 
     <style name="Theme.AdAway.NoActionBar.Red" parent="Theme.MaterialComponents.NoActionBar">
@@ -37,5 +55,6 @@
         <item name="android:statusBarColor">?colorOnSecondary</item>
         <item name="android:navigationBarColor">@color/welcomeBackground</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
     </style>
 </resources>

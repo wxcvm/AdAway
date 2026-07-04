@@ -3,7 +3,6 @@ package org.adaway.helper;
 import android.app.Activity;
 
 import androidx.appcompat.app.AppCompatDelegate;
-import androidx.core.view.WindowCompat;
 
 /**
  * This class is a helper to apply user selected theme on the application activity.
@@ -27,18 +26,16 @@ public final class ThemeHelper {
     public static void applyTheme(Activity activity) {
         AppCompatDelegate.setDefaultNightMode(PreferenceHelper.getDarkThemeMode(activity));
         /*
-         * BUG FIX: targetSdk 35 (Android 15) enforces edge-to-edge display by
-         * default. None of this app's screens were migrated to handle
-         * WindowInsets (padding their content around the status bar / the
-         * ActionBar), so on API 35+ every screen's content draws underneath
-         * the status bar and action bar instead of below them — visible
-         * as the toolbar title overlapping the first list item on
-         * HostsSourcesActivity/PrefsActivity and, likely, elsewhere.
-         * Opt back out of edge-to-edge (restoring this app's pre-SDK-35
-         * layout behavior) until each screen is properly migrated to
-         * consume insets itself — that's a much larger, per-screen change
-         * than belongs in this one-line fix.
+         * NOTE: the fix for the targetSdk-35 edge-to-edge toolbar/content
+         * overlap does NOT belong here. A previous attempt called
+         * WindowCompat.setDecorFitsSystemWindows(activity.getWindow(), true)
+         * from this method, but that call is a deliberate no-op once
+         * edge-to-edge is enforced (Android 15+ platform source literally
+         * short-circuits it: `if (mEdgeToEdgeEnforced) return;`). The
+         * actual, platform-honored opt-out is the theme attribute
+         * android:windowOptOutEdgeToEdgeEnforcement, set on Base.AdAway /
+         * Theme.AdAway.NoActionBar / Theme.AdAway.NoActionBar.Red in
+         * values/styles.xml. See that file for the full explanation.
          */
-        WindowCompat.setDecorFitsSystemWindows(activity.getWindow(), true);
     }
 }
