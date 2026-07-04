@@ -43,9 +43,51 @@ public final class ShellUtils {
         return Shell.cmd(grepCmd).exec().isSuccess();
     }
 
+    /**
+     * BUG FIX (root cause of the persistent "web server failed to start" /
+     * empty-log-file reports): every previous version of this class
+     * executed the bundled native binary directly out of the app's own
+     * APK-mapped native library directory (getApplicationInfo().nativeLibraryDir,
+     * e.g. /data/app/~~.../<pkg>-.../lib/arm64/). Manual on-device testing
+     * confirmed that execve()-ing a file straight out of that location from
+     * a root shell fails outright (before main() ever runs — no log output
+     * of any kind, not even to logcat), while copying the exact same file
+     * to /data/local/tmp and executing it from there works without any
+     * other change. This matches a known Android/SELinux restriction on
+     * treating an app-package-mapped path as an executable target for a
+     * process outside the app's own (zygote-forked) domain, even when that
+     * process is root.
+     * <p>
+     * Stage the executable into /data/local/tmp (same filename, so the
+     * existing pgrep/ps pattern matching in isBundledExecutableRunning()/
+     * killBundledExecutable() keeps working unmodified) before every run.
+     * Shared libraries (libssl.so/libcrypto.so) are left in place and
+     * still reached via LD_LIBRARY_PATH pointing at nativeLibraryDir.
+     *
+     * @return the staged, executable path, or {@code null} if staging failed.
+     */
+    private static String stageExecutable(Context context, String executable) {
+        String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
+        String srcPath = nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
+        String stagedPath = "/data/local/tmp/" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
+
+        Shell.Result result = Shell.cmd(
+                "cp -f " + escapedString(srcPath) + " " + escapedString(stagedPath) +
+                        " && chmod 755 " + escapedString(stagedPath)
+        ).exec();
+        if (!result.isSuccess()) {
+            Timber.e("Failed to stage %s to %s: %s", srcPath, stagedPath, mergeAllLines(result.getErr()));
+            return null;
+        }
+        return stagedPath;
+    }
+
     public static boolean runBundledExecutable(Context context, String executable, String parameters) {
         String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
-        String binPath = nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
+        String binPath = stageExecutable(context, executable);
+        if (binPath == null) {
+            return false;
+        }
         
         // Use /data/local/tmp for logging instead of app filesDir to avoid permission issues
         String logPath = "/data/local/tmp/webserver_start_" + System.currentTimeMillis() + ".log";
@@ -127,6 +169,9 @@ public final class ShellUtils {
      */
     public static boolean runBundledExecutableSync(Context context, String executable, String parameters) {
         String cmd = buildCommand(context, executable, parameters);
+        if (cmd == null) {
+            return false;
+        }
         Timber.d("Executing sync: %s", cmd);
         
         Shell.Result result = Shell.cmd(cmd).exec();
@@ -143,9 +188,11 @@ public final class ShellUtils {
 
     private static String buildCommand(Context context, String executable, String parameters) {
         String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
-        return "LD_LIBRARY_PATH=" + nativeLibraryDir + " " +
-                nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + " " +
-                parameters;
+        String binPath = stageExecutable(context, executable);
+        if (binPath == null) {
+            return null;
+        }
+        return "LD_LIBRARY_PATH=" + nativeLibraryDir + " " + binPath + " " + parameters;
     }
 
     public static void killBundledExecutable(String executable) {
