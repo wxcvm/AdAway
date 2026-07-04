@@ -124,6 +124,7 @@ static int make_cert(const char  *hostname,
     if (!pctx || EVP_PKEY_keygen_init(pctx) <= 0 ||
         EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0 ||
         EVP_PKEY_keygen(pctx, &pkey) <= 0) goto done;
+    LOG_INFO("make_cert(%s): RSA key generated", hostname);
 
     x = X509_new();
     if (!x) goto done;
@@ -181,10 +182,12 @@ static int make_cert(const char  *hostname,
             X509_EXTENSION_free(ext);
             if (!ok) goto done;
         }
+        LOG_INFO("make_cert(%s): extensions added", hostname);
     }
 
     EVP_PKEY *sign_key = ca_key ? ca_key : pkey;
     if (X509_sign(x, sign_key, EVP_sha256()) == 0) goto done;
+    LOG_INFO("make_cert(%s): signed OK", hostname);
 
     *out_cert = x;  x = NULL;
     *out_key  = pkey; pkey = NULL;
@@ -351,6 +354,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--resources") == 0 && i < argc-1) {
             const char *rpath = argv[++i];
+            LOG_INFO("Resources dir: %s", rpath);
 
             char cert_path[PATH_MAX], key_path[PATH_MAX];
             snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", rpath);
@@ -358,12 +362,14 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 
             /* Generate CA cert on first use */
             bool missing = (access(cert_path, F_OK) != 0 || access(key_path, F_OK) != 0);
+            LOG_INFO("CA cert missing=%d (cert=%s key=%s)", missing, cert_path, key_path);
             if (missing) {
                 LOG_INFO("Generating root CA…");
                 if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
                     LOG_FATAL("CA generation failed");
                     return s;
                 }
+                LOG_INFO("Root CA generated OK");
             }
 
             /* Load CA into memory for SNI signing */
@@ -371,6 +377,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
                 LOG_FATAL("Failed to load CA");
                 return s;
             }
+            LOG_INFO("CA loaded OK");
 
             /* TLS opts for the localhost listener (uses the CA cert directly) */
             s.tls_opts.cert = mg_file_read(&mg_fs_posix, cert_path);
@@ -388,6 +395,12 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 /* ── main ─────────────────────────────────────────────────────── */
 int main(int argc, char *argv[]) {
     setsid();
+    /* DIAGNOSTIC CHECKPOINT 1: if this line never shows up in the log,
+       the process is crashing during dynamic linking / static
+       initialization (loading libssl.so/libcrypto.so/libc++_shared.so)
+       before main() itself ever runs any of our code — a completely
+       different class of bug than anything inside main()'s own logic. */
+    LOG_INFO("main() entered, argc=%d", argc);
 
     struct settings s = parse_cli_parameters(argc, argv);
     if (!s.init) {
