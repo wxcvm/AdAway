@@ -16,8 +16,19 @@
 #include "mongoose/mongoose.h"
 
 #define THIS_FILE "WebServer"
-#define HTTP_URL  "http://localhost:80"
-#define HTTPS_URL "https://localhost:443"
+/* BUG FIX: bind the loopback IP literal, not the hostname "localhost".
+   mg_http_listen() resolves a hostname via getaddrinfo()/the hosts file
+   before it can bind, so "localhost" here silently depends on AdAway's
+   own hosts file (or /etc/hosts) still containing a working
+   "127.0.0.1 localhost" line. AdAway's whole purpose is rewriting that
+   file, so any transient state where that line is missing, stale, or
+   still being synced turns into "web server failed to start" with no
+   obvious cause. Binding 127.0.0.1 directly removes that dependency
+   entirely, while intentionally NOT switching to 0.0.0.0 — that would
+   expose the block-page server to the whole LAN instead of just this
+   device, which is why an earlier attempt at 0.0.0.0 was reverted. */
+#define HTTP_URL  "http://127.0.0.1:80"
+#define HTTPS_URL "https://127.0.0.1:443"
 
 /* BUG FIX: __android_log_print() only reaches logcat, never the process's
    own stdout/stderr. The Java side (ShellUtils.runBundledExecutable)
