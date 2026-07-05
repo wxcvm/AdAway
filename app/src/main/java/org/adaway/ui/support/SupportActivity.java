@@ -28,12 +28,22 @@ import org.adaway.R;
 public class SupportActivity extends AppCompatActivity {
     /**
      * The support link.
+     * <p>
+     * BUG FIX: this used to point to the original upstream AdAway
+     * maintainer's PayPal (https://paypal.me/BruceBUJON) — soliciting
+     * donations for someone else through this fork's own UI. Repurposed
+     * to point at this fork's repo, matching the same fix already applied
+     * to UpdateActivity's donate/sponsor buttons.
      */
-    public static final Uri SUPPORT_LINK = parse("https://paypal.me/BruceBUJON");
+    public static final Uri SUPPORT_LINK = parse("https://github.com/wxcvm/AdAway");
     /**
      * The sponsorship link.
+     * <p>
+     * BUG FIX: same issue as SUPPORT_LINK above, previously
+     * https://github.com/sponsors/PerfectSlayer (the original maintainer's
+     * GitHub Sponsors page).
      */
-    public static final Uri SPONSORSHIP_LINK = parse("https://github.com/sponsors/PerfectSlayer");
+    public static final Uri SPONSORSHIP_LINK = parse("https://github.com/wxcvm/AdAway/issues");
 
     public static void animateHeart(ImageView heartImageView) {
         PropertyValuesHolder growScaleX = PropertyValuesHolder.ofFloat(View.SCALE_X, 1F, 1.2F);
