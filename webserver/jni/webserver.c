@@ -133,7 +133,7 @@ static void oom_adjust_setup(void) {
    use_ec selects EC (P-256) instead of RSA-2048 for the generated key.
    OPTIMIZATION: make_domain_ctx() calls this on every SNI cache miss —
    i.e. once per distinct ad/tracker domain the device visits that isn't
-   already in the (small, 48-entry) cache. RSA-2048 keygen costs tens to
+   already in the SNI cache (see SNI_CACHE_SIZE below). RSA-2048 keygen costs tens to
    low-hundreds of milliseconds on a phone CPU; EC P-256 keygen is
    consistently sub-millisecond, and P-256 server certs are supported by
    effectively every modern TLS client. Only the hot path (per-domain
