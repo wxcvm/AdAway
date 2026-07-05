@@ -15,6 +15,7 @@ import org.adaway.db.entity.ListType;
 import org.adaway.util.RegexUtils;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -46,7 +47,7 @@ class SourceLoader {
         this.source = hostsSource;
     }
 
-    void parse(BufferedReader reader, HostListItemDao hostListItemDao) {
+    void parse(BufferedReader reader, HostListItemDao hostListItemDao) throws IOException {
         // Clear current hosts
         hostListItemDao.clearSourceHosts(this.source.getId());
         // Create batch
@@ -72,14 +73,36 @@ class SourceLoader {
         } catch (InterruptedException e) {
             Timber.w(e, "Interrupted while parsing sources.");
             Thread.currentThread().interrupt();
+        } finally {
+            executorService.shutdown();
         }
-        executorService.shutdown();
+        /*
+         * BUG FIX: SourceReader.run() used to catch every exception from
+         * reading the stream (network timeout, connection reset partway
+         * through a large source, etc.), log a warning nobody sees, and
+         * then send the end-of-queue marker as if the read had finished
+         * normally. Downstream, that looks exactly like a fully, cleanly
+         * downloaded source — the parser/inserter threads just process
+         * whatever lines arrived before the failure and finish "successfully".
+         * The result: hosts sources silently truncate mid-file on any
+         * network hiccup, with the app reporting a normal successful
+         * update and no indication anything was cut short. Surface the
+         * failure here so the caller's existing IOException handling
+         * (SourceModel#downloadHostSource / #readSourceFile) can treat
+         * this source as failed instead of silently accepting partial
+         * data as a complete, successful import.
+         */
+        Throwable readError = sourceReader.getError();
+        if (readError != null) {
+            throw new IOException("Hosts source reading was interrupted before completion", readError);
+        }
     }
 
     private static class SourceReader implements Runnable {
         private final BufferedReader reader;
         private final BlockingQueue<String> queue;
         private final int parserCount;
+        private volatile Throwable error;
 
         private SourceReader(BufferedReader reader, BlockingQueue<String> queue, int parserCount) {
             this.reader = reader;
@@ -93,12 +116,21 @@ class SourceLoader {
                 this.reader.lines().forEach(this.queue::add);
             } catch (Throwable t) {
                 Timber.w(t, "Failed to read hosts source.");
+                this.error = t;
             } finally {
                 // Send end of queue marker to parsers
                 for (int i = 0; i < this.parserCount; i++) {
                     this.queue.add(END_OF_QUEUE_MARKER);
                 }
             }
+        }
+
+        /**
+         * @return the error that interrupted reading, or {@code null} if the
+         * source was read to completion without issue.
+         */
+        Throwable getError() {
+            return this.error;
         }
     }
 
