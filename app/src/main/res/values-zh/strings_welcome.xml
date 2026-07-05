@@ -46,8 +46,8 @@
     <!-- Support -->
     <string name="welcome_support_logo">支持</string>
     <string name="welcome_support_header">支持我！</string>
-    <string name="welcome_support_summary">AdAway 是一款我利用业余时间开发的自由开源应用。如果你喜欢它，请随时表达你的支持：</string>
-    <string name="welcome_support_button">通过 PayPal 捐赠</string>
+    <string name="welcome_support_summary">这是 AdAway 的一个个人 fork 版本。如果你喜欢它，欢迎查看源码或反馈问题：</string>
+    <string name="welcome_support_button">查看源码</string>
     <string name="welcome_support_telemetry_summary">你喜欢 bug 吗？我也不喜欢。</string>
     <string name="welcome_support_telemetry_button">启用遥测，向我发送崩溃报告</string>
 

@@ -67,7 +67,7 @@
             android:drawablePadding="8dp"
             android:text="@string/welcome_support_button"
             android:textAppearance="@style/TextAppearance.AppCompat.Large"
-            app:drawableStartCompat="@drawable/paypal" />
+            app:drawableStartCompat="@drawable/ic_github_32dp" />
 
     </androidx.cardview.widget.CardView>
 
@@ -92,7 +92,7 @@
             android:drawablePadding="8dp"
             android:text="@string/support_sponsorship_button"
             android:textAppearance="@style/TextAppearance.AppCompat.Large"
-            app:drawableStartCompat="@drawable/ic_github_32dp" />
+            app:drawableStartCompat="@drawable/ic_bug_report_24dp" />
 
     </androidx.cardview.widget.CardView>
 
