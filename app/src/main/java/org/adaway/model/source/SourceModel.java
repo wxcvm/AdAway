@@ -40,6 +40,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.util.concurrent.TimeUnit;
 import java.net.MalformedURLException;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -384,8 +385,22 @@ public class SourceModel {
     @NonNull
     private OkHttpClient getHttpClient() {
         if (this.cachedHttpClient == null) {
+            /*
+             * BUG FIX: OkHttp's defaults (10s connect / 10s read / 10s write)
+             * are tight for some of the larger hosts sources this app deals
+             * with (hundreds of thousands of lines). A single stall on a
+             * flaky mobile connection was enough to trip the read timeout
+             * partway through - previously that got silently swallowed
+             * elsewhere (see SourceLoader) and treated as a successful,
+             * complete download. That's fixed separately, but a more
+             * generous timeout here also reduces how often it happens in
+             * the first place.
+             */
             this.cachedHttpClient = new OkHttpClient.Builder()
                     .cache(new Cache(this.context.getCacheDir(), CACHE_SIZE))
+                    .connectTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(30, TimeUnit.SECONDS)
+                    .writeTimeout(30, TimeUnit.SECONDS)
                     .build();
         }
         return this.cachedHttpClient;
@@ -475,8 +490,15 @@ public class SourceModel {
      *
      * @param hostsSource The host source to parse.
      * @param reader      The host source reader.
+     * @throws IOException If the source could not be read to completion (e.g. a
+     *                      network timeout partway through downloading a large
+     *                      source) - callers already catch and wrap IOException
+     *                      from this method's siblings in the same try block, so
+     *                      a partially-read source is now treated as a failed
+     *                      copy instead of silently importing truncated data as
+     *                      if it were a complete, successful update.
      */
-    private void parseSourceInputStream(HostsSource hostsSource, BufferedReader reader) {
+    private void parseSourceInputStream(HostsSource hostsSource, BufferedReader reader) throws IOException {
         setState(R.string.status_parse_source, hostsSource.getLabel());
         long startTime = System.currentTimeMillis();
         new SourceLoader(hostsSource).parse(reader, this.hostListItemDao);
