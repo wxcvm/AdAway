@@ -94,6 +94,18 @@ class SourceLoader {
          */
         Throwable readError = sourceReader.getError();
         if (readError != null) {
+            /*
+             * Discard whatever partial data this failed read already
+             * inserted. Keeping a truncated snapshot around gives false
+             * confidence (some domains from this source silently missing,
+             * with no indication) until the next successful sync overwrites
+             * it. An explicit "this source currently contributes nothing"
+             * is safer and more honest than an undetectably-incomplete one
+             * — and since the failure propagates via the exception thrown
+             * right after this, the next sync will retry this source
+             * automatically anyway.
+             */
+            hostListItemDao.clearSourceHosts(this.source.getId());
             throw new IOException("Hosts source reading was interrupted before completion", readError);
         }
     }
