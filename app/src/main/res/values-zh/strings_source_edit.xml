@@ -2,6 +2,7 @@
 <resources>
     <string name="source_edit_title">编辑来源</string>
     <string name="source_edit_add_title">添加来源</string>
+    <string name="source_edit_not_found">未找到该来源,可能已被删除</string>
     <!-- Hosts source edition -->
     <string name="source_edit_label">标签</string>
     <string name="source_edit_label_required">需要标签</string>

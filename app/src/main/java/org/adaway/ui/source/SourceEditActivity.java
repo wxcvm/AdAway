@@ -7,6 +7,7 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult;
@@ -108,14 +109,32 @@ public class SourceEditActivity extends AppCompatActivity {
         if (this.editing) {
             DISK_IO_EXECUTOR.execute(() -> {
                 Optional<HostsSource> hostsSource = this.hostsSourceDao.getById(sourceId);
-                hostsSource.ifPresent(source -> {
+                if (hostsSource.isPresent()) {
+                    HostsSource source = hostsSource.get();
                     this.edited = source;
                     MAIN_THREAD_EXECUTOR.execute(() -> {
                         applyInitialValues(source);
                         bindLocation();
                         bindFormats();
                     });
-                });
+                } else {
+                    /*
+                     * BUG FIX: previously this branch did nothing at all
+                     * when the lookup came back empty (e.g. the source was
+                     * deleted, or the row was momentarily unavailable
+                     * during a background hosts-source sync). The screen
+                     * was left half-initialized — title still says "Edit
+                     * source" but the label/location fields were never
+                     * populated and bindLocation()/bindFormats() were
+                     * never called, so the format toggle buttons didn't
+                     * even work. Bail out to a usable state instead of a
+                     * silently broken one.
+                     */
+                    MAIN_THREAD_EXECUTOR.execute(() -> {
+                        Toast.makeText(this, R.string.source_edit_not_found, Toast.LENGTH_SHORT).show();
+                        finish();
+                    });
+                }
             });
         } else {
             setTitle(R.string.source_edit_add_title);
