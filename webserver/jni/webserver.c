@@ -10,6 +10,7 @@
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
+#include <openssl/ec.h>
 #include <openssl/pem.h>
 #include <openssl/bio.h>
 #include <openssl/rand.h>
@@ -59,8 +60,14 @@
 #define IDLE_TIMEOUT_MS   10000
 #define BLOCK_IMAGE_COUNT 7
 
-/* SNI per-domain certificate cache */
-#define SNI_CACHE_SIZE 48
+/* SNI per-domain certificate cache.
+   OPTIMIZATION: 48 was tight for real browsing sessions — a single page
+   with a dozen distinct ad/tracker domains, multiplied across a few
+   tabs/apps, evicts entries before they get reused, forcing needless
+   re-generation (even with the EC speedup above, still not free).
+   256 entries at ~264 bytes each (hostname[256] + pointer) is ~68KB —
+   negligible for a process that otherwise stays resident. */
+#define SNI_CACHE_SIZE 256
 struct sni_entry { char hostname[256]; SSL_CTX *ctx; };
 static struct sni_entry s_sni_cache[SNI_CACHE_SIZE];
 static int              s_sni_pos = 0;
@@ -122,13 +129,24 @@ static void oom_adjust_setup(void) {
    san_override, if non-NULL, replaces the default "DNS:hostname" SAN
    string — used for the localhost leaf cert, which needs both
    "DNS:localhost" and "IP:127.0.0.1" since clients connecting to the
-   literal loopback address check the IP SAN, not just the CN. */
+   literal loopback address check the IP SAN, not just the CN.
+   use_ec selects EC (P-256) instead of RSA-2048 for the generated key.
+   OPTIMIZATION: make_domain_ctx() calls this on every SNI cache miss —
+   i.e. once per distinct ad/tracker domain the device visits that isn't
+   already in the (small, 48-entry) cache. RSA-2048 keygen costs tens to
+   low-hundreds of milliseconds on a phone CPU; EC P-256 keygen is
+   consistently sub-millisecond, and P-256 server certs are supported by
+   effectively every modern TLS client. Only the hot path (per-domain
+   leaf certs) is switched — the root CA and the localhost leaf cert are
+   each generated at most once per process start, so there's nothing to
+   gain there and no reason to touch what's already known-working. */
 static int make_cert(const char  *hostname,
                      X509        *ca_cert,   /* NULL → self-signed root CA */
                      EVP_PKEY    *ca_key,    /* signing key                */
                      int          is_ca,     /* 1 → add CA extensions      */
                      int          validity_days,
                      const char  *san_override,
+                     int          use_ec,
                      X509       **out_cert,
                      EVP_PKEY   **out_key) {
     int ret = EXIT_FAILURE;
@@ -137,11 +155,18 @@ static int make_cert(const char  *hostname,
     X509         *x    = NULL;
     X509_NAME    *name = NULL;
 
-    pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
-    if (!pctx || EVP_PKEY_keygen_init(pctx) <= 0 ||
-        EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0 ||
-        EVP_PKEY_keygen(pctx, &pkey) <= 0) goto done;
-    LOG_INFO("make_cert(%s): RSA key generated", hostname);
+    if (use_ec) {
+        pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+        if (!pctx || EVP_PKEY_keygen_init(pctx) <= 0 ||
+            EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx, NID_X9_62_prime256v1) <= 0 ||
+            EVP_PKEY_keygen(pctx, &pkey) <= 0) goto done;
+    } else {
+        pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
+        if (!pctx || EVP_PKEY_keygen_init(pctx) <= 0 ||
+            EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0 ||
+            EVP_PKEY_keygen(pctx, &pkey) <= 0) goto done;
+    }
+    LOG_INFO("make_cert(%s): %s key generated", hostname, use_ec ? "EC" : "RSA");
 
     x = X509_new();
     if (!x) goto done;
@@ -225,7 +250,7 @@ done:
 /* Generate root CA cert + key and write as PEM files */
 static int generate_root_ca(const char *cert_path, const char *key_path) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
-    int ret = make_cert("AdAway Root CA", NULL, NULL, 1, 3650, NULL, &cert, &key);
+    int ret = make_cert("AdAway Root CA", NULL, NULL, 1, 3650, NULL, /*use_ec=*/0, &cert, &key);
     if (ret != EXIT_SUCCESS) return ret;
     ret = EXIT_FAILURE;
     FILE *f;
@@ -301,7 +326,7 @@ static struct mg_str key_to_pem_mgstr(EVP_PKEY *key) {
 static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
     if (make_cert("localhost", ca->cert, ca->key, 0, 397,
-                  "DNS:localhost,IP:127.0.0.1", &cert, &key) != EXIT_SUCCESS)
+                  "DNS:localhost,IP:127.0.0.1", /*use_ec=*/0, &cert, &key) != EXIT_SUCCESS)
         return EXIT_FAILURE;
     out_opts->cert = cert_to_pem_mgstr(cert);
     out_opts->key  = key_to_pem_mgstr(key);
@@ -314,7 +339,7 @@ static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts
 
 static SSL_CTX *make_domain_ctx(const char *hostname, struct ca_state *ca) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
-    if (make_cert(hostname, ca->cert, ca->key, 0, 1, NULL, &cert, &key) != EXIT_SUCCESS)
+    if (make_cert(hostname, ca->cert, ca->key, 0, 1, NULL, /*use_ec=*/1, &cert, &key) != EXIT_SUCCESS)
         return NULL;
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) goto fail;
@@ -421,6 +446,14 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     snprintf(img_path, sizeof(img_path), "%s/img_%02d.webp", s->resource_dir, idx);
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
+    /* OPTIMIZATION: every blocked ad slot on every page load re-requests
+       this same placeholder image from the local server with no caching
+       hint at all, so the client re-fetches it every single time instead
+       of ever reusing a cached copy — needless disk I/O and CPU work on
+       a mobile device that may be handling this dozens of times a
+       minute. These images are static build resources that never change
+       at runtime, so let clients cache them. */
+    o.extra_headers = "Cache-Control: public, max-age=86400\r\n";
     mg_http_serve_file(c, hm, img_path, &o);
 }
 
