@@ -15,12 +15,15 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.TimeUnit;
+
+import javax.net.ssl.HttpsURLConnection;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -130,18 +133,40 @@ public class WebServerUtils {
             return R.string.pref_webserver_state_not_running;
         }
 
+        /*
+         * BUG FIX: this used to reuse the OkHttp `client` above for the
+         * HTTPS check too. OkHttp builds its own independent TrustManager
+         * from TrustManagerFactory.getDefaultAlgorithm() — it does NOT
+         * consult this app's network_security_config.xml, which has a
+         * <domain-config> specifically for "localhost" trusting both
+         * system- and user-installed certificates. Per-domain
+         * network_security_config trust-anchor overrides are only honored
+         * by Android's own platform HttpsURLConnection stack. The result:
+         * a user who installed the cert via the normal (non-root) "user"
+         * KeyChain path — the only path available without root, and the
+         * one this fragment's own dialog offers — got an SSL handshake
+         * failure here every single time, permanently reported as
+         * "certificate not installed" no matter what they did. Use
+         * HttpsURLConnection instead of the OkHttp client for this one
+         * check so the NSC-configured user-cert trust actually applies.
+         */
+        HttpsURLConnection connection = null;
         try {
-            try (Response r = client.newCall(
-                    new Request.Builder().url(TEST_URL).build()
-            ).execute()) {
-                return r.isSuccessful()
-                        ? R.string.pref_webserver_state_running_and_installed
-                        : R.string.pref_webserver_state_running_not_installed;
-            }
+            connection = (HttpsURLConnection) new URL(TEST_URL).openConnection();
+            connection.setConnectTimeout(3000);
+            connection.setReadTimeout(3000);
+            int code = connection.getResponseCode();
+            return (code >= 200 && code < 300)
+                    ? R.string.pref_webserver_state_running_and_installed
+                    : R.string.pref_webserver_state_running_not_installed;
         } catch (IOException e) {
             return isSslError(e)
                     ? R.string.pref_webserver_state_running_not_installed
                     : R.string.pref_webserver_state_not_running;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 
