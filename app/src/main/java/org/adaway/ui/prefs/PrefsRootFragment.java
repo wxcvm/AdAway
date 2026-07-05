@@ -114,18 +114,9 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
 
     @Override
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
-        Context context = requireContext();
-        // Restart web server on icon change
-        if (context.getString(R.string.pref_webserver_icon_key).equals(key)) {
-            AppExecutors executors = AppExecutors.getInstance();
-            executors.diskIO().execute(() -> {
-                if (isWebServerRunning()) {
-                    stopWebServer();
-                    startWebServer(context);
-                }
-                executors.mainThread().execute(this::updateWebServerState);
-            });
-        }
+        // Intentionally left without special handling: the only entry that
+        // used to live here (webserverIcon) was removed - see
+        // PreferenceHelper.getWebServerIcon() removal for why.
     }
 
     private void registerForOpenHostActivity() {

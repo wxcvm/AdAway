@@ -198,17 +198,6 @@ public final class PreferenceHelper {
         );
     }
 
-    public static boolean getWebServerIcon(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(
-                Constants.PREFS_NAME,
-                Context.MODE_PRIVATE
-        );
-        return prefs.getBoolean(
-                context.getString(R.string.pref_webserver_icon_key),
-                context.getResources().getBoolean(R.bool.pref_webserver_icon_def)
-        );
-    }
-
     public static AdBlockMethod getAdBlockMethod(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(
                 Constants.PREFS_NAME,
