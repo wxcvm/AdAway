@@ -232,21 +232,43 @@ public class WebServerUtils {
         boolean ok;
 
         if (sdk >= 34) {
-            // Android 14+: mount a tmpfs over /system/etc/security/cacerts,
-            // copy existing certs into it, then add ours.
+            /*
+             * BUG FIX (best-effort, not confirmed via on-device SELinux
+             * denial logs): none of these commands ever set an SELinux
+             * label on the files this creates. Mounting a fresh tmpfs over
+             * /system/etc/security/cacerts replaces the directory's
+             * contents with files that get a generic/inherited label, not
+             * the specific type Android's certificate loading code
+             * (running as system_server, in a tightly confined SELinux
+             * domain) is allowed to read. The files can be perfectly
+             * present, correctly named and permissioned, and still be
+             * silently invisible to the OS purely because of this label
+             * mismatch - "cp worked, chmod worked, toast said success" is
+             * exactly what you'd see either way. Capture the directory's
+             * actual context *before* wiping it with the tmpfs mount, and
+             * restore that same context to the new files afterward -
+             * whatever the correct value is on this specific device/vendor
+             * image, rather than guessing a hardcoded SELinux type that
+             * might be wrong for this ROM.
+             */
             ok = Shell.cmd(
                 "mkdir -p /data/local/tmp/adaway_cacerts",
                 "cp /system/etc/security/cacerts/* /data/local/tmp/adaway_cacerts/ 2>/dev/null || true",
                 "cp " + certPath + " /data/local/tmp/adaway_cacerts/" + destName,
                 "chmod 644 /data/local/tmp/adaway_cacerts/" + destName,
+                "SEL_CTX=$(stat -c '%C' /system/etc/security/cacerts 2>/dev/null)",
                 "mount -t tmpfs tmpfs /system/etc/security/cacerts",
                 "cp /data/local/tmp/adaway_cacerts/* /system/etc/security/cacerts/",
                 "chown -R root:root /system/etc/security/cacerts",
                 "chmod 644 /system/etc/security/cacerts/*",
+                "[ -n \"$SEL_CTX\" ] && chcon -R \"$SEL_CTX\" /system/etc/security/cacerts || true",
                 "rm -rf /data/local/tmp/adaway_cacerts"
             ).exec().isSuccess();
         } else {
             // Android ≤ 13: remount /system rw and write directly.
+            // (Files created here inherit the existing directory's context
+            // rather than a fresh tmpfs's, so this path isn't affected by
+            // the same issue - no chcon needed.)
             ok = Shell.cmd(
                 "mount -o remount,rw /system 2>/dev/null || true",
                 "cp " + certPath + " /system/etc/security/cacerts/" + destName,
