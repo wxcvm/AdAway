@@ -1,6 +1,5 @@
 package org.adaway.ui.prefs;
 
-import static android.os.Build.VERSION.SDK_INT;
 import static android.provider.Settings.ACTION_SECURITY_SETTINGS;
 import static android.widget.Toast.LENGTH_SHORT;
 import static org.adaway.model.root.MountType.READ_ONLY;
@@ -25,7 +24,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
-import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.widget.Toast;
 
@@ -303,28 +301,45 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         Preference webServerTest = findPreference(getString(R.string.pref_webserver_certificate_key));
         assert webServerTest != null : PREFERENCE_NOT_FOUND;
         webServerTest.setOnPreferenceClickListener(preference -> {
-            if (SDK_INT < VERSION_CODES.R) {
-                // Offer system CA install (trusted by all apps / VPNs) if not yet done
-                Context ctx = requireContext();
-                if (isSystemCertificateInstalled(ctx)) {
-                    installUserCertificate(ctx);
-                } else {
-                    new com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
-                        .setTitle(R.string.pref_webserver_certificate_dialog_title)
-                        .setMessage(R.string.pref_webserver_system_ca_prompt)
-                        .setPositiveButton(R.string.pref_webserver_system_ca_install, (d, w) -> {
-                            boolean ok = installSystemCertificate(ctx);
-                            int msg = ok ? R.string.pref_webserver_system_ca_success
-                                         : R.string.pref_webserver_system_ca_failed;
-                            android.widget.Toast.makeText(ctx, msg,
-                                android.widget.Toast.LENGTH_LONG).show();
-                        })
-                        .setNegativeButton(R.string.pref_webserver_certificate_user_only,
-                            (d, w) -> installUserCertificate(ctx))
-                        .show();
-                }
+            /*
+             * BUG FIX: this used to gate the whole system-CA-install dialog
+             * behind `SDK_INT < VERSION_CODES.R` (Android 11), so on every
+             * device running Android 11+ — the overwhelming majority of
+             * devices today — this branch was unreachable and users always
+             * fell straight to the file-export flow below, which can only
+             * ever produce a *user* certificate (shows up under "User
+             * credentials", never "Trusted credentials").
+             *
+             * installSystemCertificate() itself is entirely root-shell
+             * based (mount/cp via `su`, not any official Android KeyChain
+             * API), and already has its own internal branch for Android
+             * 14+ (tmpfs overlay) vs older versions (direct remount) — it
+             * was clearly updated to support modern Android after this
+             * SDK_INT gate was written, but the gate itself was never
+             * updated to match, leaving a fully working, modern
+             * implementation unreachable from the UI. This whole screen
+             * already assumes root access (it's the "root based ad
+             * blocker" screen), so there's no reason to restrict the
+             * root-based system-install path by Android version at all —
+             * offer it unconditionally.
+             */
+            Context ctx = requireContext();
+            if (isSystemCertificateInstalled(ctx)) {
+                installUserCertificate(ctx);
             } else {
-                this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt");
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                    .setTitle(R.string.pref_webserver_certificate_dialog_title)
+                    .setMessage(R.string.pref_webserver_system_ca_prompt)
+                    .setPositiveButton(R.string.pref_webserver_system_ca_install, (d, w) -> {
+                        boolean ok = installSystemCertificate(ctx);
+                        int msg = ok ? R.string.pref_webserver_system_ca_success
+                                     : R.string.pref_webserver_system_ca_failed;
+                        android.widget.Toast.makeText(ctx, msg,
+                            android.widget.Toast.LENGTH_LONG).show();
+                    })
+                    .setNegativeButton(R.string.pref_webserver_certificate_user_only,
+                        (d, w) -> installUserCertificate(ctx))
+                    .show();
             }
             return true;
         });
