@@ -15,7 +15,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -25,7 +24,6 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.TimeUnit;
 
-import javax.net.ssl.HttpsURLConnection;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -116,7 +114,7 @@ public class WebServerUtils {
     }
 
     @StringRes
-    public static int getWebServerState() {
+    public static int getWebServerState(Context context) {
         if (!isWebServerRunning()) return R.string.pref_webserver_state_not_running;
 
         OkHttpClient client = new OkHttpClient.Builder()
@@ -136,40 +134,30 @@ public class WebServerUtils {
         }
 
         /*
-         * BUG FIX: this used to reuse the OkHttp `client` above for the
-         * HTTPS check too. OkHttp builds its own independent TrustManager
-         * from TrustManagerFactory.getDefaultAlgorithm() — it does NOT
-         * consult this app's network_security_config.xml, which has a
-         * <domain-config> specifically for "localhost" trusting both
-         * system- and user-installed certificates. Per-domain
-         * network_security_config trust-anchor overrides are only honored
-         * by Android's own platform HttpsURLConnection stack. The result:
-         * a user who installed the cert via the normal (non-root) "user"
-         * KeyChain path — the only path available without root, and the
-         * one this fragment's own dialog offers — got an SSL handshake
-         * failure here every single time, permanently reported as
-         * "certificate not installed" no matter what they did. Use
-         * HttpsURLConnection instead of the OkHttp client for this one
-         * check so the NSC-configured user-cert trust actually applies.
+         * BUG FIX: previously determined "is the cert installed" by
+         * actually performing an HTTPS handshake (HttpsURLConnection) and
+         * relying on network_security_config's per-domain trust-anchor
+         * override to correctly consult both the system and user cert
+         * stores. Confirmed on a real device this doesn't reliably
+         * reflect reality: opening the exact same test URL in a real
+         * browser (a separate process) worked perfectly with no
+         * certificate warning at all, while this check kept reporting
+         * "not installed" even after fully force-closing and restarting
+         * AdAway itself (ruling out any per-process trust-manager
+         * caching as the explanation). Whatever the exact platform/OEM
+         * reason HttpsURLConnection wasn't picking this up, don't depend
+         * on live OS-level TLS trust resolution for a yes/no answer we
+         * can determine more directly and reliably: check whether a file
+         * matching our CA's hash exists in either the system or user
+         * trust-anchor directory - the same direct approach
+         * isSystemCertificateInstalled() already used successfully for
+         * the system side.
          */
-        HttpsURLConnection connection = null;
-        try {
-            connection = (HttpsURLConnection) new URL(TEST_URL).openConnection();
-            connection.setConnectTimeout(3000);
-            connection.setReadTimeout(3000);
-            int code = connection.getResponseCode();
-            return (code >= 200 && code < 300)
-                    ? R.string.pref_webserver_state_running_and_installed
-                    : R.string.pref_webserver_state_running_not_installed;
-        } catch (IOException e) {
-            return isSslError(e)
-                    ? R.string.pref_webserver_state_running_not_installed
-                    : R.string.pref_webserver_state_not_running;
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
-        }
+        boolean installed = isSystemCertificateInstalled(context)
+                || isUserCertificateInstalled(context);
+        return installed
+                ? R.string.pref_webserver_state_running_and_installed
+                : R.string.pref_webserver_state_running_not_installed;
     }
 
     /**
@@ -282,6 +270,30 @@ public class WebServerUtils {
     /**
      * Check whether AdAway's CA is already present in the system trust store.
      */
+    /**
+     * Check whether AdAway's CA is installed as a *user* trust anchor by
+     * looking directly at the on-disk file Android's KeyChain writes
+     * user-installed CA certs to, rather than performing a live HTTPS
+     * handshake and hoping network_security_config's per-domain trust
+     * override kicks in. See the comment in getWebServerState() for why.
+     */
+    public static boolean isUserCertificateInstalled(Context context) {
+        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+        if (!Files.isRegularFile(certFile)) return false;
+        String hash;
+        try {
+            hash = computeSubjectHashOld(certFile);
+        } catch (IOException | CertificateException | NoSuchAlgorithmException e) {
+            Timber.w(e, "Failed to compute certificate hash.");
+            return false;
+        }
+        // Standard AOSP location for KeyChain-installed user CA certs
+        // since Android 4.0 (ICS) - readable directly with root, same
+        // approach as isSystemCertificateInstalled() above.
+        return Shell.cmd("test -f /data/misc/user/0/cacerts-added/" + hash + ".0")
+                    .exec().isSuccess();
+    }
+
     public static boolean isSystemCertificateInstalled(Context context) {
         Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) return false;
@@ -388,16 +400,5 @@ public class WebServerUtils {
                                         String name, Path target) throws IOException {
         Path out = target.resolve(name);
         if (!Files.isRegularFile(out)) Files.copy(am.open(name), out);
-    }
-
-    private static boolean isSslError(Throwable t) {
-        while (t != null) {
-            if (t instanceof javax.net.ssl.SSLException
-                    || t instanceof java.security.cert.CertificateException
-                    || t instanceof java.security.cert.CertPathValidatorException)
-                return true;
-            t = t.getCause();
-        }
-        return false;
     }
 }
