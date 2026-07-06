@@ -15,7 +15,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -25,7 +24,6 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.TimeUnit;
 
-import javax.net.ssl.HttpsURLConnection;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -116,7 +114,7 @@ public class WebServerUtils {
     }
 
     @StringRes
-    public static int getWebServerState() {
+    public static int getWebServerState(Context context) {
         if (!isWebServerRunning()) return R.string.pref_webserver_state_not_running;
 
         OkHttpClient client = new OkHttpClient.Builder()
@@ -136,40 +134,30 @@ public class WebServerUtils {
         }
 
         /*
-         * BUG FIX: this used to reuse the OkHttp `client` above for the
-         * HTTPS check too. OkHttp builds its own independent TrustManager
-         * from TrustManagerFactory.getDefaultAlgorithm() — it does NOT
-         * consult this app's network_security_config.xml, which has a
-         * <domain-config> specifically for "localhost" trusting both
-         * system- and user-installed certificates. Per-domain
-         * network_security_config trust-anchor overrides are only honored
-         * by Android's own platform HttpsURLConnection stack. The result:
-         * a user who installed the cert via the normal (non-root) "user"
-         * KeyChain path — the only path available without root, and the
-         * one this fragment's own dialog offers — got an SSL handshake
-         * failure here every single time, permanently reported as
-         * "certificate not installed" no matter what they did. Use
-         * HttpsURLConnection instead of the OkHttp client for this one
-         * check so the NSC-configured user-cert trust actually applies.
+         * BUG FIX: previously determined "is the cert installed" by
+         * actually performing an HTTPS handshake (HttpsURLConnection) and
+         * relying on network_security_config's per-domain trust-anchor
+         * override to correctly consult both the system and user cert
+         * stores. Confirmed on a real device this doesn't reliably
+         * reflect reality: opening the exact same test URL in a real
+         * browser (a separate process) worked perfectly with no
+         * certificate warning at all, while this check kept reporting
+         * "not installed" even after fully force-closing and restarting
+         * AdAway itself (ruling out any per-process trust-manager
+         * caching as the explanation). Whatever the exact platform/OEM
+         * reason HttpsURLConnection wasn't picking this up, don't depend
+         * on live OS-level TLS trust resolution for a yes/no answer we
+         * can determine more directly and reliably: check whether a file
+         * matching our CA's hash exists in either the system or user
+         * trust-anchor directory - the same direct approach
+         * isSystemCertificateInstalled() already used successfully for
+         * the system side.
          */
-        HttpsURLConnection connection = null;
-        try {
-            connection = (HttpsURLConnection) new URL(TEST_URL).openConnection();
-            connection.setConnectTimeout(3000);
-            connection.setReadTimeout(3000);
-            int code = connection.getResponseCode();
-            return (code >= 200 && code < 300)
-                    ? R.string.pref_webserver_state_running_and_installed
-                    : R.string.pref_webserver_state_running_not_installed;
-        } catch (IOException e) {
-            return isSslError(e)
-                    ? R.string.pref_webserver_state_running_not_installed
-                    : R.string.pref_webserver_state_not_running;
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
-        }
+        boolean installed = isSystemCertificateInstalled(context)
+                || isUserCertificateInstalled(context);
+        return installed
+                ? R.string.pref_webserver_state_running_and_installed
+                : R.string.pref_webserver_state_running_not_installed;
     }
 
     /**
@@ -244,21 +232,43 @@ public class WebServerUtils {
         boolean ok;
 
         if (sdk >= 34) {
-            // Android 14+: mount a tmpfs over /system/etc/security/cacerts,
-            // copy existing certs into it, then add ours.
+            /*
+             * BUG FIX (best-effort, not confirmed via on-device SELinux
+             * denial logs): none of these commands ever set an SELinux
+             * label on the files this creates. Mounting a fresh tmpfs over
+             * /system/etc/security/cacerts replaces the directory's
+             * contents with files that get a generic/inherited label, not
+             * the specific type Android's certificate loading code
+             * (running as system_server, in a tightly confined SELinux
+             * domain) is allowed to read. The files can be perfectly
+             * present, correctly named and permissioned, and still be
+             * silently invisible to the OS purely because of this label
+             * mismatch - "cp worked, chmod worked, toast said success" is
+             * exactly what you'd see either way. Capture the directory's
+             * actual context *before* wiping it with the tmpfs mount, and
+             * restore that same context to the new files afterward -
+             * whatever the correct value is on this specific device/vendor
+             * image, rather than guessing a hardcoded SELinux type that
+             * might be wrong for this ROM.
+             */
             ok = Shell.cmd(
                 "mkdir -p /data/local/tmp/adaway_cacerts",
                 "cp /system/etc/security/cacerts/* /data/local/tmp/adaway_cacerts/ 2>/dev/null || true",
                 "cp " + certPath + " /data/local/tmp/adaway_cacerts/" + destName,
                 "chmod 644 /data/local/tmp/adaway_cacerts/" + destName,
+                "SEL_CTX=$(stat -c '%C' /system/etc/security/cacerts 2>/dev/null)",
                 "mount -t tmpfs tmpfs /system/etc/security/cacerts",
                 "cp /data/local/tmp/adaway_cacerts/* /system/etc/security/cacerts/",
                 "chown -R root:root /system/etc/security/cacerts",
                 "chmod 644 /system/etc/security/cacerts/*",
+                "[ -n \"$SEL_CTX\" ] && chcon -R \"$SEL_CTX\" /system/etc/security/cacerts || true",
                 "rm -rf /data/local/tmp/adaway_cacerts"
             ).exec().isSuccess();
         } else {
             // Android ≤ 13: remount /system rw and write directly.
+            // (Files created here inherit the existing directory's context
+            // rather than a fresh tmpfs's, so this path isn't affected by
+            // the same issue - no chcon needed.)
             ok = Shell.cmd(
                 "mount -o remount,rw /system 2>/dev/null || true",
                 "cp " + certPath + " /system/etc/security/cacerts/" + destName,
@@ -282,6 +292,30 @@ public class WebServerUtils {
     /**
      * Check whether AdAway's CA is already present in the system trust store.
      */
+    /**
+     * Check whether AdAway's CA is installed as a *user* trust anchor by
+     * looking directly at the on-disk file Android's KeyChain writes
+     * user-installed CA certs to, rather than performing a live HTTPS
+     * handshake and hoping network_security_config's per-domain trust
+     * override kicks in. See the comment in getWebServerState() for why.
+     */
+    public static boolean isUserCertificateInstalled(Context context) {
+        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+        if (!Files.isRegularFile(certFile)) return false;
+        String hash;
+        try {
+            hash = computeSubjectHashOld(certFile);
+        } catch (IOException | CertificateException | NoSuchAlgorithmException e) {
+            Timber.w(e, "Failed to compute certificate hash.");
+            return false;
+        }
+        // Standard AOSP location for KeyChain-installed user CA certs
+        // since Android 4.0 (ICS) - readable directly with root, same
+        // approach as isSystemCertificateInstalled() above.
+        return Shell.cmd("test -f /data/misc/user/0/cacerts-added/" + hash + ".0")
+                    .exec().isSuccess();
+    }
+
     public static boolean isSystemCertificateInstalled(Context context) {
         Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) return false;
@@ -388,16 +422,5 @@ public class WebServerUtils {
                                         String name, Path target) throws IOException {
         Path out = target.resolve(name);
         if (!Files.isRegularFile(out)) Files.copy(am.open(name), out);
-    }
-
-    private static boolean isSslError(Throwable t) {
-        while (t != null) {
-            if (t instanceof javax.net.ssl.SSLException
-                    || t instanceof java.security.cert.CertificateException
-                    || t instanceof java.security.cert.CertPathValidatorException)
-                return true;
-            t = t.getCause();
-        }
-        return false;
     }
 }

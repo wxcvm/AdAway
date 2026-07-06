@@ -391,7 +391,7 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     }
-                    int summaryResId = getWebServerState();
+                    int summaryResId = getWebServerState(requireContext());
                     executors.mainThread().execute(
                             () -> webServerTest.setSummary(summaryResId)
                     );
