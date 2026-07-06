@@ -12,7 +12,6 @@ import static org.adaway.util.Constants.PREFS_NAME;
 import static org.adaway.util.WebServerUtils.TEST_URL;
 import static org.adaway.util.WebServerUtils.copyCertificate;
 import static org.adaway.util.WebServerUtils.getWebServerState;
-import static org.adaway.util.WebServerUtils.installUserCertificate;
 import static org.adaway.util.WebServerUtils.installSystemCertificate;
 import static org.adaway.util.WebServerUtils.isSystemCertificateInstalled;
 import static org.adaway.util.WebServerUtils.isWebServerRunning;
@@ -323,9 +322,22 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
              * root-based system-install path by Android version at all —
              * offer it unconditionally.
              */
+            /*
+             * BUG FIX: this used to call installUserCertificate(ctx), which
+             * goes through KeyChain.createInstallIntent() to install the CA
+             * cert directly. On this device (and apparently others), that
+             * flow gets rejected outright by the system with "Unable to
+             * install CA certificate ... must be installed through
+             * Settings" - confirmed on-device, not a hypothesis. That's
+             * presumably exactly why this file-export flow
+             * (prepareCertificateLauncher) existed in the first place
+             * before the SDK_INT gate above was removed - it was the
+             * correct fallback for exactly this restriction, just gated
+             * off for the wrong set of devices. Use it here instead.
+             */
             Context ctx = requireContext();
             if (isSystemCertificateInstalled(ctx)) {
-                installUserCertificate(ctx);
+                this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt");
             } else {
                 new com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
                     .setTitle(R.string.pref_webserver_certificate_dialog_title)
@@ -338,7 +350,7 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
                             android.widget.Toast.LENGTH_LONG).show();
                     })
                     .setNegativeButton(R.string.pref_webserver_certificate_user_only,
-                        (d, w) -> installUserCertificate(ctx))
+                        (d, w) -> this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt"))
                     .show();
             }
             return true;

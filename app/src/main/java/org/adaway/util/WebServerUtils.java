@@ -18,6 +18,8 @@ import java.io.OutputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -215,16 +217,27 @@ public class WebServerUtils {
         }
         String certPath = certFile.toAbsolutePath().toString();
 
-        // Use OpenSSL to compute the subject_hash_old (trust-store filename)
-        String hashResult = Shell.cmd(
-                "openssl x509 -subject_hash_old -noout -in " + certPath
-        ).exec().getOut().stream().findFirst().orElse("");
-
-        if (hashResult.isEmpty()) {
-            Timber.e("Failed to compute certificate hash.");
+        /*
+         * BUG FIX: this used to shell out to `openssl x509 -subject_hash_old`
+         * to compute the trust-store filename. That's an external binary
+         * this app doesn't control the presence of — modern Android's
+         * crypto lives in the Conscrypt APEX module as libraries, not
+         * necessarily as a general-purpose CLI tool, and plenty of vendor
+         * images don't ship a standalone `openssl` command at all. When it
+         * was missing, Shell.cmd(...) just returned an empty result, this
+         * silently returned false, and the user saw an opaque "System CA
+         * install failed" with nothing actionable in the visible UI.
+         * Compute the same value in pure Java instead - no external
+         * dependency, and a real exception if something's actually wrong
+         * with the certificate file itself.
+         */
+        String certHash;
+        try {
+            certHash = computeSubjectHashOld(certFile);
+        } catch (IOException | CertificateException | NoSuchAlgorithmException e) {
+            Timber.e(e, "Failed to compute certificate hash.");
             return false;
         }
-        String certHash = hashResult.trim();
         String destName = certHash + ".0";
 
         int sdk = android.os.Build.VERSION.SDK_INT;
@@ -272,13 +285,39 @@ public class WebServerUtils {
     public static boolean isSystemCertificateInstalled(Context context) {
         Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) return false;
-        String certPath = certFile.toAbsolutePath().toString();
-        String hash = Shell.cmd(
-                "openssl x509 -subject_hash_old -noout -in " + certPath
-        ).exec().getOut().stream().findFirst().orElse("").trim();
-        if (hash.isEmpty()) return false;
+        String hash;
+        try {
+            hash = computeSubjectHashOld(certFile);
+        } catch (IOException | CertificateException | NoSuchAlgorithmException e) {
+            Timber.w(e, "Failed to compute certificate hash.");
+            return false;
+        }
         return Shell.cmd("test -f /system/etc/security/cacerts/" + hash + ".0")
                     .exec().isSuccess();
+    }
+
+    /**
+     * Compute OpenSSL's "subject_hash_old" for a certificate - the legacy
+     * c_rehash filename convention ("<hash>.0") the Android system trust
+     * store still uses under /system/etc/security/cacerts. It's the first
+     * 4 bytes of MD5(DER-encoded subject name), read as a little-endian
+     * unsigned 32-bit integer and printed as 8 lowercase hex digits.
+     * Reimplemented here in pure Java so this app never depends on an
+     * `openssl` CLI binary actually existing on the device.
+     */
+    private static String computeSubjectHashOld(Path certFile)
+            throws IOException, CertificateException, NoSuchAlgorithmException {
+        X509Certificate cert;
+        try (InputStream is = Files.newInputStream(certFile)) {
+            cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(is);
+        }
+        byte[] subjectDer = cert.getSubjectX500Principal().getEncoded();
+        byte[] digest = MessageDigest.getInstance("MD5").digest(subjectDer);
+        long hash = (digest[0] & 0xFFL)
+                | ((digest[1] & 0xFFL) << 8)
+                | ((digest[2] & 0xFFL) << 16)
+                | ((digest[3] & 0xFFL) << 24);
+        return String.format("%08x", hash);
     }
 
     public static void copyCertificate(ContextThemeWrapper wrapper, Uri uri) {
