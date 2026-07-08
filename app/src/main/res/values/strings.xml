@@ -261,11 +261,6 @@
 
 
     <!-- System CA installation (WebServerUtils) -->
-    <string name="pref_webserver_system_ca_prompt">Install as system CA so ALL apps (including VPN/proxy) trust AdAway\'s block page — no more certificate errors on HTTPS ads. Requires root.</string>
-    <string name="pref_webserver_system_ca_install">Install System CA</string>
-    <string name="pref_webserver_certificate_user_only">User CA only</string>
-    <string name="pref_webserver_system_ca_success">System CA installed — restart apps to apply</string>
-    <string name="pref_webserver_system_ca_failed">System CA install failed (check logcat)</string>
 
     <string name="pref_webserver_start_failed">Web 服务器启动失败，详情见 /data/local/tmp/webserver_start_*.log（需 Root 权限查看）</string>
     <string name="pref_webserver_stop_failed">Web 服务器停止失败</string>

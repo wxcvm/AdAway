@@ -32,6 +32,7 @@
     <string name="pref_webserver_state_checking">正在检查…</string>
     <string name="pref_webserver_state_not_running">未运行</string>
     <string name="pref_webserver_state_running_not_installed">正在运行，但未安装证书</string>
-    <string name="pref_webserver_state_running_and_installed">运行并安装证书</string>
+    <string name="pref_webserver_state_running_and_installed">正在运行，证书已安装（用户级）</string>
+    <string name="pref_webserver_state_running_and_installed_system">正在运行，证书已安装（系统级，所有 App 均信任）</string>
     <string name="pref_webserver_icon">用应用程序图标替换空白广告空间</string>
 </resources>
