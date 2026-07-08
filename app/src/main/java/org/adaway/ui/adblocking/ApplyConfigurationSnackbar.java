@@ -20,6 +20,8 @@ import org.adaway.util.AppExecutors;
 
 import java.util.Collection;
 
+import timber.log.Timber;
+
 import static com.google.android.material.snackbar.Snackbar.LENGTH_INDEFINITE;
 import static com.google.android.material.snackbar.Snackbar.LENGTH_LONG;
 
@@ -143,6 +145,16 @@ public class ApplyConfigurationSnackbar {
                 adBlockModel.apply();
                 endLoading(true);
             } catch (HostErrorException exception) {
+                endLoading(false);
+            } catch (Exception exception) {
+                /*
+                 * BUG FIX: any exception other than HostErrorException
+                 * (e.g. a database error) used to propagate out of this
+                 * background executor task uncaught, crashing the whole
+                 * app rather than just failing this one sync/apply
+                 * action.
+                 */
+                Timber.e(exception, "Unexpected error while applying configuration.");
                 endLoading(false);
             }
         });

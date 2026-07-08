@@ -19,4 +19,6 @@
     <string name="error_enable_vpn_failed_details">请检查您的VPN设置以授权启动应用程序VPN。</string>
     <string name="error_disable_vpn_failed_message">无法禁用VPN广告拦截器。</string>
     <string name="error_disable_vpn_failed_details">请检查您的VPN设置以手动将其禁用。</string>
+    <string name="error_unknown_message">出现了一点问题</string>
+    <string name="error_unknown_details">发生了未预期的错误，请重试；如果反复出现，请把当时的操作步骤一并反馈给我们。</string>
 </resources>

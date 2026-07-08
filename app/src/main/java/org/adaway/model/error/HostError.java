@@ -20,7 +20,12 @@ public enum HostError {
     REVERT_FAIL(R.string.error_revert_failed_message, R.string.error_revert_failed_details),
     // VPN model error
     ENABLE_VPN_FAIL(R.string.error_enable_vpn_failed_message, R.string.error_enable_vpn_failed_details),
-    DISABLE_VPN_FAIL(R.string.error_disable_vpn_failed_message, R.string.error_disable_vpn_failed_details);
+    DISABLE_VPN_FAIL(R.string.error_disable_vpn_failed_message, R.string.error_disable_vpn_failed_details),
+    // Generic/unexpected error - any exception that isn't one of the
+    // specific cases above (e.g. a database error during sync) still
+    // needs to surface *something* to the user instead of the app
+    // just crashing silently.
+    UNKNOWN_ERROR(R.string.error_unknown_message, R.string.error_unknown_details);
 
     @StringRes
     private final int messageKey;

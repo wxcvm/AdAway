@@ -131,6 +131,20 @@ public class HomeViewModel extends AndroidViewModel {
             } catch (HostErrorException exception) {
                 Timber.w(exception, "Failed to toggle ad blocking.");
                 this.error.postValue(exception.getError());
+            } catch (Exception exception) {
+                /*
+                 * BUG FIX: this used to catch only HostErrorException. Any
+                 * other unchecked exception (e.g. a SQLiteException from a
+                 * Room DAO call) would propagate out of this background
+                 * executor task uncaught - on Android that crashes the
+                 * whole app, not just this operation, since there's no
+                 * default handler for it (this build has crash reporting
+                 * disabled, so it wouldn't even be logged anywhere visible
+                 * to the user). Catch broadly here so a sync/toggle
+                 * failure is just a failure, never a crash.
+                 */
+                Timber.e(exception, "Unexpected error while toggling ad blocking.");
+                this.error.postValue(HostError.UNKNOWN_ERROR);
             } finally {
                 this.pending.postValue(false);
             }
@@ -148,6 +162,9 @@ public class HomeViewModel extends AndroidViewModel {
             } catch (HostErrorException exception) {
                 Timber.w(exception, "Failed to update.");
                 this.error.postValue(exception.getError());
+            } catch (Exception exception) {
+                Timber.e(exception, "Unexpected error while checking for update.");
+                this.error.postValue(HostError.UNKNOWN_ERROR);
             } finally {
                 this.pending.postValue(false);
             }
@@ -166,6 +183,9 @@ public class HomeViewModel extends AndroidViewModel {
             } catch (HostErrorException exception) {
                 Timber.w(exception, "Failed to sync.");
                 this.error.postValue(exception.getError());
+            } catch (Exception exception) {
+                Timber.e(exception, "Unexpected error while syncing.");
+                this.error.postValue(HostError.UNKNOWN_ERROR);
             } finally {
                 this.pending.postValue(false);
             }
