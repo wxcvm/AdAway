@@ -219,10 +219,29 @@ public class WebServerUtils {
 
     /**
      * Check whether AdAway's CA is already present in the system trust store
-     * (/system/etc/security/cacerts) - e.g. via a Magisk "move
-     * certificates"-style module promoting an already-installed user cert,
-     * since this app no longer attempts a direct root-based system install
-     * itself.
+     * - e.g. via a Magisk "move certificates"-style module promoting an
+     * already-installed user cert, since this app no longer attempts a
+     * direct root-based system install itself.
+     * <p>
+     * BUG FIX: this used to check only /system/etc/security/cacerts.
+     * Confirmed on-device report: a cert correctly moved to the system
+     * store by an external tool still showed as "user" here. Reason:
+     * starting Android 14 (and some earlier devices that already received
+     * a Conscrypt Mainline module update), the trust store apps actually
+     * consult at runtime moved to /apex/com.android.conscrypt/cacerts, a
+     * read-only APEX container - /system/etc/security/cacerts is no
+     * longer read at all on those devices, even though it still physically
+     * exists and even root can still write to it. This is a well-documented
+     * platform change (see e.g. httptoolkit.com/blog/android-14-breaks-
+     * system-certificate-installation), and it's exactly why this app
+     * removed its own root-based *install* attempt earlier - properly
+     * injecting into the APEX path requires bind-mounting into every app's
+     * Zygote-inherited mount namespace, well beyond a one-shot root shell
+     * command. Detection is simpler: just check whichever path this
+     * device actually has. Prefer the APEX path when it exists (it's the
+     * one that matters on any device that has it), falling back to the
+     * legacy /system path for older devices that never had a conscrypt
+     * APEX module at all.
      */
     public static boolean isSystemCertificateInstalled(Context context) {
         Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
@@ -234,8 +253,12 @@ public class WebServerUtils {
             Timber.w(e, "Failed to compute certificate hash.");
             return false;
         }
-        return Shell.cmd("test -f /system/etc/security/cacerts/" + hash + ".0")
-                    .exec().isSuccess();
+        boolean hasApexStore = Shell.cmd("test -d /apex/com.android.conscrypt/cacerts")
+                                     .exec().isSuccess();
+        String certsDir = hasApexStore
+                ? "/apex/com.android.conscrypt/cacerts/"
+                : "/system/etc/security/cacerts/";
+        return Shell.cmd("test -f " + certsDir + hash + ".0").exec().isSuccess();
     }
 
     /**
