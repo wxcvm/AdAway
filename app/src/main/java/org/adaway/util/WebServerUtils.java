@@ -144,18 +144,25 @@ public class WebServerUtils {
          * certificate warning at all, while this check kept reporting
          * "not installed" even after fully force-closing and restarting
          * AdAway itself (ruling out any per-process trust-manager
-         * caching as the explanation). Whatever the exact platform/OEM
-         * reason HttpsURLConnection wasn't picking this up, don't depend
-         * on live OS-level TLS trust resolution for a yes/no answer we
-         * can determine more directly and reliably: check whether a file
-         * matching our CA's hash exists in either the system or user
-         * trust-anchor directory - the same direct approach
-         * isSystemCertificateInstalled() already used successfully for
-         * the system side.
+         * caching as the explanation). Don't depend on live OS-level TLS
+         * trust resolution for a yes/no answer we can determine more
+         * directly: check whether a file matching our CA's hash exists in
+         * either the system or user trust-anchor directory.
+         *
+         * Report system vs. user cert separately (rather than a single
+         * merged "installed" boolean) so the status line actually answers
+         * whether the cert ended up trusted at the system level or only
+         * the user level — the two have meaningfully different trust
+         * scope (system certs are honored by apps that ignore user-added
+         * ones), and this can change without any action inside AdAway
+         * itself, e.g. a Magisk "move certificates"-style module
+         * promoting the already-installed user cert to system on the next
+         * boot.
          */
-        boolean installed = isSystemCertificateInstalled(context)
-                || isUserCertificateInstalled(context);
-        return installed
+        if (isSystemCertificateInstalled(context)) {
+            return R.string.pref_webserver_state_running_and_installed_system;
+        }
+        return isUserCertificateInstalled(context)
                 ? R.string.pref_webserver_state_running_and_installed
                 : R.string.pref_webserver_state_running_not_installed;
     }
@@ -187,112 +194,6 @@ public class WebServerUtils {
     }
 
     /**
-     * Install AdAway's CA into the SYSTEM trust store using root shell.
-     * This makes AdAway's block-page HTTPS trusted by ALL apps (including VPN
-     * tools) without any per-app or per-user confirmation dialog.
-     *
-     * Strategy:
-     *   Android ≤ 13 : write directly to /system/etc/security/cacerts/
-     *   Android 14+  : use tmpfs overlay (same technique as Magisk)
-     *
-     * @return true if installation succeeded.
-     */
-    public static boolean installSystemCertificate(Context context) {
-        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
-        if (!Files.isRegularFile(certFile)) {
-            Timber.w("CA cert not present — enable web server first.");
-            return false;
-        }
-        String certPath = certFile.toAbsolutePath().toString();
-
-        /*
-         * BUG FIX: this used to shell out to `openssl x509 -subject_hash_old`
-         * to compute the trust-store filename. That's an external binary
-         * this app doesn't control the presence of — modern Android's
-         * crypto lives in the Conscrypt APEX module as libraries, not
-         * necessarily as a general-purpose CLI tool, and plenty of vendor
-         * images don't ship a standalone `openssl` command at all. When it
-         * was missing, Shell.cmd(...) just returned an empty result, this
-         * silently returned false, and the user saw an opaque "System CA
-         * install failed" with nothing actionable in the visible UI.
-         * Compute the same value in pure Java instead - no external
-         * dependency, and a real exception if something's actually wrong
-         * with the certificate file itself.
-         */
-        String certHash;
-        try {
-            certHash = computeSubjectHashOld(certFile);
-        } catch (IOException | CertificateException | NoSuchAlgorithmException e) {
-            Timber.e(e, "Failed to compute certificate hash.");
-            return false;
-        }
-        String destName = certHash + ".0";
-
-        int sdk = android.os.Build.VERSION.SDK_INT;
-        boolean ok;
-
-        if (sdk >= 34) {
-            /*
-             * BUG FIX (best-effort, not confirmed via on-device SELinux
-             * denial logs): none of these commands ever set an SELinux
-             * label on the files this creates. Mounting a fresh tmpfs over
-             * /system/etc/security/cacerts replaces the directory's
-             * contents with files that get a generic/inherited label, not
-             * the specific type Android's certificate loading code
-             * (running as system_server, in a tightly confined SELinux
-             * domain) is allowed to read. The files can be perfectly
-             * present, correctly named and permissioned, and still be
-             * silently invisible to the OS purely because of this label
-             * mismatch - "cp worked, chmod worked, toast said success" is
-             * exactly what you'd see either way. Capture the directory's
-             * actual context *before* wiping it with the tmpfs mount, and
-             * restore that same context to the new files afterward -
-             * whatever the correct value is on this specific device/vendor
-             * image, rather than guessing a hardcoded SELinux type that
-             * might be wrong for this ROM.
-             */
-            ok = Shell.cmd(
-                "mkdir -p /data/local/tmp/adaway_cacerts",
-                "cp /system/etc/security/cacerts/* /data/local/tmp/adaway_cacerts/ 2>/dev/null || true",
-                "cp " + certPath + " /data/local/tmp/adaway_cacerts/" + destName,
-                "chmod 644 /data/local/tmp/adaway_cacerts/" + destName,
-                "SEL_CTX=$(stat -c '%C' /system/etc/security/cacerts 2>/dev/null)",
-                "mount -t tmpfs tmpfs /system/etc/security/cacerts",
-                "cp /data/local/tmp/adaway_cacerts/* /system/etc/security/cacerts/",
-                "chown -R root:root /system/etc/security/cacerts",
-                "chmod 644 /system/etc/security/cacerts/*",
-                "[ -n \"$SEL_CTX\" ] && chcon -R \"$SEL_CTX\" /system/etc/security/cacerts || true",
-                "rm -rf /data/local/tmp/adaway_cacerts"
-            ).exec().isSuccess();
-        } else {
-            // Android ≤ 13: remount /system rw and write directly.
-            // (Files created here inherit the existing directory's context
-            // rather than a fresh tmpfs's, so this path isn't affected by
-            // the same issue - no chcon needed.)
-            ok = Shell.cmd(
-                "mount -o remount,rw /system 2>/dev/null || true",
-                "cp " + certPath + " /system/etc/security/cacerts/" + destName,
-                "chmod 644 /system/etc/security/cacerts/" + destName,
-                "chown root:root /system/etc/security/cacerts/" + destName,
-                "mount -o remount,ro /system 2>/dev/null || true"
-            ).exec().isSuccess();
-        }
-
-        if (ok) {
-            Timber.i("System CA installed: /system/etc/security/cacerts/%s", destName);
-            // Reload cert store (sends SIGUSR1 to system_server on some ROMs)
-            Shell.cmd("am broadcast -a android.intent.action.CONFIGURATION_CHANGED")
-                 .exec();
-        } else {
-            Timber.e("System CA installation failed.");
-        }
-        return ok;
-    }
-
-    /**
-     * Check whether AdAway's CA is already present in the system trust store.
-     */
-    /**
      * Check whether AdAway's CA is installed as a *user* trust anchor by
      * looking directly at the on-disk file Android's KeyChain writes
      * user-installed CA certs to, rather than performing a live HTTPS
@@ -316,6 +217,13 @@ public class WebServerUtils {
                     .exec().isSuccess();
     }
 
+    /**
+     * Check whether AdAway's CA is already present in the system trust store
+     * (/system/etc/security/cacerts) - e.g. via a Magisk "move
+     * certificates"-style module promoting an already-installed user cert,
+     * since this app no longer attempts a direct root-based system install
+     * itself.
+     */
     public static boolean isSystemCertificateInstalled(Context context) {
         Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) return false;

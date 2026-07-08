@@ -12,8 +12,6 @@ import static org.adaway.util.Constants.PREFS_NAME;
 import static org.adaway.util.WebServerUtils.TEST_URL;
 import static org.adaway.util.WebServerUtils.copyCertificate;
 import static org.adaway.util.WebServerUtils.getWebServerState;
-import static org.adaway.util.WebServerUtils.installSystemCertificate;
-import static org.adaway.util.WebServerUtils.isSystemCertificateInstalled;
 import static org.adaway.util.WebServerUtils.isWebServerRunning;
 import static org.adaway.util.WebServerUtils.startWebServer;
 import static org.adaway.util.WebServerUtils.stopWebServer;
@@ -301,58 +299,22 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         assert webServerTest != null : PREFERENCE_NOT_FOUND;
         webServerTest.setOnPreferenceClickListener(preference -> {
             /*
-             * BUG FIX: this used to gate the whole system-CA-install dialog
-             * behind `SDK_INT < VERSION_CODES.R` (Android 11), so on every
-             * device running Android 11+ — the overwhelming majority of
-             * devices today — this branch was unreachable and users always
-             * fell straight to the file-export flow below, which can only
-             * ever produce a *user* certificate (shows up under "User
-             * credentials", never "Trusted credentials").
-             *
-             * installSystemCertificate() itself is entirely root-shell
-             * based (mount/cp via `su`, not any official Android KeyChain
-             * API), and already has its own internal branch for Android
-             * 14+ (tmpfs overlay) vs older versions (direct remount) — it
-             * was clearly updated to support modern Android after this
-             * SDK_INT gate was written, but the gate itself was never
-             * updated to match, leaving a fully working, modern
-             * implementation unreachable from the UI. This whole screen
-             * already assumes root access (it's the "root based ad
-             * blocker" screen), so there's no reason to restrict the
-             * root-based system-install path by Android version at all —
-             * offer it unconditionally.
+             * The "install as system CA" root-shell path
+             * (installSystemCertificate) went through three rounds of
+             * fixes this session (an unreachable-on-Android-11+ gate, a
+             * missing openssl CLI dependency, a suspected SELinux label
+             * mismatch after the tmpfs mount) without a confirmed working
+             * result on-device. Removed it rather than keep chasing it -
+             * the complexity and root-remount risk weren't earning their
+             * keep against an unproven benefit. Always use the file-export
+             * + Settings-install flow now; it's the well-understood,
+             * reliable path (this is what every device got by default
+             * before the system-CA dialog was ever added). The web server
+             * status summary still reports whether the cert has separately
+             * ended up trusted at the system level (e.g. via a Magisk
+             * "move certificates"-style module) - see getWebServerState().
              */
-            /*
-             * BUG FIX: this used to call installUserCertificate(ctx), which
-             * goes through KeyChain.createInstallIntent() to install the CA
-             * cert directly. On this device (and apparently others), that
-             * flow gets rejected outright by the system with "Unable to
-             * install CA certificate ... must be installed through
-             * Settings" - confirmed on-device, not a hypothesis. That's
-             * presumably exactly why this file-export flow
-             * (prepareCertificateLauncher) existed in the first place
-             * before the SDK_INT gate above was removed - it was the
-             * correct fallback for exactly this restriction, just gated
-             * off for the wrong set of devices. Use it here instead.
-             */
-            Context ctx = requireContext();
-            if (isSystemCertificateInstalled(ctx)) {
-                this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt");
-            } else {
-                new com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
-                    .setTitle(R.string.pref_webserver_certificate_dialog_title)
-                    .setMessage(R.string.pref_webserver_system_ca_prompt)
-                    .setPositiveButton(R.string.pref_webserver_system_ca_install, (d, w) -> {
-                        boolean ok = installSystemCertificate(ctx);
-                        int msg = ok ? R.string.pref_webserver_system_ca_success
-                                     : R.string.pref_webserver_system_ca_failed;
-                        android.widget.Toast.makeText(ctx, msg,
-                            android.widget.Toast.LENGTH_LONG).show();
-                    })
-                    .setNegativeButton(R.string.pref_webserver_certificate_user_only,
-                        (d, w) -> this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt"))
-                    .show();
-            }
+            this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt");
             return true;
         });
     }
