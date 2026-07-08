@@ -66,6 +66,23 @@ public interface HostEntryDao {
     @Query("SELECT * FROM `host_entries` ORDER BY `host`")
     List<HostEntry> getAll();
 
+    /**
+     * Same rows as {@link #getAll()}, as a raw Cursor instead of a
+     * materialized List<HostEntry>.
+     * <p>
+     * OPTIMIZATION: writing the generated hosts file iterates every row
+     * exactly once, in order, and needs only 3 columns - there's no
+     * reason to pay for allocating one HostEntry object per row (this
+     * table commonly holds 100k-300k+ rows after merging several
+     * community block lists) just to immediately discard them after a
+     * single pass. Room supports returning a Cursor directly precisely
+     * for this kind of large-sequential-scan case, avoiding both the
+     * object allocation and holding the entire result set in memory at
+     * once.
+     */
+    @Query("SELECT `host`, `type`, `redirection` FROM `host_entries` ORDER BY `host`")
+    android.database.Cursor getAllCursor();
+
     @Query("SELECT `type` FROM `host_entries` WHERE `host` == :host LIMIT 1")
     ListType getTypeOfHost(String host);
 

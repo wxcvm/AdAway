@@ -30,7 +30,6 @@ import org.adaway.R;
 import org.adaway.db.AppDatabase;
 import org.adaway.db.dao.HostEntryDao;
 import org.adaway.db.dao.HostsSourceDao;
-import org.adaway.db.entity.HostEntry;
 import org.adaway.db.entity.HostsSource;
 import org.adaway.helper.PreferenceHelper;
 import org.adaway.model.adblocking.AdBlockMethod;
@@ -223,18 +222,25 @@ public class RootModel extends AdBlockModel {
         String redirectionIpv4 = PreferenceHelper.getRedirectionIpv4(this.context);
         String redirectionIpv6 = PreferenceHelper.getRedirectionIpv6(this.context);
         boolean enableIpv6 = PreferenceHelper.getEnableIpv6(this.context);
-        // Write each hostname
-        for (HostEntry entry : this.hostEntryDao.getAll()) {
-            String hostname = entry.getHost();
-            if (entry.getType() == REDIRECTED) {
-                writer.write(entry.getRedirection() + " " + hostname);
-                writer.newLine();
-            } else {
-                writer.write(redirectionIpv4 + " " + hostname);
-                writer.newLine();
-                if (enableIpv6) {
-                    writer.write(redirectionIpv6 + " " + hostname);
+        // Write each hostname, streaming rows from a Cursor instead of
+        // materializing the whole (often 100k-300k+ row) result set into a
+        // List<HostEntry> first - see HostEntryDao#getAllCursor().
+        try (android.database.Cursor cursor = this.hostEntryDao.getAllCursor()) {
+            int hostIdx = cursor.getColumnIndexOrThrow("host");
+            int typeIdx = cursor.getColumnIndexOrThrow("type");
+            int redirectionIdx = cursor.getColumnIndexOrThrow("redirection");
+            while (cursor.moveToNext()) {
+                String hostname = cursor.getString(hostIdx);
+                if (cursor.getInt(typeIdx) == REDIRECTED.getValue()) {
+                    writer.write(cursor.getString(redirectionIdx) + " " + hostname);
                     writer.newLine();
+                } else {
+                    writer.write(redirectionIpv4 + " " + hostname);
+                    writer.newLine();
+                    if (enableIpv6) {
+                        writer.write(redirectionIpv6 + " " + hostname);
+                        writer.newLine();
+                    }
                 }
             }
         }
