@@ -19,4 +19,7 @@
     <string name="error_enable_vpn_failed_details">Please check your VPN settings to authorize the application VPN to start.</string>
     <string name="error_disable_vpn_failed_message">Failed to disable VPN ad blocking.</string>
     <string name="error_disable_vpn_failed_details">Please check your VPN settings to disable it manually.</string>
+    <!-- Generic/unexpected error -->
+    <string name="error_unknown_message">Something went wrong</string>
+    <string name="error_unknown_details">An unexpected error occurred. Please try again; if it keeps happening, report it with the details of what you were doing.</string>
 </resources>

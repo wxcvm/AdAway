@@ -137,6 +137,14 @@ public final class SourceUpdateService {
                 // An error occurred, check will be retried
                 Timber.e(exception, "Failed to check for update. Will retry later.");
                 return retry();
+            } catch (Exception exception) {
+                // BUG FIX: any exception other than HostErrorException used
+                // to propagate out of doWork() uncaught. WorkManager itself
+                // catches that internally so it wouldn't crash the whole
+                // app, but it was an unhelpful generic failure with no
+                // retry - treat it the same as a HostErrorException instead.
+                Timber.e(exception, "Unexpected error while checking for update. Will retry later.");
+                return retry();
             }
             if (hasUpdate) {
                 // Do update
@@ -145,6 +153,9 @@ public final class SourceUpdateService {
                 } catch (HostErrorException exception) {
                     // Installation failed. Worker failed.
                     Timber.e(exception, "Failed to apply hosts file during background update.");
+                    return failure();
+                } catch (Exception exception) {
+                    Timber.e(exception, "Unexpected error applying hosts file during background update.");
                     return failure();
                 }
             }

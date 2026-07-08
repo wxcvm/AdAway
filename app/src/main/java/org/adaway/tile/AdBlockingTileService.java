@@ -70,6 +70,11 @@ public class AdBlockingTileService extends TileService {
             }
         } catch (HostErrorException e) {
             Timber.w(e, "Failed to toggle ad-blocking.");
+        } catch (Exception e) {
+            // BUG FIX: don't let an unexpected exception crash the app from
+            // a Quick Settings tile tap - see HomeViewModel for the same
+            // fix and fuller explanation.
+            Timber.e(e, "Unexpected error while toggling ad-blocking from tile.");
         } finally {
             this.toggling.set(false);
         }

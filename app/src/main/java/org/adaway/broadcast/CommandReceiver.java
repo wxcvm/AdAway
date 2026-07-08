@@ -48,6 +48,11 @@ public class CommandReceiver extends BroadcastReceiver {
             }
         } catch (HostErrorException e) {
             Timber.w(e, "Failed to apply ad block command " + command + ".");
+        } catch (Exception e) {
+            // BUG FIX: same fix as HomeViewModel/AdBlockingTileService -
+            // don't let an unexpected exception crash the app from a
+            // background broadcast-triggered task.
+            Timber.e(e, "Unexpected error while executing command " + command + ".");
         }
     }
 }
