@@ -66,6 +66,10 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
      * The launcher to prepare web service certificate activity.
      */
     private ActivityResultLauncher<String> prepareCertificateLauncher;
+    /**
+     * The launcher to pick a custom block-placeholder image.
+     */
+    private ActivityResultLauncher<String> pickBlockImageLauncher;
 
     @Override
     public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
@@ -75,12 +79,14 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         // Register for activities
         registerForOpenHostActivity();
         registerForPrepareCertificateActivity();
+        registerForPickBlockImageActivity();
         // Bind pref actions
         bindOpenHostsFile();
         bindRedirection();
         bindWebServerPrefAction();
         bindWebServerTest();
         bindWebServerCertificate();
+        bindWebServerBlockImage();
         // Update current state
         updateWebServerState();
         // Register as listener
@@ -129,6 +135,23 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         this.prepareCertificateLauncher = registerForActivityResult(
                 new ActivityResultContracts.CreateDocument(CERTIFICATE_MIME_TYPE),
                 this::prepareWebServerCertificate
+        );
+    }
+
+    private void registerForPickBlockImageActivity() {
+        this.pickBlockImageLauncher = registerForActivityResult(
+                new ActivityResultContracts.GetContent(),
+                uri -> {
+                    if (uri == null) return;
+                    Context ctx = requireContext();
+                    boolean ok = org.adaway.util.WebServerUtils.setCustomBlockImage(ctx, uri);
+                    android.widget.Toast.makeText(
+                            ctx,
+                            ok ? R.string.pref_webserver_block_image_success
+                               : R.string.pref_webserver_block_image_failed,
+                            android.widget.Toast.LENGTH_LONG
+                    ).show();
+                }
         );
     }
 
@@ -315,6 +338,37 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
              * "move certificates"-style module) - see getWebServerState().
              */
             this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt");
+            return true;
+        });
+    }
+
+    private void bindWebServerBlockImage() {
+        Preference blockImagePref = findPreference(getString(R.string.pref_webserver_block_image_key));
+        assert blockImagePref != null : PREFERENCE_NOT_FOUND;
+        blockImagePref.setOnPreferenceClickListener(preference -> {
+            Context ctx = requireContext();
+            new com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                    .setTitle(R.string.pref_webserver_block_image)
+                    .setItems(new CharSequence[]{
+                            getString(R.string.pref_webserver_block_image_choose),
+                            getString(R.string.pref_webserver_block_image_reset)
+                    }, (dialog, which) -> {
+                        if (which == 0) {
+                            this.pickBlockImageLauncher.launch("image/*");
+                        } else {
+                            AppExecutors.getInstance().diskIO().execute(() -> {
+                                org.adaway.util.WebServerUtils.resetBlockImagesToDefault(ctx);
+                                AppExecutors.getInstance().mainThread().execute(() ->
+                                        android.widget.Toast.makeText(
+                                                ctx,
+                                                R.string.pref_webserver_block_image_reset_success,
+                                                android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                );
+                            });
+                        }
+                    })
+                    .show();
             return true;
         });
     }

@@ -3,7 +3,10 @@ package org.adaway.util;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.Build;
 import android.view.ContextThemeWrapper;
 import android.widget.Toast;
 
@@ -347,6 +350,74 @@ public class WebServerUtils {
             try { Files.deleteIfExists(certFile); Files.deleteIfExists(dir.resolve(CA_KEY_FILE)); }
             catch (IOException ignored) {}
         }
+    }
+
+    /**
+     * Replace all 7 block-placeholder images (img_00.webp .. img_06.webp,
+     * served by the native web server in place of blocked ads) with a
+     * single image the user picked.
+     * <p>
+     * Decodes whatever format was picked (JPEG/PNG/etc.) and re-encodes it
+     * as WEBP before writing, since that's the only format the native
+     * server's MIME-type mapping (and file extension it looks for) knows
+     * about. Every one of the 7 slots gets the same image - the server
+     * picks one at random per request purely for visual variety, not
+     * because they're meant to differ in content.
+     *
+     * @return true if the image was decoded and written successfully.
+     */
+    public static boolean setCustomBlockImage(Context context, Uri imageUri) {
+        Bitmap bitmap;
+        try (InputStream is = context.getContentResolver().openInputStream(imageUri)) {
+            if (is == null) return false;
+            bitmap = BitmapFactory.decodeStream(is);
+        } catch (IOException e) {
+            Timber.e(e, "Failed to read picked block image.");
+            return false;
+        }
+        if (bitmap == null) {
+            Timber.e("Failed to decode picked block image.");
+            return false;
+        }
+        Bitmap.CompressFormat format = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? Bitmap.CompressFormat.WEBP_LOSSY
+                : Bitmap.CompressFormat.WEBP;
+        Path resourceDir = getResourcePath(context);
+        try {
+            if (!Files.isDirectory(resourceDir)) Files.createDirectories(resourceDir);
+            for (int i = 0; i < 7; i++) {
+                Path out = resourceDir.resolve(String.format("img_%02d.webp", i));
+                try (OutputStream os = Files.newOutputStream(out)) {
+                    bitmap.compress(format, 90, os);
+                }
+            }
+            return true;
+        } catch (IOException e) {
+            Timber.e(e, "Failed to write custom block image.");
+            return false;
+        } finally {
+            bitmap.recycle();
+        }
+    }
+
+    /**
+     * Delete the (possibly user-customized) block-placeholder images so
+     * ensureStaticResources() re-extracts the original defaults from the
+     * APK's assets on the next web server start - it only ever copies a
+     * given filename if it's missing, which is what makes both this and
+     * setCustomBlockImage() above work without needing any extra "is this
+     * customized" flag.
+     */
+    public static void resetBlockImagesToDefault(Context context) {
+        Path resourceDir = getResourcePath(context);
+        for (int i = 0; i < 7; i++) {
+            try {
+                Files.deleteIfExists(resourceDir.resolve(String.format("img_%02d.webp", i)));
+            } catch (IOException e) {
+                Timber.w(e, "Failed to delete block image %d for reset.", i);
+            }
+        }
+        ensureStaticResources(context, resourceDir);
     }
 
     private static void inflateResource(android.content.res.AssetManager am,

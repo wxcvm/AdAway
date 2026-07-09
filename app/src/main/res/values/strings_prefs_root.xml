@@ -29,6 +29,13 @@
     <string name="pref_webserver_certificate_dialog_title">Certificate manual install</string>
     <string name="pref_webserver_certificate_dialog_content">Starting from Android 11 (R), application can no more automatically install certificate authority (CA).\n\nGo to \"Security\" settings, \"Encryption &amp; credentials\" then \"Install a certificate\". From there, choose \"CA certificate\" and select the newly exported certificate file.</string>
     <string name="pref_webserver_certificate_dialog_action">Open "Security" settings</string>
+    <string name="pref_webserver_block_image">Customize block placeholder image</string>
+    <string name="pref_webserver_block_image_summary">Replace the image shown in place of blocked ads</string>
+    <string name="pref_webserver_block_image_choose">Choose image…</string>
+    <string name="pref_webserver_block_image_reset">Restore default images</string>
+    <string name="pref_webserver_block_image_success">Block image updated. Browsers may keep showing the old one for a while — it\'s cached for up to 24h per domain.</string>
+    <string name="pref_webserver_block_image_reset_success">Restored default block images</string>
+    <string name="pref_webserver_block_image_failed">Failed to set custom block image</string>
     <string name="pref_webserver_state_checking">Checking…</string>
     <string name="pref_webserver_state_not_running">Not running</string>
     <string name="pref_webserver_state_running_not_installed">Running but certificate not installed</string>
