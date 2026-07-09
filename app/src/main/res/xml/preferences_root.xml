@@ -49,6 +49,12 @@
             app:key="@string/pref_webserver_certificate_key"
             app:persistent="false"
             app:title="@string/pref_webserver_certificate" />
+        <Preference
+            app:dependency="@string/pref_webserver_enabled_key"
+            app:key="@string/pref_webserver_block_image_key"
+            app:persistent="false"
+            app:summary="@string/pref_webserver_block_image_summary"
+            app:title="@string/pref_webserver_block_image" />
     </PreferenceCategory>
 
 </PreferenceScreen>
