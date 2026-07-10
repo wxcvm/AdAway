@@ -95,7 +95,38 @@ public class PrefsMainFragment extends PreferenceFragmentCompat {
         Preference versionPref = findPreference(getString(R.string.pref_about_version_key));
         assert versionPref != null : PREFERENCE_NOT_FOUND;
         versionPref.setSummary(getVersionName(context));
+        /*
+         * Hidden unlock for the custom block-placeholder-image picker
+         * (lives on the root-based ad blocker screen) - tap the version
+         * number 7 times in a row, same pattern as stock Android's
+         * "tap build number to enable developer options". Default hidden
+         * since it's a niche customization most users will never need;
+         * this just keeps the main settings screen from growing an entry
+         * for it. this.tapCount resets naturally since this Fragment is
+         * recreated each time this screen is opened.
+         */
+        versionPref.setOnPreferenceClickListener(preference -> {
+            this.tapCount++;
+            int remaining = TAPS_TO_UNLOCK - this.tapCount;
+            if (remaining <= 0) {
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(getString(R.string.pref_advanced_features_unlocked_key), true)
+                        .apply();
+                this.tapCount = 0;
+                android.widget.Toast.makeText(context, R.string.pref_about_advanced_unlocked,
+                        android.widget.Toast.LENGTH_SHORT).show();
+            } else if (remaining <= 3) {
+                android.widget.Toast.makeText(context,
+                        getString(R.string.pref_about_advanced_unlock_countdown, remaining),
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+            return true;
+        });
     }
+
+    private int tapCount = 0;
+    private static final int TAPS_TO_UNLOCK = 7;
 
     private static String getVersionName(Context context) {
         try {
