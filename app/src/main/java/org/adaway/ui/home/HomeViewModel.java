@@ -131,7 +131,7 @@ public class HomeViewModel extends AndroidViewModel {
             } catch (HostErrorException exception) {
                 Timber.w(exception, "Failed to toggle ad blocking.");
                 this.error.postValue(exception.getError());
-            } catch (Exception exception) {
+            } catch (Throwable exception) {
                 /*
                  * BUG FIX: this used to catch only HostErrorException. Any
                  * other unchecked exception (e.g. a SQLiteException from a
@@ -162,7 +162,7 @@ public class HomeViewModel extends AndroidViewModel {
             } catch (HostErrorException exception) {
                 Timber.w(exception, "Failed to update.");
                 this.error.postValue(exception.getError());
-            } catch (Exception exception) {
+            } catch (Throwable exception) {
                 Timber.e(exception, "Unexpected error while checking for update.");
                 this.error.postValue(HostError.UNKNOWN_ERROR);
             } finally {
@@ -183,7 +183,7 @@ public class HomeViewModel extends AndroidViewModel {
             } catch (HostErrorException exception) {
                 Timber.w(exception, "Failed to sync.");
                 this.error.postValue(exception.getError());
-            } catch (Exception exception) {
+            } catch (Throwable exception) {
                 Timber.e(exception, "Unexpected error while syncing.");
                 this.error.postValue(HostError.UNKNOWN_ERROR);
             } finally {

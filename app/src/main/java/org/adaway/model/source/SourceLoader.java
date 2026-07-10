@@ -52,8 +52,20 @@ class SourceLoader {
         hostListItemDao.clearSourceHosts(this.source.getId());
         // Create batch
         int parserCount = 3;
-        LinkedBlockingQueue<String> hostsLineQueue = new LinkedBlockingQueue<>();
-        LinkedBlockingQueue<HostListItem> hostsListItemQueue = new LinkedBlockingQueue<>();
+        // BUG FIX: these used to be unbounded (new LinkedBlockingQueue<>()
+        // with no capacity). If the reader thread produces lines faster
+        // than the parser/inserter threads can drain them - the normal
+        // case, since DB inserts are the bottleneck - the queue has no
+        // limit on how much of a 100k-300k+ line source it will hold in
+        // memory at once as pending items. That's a real, reproducible
+        // OutOfMemoryError risk on exactly the large-source-sync path this
+        // was already known to run on, especially on lower-RAM devices.
+        // A bounded capacity makes producers block (via put(), not add())
+        // once it's full, naturally pacing the reader to however fast the
+        // consumers can actually keep up - memory use is now capped
+        // regardless of source size.
+        LinkedBlockingQueue<String> hostsLineQueue = new LinkedBlockingQueue<>(4096);
+        LinkedBlockingQueue<HostListItem> hostsListItemQueue = new LinkedBlockingQueue<>(4096);
         SourceReader sourceReader = new SourceReader(reader, hostsLineQueue, parserCount);
         ItemInserter inserter = new ItemInserter(hostsListItemQueue, hostListItemDao, parserCount);
         ExecutorService executorService = Executors.newFixedThreadPool(
@@ -125,14 +137,31 @@ class SourceLoader {
         @Override
         public void run() {
             try {
-                this.reader.lines().forEach(this.queue::add);
+                this.reader.lines().forEach(line -> {
+                    try {
+                        this.queue.put(line);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(e);
+                    }
+                });
             } catch (Throwable t) {
                 Timber.w(t, "Failed to read hosts source.");
                 this.error = t;
             } finally {
-                // Send end of queue marker to parsers
+                // Send end of queue marker to parsers. Use a bounded
+                // offer() instead of put()/add() here specifically: if
+                // something's already gone wrong and nothing is draining
+                // the queue anymore, we'd rather give up after a timeout
+                // than block this thread forever trying to signal a
+                // shutdown that's never going to be read.
                 for (int i = 0; i < this.parserCount; i++) {
-                    this.queue.add(END_OF_QUEUE_MARKER);
+                    try {
+                        this.queue.offer(END_OF_QUEUE_MARKER, 30, java.util.concurrent.TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
                 }
             }
         }
@@ -171,14 +200,14 @@ class SourceLoader {
                         // Send end of queue marker to inserter
                         HostListItem endItem = new HostListItem();
                         endItem.setHost(line);
-                        this.itemQueue.add(endItem);
+                        this.itemQueue.put(endItem);
                     } // Check comments
                     else if (line.isEmpty() || line.charAt(0) == '#') {
                         Timber.d("Skip comment: %s.", line);
                     } else {
                         HostListItem item = allowedList ? parseAllowListItem(line) : parseHostListItem(line);
                         if (item != null && isRedirectionValid(item) && isHostValid(item)) {
-                            this.itemQueue.add(item);
+                            this.itemQueue.put(item);
                         }
                     }
                 } catch (InterruptedException e) {
