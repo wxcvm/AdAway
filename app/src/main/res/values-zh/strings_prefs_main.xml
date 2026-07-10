@@ -23,4 +23,6 @@
     <string name="pref_enable_telemetry_disabled_summary">此版本不支持</string>
     <string name="pref_enable_debug">启用详细日志</string>
     <string name="pref_enable_debug_summary">具体的日志级别为 verbose，需重启 AdAway 才能使此设置生效。</string>
+    <string name="pref_about_advanced_unlocked">高级选项已解锁：自定义拦截占位图（在"基于 Root 的广告拦截器"页面里）</string>
+    <string name="pref_about_advanced_unlock_countdown">再点击 %1$d 次即可解锁高级选项</string>
 </resources>

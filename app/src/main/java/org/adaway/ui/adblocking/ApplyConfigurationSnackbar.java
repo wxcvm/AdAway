@@ -146,7 +146,7 @@ public class ApplyConfigurationSnackbar {
                 endLoading(true);
             } catch (HostErrorException exception) {
                 endLoading(false);
-            } catch (Exception exception) {
+            } catch (Throwable exception) {
                 /*
                  * BUG FIX: any exception other than HostErrorException
                  * (e.g. a database error) used to propagate out of this

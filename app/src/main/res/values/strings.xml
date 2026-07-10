@@ -273,5 +273,6 @@
     <string name="pref_about_issues_key" translatable="false">about_issues</string>
     <string name="pref_about_issues_title">问题反馈</string>
     <string name="pref_about_version_key" translatable="false">about_version</string>
+    <string name="pref_advanced_features_unlocked_key" translatable="false">advancedFeaturesUnlocked</string>
     <string name="pref_about_version_title">版本</string>
 </resources>

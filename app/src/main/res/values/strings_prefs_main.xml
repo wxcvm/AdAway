@@ -23,4 +23,6 @@
     <string name="pref_enable_telemetry_disabled_summary">Not supported on this build</string>
     <string name="pref_enable_debug">Verbose logging</string>
     <string name="pref_enable_debug_summary">App restart is needed to apply</string>
+    <string name="pref_about_advanced_unlocked">Advanced option unlocked: custom block image (root-based ad blocker screen)</string>
+    <string name="pref_about_advanced_unlock_countdown">%1$d more taps to unlock advanced options</string>
 </resources>

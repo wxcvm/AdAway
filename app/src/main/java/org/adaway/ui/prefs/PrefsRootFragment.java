@@ -345,6 +345,19 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
     private void bindWebServerBlockImage() {
         Preference blockImagePref = findPreference(getString(R.string.pref_webserver_block_image_key));
         assert blockImagePref != null : PREFERENCE_NOT_FOUND;
+        /*
+         * Hidden by default - a niche customization most users will never
+         * need. Unlocked by tapping the version number 7 times on the main
+         * preferences screen (see PrefsMainFragment), same pattern as
+         * stock Android's developer-options unlock. Re-check every time
+         * this screen is opened rather than once at install time, since
+         * the flag can flip from false to true while this fragment isn't
+         * showing.
+         */
+        boolean unlocked = requireContext()
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(getString(R.string.pref_advanced_features_unlocked_key), false);
+        blockImagePref.setVisible(unlocked);
         blockImagePref.setOnPreferenceClickListener(preference -> {
             Context ctx = requireContext();
             new com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
