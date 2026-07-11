@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
+OPTIONAL pre-conversion helper. As of this app version, dropping an
+image of any common format (PNG/JPG/WEBP) directly into
+app/src/main/assets/ as img_00.<ext>..img_06.<ext> is enough - the app
+detects and converts it to WebP automatically the first time it runs,
+no script needed. Use this script only if you want to see/commit the
+already-converted WebP files instead of relying on that first-run
+conversion (e.g. to double check the re-encoded result before
+committing, or to keep the repo's assets pre-converted for some other
+reason).
+
 Replace AdAway's 7 default block-placeholder images
-(app/src/main/assets/img_00.webp .. img_06.webp) with your own, for
-maintainers/forkers who want different defaults baked into the build -
-as opposed to the in-app "custom block image" picker (Settings, hidden
-behind tapping the version number 7 times), which lets any *user*
-override images at runtime without touching the repo at all.
+(app/src/main/assets/img_00.webp .. img_06.webp) with your own.
 
 These 7 files don't need to share one fixed size/aspect ratio - the
 originals are a mix of 512x768, 512x512 and 512x410, matching common ad

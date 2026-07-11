@@ -315,13 +315,70 @@ public class WebServerUtils {
         try {
             if (!Files.isDirectory(target)) Files.createDirectories(target);
             inflateResource(am, "test.html", target);
-            for (int i = 0; i < 7; i++)
-                inflateResource(am, String.format("img_%02d.webp", i), target);
+            for (int i = 0; i < 7; i++) inflateBlockImage(am, i, target);
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
         }
         // Delete stale cert (missing SAN / EKU) so server regenerates on next start
         deleteStaleServerCert(target);
+    }
+
+    /**
+     * Common source-image formats accepted as a drop-in replacement for a
+     * default block-placeholder image, tried in this order.
+     */
+    private static final String[] BLOCK_IMAGE_SOURCE_EXTENSIONS = {"webp", "png", "jpg", "jpeg"};
+
+    /**
+     * Inflate one of the 7 default block-placeholder images
+     * (img_00.webp .. img_06.webp) into the resource directory.
+     * <p>
+     * CONVENIENCE: a repo maintainer wanting different baked-in defaults
+     * used to need a separate conversion script (scripts/
+     * set_default_block_images.py) before building, since the native web
+     * server only serves .webp and only recognizes that exact filename
+     * pattern. That's an unnecessary extra step - dropping an image file
+     * of *any* common format into assets/ with the right base name
+     * (img_00.png, img_03.jpg, etc, alongside or instead of the .webp
+     * files) is simpler and needs no separate tooling. If an exact
+     * img_NN.webp asset exists, it's copied as-is (fast path, byte-for-
+     * byte, same as before). Otherwise this looks for img_NN.<ext> in
+     * PNG/JPEG and re-encodes it to WebP once, the same
+     * decode-then-Bitmap.CompressFormat.WEBP path already used by the
+     * in-app runtime picker (setCustomBlockImage()) - so both routes
+     * produce the same kind of file, just at different times (build-time
+     * assets vs a user's runtime pick).
+     */
+    private static void inflateBlockImage(android.content.res.AssetManager am, int index, Path target)
+            throws IOException {
+        String webpName = String.format("img_%02d.webp", index);
+        Path out = target.resolve(webpName);
+        if (Files.isRegularFile(out)) return; // already inflated
+
+        for (String ext : BLOCK_IMAGE_SOURCE_EXTENSIONS) {
+            String assetName = String.format("img_%02d.%s", index, ext);
+            try (InputStream in = am.open(assetName)) {
+                if (ext.equals("webp")) {
+                    Files.copy(in, out);
+                } else {
+                    Bitmap bitmap = BitmapFactory.decodeStream(in);
+                    if (bitmap == null) {
+                        Timber.w("Couldn't decode %s as an image, skipping.", assetName);
+                        continue;
+                    }
+                    try (OutputStream os = Files.newOutputStream(out)) {
+                        bitmap.compress(Bitmap.CompressFormat.WEBP, 85, os);
+                    } finally {
+                        bitmap.recycle();
+                    }
+                }
+                return; // found and inflated - stop trying other extensions
+            } catch (IOException e) {
+                // This extension doesn't exist for this slot - try the next one.
+            }
+        }
+        Timber.w("No source image found for slot %d (tried: %s).",
+                index, String.join(", ", BLOCK_IMAGE_SOURCE_EXTENSIONS));
     }
 
     private static void deleteStaleServerCert(Path dir) {
