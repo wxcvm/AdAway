@@ -1,0 +1,82 @@
+name: Update default block image
+
+# Convenience for maintainers: paste an image URL, pick a slot, click
+# "Run workflow" - it downloads the image, converts it to WebP, and
+# commits it straight to app/src/main/assets/. No local git/Python
+# tooling needed.
+#
+# (GitHub's own "Add file > Upload files" web UI on the assets/ folder
+# is an equally valid, even simpler option if you'd rather drag-and-drop
+# a file directly - this workflow is for when you already have an image
+# hosted somewhere and just want to point at the URL.)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_url:
+        description: 'Direct URL to the image (jpg/png/webp)'
+        required: true
+        type: string
+      slot:
+        description: 'Which slot to replace'
+        required: true
+        type: choice
+        default: 'all'
+        options:
+          - 'all'
+          - '0'
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+          - '6'
+
+permissions:
+  contents: write
+
+jobs:
+  update-block-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download image
+        run: |
+          set -euo pipefail
+          curl -fL "${{ inputs.image_url }}" -o /tmp/source_image
+          file /tmp/source_image
+
+      - name: Install cwebp
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq webp
+
+      - name: Convert and place image(s)
+        run: |
+          set -euo pipefail
+          DEST=app/src/main/assets
+          if [ "${{ inputs.slot }}" = "all" ]; then
+            SLOTS="0 1 2 3 4 5 6"
+          else
+            SLOTS="${{ inputs.slot }}"
+          fi
+          for s in $SLOTS; do
+            printf -v padded "%02d" "$s"
+            cwebp -q 85 /tmp/source_image -o "$DEST/img_${padded}.webp"
+            echo "Wrote $DEST/img_${padded}.webp"
+          done
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/assets/img_*.webp
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: update default block image (slot: ${{ inputs.slot }})
+
+          Source: ${{ inputs.image_url }}
+          Triggered by: ${{ github.actor }}"
+          git push
