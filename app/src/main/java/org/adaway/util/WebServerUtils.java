@@ -315,12 +315,41 @@ public class WebServerUtils {
         try {
             if (!Files.isDirectory(target)) Files.createDirectories(target);
             inflateResource(am, "test.html", target);
-            for (int i = 0; i < 7; i++) inflateBlockImage(am, i, target);
+            /*
+             * BUG FIX (configurability): this used to be a hardcoded
+             * `for (int i = 0; i < 7; i++)`, matching webserver.c's old
+             * hardcoded BLOCK_IMAGE_COUNT. Both sides now scan instead -
+             * see count_block_images() in webserver.c for the native
+             * side. Here: keep inflating slot i as long as there's
+             * *something* backing it (either already inflated from a
+             * previous run, or a source asset in any accepted format),
+             * stopping at the first genuinely empty slot. Sequential
+             * from 0, same contiguous-indices assumption the native side
+             * makes.
+             */
+            for (int i = 0; i < BLOCK_IMAGE_MAX_SCAN && hasBlockImageSource(am, i, target); i++) {
+                inflateBlockImage(am, i, target);
+            }
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
         }
         // Delete stale cert (missing SAN / EKU) so server regenerates on next start
         deleteStaleServerCert(target);
+    }
+
+    /** Matches webserver.c's BLOCK_IMAGE_MAX_SCAN - the 2-digit %02d filename format caps this at 100 anyway. */
+    private static final int BLOCK_IMAGE_MAX_SCAN = 100;
+
+    private static boolean hasBlockImageSource(android.content.res.AssetManager am, int index, Path target) {
+        if (Files.isRegularFile(target.resolve(String.format("img_%02d.webp", index)))) return true;
+        for (String ext : BLOCK_IMAGE_SOURCE_EXTENSIONS) {
+            try (InputStream in = am.open(String.format("img_%02d.%s", index, ext))) {
+                return true;
+            } catch (IOException ignored) {
+                // try the next extension
+            }
+        }
+        return false;
     }
 
     /**
@@ -417,12 +446,38 @@ public class WebServerUtils {
      * Decodes whatever format was picked (JPEG/PNG/etc.) and re-encodes it
      * as WEBP before writing, since that's the only format the native
      * server's MIME-type mapping (and file extension it looks for) knows
-     * about. Every one of the 7 slots gets the same image - the server
+     * about. Every configured slot gets the same image - the server
      * picks one at random per request purely for visual variety, not
      * because they're meant to differ in content.
      *
      * @return true if the image was decoded and written successfully.
      */
+    /**
+     * How many block-placeholder image slots are currently configured -
+     * the larger of what's already inflated in the resource directory
+     * (covers a webserver that's already run at least once) and what's
+     * defined in the APK's assets (covers a fresh install/data-clear
+     * where the resource directory hasn't been populated yet at all).
+     * Used here so setCustomBlockImage()/resetBlockImagesToDefault()
+     * don't each hardcode a slot count independently of what
+     * ensureStaticResources()/count_block_images() (native side) would
+     * actually use.
+     */
+    private static int getBlockImageSlotCount(Context context) {
+        Path resourceDir = getResourcePath(context);
+        int fromResourceDir = 0;
+        while (fromResourceDir < BLOCK_IMAGE_MAX_SCAN
+                && Files.isRegularFile(resourceDir.resolve(String.format("img_%02d.webp", fromResourceDir)))) {
+            fromResourceDir++;
+        }
+        android.content.res.AssetManager am = context.getAssets();
+        int fromAssets = 0;
+        while (fromAssets < BLOCK_IMAGE_MAX_SCAN && hasBlockImageSource(am, fromAssets, resourceDir)) {
+            fromAssets++;
+        }
+        return Math.max(1, Math.max(fromResourceDir, fromAssets));
+    }
+
     public static boolean setCustomBlockImage(Context context, Uri imageUri) {
         Bitmap bitmap;
         try (InputStream is = context.getContentResolver().openInputStream(imageUri)) {
@@ -442,7 +497,8 @@ public class WebServerUtils {
         Path resourceDir = getResourcePath(context);
         try {
             if (!Files.isDirectory(resourceDir)) Files.createDirectories(resourceDir);
-            for (int i = 0; i < 7; i++) {
+            int slotCount = getBlockImageSlotCount(context);
+            for (int i = 0; i < slotCount; i++) {
                 Path out = resourceDir.resolve(String.format("img_%02d.webp", i));
                 try (OutputStream os = Files.newOutputStream(out)) {
                     bitmap.compress(format, 90, os);
@@ -467,7 +523,8 @@ public class WebServerUtils {
      */
     public static void resetBlockImagesToDefault(Context context) {
         Path resourceDir = getResourcePath(context);
-        for (int i = 0; i < 7; i++) {
+        int slotCount = getBlockImageSlotCount(context);
+        for (int i = 0; i < slotCount; i++) {
             try {
                 Files.deleteIfExists(resourceDir.resolve(String.format("img_%02d.webp", i)));
             } catch (IOException e) {
