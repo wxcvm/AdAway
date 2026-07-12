@@ -18,19 +18,14 @@ on:
         required: true
         type: string
       slot:
-        description: 'Which slot to replace'
+        description: >-
+          Slot number (0-99, matches img_NN.webp - the count is no
+          longer fixed at 7, see webserver.c's count_block_images()),
+          or "all" to replace every slot that currently exists in
+          app/src/main/assets/
         required: true
-        type: choice
+        type: string
         default: 'all'
-        options:
-          - 'all'
-          - '0'
-          - '1'
-          - '2'
-          - '3'
-          - '4'
-          - '5'
-          - '6'
 
 permissions:
   contents: write
@@ -55,7 +50,24 @@ jobs:
           set -euo pipefail
           DEST=app/src/main/assets
           if [ "${{ inputs.slot }}" = "all" ]; then
-            SLOTS="0 1 2 3 4 5 6"
+            # Scan for whatever slots currently exist (any accepted
+            # extension), contiguous from 0 - same assumption
+            # count_block_images() in webserver.c makes. This replaces
+            # every existing slot, however many there are; it doesn't
+            # add a new one (use a specific slot number for that).
+            SLOTS=""
+            i=0
+            while [ -f "$DEST/img_$(printf '%02d' "$i").webp" ] || \
+                  [ -f "$DEST/img_$(printf '%02d' "$i").png" ]  || \
+                  [ -f "$DEST/img_$(printf '%02d' "$i").jpg" ]  || \
+                  [ -f "$DEST/img_$(printf '%02d' "$i").jpeg" ]; do
+              SLOTS="$SLOTS $i"
+              i=$((i + 1))
+            done
+            if [ -z "$SLOTS" ]; then
+              echo "No existing slots found in $DEST - pass a specific slot number instead of 'all' to add the first one."
+              exit 1
+            fi
           else
             SLOTS="${{ inputs.slot }}"
           fi

@@ -58,7 +58,42 @@
 
 #define MAX_CONNECTIONS   256
 #define IDLE_TIMEOUT_MS   10000
-#define BLOCK_IMAGE_COUNT 7
+/*
+ * BUG FIX (configurability): this used to be a hardcoded
+ * #define BLOCK_IMAGE_COUNT 7, meaning changing how many placeholder
+ * images exist required editing this file and rebuilding the native
+ * binary - the Java-side asset inflation / repo tooling could add or
+ * remove img_NN.<ext> files freely, but the number the server actually
+ * picked a random index from was frozen at build time regardless.
+ * Replaced with count_block_images(), which scans the resource
+ * directory at startup for how many img_NN.webp files actually exist
+ * (sequential from 00, stopping at the first gap - matches the
+ * assumption the Java-side inflation already makes). Adding/removing
+ * images now takes effect on the next server (re)start, no source
+ * change or rebuild needed.
+ */
+#define BLOCK_IMAGE_MAX_SCAN 100  /* matches the 2-digit %02d filename format */
+
+/* Count how many img_00.webp, img_01.webp, ... files exist in
+   resource_dir, stopping at the first missing index. Returns at least
+   1 even if none are found, so the modulo in fn() below never divides
+   by zero - the subsequent mg_http_serve_file() call will just 404 on
+   a missing file in that degenerate case, rather than crash. */
+static int count_block_images(const char *resource_dir) {
+    char path[PATH_MAX];
+    int count = 0;
+    for (; count < BLOCK_IMAGE_MAX_SCAN; count++) {
+        snprintf(path, sizeof(path), "%s/img_%02d.webp", resource_dir, count);
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) break;
+    }
+    if (count == 0) {
+        LOG_INFO("No block placeholder images found in %s", resource_dir);
+        return 1;
+    }
+    LOG_INFO("Found %d block placeholder image(s) in %s", count, resource_dir);
+    return count;
+}
 
 /* SNI per-domain certificate cache.
    OPTIMIZATION: 48 was tight for real browsing sessions — a single page
@@ -92,6 +127,7 @@ struct settings {
     char              test_path[PATH_MAX];
     struct ca_state   ca;
     bool              debug;
+    int               block_image_count;
 };
 
 /* ── Signal handling ──────────────────────────────────────────── */
@@ -441,7 +477,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 
     /* Random block image */
     uint64_t t; memcpy(&t, c->data, sizeof(t));
-    int idx = (int)(t % BLOCK_IMAGE_COUNT);
+    int idx = (int)(t % (uint64_t)s->block_image_count);
     char img_path[PATH_MAX];
     snprintf(img_path, sizeof(img_path), "%s/img_%02d.webp", s->resource_dir, idx);
     struct mg_http_serve_opts o = {0};
@@ -498,6 +534,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             LOG_INFO("localhost leaf cert issued OK");
             snprintf(s.resource_dir, sizeof(s.resource_dir), "%s", rpath);
             snprintf(s.test_path,    sizeof(s.test_path),    "%s/test.html", rpath);
+            s.block_image_count = count_block_images(rpath);
             s.init = true;
         } else if (strcmp(argv[i], "--debug") == 0) {
             s.debug = true;
