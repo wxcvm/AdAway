@@ -61,7 +61,6 @@
         <Preference
             app:icon="@drawable/ic_collections_bookmark_24dp"
             app:key="@string/pref_about_version_key"
-            app:selectable="false"
             app:title="@string/pref_about_version_title" />
     </PreferenceCategory>
 
