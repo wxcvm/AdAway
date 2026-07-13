@@ -94,21 +94,48 @@ public abstract class AppDatabase extends RoomDatabase {
         userSource.setAllowEnabled(true);
         userSource.setRedirectEnabled(true);
         hostsSourceDao.insert(userSource);
-        // AdAway official
+        // BUG FIX / UPDATE: replaced the original 3 default sources
+        // (AdAway official, StevenBlack, Pete Lowe) with these 7 per
+        // explicit request - these are the sources actually in active
+        // use, not translated/localized descriptions, so labels are
+        // hardcoded short names matching how they're already labeled
+        // rather than going through string resources like the old ones
+        // did (those were more like descriptive taglines than short
+        // identifiers, which doesn't fit this list's naming).
         HostsSource source1 = new HostsSource();
-        source1.setLabel(context.getString(R.string.hosts_adaway_source));
-        source1.setUrl("https://adaway.org/hosts.txt");
+        source1.setLabel("10007_auto");
+        source1.setUrl("https://raw.githubusercontent.com/lingeringsound/10007_auto/master/all");
         hostsSourceDao.insert(source1);
-        // StevenBlack
+
         HostsSource source2 = new HostsSource();
-        source2.setLabel(context.getString(R.string.hosts_stevenblack_source));
-        source2.setUrl("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts");
+        source2.setLabel("ADblock");
+        source2.setUrl("https://raw.githubusercontent.com/217heidai/adblockfilters/main/rules/adblockhostslite.txt");
         hostsSourceDao.insert(source2);
-        // Pete Lowe
+
         HostsSource source3 = new HostsSource();
-        source3.setLabel(context.getString(R.string.hosts_peterlowe_source));
-        source3.setUrl("https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext");
+        source3.setLabel("Ad-set-hosts");
+        source3.setUrl("https://raw.githubusercontent.com/rentianyu/Ad-set-hosts/master/hosts");
         hostsSourceDao.insert(source3);
+
+        HostsSource source4 = new HostsSource();
+        source4.setLabel("SMhosts");
+        source4.setUrl("https://raw.githubusercontent.com/2Gardon/SM-Ad-FuckU-hosts/refs/heads/master/SMAdHosts");
+        hostsSourceDao.insert(source4);
+
+        HostsSource source5 = new HostsSource();
+        source5.setLabel("ADhosts");
+        source5.setUrl("https://gitlab.com/rainmor/Adhosts-block/-/raw/master/hosts");
+        hostsSourceDao.insert(source5);
+
+        HostsSource source6 = new HostsSource();
+        source6.setLabel("neohosts");
+        source6.setUrl("https://cdn.jsdelivr.net/gh/neoFelhz/neohosts@gh-pages/127.0.0.1/full/hosts");
+        hostsSourceDao.insert(source6);
+
+        HostsSource source7 = new HostsSource();
+        source7.setLabel("秋风hosts");
+        source7.setUrl("https://raw.githubusercontent.com/TG-Twilight/AWAvenue-Ads-Rule/main/Filters/AWAvenue-Ads-Rule-hosts.txt");
+        hostsSourceDao.insert(source7);
     }
 
     /**
