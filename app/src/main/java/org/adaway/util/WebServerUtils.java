@@ -316,19 +316,23 @@ public class WebServerUtils {
             if (!Files.isDirectory(target)) Files.createDirectories(target);
             inflateResource(am, "test.html", target);
             /*
-             * BUG FIX (configurability): this used to be a hardcoded
-             * `for (int i = 0; i < 7; i++)`, matching webserver.c's old
-             * hardcoded BLOCK_IMAGE_COUNT. Both sides now scan instead -
-             * see count_block_images() in webserver.c for the native
-             * side. Here: keep inflating slot i as long as there's
-             * *something* backing it (either already inflated from a
-             * previous run, or a source asset in any accepted format),
-             * stopping at the first genuinely empty slot. Sequential
-             * from 0, same contiguous-indices assumption the native side
-             * makes.
+             * BUG FIX (usability): this used to require contiguous,
+             * zero-padded numbering (img_00, img_01, ...) - deleting one
+             * image meant renaming every image after it to close the gap.
+             * Scan all assets for anything actually matching the block-
+             * image naming pattern instead (any suffix, e.g. img_00.png,
+             * img_cat.jpg, img_2024-ad.webp all qualify) and inflate
+             * whatever's found - deleting one doesn't touch any other
+             * file's name. Matches the equivalent scan_block_images() on
+             * the native side.
              */
-            for (int i = 0; i < BLOCK_IMAGE_MAX_SCAN && hasBlockImageSource(am, i, target); i++) {
-                inflateBlockImage(am, i, target);
+            String[] assetNames = am.list("");
+            if (assetNames != null) {
+                for (String assetName : assetNames) {
+                    if (BLOCK_IMAGE_ASSET_PATTERN.matcher(assetName).matches()) {
+                        inflateBlockImageAsset(am, assetName, target);
+                    }
+                }
             }
         } catch (IOException e) {
             Timber.w(e, "Failed to inflate web server resources.");
@@ -337,77 +341,69 @@ public class WebServerUtils {
         deleteStaleServerCert(target);
     }
 
-    /** Matches webserver.c's BLOCK_IMAGE_MAX_SCAN - the 2-digit %02d filename format caps this at 100 anyway. */
-    private static final int BLOCK_IMAGE_MAX_SCAN = 100;
+    /**
+     * Matches any block-placeholder source asset: "img_" + anything +
+     * one of the accepted image extensions. No numbering/padding
+     * requirement - "img_00.png", "img_cat.jpg", "img_2024-ad.webp" all
+     * match.
+     */
+    private static final java.util.regex.Pattern BLOCK_IMAGE_ASSET_PATTERN =
+            java.util.regex.Pattern.compile("^img_.+\\.(?:webp|png|jpe?g)$");
 
-    private static boolean hasBlockImageSource(android.content.res.AssetManager am, int index, Path target) {
-        if (Files.isRegularFile(target.resolve(String.format("img_%02d.webp", index)))) return true;
-        for (String ext : BLOCK_IMAGE_SOURCE_EXTENSIONS) {
-            try (InputStream in = am.open(String.format("img_%02d.%s", index, ext))) {
-                return true;
-            } catch (IOException ignored) {
-                // try the next extension
+    /**
+     * Inflate a single block-placeholder source asset (e.g. "img_00.png",
+     * "img_cat.jpg") into the resource directory as "<base name>.webp" -
+     * copied as-is if it's already WebP (fast path, byte-for-byte),
+     * otherwise decoded and re-encoded once via the same
+     * decode-then-Bitmap.CompressFormat.WEBP path already used by the
+     * in-app runtime picker (setCustomBlockImage()). Skipped if that
+     * output file already exists - ensureStaticResources() only needs to
+     * do this once per image, not on every server start.
+     */
+    private static void inflateBlockImageAsset(android.content.res.AssetManager am, String assetName, Path target)
+            throws IOException {
+        String baseName = assetName.substring(0, assetName.lastIndexOf('.'));
+        Path out = target.resolve(baseName + ".webp");
+        if (Files.isRegularFile(out)) return; // already inflated
+
+        try (InputStream in = am.open(assetName)) {
+            if (assetName.endsWith(".webp")) {
+                Files.copy(in, out);
+            } else {
+                Bitmap bitmap = BitmapFactory.decodeStream(in);
+                if (bitmap == null) {
+                    Timber.w("Couldn't decode %s as an image, skipping.", assetName);
+                    return;
+                }
+                try (OutputStream os = Files.newOutputStream(out)) {
+                    bitmap.compress(Bitmap.CompressFormat.WEBP, 85, os);
+                } finally {
+                    bitmap.recycle();
+                }
             }
         }
-        return false;
     }
 
     /**
-     * Common source-image formats accepted as a drop-in replacement for a
-     * default block-placeholder image, tried in this order.
+     * List the currently-inflated block-placeholder images in a resource
+     * directory (files matching "img_*.webp", whatever their exact
+     * names). Shared by setCustomBlockImage()/resetBlockImagesToDefault()
+     * so neither hardcodes a numbering scheme independently of what
+     * ensureStaticResources()/scan_block_images() (native side) actually
+     * use.
      */
-    private static final String[] BLOCK_IMAGE_SOURCE_EXTENSIONS = {"webp", "png", "jpg", "jpeg"};
-
-    /**
-     * Inflate one of the 7 default block-placeholder images
-     * (img_00.webp .. img_06.webp) into the resource directory.
-     * <p>
-     * CONVENIENCE: a repo maintainer wanting different baked-in defaults
-     * used to need a separate conversion script (scripts/
-     * set_default_block_images.py) before building, since the native web
-     * server only serves .webp and only recognizes that exact filename
-     * pattern. That's an unnecessary extra step - dropping an image file
-     * of *any* common format into assets/ with the right base name
-     * (img_00.png, img_03.jpg, etc, alongside or instead of the .webp
-     * files) is simpler and needs no separate tooling. If an exact
-     * img_NN.webp asset exists, it's copied as-is (fast path, byte-for-
-     * byte, same as before). Otherwise this looks for img_NN.<ext> in
-     * PNG/JPEG and re-encodes it to WebP once, the same
-     * decode-then-Bitmap.CompressFormat.WEBP path already used by the
-     * in-app runtime picker (setCustomBlockImage()) - so both routes
-     * produce the same kind of file, just at different times (build-time
-     * assets vs a user's runtime pick).
-     */
-    private static void inflateBlockImage(android.content.res.AssetManager am, int index, Path target)
-            throws IOException {
-        String webpName = String.format("img_%02d.webp", index);
-        Path out = target.resolve(webpName);
-        if (Files.isRegularFile(out)) return; // already inflated
-
-        for (String ext : BLOCK_IMAGE_SOURCE_EXTENSIONS) {
-            String assetName = String.format("img_%02d.%s", index, ext);
-            try (InputStream in = am.open(assetName)) {
-                if (ext.equals("webp")) {
-                    Files.copy(in, out);
-                } else {
-                    Bitmap bitmap = BitmapFactory.decodeStream(in);
-                    if (bitmap == null) {
-                        Timber.w("Couldn't decode %s as an image, skipping.", assetName);
-                        continue;
-                    }
-                    try (OutputStream os = Files.newOutputStream(out)) {
-                        bitmap.compress(Bitmap.CompressFormat.WEBP, 85, os);
-                    } finally {
-                        bitmap.recycle();
-                    }
-                }
-                return; // found and inflated - stop trying other extensions
-            } catch (IOException e) {
-                // This extension doesn't exist for this slot - try the next one.
-            }
+    private static java.util.List<Path> listBlockImageSlots(Path resourceDir) {
+        java.util.List<Path> result = new java.util.ArrayList<>();
+        if (!Files.isDirectory(resourceDir)) return result;
+        try (java.util.stream.Stream<Path> stream = Files.list(resourceDir)) {
+            stream.filter(p -> {
+                String name = p.getFileName().toString();
+                return name.startsWith("img_") && name.endsWith(".webp");
+            }).forEach(result::add);
+        } catch (IOException e) {
+            Timber.w(e, "Failed to list block image slots.");
         }
-        Timber.w("No source image found for slot %d (tried: %s).",
-                index, String.join(", ", BLOCK_IMAGE_SOURCE_EXTENSIONS));
+        return result;
     }
 
     private static void deleteStaleServerCert(Path dir) {
@@ -452,32 +448,6 @@ public class WebServerUtils {
      *
      * @return true if the image was decoded and written successfully.
      */
-    /**
-     * How many block-placeholder image slots are currently configured -
-     * the larger of what's already inflated in the resource directory
-     * (covers a webserver that's already run at least once) and what's
-     * defined in the APK's assets (covers a fresh install/data-clear
-     * where the resource directory hasn't been populated yet at all).
-     * Used here so setCustomBlockImage()/resetBlockImagesToDefault()
-     * don't each hardcode a slot count independently of what
-     * ensureStaticResources()/count_block_images() (native side) would
-     * actually use.
-     */
-    private static int getBlockImageSlotCount(Context context) {
-        Path resourceDir = getResourcePath(context);
-        int fromResourceDir = 0;
-        while (fromResourceDir < BLOCK_IMAGE_MAX_SCAN
-                && Files.isRegularFile(resourceDir.resolve(String.format("img_%02d.webp", fromResourceDir)))) {
-            fromResourceDir++;
-        }
-        android.content.res.AssetManager am = context.getAssets();
-        int fromAssets = 0;
-        while (fromAssets < BLOCK_IMAGE_MAX_SCAN && hasBlockImageSource(am, fromAssets, resourceDir)) {
-            fromAssets++;
-        }
-        return Math.max(1, Math.max(fromResourceDir, fromAssets));
-    }
-
     public static boolean setCustomBlockImage(Context context, Uri imageUri) {
         Bitmap bitmap;
         try (InputStream is = context.getContentResolver().openInputStream(imageUri)) {
@@ -497,9 +467,9 @@ public class WebServerUtils {
         Path resourceDir = getResourcePath(context);
         try {
             if (!Files.isDirectory(resourceDir)) Files.createDirectories(resourceDir);
-            int slotCount = getBlockImageSlotCount(context);
-            for (int i = 0; i < slotCount; i++) {
-                Path out = resourceDir.resolve(String.format("img_%02d.webp", i));
+            java.util.List<Path> slots = listBlockImageSlots(resourceDir);
+            if (slots.isEmpty()) slots = java.util.Collections.singletonList(resourceDir.resolve("img_00.webp"));
+            for (Path out : slots) {
                 try (OutputStream os = Files.newOutputStream(out)) {
                     bitmap.compress(format, 90, os);
                 }
@@ -523,12 +493,11 @@ public class WebServerUtils {
      */
     public static void resetBlockImagesToDefault(Context context) {
         Path resourceDir = getResourcePath(context);
-        int slotCount = getBlockImageSlotCount(context);
-        for (int i = 0; i < slotCount; i++) {
+        for (Path slot : listBlockImageSlots(resourceDir)) {
             try {
-                Files.deleteIfExists(resourceDir.resolve(String.format("img_%02d.webp", i)));
+                Files.deleteIfExists(slot);
             } catch (IOException e) {
-                Timber.w(e, "Failed to delete block image %d for reset.", i);
+                Timber.w(e, "Failed to delete block image %s for reset.", slot);
             }
         }
         ensureStaticResources(context, resourceDir);

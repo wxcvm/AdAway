@@ -6,6 +6,7 @@
 #include <android/log.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <linux/limits.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
@@ -59,36 +60,54 @@
 #define MAX_CONNECTIONS   256
 #define IDLE_TIMEOUT_MS   10000
 /*
- * BUG FIX (configurability): this used to be a hardcoded
- * #define BLOCK_IMAGE_COUNT 7, meaning changing how many placeholder
- * images exist required editing this file and rebuilding the native
- * binary - the Java-side asset inflation / repo tooling could add or
- * remove img_NN.<ext> files freely, but the number the server actually
- * picked a random index from was frozen at build time regardless.
- * Replaced with count_block_images(), which scans the resource
- * directory at startup for how many img_NN.webp files actually exist
- * (sequential from 00, stopping at the first gap - matches the
- * assumption the Java-side inflation already makes). Adding/removing
- * images now takes effect on the next server (re)start, no source
- * change or rebuild needed.
+ * BUG FIX (usability): the sequential img_00.webp, img_01.webp, ...
+ * scheme (see git history for count_block_images(), the previous
+ * approach) required contiguous, zero-padded numbering - deleting one
+ * image meant renaming every image after it to close the gap, since
+ * scanning stopped at the first missing index. Scan the actual
+ * directory contents instead and remember whichever filenames are
+ * really there: delete any image, rename none of the others, add a
+ * new one under any name matching the pattern - all just work. Also no
+ * longer bound to the "two-digit index" naming scheme this session's
+ * earlier fixes needed, since actual filenames (not reconstructed
+ * ones) are what get served.
  */
-#define BLOCK_IMAGE_MAX_SCAN 100  /* matches the 2-digit %02d filename format */
+#define BLOCK_IMAGE_MAX_COUNT 100
+#define BLOCK_IMAGE_NAME_MAX  128
 
-/* Count how many img_00.webp, img_01.webp, ... files exist in
-   resource_dir, stopping at the first missing index. Returns at least
-   1 even if none are found, so the modulo in fn() below never divides
-   by zero - the subsequent mg_http_serve_file() call will just 404 on
-   a missing file in that degenerate case, rather than crash. */
-static int count_block_images(const char *resource_dir) {
-    char path[PATH_MAX];
+/* Scan resource_dir for files matching img_*.webp (case-sensitive,
+   any suffix - "img_00.webp", "img_cat.webp", "img_2024-ad.webp" all
+   match), storing up to BLOCK_IMAGE_MAX_COUNT filenames into out[].
+   Returns the count found; always >= 1 (falls back to "img_00.webp"
+   even if nothing was found, so the modulo below never divides by
+   zero - the subsequent mg_http_serve_file() call will just 404 on a
+   missing file in that degenerate case, rather than crash). */
+static int scan_block_images(const char *resource_dir,
+                             char out[][BLOCK_IMAGE_NAME_MAX]) {
     int count = 0;
-    for (; count < BLOCK_IMAGE_MAX_SCAN; count++) {
-        snprintf(path, sizeof(path), "%s/img_%02d.webp", resource_dir, count);
-        struct stat st;
-        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) break;
+    DIR *dir = opendir(resource_dir);
+    if (!dir) {
+        LOG_INFO("Could not open resource dir %s to scan for block images", resource_dir);
+        snprintf(out[0], BLOCK_IMAGE_NAME_MAX, "img_00.webp");
+        return 1;
     }
+    struct dirent *entry;
+    while (count < BLOCK_IMAGE_MAX_COUNT && (entry = readdir(dir)) != NULL) {
+        const char *name = entry->d_name;
+        size_t len = strlen(name);
+        /* Match "img_*.webp" - starts with "img_", ends with ".webp",
+           and has at least one character in between. */
+        if (len > 9 /* strlen("img_x.webp") */
+                && strncmp(name, "img_", 4) == 0
+                && strcmp(name + len - 5, ".webp") == 0) {
+            snprintf(out[count], BLOCK_IMAGE_NAME_MAX, "%s", name);
+            count++;
+        }
+    }
+    closedir(dir);
     if (count == 0) {
         LOG_INFO("No block placeholder images found in %s", resource_dir);
+        snprintf(out[0], BLOCK_IMAGE_NAME_MAX, "img_00.webp");
         return 1;
     }
     LOG_INFO("Found %d block placeholder image(s) in %s", count, resource_dir);
@@ -128,6 +147,7 @@ struct settings {
     struct ca_state   ca;
     bool              debug;
     int               block_image_count;
+    char              block_images[BLOCK_IMAGE_MAX_COUNT][BLOCK_IMAGE_NAME_MAX];
 };
 
 /* ── Signal handling ──────────────────────────────────────────── */
@@ -475,11 +495,14 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
-    /* Random block image */
+    /* Random block image - serve whichever actual filename was found at
+       scan time (see scan_block_images()), not a reconstructed
+       img_%02d.webp - deleting/adding images doesn't require renaming
+       the rest to stay contiguous. */
     uint64_t t; memcpy(&t, c->data, sizeof(t));
     int idx = (int)(t % (uint64_t)s->block_image_count);
     char img_path[PATH_MAX];
-    snprintf(img_path, sizeof(img_path), "%s/img_%02d.webp", s->resource_dir, idx);
+    snprintf(img_path, sizeof(img_path), "%s/%s", s->resource_dir, s->block_images[idx]);
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
     /* OPTIMIZATION: every blocked ad slot on every page load re-requests
@@ -534,7 +557,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             LOG_INFO("localhost leaf cert issued OK");
             snprintf(s.resource_dir, sizeof(s.resource_dir), "%s", rpath);
             snprintf(s.test_path,    sizeof(s.test_path),    "%s/test.html", rpath);
-            s.block_image_count = count_block_images(rpath);
+            s.block_image_count = scan_block_images(rpath, s.block_images);
             s.init = true;
         } else if (strcmp(argv[i], "--debug") == 0) {
             s.debug = true;
