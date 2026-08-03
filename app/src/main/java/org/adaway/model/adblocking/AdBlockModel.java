@@ -22,6 +22,22 @@ public abstract class AdBlockModel {
     protected final Context context;
     protected final MutableLiveData<Boolean> applied;
     private final MutableLiveData<String> state;
+    /**
+     * Lock for subclasses to guard apply()/revert() with.
+     * <p>
+     * BUG FIX: the ad block model is a single app-wide instance (see
+     * AdAwayApplication#getAdBlockModel()), reused by every entry point
+     * that can trigger an apply/revert - the home screen's manual sync
+     * action, the periodic background update worker, and the "apply
+     * configuration" snackbar shown elsewhere in the app - with no
+     * coordination between them. Two of those overlapping (e.g. a
+     * background update finishing apply() right as the user taps sync
+     * manually) used to race on the same generated hosts file and, for
+     * root installs, on the same root shell copy - an occasional crash
+     * when updating hosts. See RootModel#apply()/revert() for where this
+     * is used.
+     */
+    protected final Object applyLock = new Object();
 
     protected AdBlockModel(Context context) {
         this.context = context;

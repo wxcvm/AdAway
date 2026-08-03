@@ -96,6 +96,30 @@ public class SourceModel {
      * The HTTP client to download hosts sources ({@code null} until initialized by {@link #getHttpClient()}).
      */
     private OkHttpClient cachedHttpClient;
+    /**
+     * Lock guarding {@link #retrieveHostsSources()} / {@link #syncHostEntries()}.
+     * <p>
+     * BUG FIX: this model is a single app-wide instance (see
+     * AdAwayApplication#getSourceModel()) shared by three independent,
+     * uncoordinated entry points - the periodic background update worker
+     * (SourceUpdateService), the manual "sync" action on the home screen
+     * (HomeViewModel#sync()), and the "apply configuration" snackbar shown
+     * elsewhere in the app (ApplyConfigurationSnackbar#apply()). Nothing
+     * previously stopped two of these from running at the same time (e.g.
+     * a background sync landing right as the user taps "sync" manually) -
+     * each would independently clear/re-download/re-parse hosts sources
+     * and re-run the host_entries dedup sync concurrently against the same
+     * database tables, which was the source of the occasional crash
+     * reported when updating hosts (SQLite busy/locked errors, and racing
+     * on the generated hosts file in RootModel#apply()). HomeViewModel's
+     * own "pending" flag only guarded its own two entry points against
+     * each other, and even that check-via-getValue()/set-via-postValue()
+     * pattern across threads isn't actually atomic. A single instance-wide
+     * lock here (and a matching one around RootModel#apply()/revert())
+     * makes these operations mutually exclusive regardless of which entry
+     * point triggered them.
+     */
+    private final Object updateLock = new Object();
 
     /**
      * Constructor.
@@ -303,6 +327,12 @@ public class SourceModel {
      * @throws HostErrorException If the hosts sources could not be downloaded.
      */
     public void retrieveHostsSources() throws HostErrorException {
+        synchronized (this.updateLock) {
+            retrieveHostsSourcesLocked();
+        }
+    }
+
+    private void retrieveHostsSourcesLocked() throws HostErrorException {
         // Check connection status
         if (isDeviceOffline()) {
             throw new HostErrorException(NO_CONNECTION);
@@ -373,8 +403,10 @@ public class SourceModel {
      * Synchronize hosts entries from current source states.
      */
     public void syncHostEntries() {
-        setState(R.string.status_sync_database);
-        this.hostEntryDao.sync();
+        synchronized (this.updateLock) {
+            setState(R.string.status_sync_database);
+            this.hostEntryDao.sync();
+        }
     }
 
     /**
