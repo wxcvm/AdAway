@@ -20,7 +20,26 @@ import static androidx.room.ForeignKey.CASCADE;
         tableName = "hosts_lists",
         indices = {
                 @Index(value = "host"),
-                @Index(value = "source_id")
+                @Index(value = "source_id"),
+                /*
+                 * OPTIMIZATION: every hot-path query against this table -
+                 * dedup sync (HostEntryDao#importBlocked/
+                 * getEnabledAllowedHosts/getEnabledRedirectedHosts) and the
+                 * home screen statistics (HostListItemDao#getBlockedHostCount/
+                 * getAllowedHostCount/getRedirectHostCount) - filters by
+                 * exactly `type` + `enabled` and, for the dedup reads, also
+                 * orders/dedupes by `host`. With only single-column indices
+                 * on `host` and `source_id`, none of those queries had an
+                 * index usable for the `type`/`enabled` filter, so SQLite
+                 * fell back to a full table scan on what's typically a
+                 * 100k-300k+ row table (after merging several community
+                 * block lists), on every sync and every stats refresh. This
+                 * composite index lets SQLite satisfy the filter, the
+                 * `ORDER BY host` in getEnabledRedirectedHosts(), and the
+                 * `COUNT(DISTINCT host)` aggregates directly from the index
+                 * without touching the table rows.
+                 */
+                @Index(value = {"type", "enabled", "host"})
         },
         foreignKeys = @ForeignKey(
                 entity = HostsSource.class,
