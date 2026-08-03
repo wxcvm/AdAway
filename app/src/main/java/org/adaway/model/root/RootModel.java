@@ -87,14 +87,16 @@ public class RootModel extends AdBlockModel {
 
     @Override
     public void apply() throws HostErrorException {
-        setState(R.string.status_apply_sources);
-        setState(R.string.status_create_new_hosts);
-        createNewHostsFile();
-        setState(R.string.status_copy_new_hosts);
-        copyNewHostsFile();
-        setState(R.string.status_check_copy);
-        setState(R.string.status_hosts_updated);
-        this.applied.postValue(true);
+        synchronized (this.applyLock) {
+            setState(R.string.status_apply_sources);
+            setState(R.string.status_create_new_hosts);
+            createNewHostsFile();
+            setState(R.string.status_copy_new_hosts);
+            copyNewHostsFile();
+            setState(R.string.status_check_copy);
+            setState(R.string.status_hosts_updated);
+            this.applied.postValue(true);
+        }
     }
 
     /**
@@ -104,15 +106,17 @@ public class RootModel extends AdBlockModel {
      */
     @Override
     public void revert() throws HostErrorException {
-        // Update status
-        setState(R.string.status_revert);
-        try {
-            // Revert hosts file
-            revertHostFile();
-            setState(R.string.status_revert_done);
-            this.applied.postValue(false);
-        } catch (IOException exception) {
-            throw new HostErrorException(REVERT_FAIL, exception);
+        synchronized (this.applyLock) {
+            // Update status
+            setState(R.string.status_revert);
+            try {
+                // Revert hosts file
+                revertHostFile();
+                setState(R.string.status_revert_done);
+                this.applied.postValue(false);
+            } catch (IOException exception) {
+                throw new HostErrorException(REVERT_FAIL, exception);
+            }
         }
     }
 
