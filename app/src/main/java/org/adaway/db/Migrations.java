@@ -120,4 +120,23 @@ final class Migrations {
             database.execSQL("ALTER TABLE `hosts_sources` ADD `entityTag` TEXT DEFAULT NULL");
         }
     };
+
+    /**
+     * Migration script from v7 to v8.
+     * <p>
+     * OPTIMIZATION: adds a composite index covering the `type` + `enabled`
+     * filter (plus `host` for ordering/dedup) shared by every hosts-list
+     * dedup query (HostEntryDao#sync()) and every home-screen statistics
+     * count (HostListItemDao#getBlockedHostCount/getAllowedHostCount/
+     * getRedirectHostCount). Previously those queries had no index usable
+     * for their WHERE clause and fell back to a full scan of `hosts_lists`,
+     * which routinely holds 100k-300k+ rows after merging several
+     * community block lists.
+     */
+    static final Migration MIGRATION_7_8 = new Migration(7, 8) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase database) {
+            database.execSQL("CREATE INDEX IF NOT EXISTS `index_hosts_lists_type_enabled_host` ON `hosts_lists` (`type`, `enabled`, `host`)");
+        }
+    };
 }

@@ -4,11 +4,13 @@ import androidx.annotation.Nullable;
 import androidx.room.Dao;
 import androidx.room.Insert;
 import androidx.room.Query;
+import androidx.room.Transaction;
 
 import org.adaway.db.entity.HostEntry;
 import org.adaway.db.entity.HostListItem;
 import org.adaway.db.entity.ListType;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -40,12 +42,36 @@ public interface HostEntryDao {
     @Query("SELECT * FROM hosts_lists WHERE type = 2 AND enabled = 1 ORDER BY host ASC, source_id DESC")
     List<HostListItem> getEnabledRedirectedHosts();
 
+    /**
+     * Batch-insert redirected host entries, used by {@link #sync()}.
+     * <p>
+     * OPTIMIZATION: sync() used to insert redirected hosts one row at a
+     * time - one round trip / one implicit commit per row. Room generates
+     * a single prepared-statement loop for a List insert, so passing the
+     * whole batch here instead cuts that down to one call (and, combined
+     * with {@link Transaction @Transaction} on sync(), one commit for the
+     * whole sync instead of one per row).
+     */
     @Insert(onConflict = REPLACE)
-    void redirectHost(HostEntry redirection);
+    void redirectHosts(List<HostEntry> redirections);
 
     /**
      * Synchronize the host entries based on the current hosts lists table records.
+     * <p>
+     * OPTIMIZATION / CORRECTNESS: previously not annotated with
+     * {@link Transaction @Transaction}, so clear(), importBlocked(), every
+     * per-host allowHost() delete, and every per-host redirectHost() insert
+     * each committed as its own separate transaction - for a device with a
+     * sizeable allow-list or redirect-list this was many individual disk
+     * commits for a single logical sync. It also meant a process death or
+     * crash partway through left host_entries (the table the ad-blocking
+     * service actually reads from) in an inconsistent half-synced state -
+     * e.g. blocked hosts imported but allow-list exclusions not yet
+     * applied. Wrapping the whole method in one transaction makes the sync
+     * atomic (either fully applied or not applied at all) and lets SQLite
+     * commit it once instead of N+M times.
      */
+    @Transaction
     default void sync() {
         clear();
         importBlocked();
@@ -54,13 +80,16 @@ public interface HostEntryDao {
             allowedHost = A_CHAR_PATTERN.matcher(allowedHost).replaceAll("_");
             allowHost(allowedHost);
         }
-        for (HostListItem redirectedHost : getEnabledRedirectedHosts()) {
+        List<HostListItem> redirectedHosts = getEnabledRedirectedHosts();
+        List<HostEntry> redirections = new ArrayList<>(redirectedHosts.size());
+        for (HostListItem redirectedHost : redirectedHosts) {
             HostEntry entry = new HostEntry();
             entry.setHost(redirectedHost.getHost());
             entry.setType(REDIRECTED);
             entry.setRedirection(redirectedHost.getRedirection());
-            redirectHost(entry);
+            redirections.add(entry);
         }
+        redirectHosts(redirections);
     }
 
     @Query("SELECT * FROM `host_entries` ORDER BY `host`")
