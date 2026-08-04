@@ -505,14 +505,34 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     snprintf(img_path, sizeof(img_path), "%s/%s", s->resource_dir, s->block_images[idx]);
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
-    /* OPTIMIZATION: every blocked ad slot on every page load re-requests
-       this same placeholder image from the local server with no caching
-       hint at all, so the client re-fetches it every single time instead
-       of ever reusing a cached copy — needless disk I/O and CPU work on
-       a mobile device that may be handling this dozens of times a
-       minute. These images are static build resources that never change
-       at runtime, so let clients cache them. */
-    o.extra_headers = "Cache-Control: public, max-age=86400\r\n";
+    /*
+     * OPTIMIZATION: every blocked ad slot on every page load re-requests
+     * this same placeholder image from the local server with no caching
+     * hint at all, so the client re-fetches it every single time instead
+     * of ever reusing a cached copy — needless disk I/O and CPU work on
+     * a mobile device that may be handling this dozens of times a
+     * minute. These images are static build resources that never change
+     * at runtime, so let clients cache them.
+     *
+     * BUG FIX: this used to be "public, max-age=86400" - fine for the
+     * built-in defaults, which really don't change at runtime, but the
+     * app also lets a user replace them at any time via
+     * WebServerUtils#setCustomBlockImage()/resetBlockImagesToDefault(),
+     * which overwrite the same filenames in place. A client that had
+     * already cached the old bytes under max-age=86400 won't even send
+     * a new request - let alone a conditional one - for up to a day,
+     * so a picked custom image (or a reset back to the default) could
+     * silently not show up for hours. mg_http_serve_file() already
+     * generates an ETag from each file's size+mtime and honors
+     * If-None-Match (see mg_http_etag() in mongoose.c), so "no-cache"
+     * keeps the win this header was added for - clients still cache the
+     * bytes and, on every use, get back a cheap 304 with no body as
+     * long as the file is actually unchanged - while making sure a
+     * genuine content change (different size/mtime → different ETag) is
+     * always picked up on the very next request instead of being stuck
+     * behind a stale cache.
+     */
+    o.extra_headers = "Cache-Control: no-cache\r\n";
     mg_http_serve_file(c, hm, img_path, &o);
 }
 
