@@ -50,19 +50,42 @@ jobs:
           set -euo pipefail
           DEST=app/src/main/assets
           if [ "${{ inputs.slot }}" = "all" ]; then
-            # Scan for whatever slots currently exist (any accepted
-            # extension), contiguous from 0 - same assumption
-            # count_block_images() in webserver.c makes. This replaces
-            # every existing slot, however many there are; it doesn't
-            # add a new one (use a specific slot number for that).
+            # BUG FIX: this used to stop at the first missing index
+            # (a "while -f img_NN.<ext>" loop starting from 0), on the
+            # assumption that slots are always contiguous from 0 - an
+            # assumption that matched an older version of
+            # scan_block_images() in webserver.c but not the current
+            # one, which explicitly scans the whole directory so
+            # deleting/adding a slot never requires renaming the rest.
+            # Once the assets directory actually had a gap (img_02 is
+            # followed by img_06, not img_03), this silently updated
+            # only img_00-img_02 and skipped every slot from img_06
+            # onward with no warning. Glob for every existing slot
+            # instead, matching what scan_block_images() itself does.
             SLOTS=""
-            i=0
-            while [ -f "$DEST/img_$(printf '%02d' "$i").webp" ] || \
-                  [ -f "$DEST/img_$(printf '%02d' "$i").png" ]  || \
-                  [ -f "$DEST/img_$(printf '%02d' "$i").jpg" ]  || \
-                  [ -f "$DEST/img_$(printf '%02d' "$i").jpeg" ]; do
-              SLOTS="$SLOTS $i"
-              i=$((i + 1))
+            shopt -s nullglob
+            for f in "$DEST"/img_*.webp "$DEST"/img_*.png "$DEST"/img_*.jpg "$DEST"/img_*.jpeg; do
+              base=$(basename "$f")
+              base="${base%.*}"
+              slot_num="${base#img_}"
+              # Only numbered slots (img_00, img_07, ...) are in scope
+              # here - a non-numeric name (img_cat.webp) is a valid
+              # block image but not something this "replace slot N"
+              # workflow knows how to target, so leave it alone.
+              case "$slot_num" in
+                ''|*[!0-9]*) continue ;;
+              esac
+              # Strip leading zeros via forced base-10 arithmetic -
+              # bash's printf/arithmetic treat a leading-zero numeral
+              # like "08"/"09" as (invalid) octal otherwise, which
+              # would abort this script with "value too great for
+              # base" the first time a two-digit slot starting with 0
+              # was found (every slot from img_00 to img_09).
+              slot_num=$((10#$slot_num))
+              case " $SLOTS " in
+                *" $slot_num "*) ;; # already recorded (e.g. two extensions for the same slot)
+                *) SLOTS="$SLOTS $slot_num" ;;
+              esac
             done
             if [ -z "$SLOTS" ]; then
               echo "No existing slots found in $DEST - pass a specific slot number instead of 'all' to add the first one."
