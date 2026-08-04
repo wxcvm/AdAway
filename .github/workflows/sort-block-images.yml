@@ -1,0 +1,99 @@
+name: Auto-sort uploaded block placeholder images
+
+# Whenever an image lands in app/src/main/assets/ under its original
+# name - e.g. via GitHub's "Add file > Upload files" web UI, which
+# keeps whatever filename the camera/gallery/download gave it, like
+# "IMG_20260712_162041.png" - rename it to the next free img_NN slot
+# and commit that rename automatically.
+#
+# This used to be a manual, one-off "Rename IMG_....png to img_NN.png"
+# commit after every single upload (see the git history under
+# app/src/main/assets/) - slow, had to be repeated for every image,
+# and error-prone: it's exactly the kind of manual step that silently
+# corrupted img_13.jpg once already (a GitHub-web "rename" that ended
+# up replacing the file's content with 2 bytes - see that fix's commit
+# message for the full story). Doing it in CI instead removes the
+# manual step, and therefore that failure mode, entirely.
+
+on:
+  push:
+    paths:
+      - 'app/src/main/assets/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sort-block-images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sort-block-images:
+    # Guard against the commit this job itself makes re-triggering
+    # itself - it always pushes as github-actions[bot], so a run
+    # triggered by that actor's own push is skipped rather than
+    # looping forever.
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Rename any newly uploaded images to the next free slot
+        id: sort
+        run: |
+          set -euo pipefail
+          DEST=app/src/main/assets
+
+          # Next unused numbered slot, given whatever slots already
+          # exist. Gaps are fine to leave as gaps (scan_block_images()
+          # in webserver.c scans the whole directory rather than
+          # assuming contiguous numbering) - this just keeps newly
+          # assigned numbers tidy rather than picking an arbitrarily
+          # large one.
+          next_free_slot() {
+            i=0
+            while [ -e "$DEST/img_$(printf '%02d' "$i").webp" ] || \
+                  [ -e "$DEST/img_$(printf '%02d' "$i").png" ]  || \
+                  [ -e "$DEST/img_$(printf '%02d' "$i").jpg" ]  || \
+                  [ -e "$DEST/img_$(printf '%02d' "$i").jpeg" ]; do
+              i=$((i + 1))
+            done
+            echo "$i"
+          }
+
+          renamed=0
+          shopt -s nullglob nocaseglob
+          for f in "$DEST"/*.webp "$DEST"/*.png "$DEST"/*.jpg "$DEST"/*.jpeg; do
+            name=$(basename "$f")
+            # Already-sorted images are left exactly as they are -
+            # this only ever touches files that don't yet match the
+            # img_<anything>.<ext> convention (any suffix is fine, see
+            # BLOCK_IMAGE_ASSET_PATTERN in WebServerUtils.java - it's
+            # only genuinely unsorted uploads, camera/gallery-style
+            # filenames etc., that get renamed here).
+            case "$name" in
+              img_*) continue ;;
+            esac
+            ext=$(echo "${name##*.}" | tr '[:upper:]' '[:lower:]')
+            [ "$ext" = "jpeg" ] && ext="jpg"
+            slot=$(next_free_slot)
+            padded=$(printf '%02d' "$slot")
+            new_name="img_${padded}.${ext}"
+            echo "Sorting $name -> $new_name"
+            git mv -- "$f" "$DEST/$new_name"
+            renamed=$((renamed + 1))
+          done
+          echo "renamed=$renamed" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.sort.outputs.renamed != '0'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: auto-sort newly uploaded block placeholder image(s)
+
+          Renamed ${{ steps.sort.outputs.renamed }} file(s) to the next free img_NN slot."
+          git push
