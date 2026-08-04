@@ -144,13 +144,30 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
                 uri -> {
                     if (uri == null) return;
                     Context ctx = requireContext();
-                    boolean ok = org.adaway.util.WebServerUtils.setCustomBlockImage(ctx, uri);
-                    android.widget.Toast.makeText(
-                            ctx,
-                            ok ? R.string.pref_webserver_block_image_success
-                               : R.string.pref_webserver_block_image_failed,
-                            android.widget.Toast.LENGTH_LONG
-                    ).show();
+                    /*
+                     * BUG FIX: this used to call setCustomBlockImage()
+                     * directly here - ActivityResultCallback runs on the
+                     * main thread, so decoding the picked image, deciding
+                     * a compression format, re-encoding as WEBP and
+                     * writing it to disk (once per block-image slot) all
+                     * happened synchronously on the UI thread. For a
+                     * multi-megapixel photo picked from the gallery -
+                     * the common case - that's a real ANR risk. The
+                     * sibling "reset to default" action just below
+                     * already correctly offloads the equivalent disk work
+                     * to AppExecutors.diskIO(); this path had been missed.
+                     */
+                    AppExecutors.getInstance().diskIO().execute(() -> {
+                        boolean ok = org.adaway.util.WebServerUtils.setCustomBlockImage(ctx, uri);
+                        AppExecutors.getInstance().mainThread().execute(() ->
+                                android.widget.Toast.makeText(
+                                        ctx,
+                                        ok ? R.string.pref_webserver_block_image_success
+                                           : R.string.pref_webserver_block_image_failed,
+                                        android.widget.Toast.LENGTH_LONG
+                                ).show()
+                        );
+                    });
                 }
         );
     }
