@@ -8,6 +8,7 @@ import static org.adaway.util.Constants.LOCALHOST_HOSTNAME;
 import static org.adaway.util.Constants.LOCALHOST_IPV4;
 import static org.adaway.util.Constants.LOCALHOST_IPV6;
 
+import org.adaway.db.AppDatabase;
 import org.adaway.db.dao.HostListItemDao;
 import org.adaway.db.entity.HostListItem;
 import org.adaway.db.entity.HostsSource;
@@ -47,9 +48,32 @@ class SourceLoader {
         this.source = hostsSource;
     }
 
-    void parse(BufferedReader reader, HostListItemDao hostListItemDao) throws IOException {
-        // Clear current hosts
-        hostListItemDao.clearSourceHosts(this.source.getId());
+    /**
+     * OPTIMIZATION: previously this only called clearSourceHosts() up
+     * front, then let {@link ItemInserter} insert every INSERT_BATCH_SIZE
+     * (100) items as its own separate, individually-committed transaction
+     * (Room auto-wraps each array/list @Insert call in one). A 100k-300k+
+     * line hosts source - not unusual for the popular community block
+     * lists this app ships by default - meant well over a thousand
+     * individual disk commits just for that one source, times however
+     * many sources are configured, on literally every single sync. That
+     * was by far the largest remaining cost in the whole hosts-update
+     * pipeline, dwarfing the per-item parsing work itself.
+     * <p>
+     * clearSourceHosts() now runs as the very first step inside
+     * {@link ItemInserter#call()} instead of here, and the whole thing -
+     * the clear plus every insert batch - runs inside one
+     * {@link AppDatabase#runInTransaction}, collapsing a source's total
+     * commit count from "roughly (line count / 100) + 1" down to exactly
+     * one. This is safe to do because ItemInserter already does every one
+     * of its inserts sequentially on a single dedicated thread (the
+     * reader/parser threads never touch the database - they only produce
+     * HostListItem objects onto a queue), and because SourceModel already
+     * serializes all of retrieveHostsSources() behind its own lock, so
+     * there's never a second writer that a long-lived transaction here
+     * could end up blocking.
+     */
+    void parse(BufferedReader reader, HostListItemDao hostListItemDao, AppDatabase database) throws IOException {
         // Create batch
         int parserCount = 3;
         // BUG FIX: these used to be unbounded (new LinkedBlockingQueue<>()
@@ -67,7 +91,7 @@ class SourceLoader {
         LinkedBlockingQueue<String> hostsLineQueue = new LinkedBlockingQueue<>(4096);
         LinkedBlockingQueue<HostListItem> hostsListItemQueue = new LinkedBlockingQueue<>(4096);
         SourceReader sourceReader = new SourceReader(reader, hostsLineQueue, parserCount);
-        ItemInserter inserter = new ItemInserter(hostsListItemQueue, hostListItemDao, parserCount);
+        ItemInserter inserter = new ItemInserter(hostsListItemQueue, hostListItemDao, parserCount, database, this.source.getId());
         ExecutorService executorService = Executors.newFixedThreadPool(
                 parserCount + 2,
                 r -> new Thread(r, TAG)
@@ -290,15 +314,38 @@ class SourceLoader {
         private final BlockingQueue<HostListItem> hostListItemQueue;
         private final HostListItemDao hostListItemDao;
         private final int parserCount;
+        private final AppDatabase database;
+        private final int sourceId;
 
-        private ItemInserter(BlockingQueue<HostListItem> itemQueue, HostListItemDao hostListItemDao, int parserCount) {
+        private ItemInserter(
+                BlockingQueue<HostListItem> itemQueue,
+                HostListItemDao hostListItemDao,
+                int parserCount,
+                AppDatabase database,
+                int sourceId
+        ) {
             this.hostListItemQueue = itemQueue;
             this.hostListItemDao = hostListItemDao;
             this.parserCount = parserCount;
+            this.database = database;
+            this.sourceId = sourceId;
         }
 
         @Override
         public Integer call() {
+            // See the OPTIMIZATION note on SourceLoader#parse(): both the
+            // clear and every insert batch below run inside this one
+            // transaction, and this method is the only place that writes
+            // to the database for this source, all on this single thread -
+            // so wrapping the whole thing here is what collapses this
+            // source's total commit count down to one.
+            int[] insertedHolder = {0};
+            this.database.runInTransaction(() -> insertedHolder[0] = insertAll());
+            return insertedHolder[0];
+        }
+
+        private int insertAll() {
+            this.hostListItemDao.clearSourceHosts(this.sourceId);
             int inserted = 0;
             int workerStopped = 0;
             HostListItem[] batch = new HostListItem[INSERT_BATCH_SIZE];
