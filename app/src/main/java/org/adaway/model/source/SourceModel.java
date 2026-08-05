@@ -120,6 +120,11 @@ public class SourceModel {
      * point triggered them.
      */
     private final Object updateLock = new Object();
+    /**
+     * The database, used to wrap each source's parse-and-insert pass in a
+     * single transaction - see {@link SourceLoader#parse}.
+     */
+    private final AppDatabase database;
 
     /**
      * Constructor.
@@ -129,6 +134,7 @@ public class SourceModel {
     public SourceModel(Context context) {
         this.context = context;
         AppDatabase database = AppDatabase.getInstance(this.context);
+        this.database = database;
         this.hostsSourceDao = database.hostsSourceDao();
         this.hostListItemDao = database.hostsListItemDao();
         this.hostEntryDao = database.hostEntryDao();
@@ -533,7 +539,7 @@ public class SourceModel {
     private void parseSourceInputStream(HostsSource hostsSource, BufferedReader reader) throws IOException {
         setState(R.string.status_parse_source, hostsSource.getLabel());
         long startTime = System.currentTimeMillis();
-        new SourceLoader(hostsSource).parse(reader, this.hostListItemDao);
+        new SourceLoader(hostsSource).parse(reader, this.hostListItemDao, this.database);
         long endTime = System.currentTimeMillis();
         Timber.i("Parsed " + hostsSource.getUrl() + " in " + (endTime - startTime) / 1000 + "s");
     }
