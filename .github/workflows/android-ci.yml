@@ -37,11 +37,22 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Restore CI keystore
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/ci.keystore
+          key: adaway-ci-keystore-v1
+
+      - name: Create CI keystore if missing
+        run: |
+          if [ ! -f "$RUNNER_TEMP/ci.keystore" ]; then
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/ci.keystore" -alias ci -keyalg RSA -keysize 2048 -validity 10000 -storepass adawayci -keypass adawayci -dname "CN=AdAway CI, OU=CI, O=CI, L=CI, S=CI, C=CN" >/dev/null 2>&1
+          fi
+
       - name: Sign release APK with CI key
         run: |
-          keytool -genkeypair -v -keystore "$HOME/ci.keystore" -alias ci -keyalg RSA -keysize 2048 -validity 10000 -storepass adawayci -keypass adawayci -dname "CN=AdAway CI, OU=CI, O=CI, L=CI, S=CI, C=CN" >/dev/null 2>&1
           BT=$(ls -d "$ANDROID_HOME/build-tools"/* | sort -V | tail -1)
-          "$BT/apksigner" sign --ks "$HOME/ci.keystore" --ks-pass pass:adawayci --key-pass pass:adawayci --out app/build/outputs/apk/release/app-release-signed.apk app/build/outputs/apk/release/app-release-unsigned.apk
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/ci.keystore" --ks-pass pass:adawayci --key-pass pass:adawayci --out app/build/outputs/apk/release/app-release-signed.apk app/build/outputs/apk/release/app-release-unsigned.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
