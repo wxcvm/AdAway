@@ -49,13 +49,23 @@ public interface HostListItemDao {
     @Query("SELECT id FROM hosts_lists WHERE host = :host AND source_id = 1 LIMIT 1")
     Optional<Integer> getHostId(String host);
 
-    @Query("SELECT COUNT(DISTINCT host) FROM hosts_lists WHERE type = 0 AND enabled = 1")
+    /*
+     * BUG FIX (stats accuracy): these counters used to query hosts_lists
+     * (the raw, per-source merged data). That over-reports what is really
+     * in effect: hosts excluded by the allow-list were still counted as
+     * "blocked", and a host blocked by one source but redirected by
+     * another was counted in both categories. The counters now read from
+     * host_entries — the exact table the generated hosts file is written
+     * from after the dedup/allow/redirect sync — so the home screen
+     * numbers match the file that is actually applied.
+     */
+    @Query("SELECT COUNT(*) FROM host_entries WHERE type = 0")
     LiveData<Integer> getBlockedHostCount();
 
     @Query("SELECT COUNT(DISTINCT host) FROM hosts_lists WHERE type = 1 AND enabled = 1")
     LiveData<Integer> getAllowedHostCount();
 
-    @Query("SELECT COUNT(DISTINCT host) FROM hosts_lists WHERE type = 2 AND enabled = 1")
+    @Query("SELECT COUNT(*) FROM host_entries WHERE type = 2")
     LiveData<Integer> getRedirectHostCount();
 
     @Query("DELETE FROM hosts_lists WHERE source_id = :sourceId")

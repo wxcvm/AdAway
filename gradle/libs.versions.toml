@@ -2,11 +2,11 @@
 # Build
 appName = "6.4.1"
 appCode = "60401" # Read x.yy.zz to match version name
-gradle = "8.7.2"
+gradle = "9.3.1"
 # Common
-guava = "32.0.1-android"
-junitVersion = "1.2.1"
-okhttp = "4.12.0"
+guava = "33.6.0-android"
+junitVersion = "1.3.0"
+okhttp = "5.4.0"
 timber = "5.0.1"
 # Root
 libsu = "6.0.0"
@@ -14,8 +14,8 @@ openssl = "1.1.1q-beta-1"
 # VPN
 # Test
 junit = "4.13.2"
-json = "20220320"
-androidxTestCore = "1.6.1"
+json = "20260719"
+androidxTestCore = "1.7.0"
 androidXCoreTesting = "2.2.0"
 
 [libraries]

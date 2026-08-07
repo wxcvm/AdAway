@@ -193,3 +193,33 @@ After applying these changes locally:
    `ERR_CERT_*` errors from concurrent SNI callbacks
 4. **Dependabot:** After pushing to GitHub, Dependabot will open its first
    PRs on the next Monday at 03:00 Asia/Shanghai
+
+
+---
+
+## 5. Dependency & Library Upgrades
+
+### 5.1 Mongoose 7.21 → 7.22 ()
+
+**Security release.** 7.22 fixes multiple CVEs ( IPCP OOB read,  zero-length PPP infinite loop,  NDP, plus many not-yet-CVE-assigned fixes). Verified before swapping:  layout for  is unchanged (), so the  mirror in  needs no adaptation; all APIs used (, , , , , …) are present in 7.22.
+
+### 5.2 Dependency bumps ()
+
+| Dependency | From | To | Notes |
+|---|---|---|---|
+| AGP () | 8.7.2 | 9.3.1 | Requires Gradle 9.1+;  →  DSL migrated |
+| Gradle wrapper | 8.9 | 9.7.0 | |
+| OkHttp | 4.12.0 | 5.4.0 | Public API used by the app unchanged |
+| Guava | 32.0.1-android | 33.6.0-android | Kept the  variant |
+| org.json | 20220320 | 20260719 | |
+| androidx.test:core | 1.6.1 | 1.7.0 | |
+| androidx.test.ext:junit | 1.2.1 | 1.3.0 | |
+| androidx.test:runner | 1.6.1 | 1.7.0 | |
+| Sentry BOM | 7.8.0 | 8.52.0 | Fixes high-severity Dependabot advisory (sentry-android < 8.14.0, Session Replay unmasking) |
+| sonarqube plugin | 7.2.2.6593 | 7.4.0.8496 | Gradle 9 compatibility |
+
+### 5.3 Hosts statistics accuracy ()
+
+ /  now query  (the table the generated hosts file is written from) instead of  (raw merged source data). This fixes two over-reporting cases: hosts excluded by the allow-list were previously still counted as blocked, and a host both blocked and redirected by different sources was counted in both categories.  keeps reading  (the allow-list is an exclusion rule; its source of truth is the list itself).
+
+> **Build note:** these upgrades were applied and reviewed statically in the Operit workspace but could not be compile-verified there (no Android SDK / NDK in the environment). Please run  on a machine with the Android SDK (or CI) to confirm.

@@ -73,7 +73,7 @@ android {
         viewBinding true
     }
 
-    packagingOptions {
+    packaging {
         jniLibs {
             useLegacyPackaging = true
         }
@@ -131,7 +131,7 @@ dependencies {
     if (keyStoreDefined) {
         implementation project(':sentrystub')
     } else {
-        implementation platform('io.sentry:sentry-bom:7.8.0')
+        implementation platform('io.sentry:sentry-bom:8.52.0')
         implementation('io.sentry:sentry-android')
         implementation('io.sentry:sentry-android-fragment')
         implementation('io.sentry:sentry-android-timber')
