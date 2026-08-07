@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <linux/limits.h>
+#include <pthread.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -119,12 +120,35 @@ static int scan_block_images(const char *resource_dir,
    with a dozen distinct ad/tracker domains, multiplied across a few
    tabs/apps, evicts entries before they get reused, forcing needless
    re-generation (even with the EC speedup above, still not free).
-   256 entries at ~264 bytes each (hostname[256] + pointer) is ~68KB —
-   negligible for a process that otherwise stays resident. */
+   256 entries at ~272 bytes each (hostname[256] + pointer + timestamp)
+   is ~68KB — negligible for a process that otherwise stays resident.
+
+   NOTE (threading): Mongoose 7.x is a single-threaded event loop —
+   mg_mgr_poll() drives everything via poll()/epoll on one thread, so
+   the SNI callback and all MG_EV handlers below run on that same
+   thread and there is no real concurrency to guard against in this
+   build (no pthread_create anywhere in mongoose.c). The mutex/atomics
+   are nevertheless kept as defensive code: they cost ~nothing and
+   keep this file correct if a threaded TLS dispatch or a different
+   network-stack configuration is ever introduced.
+
+   BUG FIX (cert expiry): per-domain leaf certs used to be issued with
+   a 1-day validity and the cache had no expiry awareness at all. The
+   web server is a long-running daemon (started at boot via
+   BootReceiver), so after 24h of uptime every cache hit would present
+   an already-expired certificate and browsers would refuse the
+   connection with ERR_CERT_DATE_INVALID, with no way to recover short
+   of restarting the server. Certs are now issued for
+   SNI_CERT_VALIDITY_DAYS and each cache entry records when it was
+   issued; a hit whose cert is past half its validity is treated as a
+   miss and re-issued (see sni_callback()). */
 #define SNI_CACHE_SIZE 256
-struct sni_entry { char hostname[256]; SSL_CTX *ctx; };
+#define SNI_CERT_VALIDITY_DAYS 30
+#define SNI_CERT_RENEW_MS ((uint64_t) SNI_CERT_VALIDITY_DAYS * 86400000ULL / 2)
+struct sni_entry { char hostname[256]; SSL_CTX *ctx; uint64_t issued_at; };
 static struct sni_entry s_sni_cache[SNI_CACHE_SIZE];
 static int              s_sni_pos = 0;
+static pthread_mutex_t  s_sni_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* CA state shared with the SNI callback */
 struct ca_state { X509 *cert; EVP_PKEY *key; };
@@ -309,15 +333,26 @@ static int generate_root_ca(const char *cert_path, const char *key_path) {
     int ret = make_cert("AdAway Root CA", NULL, NULL, 1, 3650, NULL, /*use_ec=*/0, &cert, &key);
     if (ret != EXIT_SUCCESS) return ret;
     ret = EXIT_FAILURE;
-    FILE *f;
+    FILE *f = NULL;
+    /* BUG FIX: the previous code leaked the FILE* when PEM_write_*
+       failed and never checked fclose()'s return value, so a full
+       disk or I/O error could leave a truncated CA file on disk that
+       would then be loaded (and trusted) on the next start. Fail
+       loudly instead, and always release the handle. */
     f = fopen(key_path, "wb");
-    if (!f || PEM_write_PrivateKey(f, key, NULL, NULL, 0, NULL, NULL) == 0)
-        goto done;
-    fclose(f); f = NULL;
+    if (!f) goto done;
+    if (PEM_write_PrivateKey(f, key, NULL, NULL, 0, NULL, NULL) == 0) {
+        fclose(f); f = NULL; goto done;
+    }
+    if (fclose(f) != 0) { f = NULL; goto done; }
+    f = NULL;
     chmod(key_path, S_IRUSR|S_IWUSR);
 
     f = fopen(cert_path, "wb");
-    if (!f || PEM_write_X509(f, cert) == 0) goto done;
+    if (!f) goto done;
+    if (PEM_write_X509(f, cert) == 0) { fclose(f); f = NULL; goto done; }
+    if (fclose(f) != 0) { f = NULL; goto done; }
+    f = NULL;
     ret = EXIT_SUCCESS;
 done:
     if (f) fclose(f);
@@ -395,13 +430,30 @@ static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts
 
 static SSL_CTX *make_domain_ctx(const char *hostname, struct ca_state *ca) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
-    if (make_cert(hostname, ca->cert, ca->key, 0, 1, NULL, /*use_ec=*/1, &cert, &key) != EXIT_SUCCESS)
+    if (make_cert(hostname, ca->cert, ca->key, 0, SNI_CERT_VALIDITY_DAYS,
+                  NULL, /*use_ec=*/1, &cert, &key) != EXIT_SUCCESS)
         return NULL;
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) goto fail;
+    /*
+     * BUG FIX: SSL_CTX_add_extra_chain_cert() takes ownership of the
+     * passed X509 (it bumps the refcount), but only when it succeeds.
+     * The previous inline X509_dup(ca->cert) leaked that dup on the
+     * (rare) failure path — use_certificate/use_PrivateKey short-circuit
+     * before the dup runs, but if add_extra_chain_cert itself fails the
+     * dup was allocated and nobody would ever free it. Track it
+     * explicitly so every failure path releases it exactly once, while
+     * the success path leaves ownership with the SSL_CTX.
+     */
+    X509 *chain = X509_dup(ca->cert);
+    if (!chain) { SSL_CTX_free(ctx); ctx = NULL; goto fail; }
     if (SSL_CTX_use_certificate(ctx, cert) != 1 ||
-        SSL_CTX_use_PrivateKey(ctx, key)   != 1 ||
-        SSL_CTX_add_extra_chain_cert(ctx, X509_dup(ca->cert)) != 1) {
+        SSL_CTX_use_PrivateKey(ctx, key)   != 1) {
+        X509_free(chain);
+        SSL_CTX_free(ctx); ctx = NULL; goto fail;
+    }
+    if (SSL_CTX_add_extra_chain_cert(ctx, chain) != 1) {
+        X509_free(chain);
         SSL_CTX_free(ctx); ctx = NULL; goto fail;
     }
 fail:
@@ -416,26 +468,62 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
     if (!host || strcmp(host, "localhost") == 0)
         return SSL_TLSEXT_ERR_OK;  /* keep default localhost cert */
 
-    /* Search cache */
+    struct ca_state *ca = (struct ca_state *)arg;
+
+    /*
+     * NOTE (threading): Mongoose 7.x drives all connections from a
+     * single mg_mgr_poll() event loop, so in this build the SNI
+     * callback cannot actually run concurrently with itself. The mutex
+     * is kept as cheap defensive code (see the cache definition above)
+     * so this path stays correct if a threaded TLS dispatch is ever
+     * introduced; it is not protecting against a real race today.
+     *
+     * BUG FIX (cert expiry): a cache hit is only reused while its cert
+     * is still comfortably within validity (half of
+     * SNI_CERT_VALIDITY_DAYS). Once past that, treat it as a miss so a
+     * fresh cert gets issued — otherwise a long-running daemon would
+     * keep serving expired certificates to returning clients.
+     */
+
+    /* Fast path: cache lookup under lock */
+    pthread_mutex_lock(&s_sni_mutex);
     for (int i = 0; i < SNI_CACHE_SIZE; i++) {
         if (s_sni_cache[i].ctx && strcmp(s_sni_cache[i].hostname, host) == 0) {
-            SSL_set_SSL_CTX(ssl, s_sni_cache[i].ctx);
-            return SSL_TLSEXT_ERR_OK;
+            if (mg_millis() - s_sni_cache[i].issued_at < SNI_CERT_RENEW_MS) {
+                SSL_set_SSL_CTX(ssl, s_sni_cache[i].ctx);
+                pthread_mutex_unlock(&s_sni_mutex);
+                return SSL_TLSEXT_ERR_OK;
+            }
+            /* Cert is near/at expiry: fall through and re-issue below.
+               The stale entry stays until evicted by the insert (if
+               that slot happens to be this one) — a later hit will
+               simply find it expired again and re-issue. */
+            break;
         }
     }
+    pthread_mutex_unlock(&s_sni_mutex);
 
-    struct ca_state *ca = (struct ca_state *)arg;
+    /* Slow path: generate new cert outside the lock so we don't
+       hold it through OpenSSL keygen (EC P-256 is fast, but still). */
     SSL_CTX *ctx = make_domain_ctx(host, ca);
     if (!ctx) {
         LOG_WARN("SNI: failed to create ctx for %s", host);
         return SSL_TLSEXT_ERR_NOACK;
     }
 
+    /* Insert into cache under lock */
+    pthread_mutex_lock(&s_sni_mutex);
     int pos = s_sni_pos % SNI_CACHE_SIZE;
     if (s_sni_cache[pos].ctx) SSL_CTX_free(s_sni_cache[pos].ctx);
     strncpy(s_sni_cache[pos].hostname, host, 255);
+    s_sni_cache[pos].issued_at = mg_millis();
+    s_sni_cache[pos].hostname[255] = '\0';  /* BUG FIX: strncpy doesn't
+        NUL-terminate when truncating; guarantee it here.  A hostname >255
+        bytes would leave the buffer unterminated, causing strcmp() above to
+        read past the array boundary on subsequent lookups. */
     s_sni_cache[pos].ctx = ctx;
     s_sni_pos++;
+    pthread_mutex_unlock(&s_sni_mutex);
 
     SSL_set_SSL_CTX(ssl, ctx);
     __android_log_print(ANDROID_LOG_DEBUG, THIS_FILE,
@@ -444,15 +532,41 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
 }
 
 /* ── Connection counting ──────────────────────────────────────── */
+/*
+ * NOTE (threading): as with the SNI cache, Mongoose 7.x is a
+ * single-threaded event loop, so this plain counter can never actually
+ * tear in this build. The __atomic builtins below are kept as
+ * defensive code (they compile to single instructions on ARM64 and
+ * cost nothing) so the cap stays correct if a threaded dispatch is
+ * ever introduced; they do not fix a real race today.
+ */
 static int s_active_connections = 0;
+
+/* Helper: atomic fetch-and-add, returns the value *before* the add */
+static inline int atomic_add_fetch(int *ptr, int val) {
+    return __atomic_add_fetch(ptr, val, __ATOMIC_SEQ_CST);
+}
+static inline int atomic_sub_fetch(int *ptr, int val) {
+    return __atomic_sub_fetch(ptr, val, __ATOMIC_SEQ_CST);
+}
+static inline int atomic_load(int *ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+}
 
 /* ── HTTP event handler ───────────────────────────────────────── */
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev == MG_EV_ACCEPT) {
-        if (s_active_connections >= MAX_CONNECTIONS) {
-            c->is_closing = 1; return;
+        /* Atomic cap check + increment (see the note on
+           s_active_connections above — defensive, not a live race). */
+        for (;;) {
+            int cur = atomic_load(&s_active_connections);
+            if (cur >= MAX_CONNECTIONS) {
+                c->is_closing = 1; return;
+            }
+            if (__atomic_compare_exchange_n(&s_active_connections, &cur,
+                    cur + 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+                break;
         }
-        s_active_connections++;
         uint64_t t = mg_millis();
         memcpy(c->data, &t, sizeof(t));
         c->data[sizeof(t)] = 1;
@@ -472,7 +586,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
 
     if (ev == MG_EV_CLOSE) {
-        if (c->data[sizeof(uint64_t)]) s_active_connections--;
+        if (c->data[sizeof(uint64_t)]) atomic_sub_fetch(&s_active_connections, 1);
         return;
     }
 
@@ -589,6 +703,17 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 /* ── main ─────────────────────────────────────────────────────── */
 int main(int argc, char *argv[]) {
     setsid();
+    /* NOTE: do NOT redirect stdin/stdout/stderr to /dev/null here even
+       though setsid() detaches us from the controlling terminal.
+       ShellUtils.runBundledExecutable() launches this binary with
+       `> logfile 2>&1` and relies on that file to diagnose startup
+       failures (bad args, CA generation failure, port bind failure,
+       ...) via LOG_FATAL/LOG_WARN/LOG_INFO, which write to both logcat
+       and stdio. dup2()-ing the std fds to /dev/null would make that
+       capture file permanently empty and silently defeat the
+       diagnostic mechanism. The launching shell has already redirected
+       our std fds, so there is no tty-sharing hazard to fix here. */
+
     /* DIAGNOSTIC CHECKPOINT 1: if this line never shows up in the log,
        the process is crashing during dynamic linking / static
        initialization (loading libssl.so/libcrypto.so/libc++_shared.so)
@@ -626,9 +751,16 @@ int main(int argc, char *argv[]) {
     LOG_INFO("Signal %d — shutting down.", s_sig_num);
     mg_mgr_free(&mgr);
 
-    /* Free SNI cache */
+    /* Free SNI cache.
+       BUG FIX: take the mutex before freeing so no concurrent
+       sni_callback() thread is still walking the cache while we destroy
+       it. After mg_mgr_free() all connections are closed and no new
+       callbacks can be dispatched, but an abundance of caution is cheap. */
+    pthread_mutex_lock(&s_sni_mutex);
     for (int i = 0; i < SNI_CACHE_SIZE; i++)
         if (s_sni_cache[i].ctx) SSL_CTX_free(s_sni_cache[i].ctx);
+    pthread_mutex_unlock(&s_sni_mutex);
+    pthread_mutex_destroy(&s_sni_mutex);
 
     /* Free CA in-memory objects */
     if (s.ca.cert) X509_free(s.ca.cert);

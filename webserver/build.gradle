@@ -50,6 +50,33 @@ def renameJniLibAsExecutable = tasks.register('renameJniLibAsExecutable', Copy) 
     // instead of the freshly-built real executable. Force it to always run.
     outputs.upToDateWhen { false }
 
+    /*
+     * BUG FIX (build-artifact verification): previously nothing checked
+     * that ndkBuild actually produced the real `webserver` executable
+     * before this task renamed it into libwebserver_exec.so. If the
+     * BUILD_EXECUTABLE step failed or was skipped (e.g. a compile error
+     * in webserver.c), this task would silently copy nothing — or worse,
+     * a stale/stub artifact — and the AAR/APK would ship without a
+     * working binary, reproducing the exact "stub shipped instead of
+     * real executable" failure this task was originally created to fix.
+     * Fail the build loudly instead of packaging garbage.
+     */
+    doFirst {
+        def exe = file("${buildFolder.get().asFile}/arm64-v8a/webserver")
+        if (!exe.exists()) {
+            throw new GradleException(
+                "Native webserver executable not found at ${exe} — " +
+                "ndkBuild BUILD_EXECUTABLE failed or was skipped. " +
+                "Refusing to package a stub/empty library.")
+        }
+        if (exe.length() < 100_000) {
+            throw new GradleException(
+                "Suspiciously small webserver executable (${exe.length()} bytes) " +
+                "at ${exe} — this looks like the placeholder stub, not the real " +
+                "linked binary. Refusing to package it.")
+        }
+    }
+
     from(buildFolder) {
         exclude "**/objs"
         exclude "**/objs-debug"
