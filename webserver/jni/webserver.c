@@ -33,6 +33,12 @@
    device, which is why an earlier attempt at 0.0.0.0 was reverted. */
 #define HTTP_URL  "http://127.0.0.1:80"
 #define HTTPS_URL "https://127.0.0.1:443"
+/* Same services on the IPv6 loopback (::1), so IPv6-first clients
+   (e.g. Android resolving "localhost" via ::1, NAT64/DNS64 setups)
+   can reach the block server too. Optional: see main() — failure to
+   bind these only logs a warning and the IPv4 listeners still serve. */
+#define HTTP_URL_IPV6  "http://[::1]:80"
+#define HTTPS_URL_IPV6 "https://[::1]:443"
 
 /* BUG FIX: __android_log_print() only reaches logcat, never the process's
    own stdout/stderr. The Java side (ShellUtils.runBundledExecutable)
@@ -402,22 +408,23 @@ static struct mg_str key_to_pem_mgstr(EVP_PKEY *key) {
 }
 
 /* Issue the leaf cert used as the *default* TLS identity for direct
-   connections to this device (https://localhost/..., https://127.0.0.1/...)
-   — i.e. anything that doesn't send SNI for a blocked ad domain and so
-   never reaches sni_callback()/make_domain_ctx().
+   connections to this device (https://localhost/..., https://127.0.0.1/...,
+   https://[::1]/...) — i.e. anything that doesn't send SNI for a blocked
+   ad domain and so never reaches sni_callback()/make_domain_ctx().
    BUG FIX: this used to be the raw root CA cert itself (CN "AdAway Root
    CA", no SAN matching "localhost" or "127.0.0.1" at all). Any client
    that checks the presented cert's SAN against the hostname/IP it
    dialed — which is effectively all of them — would fail to validate
    it even though the CA is trusted, since the CA's own identity isn't
    a valid SAN for the server it's terminating TLS for. Sign a proper
-   short-lived leaf cert for "localhost" with both a DNS and an IP SAN
-   and use *that* as the default, matching how every other hostname
-   already gets a purpose-issued leaf cert via make_domain_ctx(). */
+   short-lived leaf cert for "localhost" with DNS + IPv4 loopback +
+   IPv6 loopback SANs (the server also listens on ::1) and use *that*
+   as the default, matching how every other hostname already gets a
+   purpose-issued leaf cert via make_domain_ctx(). */
 static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
     if (make_cert("localhost", ca->cert, ca->key, 0, 397,
-                  "DNS:localhost,IP:127.0.0.1", /*use_ec=*/0, &cert, &key) != EXIT_SUCCESS)
+                  "DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1", /*use_ec=*/0, &cert, &key) != EXIT_SUCCESS)
         return EXIT_FAILURE;
     out_opts->cert = cert_to_pem_mgstr(cert);
     out_opts->key  = key_to_pem_mgstr(key);
@@ -741,10 +748,26 @@ int main(int argc, char *argv[]) {
         LOG_FATAL("HTTPS bind failed (port 443).");
         mg_mgr_free(&mgr); return EXIT_FAILURE;
     }
+    /*
+     * IPv6 loopback listeners (::1) - optional. Devices with IPv6
+     * disabled fail to bind these; that is fine, the IPv4 listeners
+     * above still serve. Both must succeed for ipv6_ok so the ready
+     * log reflects the actual state.
+     */
+    bool ipv6_ok = true;
+    if (!mg_http_listen(&mgr, HTTP_URL_IPV6, fn, &s)) {
+        LOG_WARN("HTTP IPv6 bind failed (http://[::1]:80) — continuing with IPv4 only.");
+        ipv6_ok = false;
+    }
+    if (!mg_http_listen(&mgr, HTTPS_URL_IPV6, fn, &s)) {
+        LOG_WARN("HTTPS IPv6 bind failed (https://[::1]:443) — continuing with IPv4 only.");
+        ipv6_ok = false;
+    }
 
     setup_signal_handler();
     LOG_INFO("AdAway webserver ready — arm64, Mongoose " MG_VERSION
-        ", SNI cert issuance enabled.");
+        ", SNI cert issuance enabled, IPv6 loopback %s.",
+        ipv6_ok ? "on" : "off");
 
     while (s_sig_num == 0) mg_mgr_poll(&mgr, 1000);
 
