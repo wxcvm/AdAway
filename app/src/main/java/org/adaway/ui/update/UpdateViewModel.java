@@ -59,6 +59,8 @@ public class UpdateViewModel extends AdwareViewModel {
         DownloadManager downloadManager = getApplication().getSystemService(DownloadManager.class);
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
         boolean finishDownload = false;
+        int consecutiveMisses = 0;
+        final int MAX_CONSECUTIVE_MISSES = 50; // ~5s of 100ms polls
         while (!finishDownload) {
             // Add wait before querying download manager
             try {
@@ -72,9 +74,21 @@ public class UpdateViewModel extends AdwareViewModel {
             // Query download manager
             try (Cursor cursor = downloadManager.query(query)) {
                 if (!cursor.moveToFirst()) {
-                    Timber.d("Download item was not found");
+                    /*
+                     * BUG FIX: previously this looped forever when the
+                     * download row never appeared (e.g. the download was
+                     * cancelled or pruned by the system while this screen
+                     * was open), pinning a background thread at 10 Hz.
+                     * Give up after a short grace period instead.
+                     */
+                    if (++consecutiveMisses >= MAX_CONSECUTIVE_MISSES) {
+                        Timber.w("Download item %d not found after %d polls; giving up.", downloadId, consecutiveMisses);
+                        finishDownload = true;
+                        this.downloadProgress.postValue(null);
+                    }
                     continue;
                 }
+                consecutiveMisses = 0;
                 // Check download status
                 int statusColumnIndex = cursor.getColumnIndex(COLUMN_STATUS);
                 int status = cursor.getInt(statusColumnIndex);

@@ -34,7 +34,27 @@ public final class ApplicationLog {
             Timber.plant(new Timber.DebugTree());
         } else {
             Shell.enableVerboseLogging = false;
+            /*
+             * BUG FIX: release builds used to plant no Timber tree at all
+             * here, so logcat was silent in exactly the builds where
+             * diagnosing a crash or a failed hosts update matters most.
+             * Always log to logcat; only verbose debug-level output is
+             * gated behind the debug preference.
+             */
+            Timber.plant(new ReleaseLogTree());
             SentryLog.init(application);
+        }
+    }
+
+    /**
+     * Log to logcat in release builds, filtered to warnings and above to
+     * avoid noise (and any incidental information leakage) from verbose
+     * debug output.
+     */
+    private static class ReleaseLogTree extends Timber.DebugTree {
+        @Override
+        protected boolean isLoggable(String tag, int priority) {
+            return priority >= android.util.Log.WARN;
         }
     }
 

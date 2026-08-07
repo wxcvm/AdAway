@@ -93,7 +93,8 @@ public class HomeActivity extends AppCompatActivity {
             if (showFragment(item.getItemId())) {
                 this.drawerBehavior.setState(STATE_HIDDEN);
             }
-            return false; // TODO Handle selection
+            // Consume the selection so the NavigationView updates its checked state.
+            return true;
         });
 
         if (savedInstanceState == null) {

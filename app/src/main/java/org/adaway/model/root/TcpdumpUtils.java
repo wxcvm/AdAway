@@ -142,21 +142,29 @@ class TcpdumpUtils {
      * @return The tcpdump log file content.
      */
     static List<String> getLogs(Context context) {
-        Path logPath = getLogFile(context).toPath();
+        File logFile = getLogFile(context);
         // Check if the log file exists
-        if (!Files.exists(logPath)) {
+        if (!logFile.exists()) {
             return emptyList();
         }
-        try (Stream<String> lines = Files.lines(logPath)) {
-            return lines
-                    .map(TcpdumpUtils::getTcpdumpHostname)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .collect(Collectors.toList());
-        } catch (IOException exception) {
-            Timber.e(exception, "Can not get cache directory.");
+        /*
+         * BUG FIX: the log file is written by tcpdump, which runs as root
+         * (see runBundledExecutable). On a standard Android data partition
+         * the app process cannot read a root-owned file inside its own
+         * cache directory (dir perms are 700), so Files.lines() used to
+         * fail with Permission denied and the DNS log page was always
+         * empty. Read it through the same root shell instead.
+         */
+        Shell.Result result = Shell.cmd("cat " + logFile.getAbsolutePath()).exec();
+        if (!result.isSuccess()) {
+            Timber.e("Failed to read tcpdump log as root (exit code %d).", result.getCode());
             return emptyList();
         }
+        return result.getOut().stream()
+                .map(TcpdumpUtils::getTcpdumpHostname)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     /**

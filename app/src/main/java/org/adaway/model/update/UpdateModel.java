@@ -12,6 +12,8 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 
+import androidx.core.content.ContextCompat;
+
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 
@@ -162,7 +164,7 @@ public class UpdateModel {
         long downloadId = download(manifest);
         // Register new broadcast receiver
         this.receiver = new ApkDownloadReceiver(downloadId);
-        this.context.registerReceiver(this.receiver, new IntentFilter(ACTION_DOWNLOAD_COMPLETE));
+        this.context.registerReceiver(this.receiver, new IntentFilter(ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED);
         // Return download identifier
         return downloadId;
     }
@@ -171,6 +173,7 @@ public class UpdateModel {
         Timber.i("Downloading " + manifest.version + ".");
         Uri uri = Uri.parse(DOWNLOAD_URL + manifest.versionCode);
         DownloadManager.Request request = new DownloadManager.Request(uri)
+                .setMimeType("application/vnd.android.package-archive")
                 .setTitle("AdAway " + manifest.version)
                 .setDescription(this.context.getString(R.string.update_notification_description));
         DownloadManager downloadManager = this.context.getSystemService(DownloadManager.class);

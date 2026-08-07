@@ -23,7 +23,7 @@ public class AdAwayApplication extends Application {
     /**
      * The common ad block model for the whole application.
      */
-    private AdBlockModel adBlockModel;
+    private volatile AdBlockModel adBlockModel;
     /**
      * The common update model for the whole application.
      */
@@ -57,12 +57,22 @@ public class AdAwayApplication extends Application {
      * @return The common ad block model for the whole application.
      */
     public AdBlockModel getAdBlockModel() {
-        // Check cached model
+        // Check cached model (double-checked locking: this getter is
+        // called from multiple threads - UI, quick-settings tile,
+        // broadcast receiver - so building two RootModel instances would
+        // both kick off duplicate work such as starting the web server).
         AdBlockMethod method = PreferenceHelper.getAdBlockMethod(this);
-        if (this.adBlockModel == null || this.adBlockModel.getMethod() != method) {
-            this.adBlockModel = AdBlockModel.build(this, method);
+        AdBlockModel model = this.adBlockModel;
+        if (model == null || model.getMethod() != method) {
+            synchronized (this) {
+                model = this.adBlockModel;
+                if (model == null || model.getMethod() != method) {
+                    model = AdBlockModel.build(this, method);
+                    this.adBlockModel = model;
+                }
+            }
         }
-        return this.adBlockModel;
+        return model;
     }
 
     /**
