@@ -10,6 +10,18 @@
     public static final boolean STUB;
 }
 
+### Room / WorkManager ###
+# Room instantiates generated <Database>_Impl classes via reflection
+# (Class.forName). With AGP 9's R8 these <init>() constructors were
+# being optimized away (crash at startup: NoSuchMethodException on
+# androidx.work.impl.WorkDatabase_Impl.<init>). Keep them explicitly.
+-keep class * extends androidx.room.RoomDatabase {
+    <init>();
+}
+-keep class androidx.work.impl.WorkDatabase_Impl {
+    <init>();
+}
+
 -dontobfuscate
 
 ### Android Jetpack ###
