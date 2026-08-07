@@ -10,3 +10,6 @@ build
 # IntelliJ IDEA
 .idea
 *.iml
+
+# Operit platform workspace config (never commit)
+.operit/

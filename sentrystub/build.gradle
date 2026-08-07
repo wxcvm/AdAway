@@ -1,12 +1,13 @@
 apply plugin: 'com.android.library'
 
 android {
-    compileSdk 33
+    compileSdk 35
+    ndkVersion '28.1.13356709'
     namespace 'io.sentry'
 
     defaultConfig {
         minSdk 26
-        targetSdk 33
+        targetSdk 35
     }
 
     compileOptions {
