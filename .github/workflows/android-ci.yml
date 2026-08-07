@@ -37,11 +37,17 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleRelease --stacktrace
 
+      - name: Sign release APK with CI key
+        run: |
+          keytool -genkeypair -v -keystore "$HOME/ci.keystore" -alias ci -keyalg RSA -keysize 2048 -validity 10000 -storepass adawayci -keypass adawayci -dname "CN=AdAway CI, OU=CI, O=CI, L=CI, S=CI, C=CN" >/dev/null 2>&1
+          BT=$(ls -d "$ANDROID_HOME/build-tools"/* | sort -V | tail -1)
+          "$BT/apksigner" sign --ks "$HOME/ci.keystore" --ks-pass pass:adawayci --key-pass pass:adawayci --out app/build/outputs/apk/release/app-release-signed.apk app/build/outputs/apk/release/app-release-unsigned.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AdAway-release-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: AdAway-release-signed
+          path: app/build/outputs/apk/release/app-release-signed.apk
       
       - name: Update dependency graph
         uses: mikepenz/gradle-dependency-submission@v1.0.0 # Deprecated: need to be changed
