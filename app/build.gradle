@@ -14,7 +14,7 @@ repositories {
 }
 
 android {
-    compileSdk 35
+    compileSdk 36
     ndkVersion '28.1.13356709'
     namespace 'org.adaway'
 
