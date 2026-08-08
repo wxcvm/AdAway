@@ -88,8 +88,8 @@ jobs:
 
       - name: Prepare release assets
         run: |
-          APP_NAME=$(grep -oP 'appName = \K[^"]+' gradle/libs.versions.toml)
-          APP_CODE=$(grep -oP 'appCode = \K[^"]+' gradle/libs.versions.toml)
+          APP_NAME=$(grep -oP 'appName = "\K[^"]+' gradle/libs.versions.toml)
+          APP_CODE=$(grep -oP 'appCode = "\K[^"]+' gradle/libs.versions.toml)
           cp release-assets/app-release-signed.apk release-assets/AdAway-latest.apk
           printf '{"version":"%s","versionCode":%s,"changelog":"IPv6 web server, Mongoose 7.22, AGP9/Gradle9/OkHttp5 upgrades, crash and sync fixes, official signing"}' ${APP_NAME} ${APP_CODE} > release-assets/manifest.json
 
