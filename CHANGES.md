@@ -1,3 +1,33 @@
+# Release 6.4.2
+
+## Web server
+
+- **IPv6 loopback:** the web server now also listens on ::1 (HTTP and HTTPS). IPv4 (127.0.0.1) remains the primary listener; IPv6 is optional - if the device has IPv6 disabled, startup proceeds with a warning instead of failing.
+- **Certificate SAN:** the localhost leaf certificate now includes the IPv6 loopback address (IP:0:0:0:0:0:0:0:1) so HTTPS clients validating against ::1 succeed.
+- **Mongoose 7.21 -> 7.22:** security release fixing multiple CVEs (IPCP OOB read, zero-length PPP infinite loop, NDP issues and more).
+
+## Dependency & build upgrades
+
+- AGP 8.7.2 -> 9.3.1, Gradle wrapper 8.9 -> 9.7.0, compileSdk 36
+- OkHttp 4.12 -> 5.4.0, Sentry 7.8 -> 8.52.0 (fixes high-severity advisory), Guava 33.6.0-android, org.json 20260719
+- sonarqube plugin upgraded for Gradle 9 compatibility
+
+## Correctness fixes
+
+- **Hosts statistics accuracy:** blocked/redirected counters now read from host_entries (the table the generated hosts file is written from) instead of raw hosts_lists data.
+- **Hosts sync hardening:** single app-wide lock around download/parse/sync; bounded queues and single-transaction inserts in SourceLoader (no more OOM risk on 100k+ line sources); partial downloads are treated as failed instead of silently truncating.
+- **Crash fixes:** R8 kept Room/WorkManager reflective constructors (startup crash on optimized builds); dynamic broadcast receiver now uses RECEIVER_EXPORTED (SecurityException crash on API 33+ when updating the app); ad block model access made thread-safe (no duplicate RootModel / duplicate web server instances).
+- **DNS request log:** tcpdump output (root-owned file) is now read through the root shell so the log page actually shows data.
+- **Update progress:** no more infinite polling loop if the download row disappears.
+- **Release logging:** a WARN+ logcat tree is always planted so release builds remain diagnosable.
+
+## CI / signing
+
+- Release APKs are now signed with the real release keystore (GitHub Secrets), so CI artifacts can be installed over previous versions without uninstalling.
+- Signed APK is uploaded as a build artifact (AdAway-release-signed) and published to GitHub Releases.
+
+---
+
 # Bug Fixes & Dependency Automation — Summary
 
 ## Overview
