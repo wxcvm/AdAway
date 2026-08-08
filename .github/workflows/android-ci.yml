@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - master
+    tags:
+      - 'v*' 
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -67,3 +69,32 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: ./gradlew -Dorg.gradle.jvmargs=-XX:MaxMetaspaceSize=512m sonar
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: AdAway-release-signed
+          path: release-assets
+
+      - name: Prepare release assets
+        run: |
+          APP_NAME=$(grep -oP 'appName = \K[^"]+' gradle/libs.versions.toml)
+          APP_CODE=$(grep -oP 'appCode = \K[^"]+' gradle/libs.versions.toml)
+          cp release-assets/app-release-signed.apk release-assets/AdAway-latest.apk
+          printf '{"version":"%s","versionCode":%s,"changelog":"IPv6 web server, Mongoose 7.22, AGP9/Gradle9/OkHttp5 upgrades, crash and sync fixes, official signing"}' ${APP_NAME} ${APP_CODE} > release-assets/manifest.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
