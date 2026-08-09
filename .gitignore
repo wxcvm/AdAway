@@ -13,3 +13,4 @@ build
 
 # Operit platform workspace config (never commit)
 .operit/
+.backup/
