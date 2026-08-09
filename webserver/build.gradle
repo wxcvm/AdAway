@@ -20,9 +20,6 @@ android {
         }
     }
 
-    sonarqube {
-        skipProject = true
-    }
 }
 
 dependencies {

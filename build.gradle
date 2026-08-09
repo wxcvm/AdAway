@@ -8,10 +8,6 @@ buildscript {
     }
 }
 
-plugins {
-    id 'org.sonarqube' version '7.4.0.8496'
-}
-
 allprojects {
     repositories {
         google()
@@ -19,13 +15,3 @@ allprojects {
     }
 }
 
-sonarqube {
-    properties {
-        // Root project information
-        property 'sonar.projectKey', 'org.adaway'
-        property 'sonar.organization', 'adaway'
-        property 'sonar.projectName', 'AdAway'
-        property 'sonar.projectVersion', libs.versions.appName.get()
-        property 'sonar.host.url', 'https://sonarcloud.io'
-    }
-}

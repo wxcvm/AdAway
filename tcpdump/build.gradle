@@ -22,9 +22,6 @@ android {
         }
     }
 
-    sonarqube {
-        skipProject = true
-    }
 }
 
 /**
