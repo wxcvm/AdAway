@@ -560,6 +560,101 @@ static inline int atomic_load(int *ptr) {
     return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
 }
 
+/* ── Blocked-request classification ───────────────────────────── */
+/*
+ * Classify a blocked request by its URI and reply with the most
+ * realistic "empty" resource for that type, so ad SDKs think the
+ * request succeeded (instead of retrying or erroring out).
+ * Returns true if a reply was sent, false if the caller should fall
+ * through to the default placeholder-image path (image requests keep
+ * serving the user-configured block images).
+ */
+static bool uri_ends_with_ci(const struct mg_str uri, const char *suffix) {
+    size_t n = strlen(suffix);
+    if (uri.len < n) return false;
+    return mg_strcasecmp(mg_str_n(uri.buf + uri.len - n, n), mg_str(suffix)) == 0;
+}
+
+static bool uri_contains_ci(const struct mg_str uri, const char *needle) {
+    size_t n = strlen(needle);
+    if (n == 0 || uri.len < n) return false;
+    for (size_t i = 0; i + n <= uri.len; i++) {
+        if (mg_strcasecmp(mg_str_n(uri.buf + i, n), mg_str(needle)) == 0) return true;
+    }
+    return false;
+}
+
+static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
+    struct mg_str u = hm->uri;
+
+    /* Images & video thumbnails: fall through to the user-configured
+       placeholder images (they're meant to be seen). */
+    if (uri_ends_with_ci(u, ".jpg") || uri_ends_with_ci(u, ".jpeg") ||
+        uri_ends_with_ci(u, ".png") || uri_ends_with_ci(u, ".gif") ||
+        uri_ends_with_ci(u, ".webp") || uri_ends_with_ci(u, ".avif") ||
+        uri_ends_with_ci(u, ".svg") || uri_ends_with_ci(u, ".ico") ||
+        uri_ends_with_ci(u, ".bmp")) {
+        return false;
+    }
+
+    /* JavaScript: empty script body, HTTP 200. */
+    if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
+        mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
+                              "Cache-Control: no-cache\r\n", "");
+        return true;
+    }
+
+    /* Stylesheets: empty CSS, HTTP 200. */
+    if (uri_ends_with_ci(u, ".css")) {
+        mg_http_reply(c, 200, "Content-Type: text/css\r\n"
+                              "Cache-Control: no-cache\r\n", "");
+        return true;
+    }
+
+    /* Fonts: HTTP 204 (no content needed). */
+    if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
+        uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
+        uri_ends_with_ci(u, ".eot")) {
+        mg_http_reply(c, 204, "Cache-Control: no-cache\r\n", "");
+        return true;
+    }
+
+    /* Ad API endpoints: empty JSON object, HTTP 200. */
+    if (uri_ends_with_ci(u, ".json") ||
+        uri_contains_ci(u, "/ad") || uri_contains_ci(u, "/ads") ||
+        uri_contains_ci(u, "/banner") || uri_contains_ci(u, "/feed") ||
+        uri_contains_ci(u, "/recommend")) {
+        mg_http_reply(c, 200, "Content-Type: application/json\r\n"
+                              "Cache-Control: no-cache\r\n", "{}");
+        return true;
+    }
+
+    /* Telemetry / analytics endpoints: HTTP 204. */
+    if (uri_contains_ci(u, "/track") || uri_contains_ci(u, "/event") ||
+        uri_contains_ci(u, "/log") || uri_contains_ci(u, "/collect") ||
+        uri_contains_ci(u, "/pixel")) {
+        mg_http_reply(c, 204, "Cache-Control: no-cache\r\n", "");
+        return true;
+    }
+
+    /* Heartbeats: HTTP 204. */
+    if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat")) {
+        mg_http_reply(c, 204, "Cache-Control: no-cache\r\n", "");
+        return true;
+    }
+
+    /* Config endpoints: empty JSON, HTTP 200. */
+    if (uri_contains_ci(u, "/config") || uri_contains_ci(u, "/settings")) {
+        mg_http_reply(c, 200, "Content-Type: application/json\r\n"
+                              "Cache-Control: no-cache\r\n", "{}");
+        return true;
+    }
+
+    /* Unknown: shortest possible truthful answer, HTTP 204. */
+    mg_http_reply(c, 204, "Cache-Control: no-cache\r\n", "");
+    return true;
+}
+
 /* ── HTTP event handler ───────────────────────────────────────── */
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev == MG_EV_ACCEPT) {
@@ -608,13 +703,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev != MG_EV_HTTP_MSG) return;
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
-
     if (mg_match(hm->uri, mg_str("/internal-test"), NULL)) {
         struct mg_http_serve_opts o = {0};
         o.mime_types = "html=text/html";
         mg_http_serve_file(c, hm, s->test_path, &o);
         return;
     }
+
+    /* Classify blocked requests by type and reply with the most
+       realistic "empty" resource - see reply_blocked_by_type(). */
+    if (reply_blocked_by_type(c, hm)) return;
+
 
     /* Random block image - serve whichever actual filename was found at
        scan time (see scan_block_images()), not a reconstructed
