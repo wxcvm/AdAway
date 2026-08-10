@@ -325,13 +325,39 @@ public class WebServerUtils {
              * whatever's found - deleting one doesn't touch any other
              * file's name. Matches the equivalent scan_block_images() on
              * the native side.
+             *
+             * BUG FIX (stale defaults): the old code only inflated a
+             * given image when its output file was missing, so updating
+             * the bundled assets in a new APK never replaced the images
+             * already inflated on a device (overlay install keeps
+             * files/webserver). Detect asset changes via a content hash
+             * of all bundled block images stored in a version file, and
+             * re-inflate (i.e. reset to the new defaults) only when the
+             * APK's assets actually differ - user-customized images are
+             * untouched as long as the APK itself didn't change.
              */
             String[] assetNames = am.list("");
             if (assetNames != null) {
-                for (String assetName : assetNames) {
-                    if (BLOCK_IMAGE_ASSET_PATTERN.matcher(assetName).matches()) {
-                        inflateBlockImageAsset(am, assetName, target);
+                String assetsHash = computeBlockImageAssetsHash(am, assetNames);
+                Path versionFile = target.resolve(BLOCK_IMAGES_VERSION_FILE);
+                String storedHash = Files.isRegularFile(versionFile)
+                        ? new String(Files.readAllBytes(versionFile), java.nio.charset.StandardCharsets.UTF_8)
+                        : "";
+                boolean assetsChanged = !assetsHash.equals(storedHash);
+                boolean noInflatedSlots = listBlockImageSlots(target).isEmpty();
+                if (assetsChanged || noInflatedSlots) {
+                    // Clear any previously inflated (or user-customized)
+                    // images so the new defaults are extracted below.
+                    for (Path slot : listBlockImageSlots(target)) {
+                        Files.deleteIfExists(slot);
                     }
+                    for (String assetName : assetNames) {
+                        if (BLOCK_IMAGE_ASSET_PATTERN.matcher(assetName).matches()) {
+                            inflateBlockImageAsset(am, assetName, target);
+                        }
+                    }
+                    Files.write(versionFile,
+                            assetsHash.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
             }
         } catch (IOException e) {
@@ -339,6 +365,45 @@ public class WebServerUtils {
         }
         // Delete stale cert (missing SAN / EKU) so server regenerates on next start
         deleteStaleServerCert(target);
+    }
+
+    /**
+     * Name of the marker file holding the content hash of the bundled
+     * block-image assets. Used to detect APK upgrades that changed the
+     * default images so they get re-inflated (see ensureStaticResources()).
+     */
+    private static final String BLOCK_IMAGES_VERSION_FILE = "block_images.version";
+
+    /**
+     * Compute a content hash over every bundled block-image asset (file
+     * name + bytes). Any change to the image set - new images, edited
+     * bytes, renamed/deleted files - produces a different hash, which is
+     * how the app knows the defaults changed in a new APK.
+     */
+    private static String computeBlockImageAssetsHash(
+            android.content.res.AssetManager am, String[] assetNames) throws IOException {
+        MessageDigest md;
+        try {
+            md = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 unavailable", e);
+        }
+        for (String assetName : assetNames) {
+            if (!BLOCK_IMAGE_ASSET_PATTERN.matcher(assetName).matches()) continue;
+            md.update(assetName.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            try (InputStream in = am.open(assetName)) {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    md.update(buf, 0, n);
+                }
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        for (byte b : md.digest()) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
     /**
