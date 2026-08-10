@@ -597,17 +597,20 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         return false;
     }
 
-    /* JavaScript: empty script body, HTTP 200. */
+    /* JavaScript: empty script body, HTTP 200. Cached - the empty
+       response never changes at runtime, so the client stops
+       re-requesting it after the first time (saves battery/bandwidth
+       on every page load). */
     if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
         mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
-                              "Cache-Control: no-cache\r\n", "");
+                              "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
 
-    /* Stylesheets: empty CSS, HTTP 200. */
+    /* Stylesheets: empty CSS, HTTP 200. Cached like JS above. */
     if (uri_ends_with_ci(u, ".css")) {
         mg_http_reply(c, 200, "Content-Type: text/css\r\n"
-                              "Cache-Control: no-cache\r\n", "");
+                              "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
 
@@ -615,8 +618,38 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
         uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
         uri_ends_with_ci(u, ".eot")) {
-        mg_http_reply(c, 204, "Cache-Control: no-cache\r\n", "");
+        mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
         return true;
+    }
+
+    /* No file extension - the browser's Sec-Fetch-Dest header is the
+       most precise signal for what kind of resource this is (sent by
+       all modern browsers, and more accurate than the URI for
+       extension-less endpoints like /banner?id=123). AdGuard cannot
+       annotate these requests itself - it redirects at the DNS layer,
+       so the HTTP request never passes through it - but the browser
+       already tells us the type. */
+    struct mg_str *dest = mg_http_get_header(hm, "Sec-Fetch-Dest");
+    if (dest != NULL && dest->len > 0) {
+        if (mg_strcasecmp(*dest, mg_str("image")) == 0) {
+            return false;  /* image request without extension → placeholder image */
+        }
+        if (mg_strcasecmp(*dest, mg_str("script")) == 0) {
+            mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
+                                  "Cache-Control: public, max-age=86400\r\n", "");
+            return true;
+        }
+        if (mg_strcasecmp(*dest, mg_str("style")) == 0) {
+            mg_http_reply(c, 200, "Content-Type: text/css\r\n"
+                                  "Cache-Control: public, max-age=86400\r\n", "");
+            return true;
+        }
+        if (mg_strcasecmp(*dest, mg_str("font")) == 0) {
+            mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
+            return true;
+        }
+        /* "empty" (XHR/fetch/beacon), "document", others: fall through
+           to path-keyword matching below. */
     }
 
     /* Ad API endpoints: empty JSON object, HTTP 200. */
@@ -625,7 +658,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/banner") || uri_contains_ci(u, "/feed") ||
         uri_contains_ci(u, "/recommend")) {
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
-                              "Cache-Control: no-cache\r\n", "{}");
+                              "Cache-Control: public, max-age=86400\r\n", "{}");
         return true;
     }
 
@@ -633,26 +666,27 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/track") || uri_contains_ci(u, "/event") ||
         uri_contains_ci(u, "/log") || uri_contains_ci(u, "/collect") ||
         uri_contains_ci(u, "/pixel")) {
-        mg_http_reply(c, 204, "Cache-Control: no-cache\r\n", "");
+        mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
 
     /* Heartbeats: HTTP 204. */
     if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat")) {
-        mg_http_reply(c, 204, "Cache-Control: no-cache\r\n", "");
+        mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
 
     /* Config endpoints: empty JSON, HTTP 200. */
     if (uri_contains_ci(u, "/config") || uri_contains_ci(u, "/settings")) {
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
-                              "Cache-Control: no-cache\r\n", "{}");
+                              "Cache-Control: public, max-age=86400\r\n", "{}");
         return true;
     }
 
-    /* Unknown: shortest possible truthful answer, HTTP 204. */
-    mg_http_reply(c, 204, "Cache-Control: no-cache\r\n", "");
-    return true;
+    /* Unknown request type: fall through to the placeholder image
+       (better than a bare 204 - the user sees the block placeholder
+       instead of a blank/broken slot, and it costs nothing extra). */
+    return false;
 }
 
 /* ── HTTP event handler ───────────────────────────────────────── */
