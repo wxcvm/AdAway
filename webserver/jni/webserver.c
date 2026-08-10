@@ -670,8 +670,12 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         return true;
     }
 
-    /* Heartbeats: HTTP 204. */
-    if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat")) {
+    /* Heartbeats & connectivity probes: HTTP 204. /generate_204 and
+       /204 are used by YouTube/Google to probe connectivity - they
+       must return 204 (empty body) or the client thinks the network
+       is broken. */
+    if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat") ||
+        uri_contains_ci(u, "/generate_204") || uri_contains_ci(u, "/204")) {
         mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
@@ -681,6 +685,30 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
                               "Cache-Control: public, max-age=86400\r\n", "{}");
         return true;
+    }
+
+    /* No Sec-Fetch-Dest header (older clients) - fall back to the
+       Accept header, which browsers still send for every request:
+       image/* → placeholder image, text/css → empty CSS,
+       application/javascript → empty JS. This is the last chance to
+       classify before the generic placeholder-image fallback. */
+    struct mg_str *accept = mg_http_get_header(hm, "Accept");
+    if (accept != NULL && accept->len > 0) {
+        if (uri_contains_ci(*accept, "image/") ||
+            uri_contains_ci(*accept, "image/*")) {
+            return false;  /* image request → placeholder image */
+        }
+        if (uri_contains_ci(*accept, "text/css")) {
+            mg_http_reply(c, 200, "Content-Type: text/css\r\n"
+                                  "Cache-Control: public, max-age=86400\r\n", "");
+            return true;
+        }
+        if (uri_contains_ci(*accept, "application/javascript") ||
+            uri_contains_ci(*accept, "text/javascript")) {
+            mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
+                                  "Cache-Control: public, max-age=86400\r\n", "");
+            return true;
+        }
     }
 
     /* Unknown request type: fall through to the placeholder image
