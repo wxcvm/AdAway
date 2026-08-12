@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,9 +30,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,8 +66,12 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var wsEnabled by remember {
+        mutableStateOf(org.adaway.util.WebServerUtils.isWebServerRunning())
+    }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_overview_title)) },
@@ -101,6 +112,27 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 stats = serverStats,
             )
 
+                        // Web server control card
+            WebServerControlCard(
+                enabled = wsEnabled,
+                stats = serverStats,
+                onToggle = { enable ->
+                    if (enable) {
+                        org.adaway.util.WebServerUtils.startWebServer(context)
+                    } else {
+                        org.adaway.util.WebServerUtils.stopWebServer()
+                    }
+                    wsEnabled = org.adaway.util.WebServerUtils.isWebServerRunning()
+                },
+                onTest = {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(org.adaway.util.WebServerUtils.TEST_URL)))
+                    } catch (e: Exception) {
+                        // no browser available; ignore
+                    }
+                },
+            )
+
             // Quick actions
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -133,6 +165,96 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun WebServerControlCard(
+    enabled: Boolean,
+    stats: ServerStats?,
+    onToggle: (Boolean) -> Unit,
+    onTest: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.Dns,
+                    contentDescription = null,
+                    tint = if (enabled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        stringResource(R.string.compose_ws_control_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(
+                            if (enabled) R.string.compose_ws_control_running
+                            else R.string.compose_ws_control_stopped,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (enabled) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error,
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onToggle,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                DetailChip(
+                    stringResource(R.string.compose_ws_control_ports),
+                    "80 / 443",
+                )
+                DetailChip(
+                    stringResource(R.string.compose_ws_control_images),
+                    "${stats?.blockImageCount ?: 0}",
+                )
+                DetailChip(
+                    stringResource(R.string.compose_ws_control_certs),
+                    "${stats?.sniCertsIssued ?: 0}",
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = onTest, enabled = enabled) {
+                Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.compose_ws_control_test))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailChip(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            value,
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontFamily = FontFamily.Monospace,
+            ),
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

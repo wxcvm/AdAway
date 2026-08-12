@@ -2,6 +2,7 @@ package org.adaway.ui.compose
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -56,13 +57,17 @@ import org.adaway.db.entity.ListType
 @Composable
 fun LogsScreen(viewModel: StatsViewModel) {
     val model = viewModel.adBlockModel
+    val context = androidx.compose.ui.platform.LocalContext.current
     var entries by remember { mutableStateOf<List<Pair<String, ListType?>>>(emptyList()) }
     var recording by remember { mutableStateOf(model.isRecordingLogs()) }
     var refreshing by remember { mutableStateOf(false) }
     var filter by remember { mutableIntStateOf(0) }
+    val limit = logLimit(context)
 
     fun refresh() {
-        viewModel.refreshLogEntries { newEntries -> entries = newEntries }
+        viewModel.refreshLogEntries { newEntries ->
+            entries = if (newEntries.size > limit) newEntries.takeLast(limit) else newEntries
+        }
     }
 
     // Auto-refresh every 3s while recording
@@ -87,6 +92,7 @@ fun LogsScreen(viewModel: StatsViewModel) {
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_logs_title)) },

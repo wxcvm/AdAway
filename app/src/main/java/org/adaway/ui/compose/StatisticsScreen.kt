@@ -2,6 +2,7 @@ package org.adaway.ui.compose
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -89,8 +91,15 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val showDonut = isChartEnabled(context, "chart_donut")
+    val showTrend = isChartEnabled(context, "chart_trend")
+    val showBars = isChartEnabled(context, "chart_bars")
+    val showApps = isChartEnabled(context, "chart_apps")
+    val showCerts = isChartEnabled(context, "chart_certs")
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_stats_title)) },
@@ -133,34 +142,36 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // Web server blocked-request chart
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+            // Blocked-request chart
+            if (showDonut) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
                 ) {
-                    Text(
-                        stringResource(R.string.compose_stats_blocked_by_type),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.align(Alignment.Start),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    if (serverStats == null || serverStats!!.totalBlocked == 0L) {
-                        EmptyChartPlaceholder()
-                    } else {
-                        val stats = serverStats!!
-                        DonutChart(stats = stats)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            stringResource(R.string.compose_stats_blocked_by_type),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.Start),
+                        )
                         Spacer(Modifier.height(12.dp))
-                        val categories = buildCategories(stats)
-                        categories.forEach { CategoryRow(it, stats.totalBlocked) }
+                        if (serverStats == null || serverStats!!.totalBlocked == 0L) {
+                            EmptyChartPlaceholder()
+                        } else {
+                            val stats = serverStats!!
+                            DonutChart(stats = stats)
+                            Spacer(Modifier.height(12.dp))
+                            val categories = buildCategories(stats)
+                            categories.forEach { CategoryRow(it, stats.totalBlocked) }
+                        }
                     }
                 }
             }
@@ -170,8 +181,18 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                 LifetimeCard(serverStats!!)
             }
 
+            // Block rate ring
+            if (serverStats != null && serverStats!!.totalRequests > 0) {
+                BlockRateCard(serverStats!!)
+            }
+
+            // Trend line chart
+            if (showTrend && serverStats != null && serverStats!!.history.isNotEmpty()) {
+                LineChartCard(serverStats!!.history)
+            }
+
             // Hourly traffic chart (24h / 30d switchable)
-            if (serverStats != null &&
+            if (showBars && serverStats != null &&
                 (serverStats!!.history.isNotEmpty() || serverStats!!.daily.isNotEmpty())
             ) {
                 TimeSeriesCard(
@@ -181,12 +202,12 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
             }
 
             // Per-app activity
-            if (serverStats != null && serverStats!!.apps.isNotEmpty()) {
+            if (showApps && serverStats != null && serverStats!!.apps.isNotEmpty()) {
                 ActiveAppsCard(serverStats!!.apps)
             }
 
             // Recently issued SNI certs
-            if (serverStats != null && serverStats!!.recentTls.isNotEmpty()) {
+            if (showCerts && serverStats != null && serverStats!!.recentTls.isNotEmpty()) {
                 RecentCertsCard(serverStats!!.recentTls)
             }
 
@@ -462,7 +483,9 @@ private fun CountLabel(label: String, value: Long) {
 
 @Composable
 private fun TimeSeriesCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var mode by remember { mutableIntStateOf(0) }  // 0 = 24h, 1 = 30d
+    var style by remember { mutableIntStateOf(chartStyle(context)) } // 0 = bars, 1 = stacked, 2 = area
     val data = if (mode == 0) hourly else daily
     if (data.isEmpty()) return
 
@@ -483,49 +506,97 @@ private fun TimeSeriesCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                FilterChip(
-                    selected = mode == 0,
-                    onClick = { mode = 0 },
-                    label = { Text(stringResource(R.string.compose_stats_range_24h)) },
-                )
-                Spacer(Modifier.width(8.dp))
-                FilterChip(
-                    selected = mode == 1,
-                    onClick = { mode = 1 },
-                    label = { Text(stringResource(R.string.compose_stats_range_30d)) },
-                )
+                FilterChip(selected = mode == 0, onClick = { mode = 0 },
+                    label = { Text(stringResource(R.string.compose_stats_range_24h)) })
+                Spacer(Modifier.width(6.dp))
+                FilterChip(selected = mode == 1, onClick = { mode = 1 },
+                    label = { Text(stringResource(R.string.compose_stats_range_30d)) })
             }
-            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                FilterChip(selected = style == 0, onClick = { style = 0 },
+                    label = { Text(stringResource(R.string.compose_stats_style_bars)) })
+                FilterChip(selected = style == 1, onClick = { style = 1 },
+                    label = { Text(stringResource(R.string.compose_stats_style_stacked)) })
+                FilterChip(selected = style == 2, onClick = { style = 2 },
+                    label = { Text(stringResource(R.string.compose_stats_style_area)) })
+            }
+            Spacer(Modifier.height(10.dp))
 
             val maxReq = (data.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
             val maxBlocked = (data.maxOfOrNull { it.blocked } ?: 0L).coerceAtLeast(1L)
             val reqColor = MaterialTheme.colorScheme.primary
             val blockColor = MaterialTheme.colorScheme.error
+            val gridColor = MaterialTheme.colorScheme.surfaceVariant
 
-            Canvas(modifier = Modifier.fillMaxWidth().height(140.dp)) {
+            Canvas(modifier = Modifier.fillMaxWidth().height(150.dp)) {
                 val barCount = data.size.coerceAtMost(30)
                 val slotW = size.width / barCount
-                val barW = slotW * 0.32f
-                val base = size.height - 8.dp.toPx()
+                val base = size.height - 10.dp.toPx()
+                val chartH = size.height - 26.dp.toPx()
+
+                // Horizontal grid lines
+                for (g in 1..3) {
+                    val y = base - chartH * g / 4f
+                    drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                }
+
                 data.forEachIndexed { i, p ->
                     val x = i * slotW + slotW / 2
-                    val hReq = (p.requests.toFloat() / maxReq) * (size.height - 24.dp.toPx())
-                    if (hReq > 0f) {
-                        drawRoundRect(
-                            color = reqColor,
-                            topLeft = androidx.compose.ui.geometry.Offset(x - barW, base - hReq),
-                            size = androidx.compose.ui.geometry.Size(barW, hReq),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
-                        )
-                    }
-                    val hBlk = (p.blocked.toFloat() / maxBlocked) * (size.height - 24.dp.toPx())
-                    if (hBlk > 0f) {
-                        drawRoundRect(
-                            color = blockColor,
-                            topLeft = androidx.compose.ui.geometry.Offset(x + 1.dp.toPx(), base - hBlk),
-                            size = androidx.compose.ui.geometry.Size(barW, hBlk),
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
-                        )
+                    when (style) {
+                        0 -> { // side-by-side bars
+                            val barW = (slotW * 0.36f).coerceAtMost(14f)
+                            val hReq = (p.requests.toFloat() / maxReq) * chartH
+                            val hBlk = (p.blocked.toFloat() / maxBlocked) * chartH
+                            if (hReq > 0f) drawRoundRect(
+                                color = reqColor,
+                                topLeft = Offset(x - barW - 1.dp.toPx(), base - hReq),
+                                size = Size(barW, hReq),
+                                cornerRadius = CornerRadius(2.dp.toPx()),
+                            )
+                            if (hBlk > 0f) drawRoundRect(
+                                color = blockColor,
+                                topLeft = Offset(x + 1.dp.toPx(), base - hBlk),
+                                size = Size(barW, hBlk),
+                                cornerRadius = CornerRadius(2.dp.toPx()),
+                            )
+                        }
+                        1 -> { // stacked bars
+                            val barW = (slotW * 0.6f).coerceAtMost(20f)
+                            val hReq = (p.requests.toFloat() / (maxReq + maxBlocked)) * chartH
+                            val hBlk = (p.blocked.toFloat() / (maxReq + maxBlocked)) * chartH
+                            if (hReq > 0f) drawRoundRect(
+                                color = reqColor,
+                                topLeft = Offset(x - barW / 2, base - hReq),
+                                size = Size(barW, hReq),
+                                cornerRadius = CornerRadius(2.dp.toPx()),
+                            )
+                            if (hBlk > 0f) drawRoundRect(
+                                color = blockColor,
+                                topLeft = Offset(x - barW / 2, base - hReq - hBlk),
+                                size = Size(barW, hBlk),
+                                cornerRadius = CornerRadius(2.dp.toPx()),
+                            )
+                        }
+                        else -> { // area (stacked bands)
+                            val barW = slotW
+                            val hReq = (p.requests.toFloat() / (maxReq + maxBlocked)) * chartH
+                            val hBlk = (p.blocked.toFloat() / (maxReq + maxBlocked)) * chartH
+                            if (hBlk > 0f) drawRect(
+                                color = blockColor.copy(alpha = 0.55f),
+                                topLeft = Offset(x - barW / 2, base - hReq - hBlk),
+                                size = Size(barW, hBlk),
+                            )
+                            if (hReq > 0f) drawRect(
+                                color = reqColor.copy(alpha = 0.7f),
+                                topLeft = Offset(x - barW / 2, base - hReq),
+                                size = Size(barW, hReq),
+                            )
+                        }
                     }
                 }
             }
@@ -534,6 +605,7 @@ private fun TimeSeriesCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 LegendDot(reqColor, stringResource(R.string.compose_stats_history_requests))
                 LegendDot(blockColor, stringResource(R.string.compose_stats_history_blocked))
@@ -541,6 +613,135 @@ private fun TimeSeriesCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
                 Text(
                     stringResource(if (mode == 0) R.string.compose_stats_history_window
                     else R.string.compose_stats_daily_window),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LineChartCard(history: List<HistPoint>) {
+    if (history.isEmpty()) return
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.compose_stats_trend_title),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+
+            val points = history.takeLast(24)
+            val maxReq = (points.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
+            val lineColor = MaterialTheme.colorScheme.primary
+
+            Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
+                val chartH = size.height - 20.dp.toPx()
+                val base = size.height - 10.dp.toPx()
+                val n = points.size
+                if (n == 0) return@Canvas
+
+                // Area fill (gradient)
+                val path = androidx.compose.ui.graphics.Path()
+                val firstX = 0f
+                val lastX = size.width
+                path.moveTo(firstX, base)
+                points.forEachIndexed { i, p ->
+                    val x = if (n == 1) size.width / 2 else size.width * i / (n - 1)
+                    val y = base - (p.requests.toFloat() / maxReq) * chartH
+                    path.lineTo(x, y)
+                }
+                path.lineTo(lastX, base)
+                path.close()
+                drawPath(
+                    path,
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(lineColor.copy(alpha = 0.35f), lineColor.copy(alpha = 0.02f)),
+                        startY = 0f, endY = base,
+                    ),
+                )
+
+                // Smooth line (cubic bezier through points)
+                val linePath = androidx.compose.ui.graphics.Path()
+                points.forEachIndexed { i, p ->
+                    val x = if (n == 1) size.width / 2 else size.width * i / (n - 1)
+                    val y = base - (p.requests.toFloat() / maxReq) * chartH
+                    if (i == 0) linePath.moveTo(x, y) else linePath.lineTo(x, y)
+                }
+                drawPath(linePath, color = lineColor, style = Stroke(width = 2.dp.toPx()))
+
+                // End dot
+                val last = points.last()
+                val lx = size.width
+                val ly = base - (last.requests.toFloat() / maxReq) * chartH
+                drawCircle(color = lineColor, radius = 4.dp.toPx(), center = Offset(lx, ly))
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                LegendDot(lineColor, stringResource(R.string.compose_stats_trend_requests))
+                Spacer(Modifier.weight(1f))
+                Text(
+                    stringResource(R.string.compose_stats_history_window),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BlockRateCard(stats: ServerStats) {
+    val total = stats.totalRequests.coerceAtLeast(1L)
+    val rate = stats.totalBlocked.toFloat() / total
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Rate ring
+            val ringColor = MaterialTheme.colorScheme.error
+            val trackColor = MaterialTheme.colorScheme.surfaceVariant
+            Canvas(modifier = Modifier.size(72.dp)) {
+                val stroke = Stroke(width = 8.dp.toPx())
+                drawArc(trackColor, 0f, 360f, false, style = stroke)
+                drawArc(ringColor, -90f, 360f * rate, false, style = stroke)
+            }
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.compose_stats_rate_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    stringResource(R.string.compose_stats_rate_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    String.format(Locale.US, "%.1f%%", rate * 100f),
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Text(
+                    stringResource(R.string.compose_stats_rate_blocked_of, stats.totalBlocked, stats.totalRequests),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

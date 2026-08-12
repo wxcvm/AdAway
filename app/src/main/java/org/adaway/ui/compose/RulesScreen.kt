@@ -2,6 +2,7 @@ package org.adaway.ui.compose
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -101,6 +102,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_rules_title)) },
@@ -154,7 +156,28 @@ fun RulesScreen(viewModel: StatsViewModel) {
             }
 
             if (rules.isEmpty()) {
-                EmptyRulesPlaceholder(tabs[selectedTab].emptyRes)
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 8.dp,
+                        vertical = 4.dp,
+                    ),
+                ) {
+                    item(key = "empty") {
+                        EmptyRulesPlaceholder(tabs[selectedTab].emptyRes)
+                    }
+                    item(key = "sources") {
+                        SourcesCard(
+                            sources = sources,
+                            onToggle = { source ->
+                                viewModel.toggleSource(source) { reloadSources() }
+                            },
+                            onAddClick = { showAddDialog = true },
+                        )
+                    }
+                }
             } else {
                 LazyColumn(
                     modifier = Modifier
@@ -168,17 +191,17 @@ fun RulesScreen(viewModel: StatsViewModel) {
                     items(rules, key = { "${it.host}:${it.sourceId}" }) { item ->
                         RuleRow(item = item, sourceLabel = sourceLabels[item.sourceId])
                     }
+                    item(key = "sources") {
+                        SourcesCard(
+                            sources = sources,
+                            onToggle = { source ->
+                                viewModel.toggleSource(source) { reloadSources() }
+                            },
+                            onAddClick = { showAddDialog = true },
+                        )
+                    }
                 }
             }
-
-            // Subscriptions (rule sources) management
-            SourcesCard(
-                sources = sources,
-                onToggle = { source ->
-                    viewModel.toggleSource(source) { reloadSources() }
-                },
-                onAddClick = { showAddDialog = true },
-            )
         }
     }
 
@@ -358,12 +381,11 @@ private fun RuleRow(item: HostListItem, sourceLabel: String?) {
 }
 
 @Composable
-private fun ColumnScope.EmptyRulesPlaceholder(@StringRes emptyRes: Int) {
+private fun EmptyRulesPlaceholder(@StringRes emptyRes: Int) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .weight(1f)
-            .padding(32.dp),
+            .padding(48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
