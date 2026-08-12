@@ -191,7 +191,7 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
             while (isActive) {
-                delay(5_000)
+                delay(10_000)
                 refreshServerStats()
             }
         }

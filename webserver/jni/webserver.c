@@ -437,11 +437,12 @@ static void addr_to_proc_v4(const struct mg_addr *a, char *out, size_t sz) {
 
 /* Format an mg_addr as /proc/net/tcp6 (IPv4-mapped) would print it. */
 static void addr_to_proc_v6mapped(const struct mg_addr *a, char *out, size_t sz) {
-    /* ::ffff:a.b.c.d */
+    /* ::ffff:a.b.c.d — kernel prints each 32-bit word in host order
+       (ntohl), so the ff:ff word shows as "FFFF0000" on this device. */
     char *d = out;
     for (int g = 0; g < 2; g++)
-        d += snprintf(d, 9, "%08X", 0);
-    d += snprintf(d, 9, "%08X", 0x0000FFFFu);
+        d += snprintf(d, 9, "00000000");
+    d += snprintf(d, 9, "FFFF0000");
     d += snprintf(d, 9, "%02X%02X%02X%02X",
                   (unsigned)a->addr.ip[3], (unsigned)a->addr.ip[2],
                   (unsigned)a->addr.ip[1], (unsigned)a->addr.ip[0]);

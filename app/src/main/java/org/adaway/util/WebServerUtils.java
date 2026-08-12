@@ -88,13 +88,16 @@ public class WebServerUtils {
             int n;
             while ((n = in.read(buf)) > 0) body.write(buf, 0, n);
             in.close();
-            process.waitFor(4000, java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!process.waitFor(4000, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                process.destroy();
+                return null;
+            }
             String response = body.toString("UTF-8");
             int headerEnd = response.indexOf("\r\n\r\n");
             String json = headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
             return new org.json.JSONObject(json);
         } catch (Exception e) {
-            Timber.w(e, "Failed to fetch web server stats");
+            Timber.w(e, "Failed to fetch web server stats (nc)");
             return null;
         }
     }
