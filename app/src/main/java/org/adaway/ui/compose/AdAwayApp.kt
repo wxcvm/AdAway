@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.outlined.DonutLarge
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -35,6 +36,7 @@ object Destinations {
     const val STATS = "stats"
     const val RULES = "rules"
     const val LOGS = "logs"
+    const val SETTINGS = "settings"
 }
 
 private data class Destination(
@@ -48,6 +50,7 @@ private val destinations = listOf(
     Destination(Destinations.STATS, R.string.compose_nav_stats, Icons.Outlined.DonutLarge),
     Destination(Destinations.RULES, R.string.compose_nav_rules, Icons.Outlined.Shield),
     Destination(Destinations.LOGS, R.string.compose_nav_logs, Icons.Filled.List),
+    Destination(Destinations.SETTINGS, R.string.compose_nav_settings, Icons.Outlined.Settings),
 )
 
 @Composable
@@ -97,6 +100,9 @@ fun AdAwayApp() {
             }
             composable(Destinations.LOGS) {
                 LogsScreen(viewModel)
+            }
+            composable(Destinations.SETTINGS) {
+                SettingsScreen(viewModel)
             }
         }
     }

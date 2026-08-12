@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
@@ -27,7 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -162,9 +165,19 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // Hourly traffic chart
-            if (serverStats != null && serverStats!!.history.isNotEmpty()) {
-                HourlyChartCard(serverStats!!.history)
+            // Lifetime totals
+            if (serverStats != null) {
+                LifetimeCard(serverStats!!)
+            }
+
+            // Hourly traffic chart (24h / 30d switchable)
+            if (serverStats != null &&
+                (serverStats!!.history.isNotEmpty() || serverStats!!.daily.isNotEmpty())
+            ) {
+                TimeSeriesCard(
+                    hourly = serverStats!!.history,
+                    daily = serverStats!!.daily,
+                )
             }
 
             // Per-app activity
@@ -396,7 +409,7 @@ internal fun appNameForUid(uid: Int): String {
 }
 
 @Composable
-private fun HourlyChartCard(history: List<HistPoint>) {
+private fun LifetimeCard(stats: ServerStats) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -405,25 +418,97 @@ private fun HourlyChartCard(history: List<HistPoint>) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                stringResource(R.string.compose_stats_history_title),
+                stringResource(R.string.compose_stats_lifetime_title),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.compose_stats_lifetime_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                CountLabel(stringResource(R.string.compose_stats_lifetime_requests), stats.totalRequests)
+                CountLabel(stringResource(R.string.compose_stats_lifetime_blocked), stats.totalBlocked)
+                CountLabel(stringResource(R.string.compose_stats_lifetime_connections), stats.totalConnections)
+                CountLabel(stringResource(R.string.compose_stats_lifetime_certs), stats.sniCertsIssued)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CountLabel(label: String, value: Long) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            String.format(Locale.US, "%,d", value),
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+            ),
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun TimeSeriesCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
+    var mode by remember { mutableIntStateOf(0) }  // 0 = 24h, 1 = 30d
+    val data = if (mode == 0) hourly else daily
+    if (data.isEmpty()) return
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.compose_stats_history_title),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                FilterChip(
+                    selected = mode == 0,
+                    onClick = { mode = 0 },
+                    label = { Text(stringResource(R.string.compose_stats_range_24h)) },
+                )
+                Spacer(Modifier.width(8.dp))
+                FilterChip(
+                    selected = mode == 1,
+                    onClick = { mode = 1 },
+                    label = { Text(stringResource(R.string.compose_stats_range_30d)) },
+                )
+            }
             Spacer(Modifier.height(12.dp))
 
-            val maxReq = (history.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
-            val maxBlocked = (history.maxOfOrNull { it.blocked } ?: 0L).coerceAtLeast(1L)
+            val maxReq = (data.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
+            val maxBlocked = (data.maxOfOrNull { it.blocked } ?: 0L).coerceAtLeast(1L)
             val reqColor = MaterialTheme.colorScheme.primary
             val blockColor = MaterialTheme.colorScheme.error
 
             Canvas(modifier = Modifier.fillMaxWidth().height(140.dp)) {
-                val barCount = history.size.coerceAtMost(24)
+                val barCount = data.size.coerceAtMost(30)
                 val slotW = size.width / barCount
                 val barW = slotW * 0.32f
                 val base = size.height - 8.dp.toPx()
-                history.takeLast(24).forEachIndexed { i, p ->
+                data.forEachIndexed { i, p ->
                     val x = i * slotW + slotW / 2
-                    // Requests bar (primary)
                     val hReq = (p.requests.toFloat() / maxReq) * (size.height - 24.dp.toPx())
                     if (hReq > 0f) {
                         drawRoundRect(
@@ -433,7 +518,6 @@ private fun HourlyChartCard(history: List<HistPoint>) {
                             cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
                         )
                     }
-                    // Blocked bar (error color), drawn beside the request bar
                     val hBlk = (p.blocked.toFloat() / maxBlocked) * (size.height - 24.dp.toPx())
                     if (hBlk > 0f) {
                         drawRoundRect(
@@ -455,7 +539,8 @@ private fun HourlyChartCard(history: List<HistPoint>) {
                 LegendDot(blockColor, stringResource(R.string.compose_stats_history_blocked))
                 Spacer(Modifier.weight(1f))
                 Text(
-                    stringResource(R.string.compose_stats_history_window),
+                    stringResource(if (mode == 0) R.string.compose_stats_history_window
+                    else R.string.compose_stats_daily_window),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -481,6 +566,9 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) 
 
 @Composable
 private fun ActiveAppsCard(apps: List<AppStat>) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val monitoredApps = apps.filter { isAppMonitored(context, it.uid) }
+    if (monitoredApps.isEmpty()) return
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -494,7 +582,7 @@ private fun ActiveAppsCard(apps: List<AppStat>) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
-            apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
+            monitoredApps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

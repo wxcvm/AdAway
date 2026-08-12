@@ -7,6 +7,7 @@
     <string name="compose_nav_stats">Statistics</string>
     <string name="compose_nav_logs">Logs</string>
     <string name="compose_nav_rules">Rules</string>
+    <string name="compose_nav_settings">Settings</string>
 
     <!-- Overview -->
     <string name="compose_overview_title">AdAway</string>
@@ -47,6 +48,11 @@
     <string name="compose_stats_app_sub">%1$d conn · %2$d req · %3$d blocked</string>
     <string name="compose_stats_recent_certs">Recently issued certs</string>
     <string name="compose_stats_certs_hint">Domains apps asked us to sign (SNI)</string>
+    <string name="compose_settings_title">Settings</string>
+    <string name="compose_settings_apps_title">App monitoring</string>
+    <string name="compose_settings_apps_hint">Choose which apps appear in the per-app statistics</string>
+    <string name="compose_settings_apps_empty">No apps detected yet — browse the web and apps will show up here.</string>
+    <string name="compose_settings_app_sub">%1$d conn · %2$d req · %3$d blocked</string>
     <string name="compose_stats_type_images">Images</string>
     <string name="compose_stats_type_scripts">Scripts</string>
     <string name="compose_stats_type_styles">Styles</string>
@@ -62,6 +68,15 @@
     <string name="compose_stats_history_requests">Requests</string>
     <string name="compose_stats_history_blocked">Blocked</string>
     <string name="compose_stats_history_window">hourly</string>
+    <string name="compose_stats_daily_window">daily</string>
+    <string name="compose_stats_range_24h">24h</string>
+    <string name="compose_stats_range_30d">30d</string>
+    <string name="compose_stats_lifetime_title">All-time totals</string>
+    <string name="compose_stats_lifetime_hint">Cumulative since first run (persisted across restarts)</string>
+    <string name="compose_stats_lifetime_requests">Requests</string>
+    <string name="compose_stats_lifetime_blocked">Blocked</string>
+    <string name="compose_stats_lifetime_connections">Connections</string>
+    <string name="compose_stats_lifetime_certs">Certs</string>
 
     <!-- Logs -->
     <string name="compose_logs_title">Logs</string>

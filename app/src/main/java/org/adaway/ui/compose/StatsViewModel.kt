@@ -36,13 +36,31 @@ data class TlsHost(
     val host: String,
 )
 
-/** One hourly bucket of web server activity (for the time-series chart). */
+/** One time bucket of web server activity (hourly or daily series). */
 data class HistPoint(
     val ts: Long = 0,
     val requests: Long = 0,
     val blocked: Long = 0,
     val connections: Long = 0,
+    val certs: Long = 0,
 )
+
+/** Parse a history/daily JSON array ({"ts":…,"requests":…, …}) into [HistPoint]s. */
+private fun parseHistArray(json: JSONObject, key: String): List<HistPoint> {
+    val list = mutableListOf<HistPoint>()
+    val arr = json.optJSONArray(key) ?: return list
+    for (i in 0 until arr.length()) {
+        val o = arr.optJSONObject(i) ?: continue
+        list += HistPoint(
+            ts = o.optLong("ts", 0),
+            requests = o.optLong("requests", 0),
+            blocked = o.optLong("blocked", 0),
+            connections = o.optLong("connections", 0),
+            certs = o.optLong("certs", 0),
+        )
+    }
+    return list
+}
 
 /**
  * Snapshot of the native web server statistics (from /internal-stats).
@@ -68,6 +86,7 @@ data class ServerStats(
     val apps: List<AppStat> = emptyList(),
     val recentTls: List<TlsHost> = emptyList(),
     val history: List<HistPoint> = emptyList(),
+    val daily: List<HistPoint> = emptyList(),
 ) {
     val totalBlocked: Long
         get() = blockedImages + blockedScripts + blockedStyles + blockedFonts +
@@ -102,19 +121,8 @@ data class ServerStats(
                     )
                 }
             }
-            val history = mutableListOf<HistPoint>()
-            val histArray = json.optJSONArray("history")
-            if (histArray != null) {
-                for (i in 0 until histArray.length()) {
-                    val o = histArray.optJSONObject(i) ?: continue
-                    history += HistPoint(
-                        ts = o.optLong("ts", 0),
-                        requests = o.optLong("requests", 0),
-                        blocked = o.optLong("blocked", 0),
-                        connections = o.optLong("connections", 0),
-                    )
-                }
-            }
+            val history = parseHistArray(json, "history")
+            val daily = parseHistArray(json, "daily")
             return ServerStats(
                 uptimeSeconds = json.optLong("uptime_seconds", 0),
                 totalRequests = json.optLong("total_requests", 0),
@@ -136,6 +144,7 @@ data class ServerStats(
                 apps = apps,
                 recentTls = recentTls,
                 history = history,
+                daily = daily,
             )
         }
     }
