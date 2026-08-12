@@ -59,39 +59,36 @@ public class WebServerUtils {
      * breakdown) as a parsed JSONObject. Returns null when the server
      * is not running or the response is unparseable.
      * <p>
-     * IMPORTANT: the connection must use an IPv4-mapped IPv6 socket
+     * IMPORTANT: the request must come from an IPv4-mapped IPv6 socket
      * ([::ffff:127.0.0.1]). On this device's kernel, plain IPv4/IPv6
      * loopback connections show uid 0 in /proc/net/tcp, so the web
      * server could never tell which app is asking; v4-mapped sockets
-     * keep the real uid. OkHttp normalises "::ffff:127.0.0.1" back to
-     * an Inet4Address on Android, so we build the raw 16-byte address
-     * and connect with a plain Socket instead.
+     * keep the real uid. Java (OkHttp and even raw Socket with a
+     * v4-mapped Inet6Address) collapses the address back to IPv4, so
+     * we spawn toybox nc instead — the native child keeps the app uid
+     * and connects with a genuine v4-mapped socket (verified: uid is
+     * preserved in /proc/net/tcp6).
      */
     @androidx.annotation.Nullable
     public static org.json.JSONObject getStats() {
         try {
-            byte[] v4mapped = new byte[16];
-            v4mapped[10] = (byte) 0xFF;
-            v4mapped[11] = (byte) 0xFF;
-            v4mapped[12] = 127;
-            v4mapped[13] = 0;
-            v4mapped[14] = 0;
-            v4mapped[15] = 1;
-            java.net.InetAddress address = java.net.InetAddress.getByAddress(v4mapped);
-            java.net.Socket socket = new java.net.Socket();
-            socket.connect(new java.net.InetSocketAddress(address, 80), 3000);
-            socket.setSoTimeout(3000);
-            java.io.OutputStream out = socket.getOutputStream();
+            Process process = new ProcessBuilder(
+                    "/system/bin/toybox", "nc", "-w", "3",
+                    "::ffff:127.0.0.1", "80")
+                    .redirectErrorStream(false)
+                    .start();
+            java.io.OutputStream out = process.getOutputStream();
             out.write(("GET /internal-stats HTTP/1.1\r\n" +
                     "Host: adaway\r\n" +
                     "Connection: close\r\n\r\n").getBytes("UTF-8"));
-            out.flush();
-            java.io.InputStream in = socket.getInputStream();
+            out.close();
+            java.io.InputStream in = process.getInputStream();
             java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
             byte[] buf = new byte[4096];
             int n;
             while ((n = in.read(buf)) > 0) body.write(buf, 0, n);
-            socket.close();
+            in.close();
+            process.waitFor(4000, java.util.concurrent.TimeUnit.MILLISECONDS);
             String response = body.toString("UTF-8");
             int headerEnd = response.indexOf("\r\n\r\n");
             String json = headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
