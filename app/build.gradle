@@ -7,12 +7,6 @@ boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
         project.hasProperty('signingKeyAlias') &&
         project.hasProperty('signingKeyPassword')
 
-repositories {
-    maven {
-        url 'https://jitpack.io'
-    }
-}
-
 android {
     compileSdk 36
     ndkVersion '28.1.13356709'
