@@ -462,7 +462,7 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
             unsigned long uid = 0;
             /* sl local rem st tx_queue:rx_queue tr:tm->when retrnsmt
                uid timeout inode … */
-            if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %lu %*s %lu",
+            if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %lu %*s %*lu",
                        l, r, &state, &uid) == 4) {
                 if (state == 1 /* ESTABLISHED */ &&
                     strcmp(l, loc) == 0 && strcmp(r, rem) == 0) {
