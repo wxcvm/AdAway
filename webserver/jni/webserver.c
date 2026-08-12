@@ -271,13 +271,15 @@ static uid_t conn_uid(struct mg_connection *c) {
 
     char loc[64], rem[64];
     if (!c->loc.is_ip6) {
+        /* /proc/net/tcp prints the IPv4 address as ntohl() of the
+           network-order bytes, i.e. byte-reversed vs addr.ip[]. */
         snprintf(loc, sizeof(loc), "%02X%02X%02X%02X:%04X",
-                 (unsigned)c->loc.addr.ip[0], (unsigned)c->loc.addr.ip[1],
-                 (unsigned)c->loc.addr.ip[2], (unsigned)c->loc.addr.ip[3],
+                 (unsigned)c->loc.addr.ip[3], (unsigned)c->loc.addr.ip[2],
+                 (unsigned)c->loc.addr.ip[1], (unsigned)c->loc.addr.ip[0],
                  c->loc.port);
         snprintf(rem, sizeof(rem), "%02X%02X%02X%02X:%04X",
-                 (unsigned)c->rem.addr.ip[0], (unsigned)c->rem.addr.ip[1],
-                 (unsigned)c->rem.addr.ip[2], (unsigned)c->rem.addr.ip[3],
+                 (unsigned)c->rem.addr.ip[3], (unsigned)c->rem.addr.ip[2],
+                 (unsigned)c->rem.addr.ip[1], (unsigned)c->rem.addr.ip[0],
                  c->rem.port);
     } else {
         /* /proc/net/tcp6 prints each 4-byte group byte-reversed. */
