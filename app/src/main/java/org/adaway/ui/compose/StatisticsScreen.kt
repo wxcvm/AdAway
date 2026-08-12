@@ -37,9 +37,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
@@ -186,16 +189,11 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                 BlockRateCard(serverStats!!)
             }
 
-            // Trend line chart
-            if (showTrend && serverStats != null && serverStats!!.history.isNotEmpty()) {
-                LineChartCard(serverStats!!.history)
-            }
-
-            // Hourly traffic chart (24h / 30d switchable)
+            // Trend + traffic chart (AdGuard Home style)
             if (showBars && serverStats != null &&
                 (serverStats!!.history.isNotEmpty() || serverStats!!.daily.isNotEmpty())
             ) {
-                TimeSeriesCard(
+                TrafficTrendCard(
                     hourly = serverStats!!.history,
                     daily = serverStats!!.daily,
                 )
@@ -482,12 +480,20 @@ private fun CountLabel(label: String, value: Long) {
 }
 
 @Composable
-private fun TimeSeriesCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
+private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var mode by remember { mutableIntStateOf(0) }  // 0 = 24h, 1 = 30d
-    var style by remember { mutableIntStateOf(chartStyle(context)) } // 0 = bars, 1 = stacked, 2 = area
+    var style by remember { mutableIntStateOf(chartStyle(context)) } // 0 = line, 1 = area, 2 = bars
     val data = if (mode == 0) hourly else daily
     if (data.isEmpty()) return
+
+    val maxReq = (data.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
+    val maxBlocked = (data.maxOfOrNull { it.blocked } ?: 0L).coerceAtLeast(1L)
+    val maxAll = (maxReq + maxBlocked).coerceAtLeast(1L)
+    val reqColor = MaterialTheme.colorScheme.primary
+    val blockColor = MaterialTheme.colorScheme.error
+    val gridColor = MaterialTheme.colorScheme.surfaceVariant
+    val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -519,84 +525,111 @@ private fun TimeSeriesCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 FilterChip(selected = style == 0, onClick = { style = 0 },
-                    label = { Text(stringResource(R.string.compose_stats_style_bars)) })
+                    label = { Text(stringResource(R.string.compose_stats_style_line)) })
                 FilterChip(selected = style == 1, onClick = { style = 1 },
-                    label = { Text(stringResource(R.string.compose_stats_style_stacked)) })
-                FilterChip(selected = style == 2, onClick = { style = 2 },
                     label = { Text(stringResource(R.string.compose_stats_style_area)) })
+                FilterChip(selected = style == 2, onClick = { style = 2 },
+                    label = { Text(stringResource(R.string.compose_stats_style_bars)) })
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
 
-            val maxReq = (data.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
-            val maxBlocked = (data.maxOfOrNull { it.blocked } ?: 0L).coerceAtLeast(1L)
-            val reqColor = MaterialTheme.colorScheme.primary
-            val blockColor = MaterialTheme.colorScheme.error
-            val gridColor = MaterialTheme.colorScheme.surfaceVariant
+            Canvas(modifier = Modifier.fillMaxWidth().height(170.dp)) {
+                val n = data.size
+                if (n == 0) return@Canvas
+                val leftPad = 34.dp.toPx()
+                val chartW = size.width - leftPad - 6.dp.toPx()
+                val base = size.height - 8.dp.toPx()
+                val topPad = 8.dp.toPx()
+                val chartH = base - topPad - 4.dp.toPx()
 
-            Canvas(modifier = Modifier.fillMaxWidth().height(150.dp)) {
-                val barCount = data.size.coerceAtMost(30)
-                val slotW = size.width / barCount
-                val base = size.height - 10.dp.toPx()
-                val chartH = size.height - 26.dp.toPx()
+                fun xAt(i: Int): Float = leftPad + (if (n == 1) chartW / 2 else chartW * i / (n - 1))
+                fun yReq(v: Long): Float = base - (v.toFloat() / maxAll) * chartH
+                fun yBlk(v: Long): Float = base - (v.toFloat() / maxAll) * chartH
 
-                // Horizontal grid lines
-                for (g in 1..3) {
-                    val y = base - chartH * g / 4f
-                    drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                // Y-axis grid + labels (0, 50%, 100% of maxAll)
+                for (g in 0..4) {
+                    val frac = g / 4f
+                    val y = base - chartH * frac
+                    drawLine(gridColor, Offset(leftPad, y), Offset(size.width, y), strokeWidth = 1f)
+                    val label = when (g) {
+                        0 -> "${maxAll}"
+                        1 -> "${maxAll * 3 / 4}"
+                        2 -> "${maxAll / 2}"
+                        3 -> "${maxAll / 4}"
+                        else -> "0"
+                    }
+                    drawContext.canvas.nativeCanvas.drawText(
+                        label, 2.dp.toPx(), y + 4.dp.toPx(),
+                        android.graphics.Paint().apply {
+                            color = android.graphics.Color.argb(150, 128, 128, 128)
+                            textSize = 9.dp.toPx()
+                        },
+                    )
                 }
+                // Baseline
+                drawLine(axisColor, Offset(leftPad, base), Offset(size.width, base), strokeWidth = 1.5f)
 
-                data.forEachIndexed { i, p ->
-                    val x = i * slotW + slotW / 2
-                    when (style) {
-                        0 -> { // side-by-side bars
-                            val barW = (slotW * 0.36f).coerceAtMost(14f)
-                            val hReq = (p.requests.toFloat() / maxReq) * chartH
-                            val hBlk = (p.blocked.toFloat() / maxBlocked) * chartH
+                when (style) {
+                    2 -> { // bars
+                        val slotW = chartW / n
+                        val barW = (slotW * 0.6f).coerceAtMost(18f)
+                        data.forEachIndexed { i, p ->
+                            val cx = xAt(i)
+                            val hReq = (p.requests.toFloat() / maxAll) * chartH
+                            val hBlk = (p.blocked.toFloat() / maxAll) * chartH
                             if (hReq > 0f) drawRoundRect(
                                 color = reqColor,
-                                topLeft = Offset(x - barW - 1.dp.toPx(), base - hReq),
+                                topLeft = Offset(cx - barW / 2, base - hReq),
                                 size = Size(barW, hReq),
                                 cornerRadius = CornerRadius(2.dp.toPx()),
                             )
                             if (hBlk > 0f) drawRoundRect(
                                 color = blockColor,
-                                topLeft = Offset(x + 1.dp.toPx(), base - hBlk),
+                                topLeft = Offset(cx - barW / 2, base - hReq - hBlk),
                                 size = Size(barW, hBlk),
                                 cornerRadius = CornerRadius(2.dp.toPx()),
                             )
                         }
-                        1 -> { // stacked bars
-                            val barW = (slotW * 0.6f).coerceAtMost(20f)
-                            val hReq = (p.requests.toFloat() / (maxReq + maxBlocked)) * chartH
-                            val hBlk = (p.blocked.toFloat() / (maxReq + maxBlocked)) * chartH
-                            if (hReq > 0f) drawRoundRect(
-                                color = reqColor,
-                                topLeft = Offset(x - barW / 2, base - hReq),
-                                size = Size(barW, hReq),
-                                cornerRadius = CornerRadius(2.dp.toPx()),
-                            )
-                            if (hBlk > 0f) drawRoundRect(
-                                color = blockColor,
-                                topLeft = Offset(x - barW / 2, base - hReq - hBlk),
-                                size = Size(barW, hBlk),
-                                cornerRadius = CornerRadius(2.dp.toPx()),
+                    }
+                    else -> { // line / area — smooth curves for both series
+                        val reqPts = data.mapIndexed { i, p -> Offset(xAt(i), yReq(p.requests)) }
+                        val blkPts = data.mapIndexed { i, p -> Offset(xAt(i), yBlk(p.blocked)) }
+
+                        // area fill under blocked
+                        if (style == 1) {
+                            val fill = Path()
+                            fill.moveTo(reqPts.first().x, base)
+                            reqPts.forEach { fill.lineTo(it.x, it.y) }
+                            fill.lineTo(reqPts.last().x, base)
+                            fill.close()
+                            drawPath(fill, reqColor.copy(alpha = 0.25f))
+                            val fillB = Path()
+                            fillB.moveTo(blkPts.first().x, base)
+                            blkPts.forEach { fillB.lineTo(it.x, it.y) }
+                            fillB.lineTo(blkPts.last().x, base)
+                            fillB.close()
+                            drawPath(fillB, blockColor.copy(alpha = 0.20f))
+                        } else {
+                            // subtle gradient under request line
+                            val fill = Path()
+                            fill.moveTo(reqPts.first().x, base)
+                            reqPts.forEach { fill.lineTo(it.x, it.y) }
+                            fill.lineTo(reqPts.last().x, base)
+                            fill.close()
+                            drawPath(
+                                fill,
+                                Brush.verticalGradient(
+                                    listOf(reqColor.copy(alpha = 0.18f), reqColor.copy(alpha = 0.0f)),
+                                    startY = topPad, endY = base,
+                                ),
                             )
                         }
-                        else -> { // area (stacked bands)
-                            val barW = slotW
-                            val hReq = (p.requests.toFloat() / (maxReq + maxBlocked)) * chartH
-                            val hBlk = (p.blocked.toFloat() / (maxReq + maxBlocked)) * chartH
-                            if (hBlk > 0f) drawRect(
-                                color = blockColor.copy(alpha = 0.55f),
-                                topLeft = Offset(x - barW / 2, base - hReq - hBlk),
-                                size = Size(barW, hBlk),
-                            )
-                            if (hReq > 0f) drawRect(
-                                color = reqColor.copy(alpha = 0.7f),
-                                topLeft = Offset(x - barW / 2, base - hReq),
-                                size = Size(barW, hReq),
-                            )
-                        }
+
+                        drawPath(smoothPath(reqPts), reqColor, style = Stroke(width = 2.dp.toPx()))
+                        drawPath(smoothPath(blkPts), blockColor, style = Stroke(width = 2.dp.toPx()))
+                        // end dots
+                        drawCircle(reqColor, 3.5.dp.toPx(), reqPts.last())
+                        drawCircle(blockColor, 3.5.dp.toPx(), blkPts.last())
                     }
                 }
             }
@@ -621,80 +654,22 @@ private fun TimeSeriesCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
     }
 }
 
-@Composable
-private fun LineChartCard(history: List<HistPoint>) {
-    if (history.isEmpty()) return
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                stringResource(R.string.compose_stats_trend_title),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(10.dp))
-
-            val points = history.takeLast(24)
-            val maxReq = (points.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
-            val lineColor = MaterialTheme.colorScheme.primary
-
-            Canvas(modifier = Modifier.fillMaxWidth().height(120.dp)) {
-                val chartH = size.height - 20.dp.toPx()
-                val base = size.height - 10.dp.toPx()
-                val n = points.size
-                if (n == 0) return@Canvas
-
-                // Area fill (gradient)
-                val path = androidx.compose.ui.graphics.Path()
-                val firstX = 0f
-                val lastX = size.width
-                path.moveTo(firstX, base)
-                points.forEachIndexed { i, p ->
-                    val x = if (n == 1) size.width / 2 else size.width * i / (n - 1)
-                    val y = base - (p.requests.toFloat() / maxReq) * chartH
-                    path.lineTo(x, y)
-                }
-                path.lineTo(lastX, base)
-                path.close()
-                drawPath(
-                    path,
-                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                        listOf(lineColor.copy(alpha = 0.35f), lineColor.copy(alpha = 0.02f)),
-                        startY = 0f, endY = base,
-                    ),
-                )
-
-                // Smooth line (cubic bezier through points)
-                val linePath = androidx.compose.ui.graphics.Path()
-                points.forEachIndexed { i, p ->
-                    val x = if (n == 1) size.width / 2 else size.width * i / (n - 1)
-                    val y = base - (p.requests.toFloat() / maxReq) * chartH
-                    if (i == 0) linePath.moveTo(x, y) else linePath.lineTo(x, y)
-                }
-                drawPath(linePath, color = lineColor, style = Stroke(width = 2.dp.toPx()))
-
-                // End dot
-                val last = points.last()
-                val lx = size.width
-                val ly = base - (last.requests.toFloat() / maxReq) * chartH
-                drawCircle(color = lineColor, radius = 4.dp.toPx(), center = Offset(lx, ly))
-            }
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LegendDot(lineColor, stringResource(R.string.compose_stats_trend_requests))
-                Spacer(Modifier.weight(1f))
-                Text(
-                    stringResource(R.string.compose_stats_history_window),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+/** Catmull-Rom -> cubic Bézier smoothing through the given points. */
+private fun smoothPath(points: List<Offset>): androidx.compose.ui.graphics.Path {
+    val path = androidx.compose.ui.graphics.Path()
+    if (points.isEmpty()) return path
+    path.moveTo(points.first().x, points.first().y)
+    if (points.size == 1) return path
+    for (i in 0 until points.size - 1) {
+        val p0 = points[(i - 1).coerceAtLeast(0)]
+        val p1 = points[i]
+        val p2 = points[i + 1]
+        val p3 = points[(i + 2).coerceAtMost(points.size - 1)]
+        val c1 = Offset(p1.x + (p2.x - p0.x) / 6f, p1.y + (p2.y - p0.y) / 6f)
+        val c2 = Offset(p2.x - (p3.x - p1.x) / 6f, p2.y - (p3.y - p1.y) / 6f)
+        path.cubicTo(c1.x, c1.y, c2.x, c2.y, p2.x, p2.y)
     }
+    return path
 }
 
 @Composable

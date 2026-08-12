@@ -95,6 +95,7 @@
     <string name="compose_stats_range_24h">24小时</string>
     <string name="compose_stats_range_30d">30天</string>
     <string name="compose_stats_style_bars">柱状</string>
+    <string name="compose_stats_style_line">折线</string>
     <string name="compose_stats_style_stacked">堆叠</string>
     <string name="compose_stats_style_area">面积</string>
     <string name="compose_stats_trend_title">请求趋势</string>

@@ -95,6 +95,7 @@
     <string name="compose_stats_range_24h">24h</string>
     <string name="compose_stats_range_30d">30d</string>
     <string name="compose_stats_style_bars">Bars</string>
+    <string name="compose_stats_style_line">Line</string>
     <string name="compose_stats_style_stacked">Stacked</string>
     <string name="compose_stats_style_area">Area</string>
     <string name="compose_stats_trend_title">Request trend</string>
