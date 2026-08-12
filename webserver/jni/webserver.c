@@ -428,13 +428,16 @@ static int s_tls_count = 0;  /* distinct pairs recorded so far */
    definitely alive and present in /proc — no accept-time races.
    We run as root, so every row is visible. */
 static void addr_to_proc_str(const struct mg_addr *a, char *out, size_t sz) {
+    /* /proc prints ports in network byte order as hex; mongoose stores
+       them as network-order bytes too, so swap to get the printed value. */
+    unsigned port_hex = ((unsigned)(a->port & 0xFF) << 8) | ((unsigned)a->port >> 8);
     if (!a->is_ip6) {
         /* /proc/net/tcp prints IPv4 as ntohl() of the network-order
            bytes, i.e. byte-reversed vs addr.ip[]. */
         snprintf(out, sz, "%02X%02X%02X%02X:%04X",
                  (unsigned)a->addr.ip[3], (unsigned)a->addr.ip[2],
                  (unsigned)a->addr.ip[1], (unsigned)a->addr.ip[0],
-                 a->port);
+                 port_hex);
     } else {
         /* /proc/net/tcp6 prints each 4-byte group byte-reversed. */
         char *d = out;
@@ -442,7 +445,7 @@ static void addr_to_proc_str(const struct mg_addr *a, char *out, size_t sz) {
             d += snprintf(d, 9, "%02X%02X%02X%02X",
                           (unsigned)a->addr.ip[g * 4 + 3], (unsigned)a->addr.ip[g * 4 + 2],
                           (unsigned)a->addr.ip[g * 4 + 1], (unsigned)a->addr.ip[g * 4 + 0]);
-        snprintf(out + 32, sz - 32, ":%04X", a->port);
+        snprintf(out + 32, sz - 32, ":%04X", port_hex);
     }
 }
 
