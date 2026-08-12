@@ -508,6 +508,41 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
         }
         fclose(f);
     }
+
+    /* Pass 2 (fallback): socket-inode match. The 4-tuple can miss when
+       the client closes the connection right after its request (the
+       kernel drops the ESTABLISHED row before we scan), but the fd is
+       still ours; fstat() gives the socket inode, which /proc lists in
+       the last column while the socket exists (including TIME_WAIT-ish
+       states is fine: any row with our inode and its uid is the peer).
+       We accept state 0x01 (ESTABLISHED) or 0x06 (TIME_WAIT). */
+    {
+        int sfd = (int)(intptr_t)c->fd;
+        struct stat st;
+        if (sfd > 0 && fstat(sfd, &st) == 0) {
+            unsigned long sock_ino = (unsigned long)st.st_ino;
+            for (int pass = 0; pass < 2; pass++) {
+                const char *path = pass == 0 ? "/proc/net/tcp6" : "/proc/net/tcp";
+                f = fopen(path, "r");
+                if (!f) continue;
+                char line[512];
+                while (fgets(line, sizeof(line), f)) {
+                    unsigned int state;
+                    unsigned long uid = 0, line_ino = 0;
+                    if (sscanf(line, "%*s %*s %*s %X %*s %*s %*s %lu %*s %lu",
+                               &state, &uid, &line_ino) == 3) {
+                        if ((state == 1 || state == 6) && line_ino == sock_ino) {
+                            fclose(f);
+                            LOG_INFO("conn_uid: ino=%lu -> uid=%d (%s)",
+                                     sock_ino, (int)uid, path);
+                            return (uid_t)uid;
+                        }
+                    }
+                }
+                fclose(f);
+            }
+        }
+    }
     LOG_INFO("conn_uid: %s <-> %s / %s <-> %s -> NOT FOUND",
              loc_v4, rem_v4, loc_m6, rem_m6);
     return (uid_t)-1;
