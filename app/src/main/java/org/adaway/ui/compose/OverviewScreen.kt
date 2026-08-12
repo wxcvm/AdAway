@@ -130,14 +130,6 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                             context.startActivity(Intent(context, PrefsActivity::class.java))
                         },
                     )
-                    ActionRow(
-                        icon = Icons.Outlined.Settings,
-                        label = stringResource(R.string.compose_legacy_ui),
-                        subtitle = stringResource(R.string.compose_legacy_ui_subtitle),
-                        onClick = {
-                            context.startActivity(Intent(context, HomeActivity::class.java))
-                        },
-                    )
                 }
             }
         }

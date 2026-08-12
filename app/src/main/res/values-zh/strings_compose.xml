@@ -58,6 +58,10 @@
     <string name="compose_stats_type_config">配置</string>
     <string name="compose_stats_type_ws">WebSocket/SSE</string>
     <string name="compose_stats_type_other">其他</string>
+    <string name="compose_stats_history_title">近24小时流量</string>
+    <string name="compose_stats_history_requests">请求</string>
+    <string name="compose_stats_history_blocked">拦截</string>
+    <string name="compose_stats_history_window">每小时</string>
 
     <!-- 日志 -->
     <string name="compose_logs_title">日志</string>
@@ -91,4 +95,10 @@
     <string name="compose_rules_sources_hint">通过手动添加或规则源生成</string>
     <string name="compose_rules_redirect_to">→ %1$s</string>
     <string name="compose_rules_total">共 %1$d 条</string>
+    <string name="compose_rules_add_source">添加订阅</string>
+    <string name="compose_rules_source_url_hint">https://example.com/hosts.txt</string>
+    <string name="compose_rules_add">添加</string>
+    <string name="compose_rules_cancel">取消</string>
+    <string name="compose_rules_source_size">%1$d 条</string>
+    <string name="compose_rules_sources_empty">暂无订阅，添加一个即可开始拦截。</string>
 </resources>

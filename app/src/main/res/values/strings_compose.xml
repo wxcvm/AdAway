@@ -58,6 +58,10 @@
     <string name="compose_stats_type_config">Config</string>
     <string name="compose_stats_type_ws">WebSocket/SSE</string>
     <string name="compose_stats_type_other">Other</string>
+    <string name="compose_stats_history_title">Traffic (last 24h)</string>
+    <string name="compose_stats_history_requests">Requests</string>
+    <string name="compose_stats_history_blocked">Blocked</string>
+    <string name="compose_stats_history_window">hourly</string>
 
     <!-- Logs -->
     <string name="compose_logs_title">Logs</string>
@@ -91,4 +95,10 @@
     <string name="compose_rules_sources_hint">Added manually or via hosts sources</string>
     <string name="compose_rules_redirect_to">→ %1$s</string>
     <string name="compose_rules_total">Total: %1$d</string>
+    <string name="compose_rules_add_source">Add subscription</string>
+    <string name="compose_rules_source_url_hint">https://example.com/hosts.txt</string>
+    <string name="compose_rules_add">Add</string>
+    <string name="compose_rules_cancel">Cancel</string>
+    <string name="compose_rules_source_size">%1$d items</string>
+    <string name="compose_rules_sources_empty">No subscriptions yet — add one to start blocking.</string>
 </resources>

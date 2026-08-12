@@ -10,22 +10,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -69,6 +75,9 @@ fun RulesScreen(viewModel: StatsViewModel) {
     var rules by remember { mutableStateOf<List<HostListItem>>(emptyList()) }
     var totalCount by remember { mutableIntStateOf(0) }
     var sourceLabels by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var sources by remember { mutableStateOf<List<org.adaway.db.entity.HostsSource>>(emptyList()) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var urlInput by remember { mutableStateOf("") }
 
     val tabs = listOf(
         RuleTab(R.string.compose_rules_whitelist, ListType.ALLOWED.value, R.string.compose_rules_empty_whitelist),
@@ -76,8 +85,13 @@ fun RulesScreen(viewModel: StatsViewModel) {
         RuleTab(R.string.compose_rules_redirect, ListType.REDIRECTED.value, R.string.compose_rules_empty_redirect),
     )
 
+    fun reloadSources() {
+        viewModel.loadSources { sources = it }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.loadSourceLabels { sourceLabels = it }
+        reloadSources()
     }
     LaunchedEffect(selectedTab) {
         viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items, total ->
@@ -157,43 +171,126 @@ fun RulesScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // Rule sources card
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
+            // Subscriptions (rule sources) management
+            SourcesCard(
+                sources = sources,
+                onToggle = { source ->
+                    viewModel.toggleSource(source) { reloadSources() }
+                },
+                onAddClick = { showAddDialog = true },
+            )
+        }
+    }
+
+    if (showAddDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddDialog = false },
+            title = { Text(stringResource(R.string.compose_rules_add_source)) },
+            text = {
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    label = { Text(stringResource(R.string.compose_rules_source_url_hint)) },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = urlInput.isNotBlank(),
+                    onClick = {
+                        val url = urlInput
+                        showAddDialog = false
+                        urlInput = ""
+                        viewModel.addSource(url) { ok ->
+                            if (ok) {
+                                reloadSources()
+                                viewModel.syncHosts()
+                            }
+                        }
+                    },
+                ) { Text(stringResource(R.string.compose_rules_add)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddDialog = false }) {
+                    Text(stringResource(R.string.compose_rules_cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SourcesCard(
+    sources: List<org.adaway.db.entity.HostsSource>,
+    onToggle: (org.adaway.db.entity.HostsSource) -> Unit,
+    onAddClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Outlined.Link,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.compose_rules_sources),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            stringResource(R.string.compose_rules_sources_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Icon(
+                    Icons.Outlined.Link,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    stringResource(R.string.compose_rules_sources),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onAddClick) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.compose_rules_add_source))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (sources.isEmpty()) {
+                Text(
+                    stringResource(R.string.compose_rules_sources_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                sources.forEach { source ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                source.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                stringResource(R.string.compose_rules_source_size, source.size),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = source.isEnabled(),
+                            onCheckedChange = { onToggle(source) },
                         )
                     }
-                    Text(
-                        stringResource(R.string.compose_rules_user_total, sourceLabels.size),
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontFamily = FontFamily.Monospace,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }

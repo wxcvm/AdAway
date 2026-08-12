@@ -162,6 +162,11 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                 }
             }
 
+            // Hourly traffic chart
+            if (serverStats != null && serverStats!!.history.isNotEmpty()) {
+                HourlyChartCard(serverStats!!.history)
+            }
+
             // Per-app activity
             if (serverStats != null && serverStats!!.apps.isNotEmpty()) {
                 ActiveAppsCard(serverStats!!.apps)
@@ -388,6 +393,90 @@ internal fun appNameForUid(uid: Int): String {
         }
     }
     return name ?: stringResource(R.string.compose_stats_app_unknown, uid)
+}
+
+@Composable
+private fun HourlyChartCard(history: List<HistPoint>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.compose_stats_history_title),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+
+            val maxReq = (history.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
+            val maxBlocked = (history.maxOfOrNull { it.blocked } ?: 0L).coerceAtLeast(1L)
+            val reqColor = MaterialTheme.colorScheme.primary
+            val blockColor = MaterialTheme.colorScheme.error
+
+            Canvas(modifier = Modifier.fillMaxWidth().height(140.dp)) {
+                val barCount = history.size.coerceAtMost(24)
+                val slotW = size.width / barCount
+                val barW = slotW * 0.32f
+                val base = size.height - 8.dp.toPx()
+                history.takeLast(24).forEachIndexed { i, p ->
+                    val x = i * slotW + slotW / 2
+                    // Requests bar (primary)
+                    val hReq = (p.requests.toFloat() / maxReq) * (size.height - 24.dp.toPx())
+                    if (hReq > 0f) {
+                        drawRoundRect(
+                            color = reqColor,
+                            topLeft = androidx.compose.ui.geometry.Offset(x - barW, base - hReq),
+                            size = androidx.compose.ui.geometry.Size(barW, hReq),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+                        )
+                    }
+                    // Blocked bar (error color), drawn beside the request bar
+                    val hBlk = (p.blocked.toFloat() / maxBlocked) * (size.height - 24.dp.toPx())
+                    if (hBlk > 0f) {
+                        drawRoundRect(
+                            color = blockColor,
+                            topLeft = androidx.compose.ui.geometry.Offset(x + 1.dp.toPx(), base - hBlk),
+                            size = androidx.compose.ui.geometry.Size(barW, hBlk),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                LegendDot(reqColor, stringResource(R.string.compose_stats_history_requests))
+                LegendDot(blockColor, stringResource(R.string.compose_stats_history_blocked))
+                Spacer(Modifier.weight(1f))
+                Text(
+                    stringResource(R.string.compose_stats_history_window),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.size(8.dp)) {
+            drawCircle(color = color)
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable

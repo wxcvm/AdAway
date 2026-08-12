@@ -221,6 +221,70 @@ static uint64_t uptime_seconds(void) {
     return (mg_millis() - s_stats.start_time_ms) / 1000ULL;
 }
 
+/* ── Hourly history (for the time-series chart) ────────────────── */
+/* Ring of 24 hourly buckets: requests / blocked / connections per
+   hour, exposed via /internal-stats "history" (oldest first). All
+   updates happen on the single mongoose event-loop thread. */
+#define HIST_SLOTS        24
+#define HIST_INTERVAL_MS  3600000ULL
+struct hist_slot {
+    uint64_t requests;
+    uint64_t blocked;
+    uint64_t connections;
+};
+static struct hist_slot s_hist[HIST_SLOTS];
+static int      s_hist_pos = 0;       /* current (most recent) slot */
+static uint64_t s_hist_slot_start = 0;/* epoch ms of current slot  */
+static bool     s_hist_started = false;
+
+static void hist_tick(void) {
+    uint64_t now = mg_millis();
+    if (!s_hist_started) {
+        s_hist_slot_start = now;
+        s_hist_started = true;
+        return;
+    }
+    while (now - s_hist_slot_start >= HIST_INTERVAL_MS) {
+        s_hist_pos = (s_hist_pos + 1) % HIST_SLOTS;
+        memset(&s_hist[s_hist_pos], 0, sizeof(s_hist[s_hist_pos]));
+        s_hist_slot_start += HIST_INTERVAL_MS;
+    }
+}
+
+enum hist_kind { HIST_CONN, HIST_REQ, HIST_BLOCKED };
+static void hist_add(enum hist_kind kind) {
+    hist_tick();
+    struct hist_slot *s = &s_hist[s_hist_pos];
+    switch (kind) {
+        case HIST_CONN:    s->connections++; break;
+        case HIST_REQ:     s->requests++;    break;
+        case HIST_BLOCKED: s->blocked++;     break;
+    }
+}
+
+/* Serialize the last HIST_SLOTS hourly buckets, oldest first, into
+   out[]. Returns bytes written. */
+static int hist_to_json(char *out, size_t out_sz) {
+    hist_tick();
+    int off = 0;
+    for (int i = 1; i <= HIST_SLOTS; i++) {
+        int idx = (s_hist_pos - (HIST_SLOTS - i) + HIST_SLOTS * 2) % HIST_SLOTS;
+        struct hist_slot *s = &s_hist[idx];
+        uint64_t ts = s_hist_slot_start - (uint64_t)(HIST_SLOTS - i) * HIST_INTERVAL_MS;
+        int n = snprintf(out + off, out_sz - (size_t)off,
+                         "%s{\"ts\":%llu,\"requests\":%llu,\"blocked\":%llu,"
+                         "\"connections\":%llu}",
+                         off ? "," : "",
+                         (unsigned long long)(ts / 1000ULL),
+                         (unsigned long long)s->requests,
+                         (unsigned long long)s->blocked,
+                         (unsigned long long)s->connections);
+        if (n <= 0 || off + n >= (int)out_sz) break;
+        off += n;
+    }
+    return off;
+}
+
 /* ── Per-app statistics ───────────────────────────────────────── */
 /*
  * Which app (uid) is connecting to the block server, making requests,
@@ -969,6 +1033,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                 break;
         }
         s_stats.total_connections++;
+        hist_add(HIST_CONN);
         uint64_t t = mg_millis();
         memcpy(c->data, &t, sizeof(t));
         c->data[sizeof(t)] = 1;
@@ -1010,6 +1075,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
     s_stats.total_requests++;
+    hist_add(HIST_REQ);
 
     /* Per-app request counter + record which TLS (SNI) hostname this
        app asked us to sign a certificate for. */
@@ -1091,6 +1157,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                 off ? "," : "", (int)r->uid, r->host);
             if (n > 0) off += n;
         }
+        char hist_json[4096] = "";
+        hist_to_json(hist_json, sizeof(hist_json));
         int n = snprintf(body, sizeof(body),
             "{\"uptime_seconds\":%llu,"
             "\"total_requests\":%llu,"
@@ -1110,7 +1178,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             "\"sni_certs_issued\":%llu,"
             "\"block_image_count\":%d,"
             "\"apps\":[%s],"
-            "\"recent_tls\":[%s]}",
+            "\"recent_tls\":[%s],"
+            "\"history\":[%s]}",
             (unsigned long long)uptime_seconds(),
             (unsigned long long)s_stats.total_requests,
             (unsigned long long)s_stats.total_connections,
@@ -1128,7 +1197,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             (unsigned long long)s_stats.blocked_other,
             (unsigned long long)s_stats.sni_certs_issued,
             s->block_image_count,
-            apps_json, tls_json);
+            apps_json, tls_json, hist_json);
         mg_http_reply(c, 200,
                       "Content-Type: application/json\r\n"
                       "Cache-Control: no-store\r\n", "%.*s", n, body);
@@ -1138,6 +1207,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     /* Classify blocked requests by type and reply with the most
        realistic "empty" resource - see reply_blocked_by_type(). */
     if (reply_blocked_by_type(c, hm)) {
+        hist_add(HIST_BLOCKED);
         struct appstat *ba = app_find_or_add(conn_load_uid(c));
         if (ba) ba->blocked++;
         return;
@@ -1153,6 +1223,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     char img_path[PATH_MAX];
     snprintf(img_path, sizeof(img_path), "%s/%s", s->resource_dir, s->block_images[idx]);
     s_stats.blocked_images++;
+    hist_add(HIST_BLOCKED);
     struct appstat *ba = app_find_or_add(conn_load_uid(c));
     if (ba) ba->blocked++;
     struct mg_http_serve_opts o = {0};

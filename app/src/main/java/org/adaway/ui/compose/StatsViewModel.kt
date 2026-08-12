@@ -36,6 +36,14 @@ data class TlsHost(
     val host: String,
 )
 
+/** One hourly bucket of web server activity (for the time-series chart). */
+data class HistPoint(
+    val ts: Long = 0,
+    val requests: Long = 0,
+    val blocked: Long = 0,
+    val connections: Long = 0,
+)
+
 /**
  * Snapshot of the native web server statistics (from /internal-stats).
  */
@@ -59,6 +67,7 @@ data class ServerStats(
     val blockImageCount: Int = 0,
     val apps: List<AppStat> = emptyList(),
     val recentTls: List<TlsHost> = emptyList(),
+    val history: List<HistPoint> = emptyList(),
 ) {
     val totalBlocked: Long
         get() = blockedImages + blockedScripts + blockedStyles + blockedFonts +
@@ -93,6 +102,19 @@ data class ServerStats(
                     )
                 }
             }
+            val history = mutableListOf<HistPoint>()
+            val histArray = json.optJSONArray("history")
+            if (histArray != null) {
+                for (i in 0 until histArray.length()) {
+                    val o = histArray.optJSONObject(i) ?: continue
+                    history += HistPoint(
+                        ts = o.optLong("ts", 0),
+                        requests = o.optLong("requests", 0),
+                        blocked = o.optLong("blocked", 0),
+                        connections = o.optLong("connections", 0),
+                    )
+                }
+            }
             return ServerStats(
                 uptimeSeconds = json.optLong("uptime_seconds", 0),
                 totalRequests = json.optLong("total_requests", 0),
@@ -113,6 +135,7 @@ data class ServerStats(
                 blockImageCount = json.optInt("block_image_count", 0),
                 apps = apps,
                 recentTls = recentTls,
+                history = history,
             )
         }
     }
@@ -237,6 +260,58 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     /** True while a hosts sync (sources + apply) is in progress. */
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing
+
+    /** Load all rule sources (id != 1, i.e. everything but the user list). */
+    fun loadSources(onResult: (List<org.adaway.db.entity.HostsSource>) -> Unit) {
+        viewModelScope.launch {
+            val sources = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                database.hostsSourceDao().getAll()
+            }
+            onResult(sources)
+        }
+    }
+
+    /** Toggle a subscription's enabled state (source + its items). */
+    fun toggleSource(source: org.adaway.db.entity.HostsSource, onDone: () -> Unit) {
+        viewModelScope.launch {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val dao = database.hostsSourceDao()
+                dao.setSourceEnabled(source.id, !source.isEnabled())
+                dao.setSourceItemsEnabled(source.id, !source.isEnabled())
+            }
+            onDone()
+        }
+    }
+
+    /** Add a new subscription from a hosts URL; returns false on failure. */
+    fun addSource(url: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val dao = database.hostsSourceDao()
+                    val source = org.adaway.db.entity.HostsSource()
+                    source.setUrl(url.trim())
+                    source.setLabel(deriveSourceLabel(url))
+                    dao.insert(source)
+                    true
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to add source %s", url)
+                    false
+                }
+            }
+            onDone(ok)
+        }
+    }
+
+    /** Best-effort human label for a subscription URL (host of the URL). */
+    private fun deriveSourceLabel(url: String): String {
+        return try {
+            val u = java.net.URI(url)
+            u.host?.substringBefore('.') ?: url.take(24)
+        } catch (e: Exception) {
+            url.take(24)
+        }
+    }
 
     /**
      * Synchronize hosts: enable all sources, download them and apply the
