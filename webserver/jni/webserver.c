@@ -217,68 +217,168 @@ struct webstats {
 };
 static struct webstats s_stats = {0};
 
+/* ── Persistent lifetime counters ─────────────────────────────── */
+/*
+ * The cumulative counters in s_stats are saved to
+ * <resource_dir>/stats.dat every time /internal-stats is polled (the
+ * app polls every 5 s) and loaded again at startup, so totals survive
+ * web server restarts ("all-time" statistics). Binary layout: magic +
+ * 16 uint64 values; the ring histories intentionally start fresh on
+ * each boot (they are time-series of the current session).
+ */
+#define STATS_MAGIC 0xAD574159u  /* "ADWAY" */
+struct stats_file {
+    uint32_t magic;
+    uint64_t total_requests;
+    uint64_t total_connections;
+    uint64_t blocked_images;
+    uint64_t blocked_scripts;
+    uint64_t blocked_styles;
+    uint64_t blocked_fonts;
+    uint64_t blocked_media;
+    uint64_t blocked_api;
+    uint64_t blocked_telemetry;
+    uint64_t blocked_heartbeat;
+    uint64_t blocked_config;
+    uint64_t blocked_ws_sse;
+    uint64_t blocked_other;
+    uint64_t sni_certs_issued;
+};
+
+static void save_stats(const struct settings *s) {
+    if (!s || !s->resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/stats.dat", s->resource_dir);
+    struct stats_file f;
+    memset(&f, 0, sizeof(f));
+    f.magic = STATS_MAGIC;
+    f.total_requests    = s_stats.total_requests;
+    f.total_connections = s_stats.total_connections;
+    f.blocked_images    = s_stats.blocked_images;
+    f.blocked_scripts   = s_stats.blocked_scripts;
+    f.blocked_styles    = s_stats.blocked_styles;
+    f.blocked_fonts     = s_stats.blocked_fonts;
+    f.blocked_media     = s_stats.blocked_media;
+    f.blocked_api       = s_stats.blocked_api;
+    f.blocked_telemetry = s_stats.blocked_telemetry;
+    f.blocked_heartbeat = s_stats.blocked_heartbeat;
+    f.blocked_config    = s_stats.blocked_config;
+    f.blocked_ws_sse    = s_stats.blocked_ws_sse;
+    f.blocked_other     = s_stats.blocked_other;
+    f.sni_certs_issued  = s_stats.sni_certs_issued;
+    FILE *fp = fopen(path, "wb");
+    if (fp) {
+        fwrite(&f, sizeof(f), 1, fp);
+        fclose(fp);
+    }
+}
+
+static void load_stats(const struct settings *s) {
+    if (!s || !s->resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/stats.dat", s->resource_dir);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return;
+    struct stats_file f;
+    if (fread(&f, sizeof(f), 1, fp) == 1 && f.magic == STATS_MAGIC) {
+        s_stats.total_requests    += f.total_requests;
+        s_stats.total_connections += f.total_connections;
+        s_stats.blocked_images    += f.blocked_images;
+        s_stats.blocked_scripts   += f.blocked_scripts;
+        s_stats.blocked_styles    += f.blocked_styles;
+        s_stats.blocked_fonts     += f.blocked_fonts;
+        s_stats.blocked_media     += f.blocked_media;
+        s_stats.blocked_api       += f.blocked_api;
+        s_stats.blocked_telemetry += f.blocked_telemetry;
+        s_stats.blocked_heartbeat += f.blocked_heartbeat;
+        s_stats.blocked_config    += f.blocked_config;
+        s_stats.blocked_ws_sse    += f.blocked_ws_sse;
+        s_stats.blocked_other     += f.blocked_other;
+        s_stats.sni_certs_issued  += f.sni_certs_issued;
+    }
+    fclose(fp);
+}
+
 static uint64_t uptime_seconds(void) {
     return (mg_millis() - s_stats.start_time_ms) / 1000ULL;
 }
 
 /* ── Hourly history (for the time-series chart) ────────────────── */
-/* Ring of 24 hourly buckets: requests / blocked / connections per
-   hour, exposed via /internal-stats "history" (oldest first). All
-   updates happen on the single mongoose event-loop thread. */
+/* Ring of 24 hourly buckets + 30 daily buckets: requests / blocked /
+   connections (and certs) per hour / per day, exposed via
+   /internal-stats "history" (hourly, oldest first) and "daily"
+   (oldest first). Bucket timestamps are wall-clock epoch seconds
+   (time(NULL)), independent of process uptime. All updates happen on
+   the single mongoose event-loop thread. */
 #define HIST_SLOTS        24
-#define HIST_INTERVAL_MS  3600000ULL
+#define HIST_INTERVAL_S   3600
+#define DAILY_SLOTS       30
+#define DAILY_INTERVAL_S  86400
 struct hist_slot {
     uint64_t requests;
     uint64_t blocked;
     uint64_t connections;
+    uint64_t certs;
 };
 static struct hist_slot s_hist[HIST_SLOTS];
 static int      s_hist_pos = 0;       /* current (most recent) slot */
-static uint64_t s_hist_slot_start = 0;/* epoch ms of current slot  */
-static bool     s_hist_started = false;
+static time_t   s_hist_slot_start = 0;/* epoch seconds of current slot */
+static struct hist_slot s_daily[DAILY_SLOTS];
+static int      s_daily_pos = 0;
+static time_t   s_daily_slot_start = 0;
 
 static void hist_tick(void) {
-    uint64_t now = mg_millis();
-    if (!s_hist_started) {
+    time_t now = time(NULL);
+    if (s_hist_slot_start == 0) {
         s_hist_slot_start = now;
-        s_hist_started = true;
+        s_daily_slot_start = now;
         return;
     }
-    while (now - s_hist_slot_start >= HIST_INTERVAL_MS) {
+    while (now - s_hist_slot_start >= HIST_INTERVAL_S) {
         s_hist_pos = (s_hist_pos + 1) % HIST_SLOTS;
         memset(&s_hist[s_hist_pos], 0, sizeof(s_hist[s_hist_pos]));
-        s_hist_slot_start += HIST_INTERVAL_MS;
+        s_hist_slot_start += HIST_INTERVAL_S;
+    }
+    while (now - s_daily_slot_start >= DAILY_INTERVAL_S) {
+        s_daily_pos = (s_daily_pos + 1) % DAILY_SLOTS;
+        memset(&s_daily[s_daily_pos], 0, sizeof(s_daily[s_daily_pos]));
+        s_daily_slot_start += DAILY_INTERVAL_S;
     }
 }
 
-enum hist_kind { HIST_CONN, HIST_REQ, HIST_BLOCKED };
+enum hist_kind { HIST_CONN, HIST_REQ, HIST_BLOCKED, HIST_CERT };
 static void hist_add(enum hist_kind kind) {
     hist_tick();
-    struct hist_slot *s = &s_hist[s_hist_pos];
+    struct hist_slot *h = &s_hist[s_hist_pos];
+    struct hist_slot *d = &s_daily[s_daily_pos];
     switch (kind) {
-        case HIST_CONN:    s->connections++; break;
-        case HIST_REQ:     s->requests++;    break;
-        case HIST_BLOCKED: s->blocked++;     break;
+        case HIST_CONN:    h->connections++; d->connections++; break;
+        case HIST_REQ:     h->requests++;    d->requests++;    break;
+        case HIST_BLOCKED: h->blocked++;     d->blocked++;     break;
+        case HIST_CERT:    h->certs++;       d->certs++;       break;
     }
 }
 
-/* Serialize the last HIST_SLOTS hourly buckets, oldest first, into
-   out[]. Returns bytes written. */
-static int hist_to_json(char *out, size_t out_sz) {
-    hist_tick();
+/* Serialize the last N buckets (oldest first) into out[]. */
+static int buckets_to_json(char *out, size_t out_sz,
+                           const struct hist_slot *buckets, int slots,
+                           int pos, time_t slot_start, int interval_s,
+                           int max) {
     int off = 0;
-    for (int i = 1; i <= HIST_SLOTS; i++) {
-        int idx = (s_hist_pos - (HIST_SLOTS - i) + HIST_SLOTS * 2) % HIST_SLOTS;
-        struct hist_slot *s = &s_hist[idx];
-        uint64_t ts = s_hist_slot_start - (uint64_t)(HIST_SLOTS - i) * HIST_INTERVAL_MS;
+    int n_out = slots < max ? slots : max;
+    for (int i = 1; i <= n_out; i++) {
+        int idx = (pos - (slots - i) + slots * 2) % slots;
+        const struct hist_slot *s = &buckets[idx];
+        time_t ts = slot_start - (time_t)(slots - i) * interval_s;
         int n = snprintf(out + off, out_sz - (size_t)off,
-                         "%s{\"ts\":%llu,\"requests\":%llu,\"blocked\":%llu,"
-                         "\"connections\":%llu}",
+                         "%s{\"ts\":%lld,\"requests\":%llu,\"blocked\":%llu,"
+                         "\"connections\":%llu,\"certs\":%llu}",
                          off ? "," : "",
-                         (unsigned long long)(ts / 1000ULL),
+                         (long long)ts,
                          (unsigned long long)s->requests,
                          (unsigned long long)s->blocked,
-                         (unsigned long long)s->connections);
+                         (unsigned long long)s->connections,
+                         (unsigned long long)s->certs);
         if (n <= 0 || off + n >= (int)out_sz) break;
         off += n;
     }
@@ -356,8 +456,14 @@ static uid_t conn_uid(struct mg_connection *c) {
             }
         }
         fclose(f);
-        if (result != (uid_t)-1) return result;
+        if (result != (uid_t)-1) {
+            LOG_INFO("conn_uid: fd=%d ino=%lu -> uid=%d (path=%s)",
+                     fd, sock_ino, (int)result, path);
+            return result;
+        }
     }
+    LOG_INFO("conn_uid: fd=%d ino=%lu -> NOT FOUND in /proc/net/tcp[6]",
+             fd, sock_ino);
     return (uid_t)-1;
 }
 
@@ -757,6 +863,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
     s_sni_cache[pos].ctx = ctx;
     s_sni_pos++;
     s_stats.sni_certs_issued++;
+    hist_add(HIST_CERT);
     pthread_mutex_unlock(&s_sni_mutex);
 
     SSL_set_SSL_CTX(ssl, ctx);
@@ -1158,7 +1265,13 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             if (n > 0) off += n;
         }
         char hist_json[4096] = "";
-        hist_to_json(hist_json, sizeof(hist_json));
+        buckets_to_json(hist_json, sizeof(hist_json),
+                        s_hist, HIST_SLOTS, s_hist_pos,
+                        s_hist_slot_start, HIST_INTERVAL_S, 24);
+        char daily_json[6144] = "";
+        buckets_to_json(daily_json, sizeof(daily_json),
+                        s_daily, DAILY_SLOTS, s_daily_pos,
+                        s_daily_slot_start, DAILY_INTERVAL_S, 30);
         int n = snprintf(body, sizeof(body),
             "{\"uptime_seconds\":%llu,"
             "\"total_requests\":%llu,"
@@ -1179,7 +1292,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             "\"block_image_count\":%d,"
             "\"apps\":[%s],"
             "\"recent_tls\":[%s],"
-            "\"history\":[%s]}",
+            "\"history\":[%s],"
+            "\"daily\":[%s]}",
             (unsigned long long)uptime_seconds(),
             (unsigned long long)s_stats.total_requests,
             (unsigned long long)s_stats.total_connections,
@@ -1197,10 +1311,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             (unsigned long long)s_stats.blocked_other,
             (unsigned long long)s_stats.sni_certs_issued,
             s->block_image_count,
-            apps_json, tls_json, hist_json);
+            apps_json, tls_json, hist_json, daily_json);
         mg_http_reply(c, 200,
                       "Content-Type: application/json\r\n"
                       "Cache-Control: no-store\r\n", "%.*s", n, body);
+        save_stats(s);  /* persist lifetime counters (polled every 5 s) */
         return;
     }
 
@@ -1338,6 +1453,7 @@ int main(int argc, char *argv[]) {
     if (s.debug) mg_log_set(MG_LL_DEBUG);
 
     s_stats.start_time_ms = mg_millis();
+    load_stats(&s);  /* lifetime counters survive restarts */
 
     oom_adjust_setup();
 
@@ -1374,6 +1490,8 @@ int main(int argc, char *argv[]) {
         ipv6_ok ? "on" : "off");
 
     while (s_sig_num == 0) mg_mgr_poll(&mgr, 1000);
+    save_stats(&s);
+    LOG_INFO("AdAway webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);
     mg_mgr_free(&mgr);
