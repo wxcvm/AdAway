@@ -427,61 +427,88 @@ static int s_tls_count = 0;  /* distinct pairs recorded so far */
    called when a request is being processed, i.e. the connection is
    definitely alive and present in /proc — no accept-time races.
    We run as root, so every row is visible. */
-static void addr_to_proc_str(const struct mg_addr *a, char *out, size_t sz) {
-    /* /proc prints ports in network byte order as hex; mongoose stores
-       them as network-order bytes too, so swap to get the printed value. */
-    unsigned port_hex = ((unsigned)(a->port & 0xFF) << 8) | ((unsigned)a->port >> 8);
-    if (!a->is_ip6) {
-        /* /proc/net/tcp prints IPv4 as ntohl() of the network-order
-           bytes, i.e. byte-reversed vs addr.ip[]. */
-        snprintf(out, sz, "%02X%02X%02X%02X:%04X",
-                 (unsigned)a->addr.ip[3], (unsigned)a->addr.ip[2],
-                 (unsigned)a->addr.ip[1], (unsigned)a->addr.ip[0],
-                 port_hex);
-    } else {
-        /* /proc/net/tcp6 prints each 4-byte group byte-reversed. */
-        char *d = out;
-        for (int g = 0; g < 4; g++)
-            d += snprintf(d, 9, "%02X%02X%02X%02X",
-                          (unsigned)a->addr.ip[g * 4 + 3], (unsigned)a->addr.ip[g * 4 + 2],
-                          (unsigned)a->addr.ip[g * 4 + 1], (unsigned)a->addr.ip[g * 4 + 0]);
-        snprintf(out + 32, sz - 32, ":%04X", port_hex);
-    }
+/* Format an mg_addr as /proc/net/tcp (IPv4) would print it. */
+static void addr_to_proc_v4(const struct mg_addr *a, char *out, size_t sz) {
+    snprintf(out, sz, "%02X%02X%02X%02X:%04X",
+             (unsigned)a->addr.ip[3], (unsigned)a->addr.ip[2],
+             (unsigned)a->addr.ip[1], (unsigned)a->addr.ip[0],
+             ((unsigned)(a->port & 0xFF) << 8) | ((unsigned)a->port >> 8));
 }
 
+/* Format an mg_addr as /proc/net/tcp6 (IPv4-mapped) would print it. */
+static void addr_to_proc_v6mapped(const struct mg_addr *a, char *out, size_t sz) {
+    /* ::ffff:a.b.c.d */
+    char *d = out;
+    for (int g = 0; g < 2; g++)
+        d += snprintf(d, 9, "%08X", 0);
+    d += snprintf(d, 9, "%08X", 0x0000FFFFu);
+    d += snprintf(d, 9, "%02X%02X%02X%02X",
+                  (unsigned)a->addr.ip[3], (unsigned)a->addr.ip[2],
+                  (unsigned)a->addr.ip[1], (unsigned)a->addr.ip[0]);
+    snprintf(out + 32, sz - 32, ":%04X",
+             ((unsigned)(a->port & 0xFF) << 8) | ((unsigned)a->port >> 8));
+}
+
+/* Resolve the uid owning this connection by matching its (local,
+   remote) 4-tuple against /proc/net/tcp[/tcp6]. Only called while a
+   request is being processed (connection is alive). The dual-stack
+   listener accepts IPv4 clients two ways: plain IPv4 (row in
+   /proc/net/tcp, uid may be zeroed on some kernels) and IPv4-mapped
+   (row in /proc/net/tcp6, uid preserved) — so we try both formats.
+   We run as root, so every row is visible. */
 static uid_t conn_uid_by_tuple(struct mg_connection *c) {
-    char loc[64], rem[64];
-    addr_to_proc_str(&c->loc, loc, sizeof(loc));
-    addr_to_proc_str(&c->rem, rem, sizeof(rem));
-    for (int pass = 0; pass < 2; pass++) {
-        const char *path = pass == 0 ? "/proc/net/tcp" : "/proc/net/tcp6";
-        FILE *f = fopen(path, "r");
-        if (!f) continue;
+    char loc_v4[64], rem_v4[64];
+    char loc_m6[64], rem_m6[64];
+    addr_to_proc_v4(&c->loc, loc_v4, sizeof(loc_v4));
+    addr_to_proc_v4(&c->rem, rem_v4, sizeof(rem_v4));
+    addr_to_proc_v6mapped(&c->loc, loc_m6, sizeof(loc_m6));
+    addr_to_proc_v6mapped(&c->rem, rem_m6, sizeof(rem_m6));
+
+    /* Pass 0: /proc/net/tcp6 with the v4-mapped form (real uid). */
+    FILE *f = fopen("/proc/net/tcp6", "r");
+    if (f) {
         char line[512];
-        uid_t result = (uid_t)-1;
         while (fgets(line, sizeof(line), f)) {
             char l[64] = "", r[64] = "";
             unsigned int state;
             unsigned long uid = 0;
-            /* sl local rem st tx_queue:rx_queue tr:tm->when retrnsmt
-               uid timeout inode … */
             if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %lu %*s %*s",
                        l, r, &state, &uid) == 4) {
                 if (state == 1 /* ESTABLISHED */ &&
-                    strcmp(l, loc) == 0 && strcmp(r, rem) == 0) {
-                    result = (uid_t)uid;
-                    break;
+                    strcmp(l, loc_m6) == 0 && strcmp(r, rem_m6) == 0) {
+                    fclose(f);
+                    LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp6/mapped)",
+                             loc_m6, rem_m6, (int)uid);
+                    return (uid_t)uid;
                 }
             }
         }
         fclose(f);
-        if (result != (uid_t)-1) {
-            LOG_INFO("conn_uid: %s <-> %s -> uid=%d (%s)",
-                     loc, rem, (int)result, path);
-            return result;
-        }
     }
-    LOG_INFO("conn_uid: %s <-> %s -> NOT FOUND", loc, rem);
+
+    /* Pass 1: /proc/net/tcp with the plain IPv4 form. */
+    f = fopen("/proc/net/tcp", "r");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof(line), f)) {
+            char l[64] = "", r[64] = "";
+            unsigned int state;
+            unsigned long uid = 0;
+            if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %lu %*s %*s",
+                       l, r, &state, &uid) == 4) {
+                if (state == 1 /* ESTABLISHED */ &&
+                    strcmp(l, loc_v4) == 0 && strcmp(r, rem_v4) == 0) {
+                    fclose(f);
+                    LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp)",
+                             loc_v4, rem_v4, (int)uid);
+                    return (uid_t)uid;
+                }
+            }
+        }
+        fclose(f);
+    }
+    LOG_INFO("conn_uid: %s <-> %s / %s <-> %s -> NOT FOUND",
+             loc_v4, rem_v4, loc_m6, rem_m6);
     return (uid_t)-1;
 }
 
