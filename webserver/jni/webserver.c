@@ -259,65 +259,42 @@ static int s_tls_pos = 0;    /* next write slot (ring) */
 static int s_tls_count = 0;  /* distinct pairs recorded so far */
 
 /* Resolve the uid of the peer on the other end of this connection.
-   SO_PEERCRED only works on AF_UNIX sockets, so for our loopback TCP
-   listeners we match the (local, remote) 4-tuple against
-   /proc/net/tcp[/tcp6], which the kernel populates with the owning
-   uid of every socket. We run as root, so all entries are visible.
-   Cost: one small file read per accepted connection — negligible
-   compared to the TLS handshakes this server already does. */
+   We run as root. SO_PEERCRED only works on AF_UNIX sockets, and
+   4-tuple matching against /proc/net/tcp is fragile (IPv4/IPv6 byte
+   order, short-lived connections), so instead we match the socket
+   INODE: fstat() on the accepted fd yields the same inode number that
+   /proc/net/tcp[/tcp6] lists in its last column. Exact, cheap and
+   independent of address formatting. */
 static uid_t conn_uid(struct mg_connection *c) {
     int fd = (int)(intptr_t)c->fd;
     if (fd <= 0) return (uid_t)-1;
+    struct stat st;
+    if (fstat(fd, &st) != 0) return (uid_t)-1;
+    unsigned long sock_ino = (unsigned long)st.st_ino;
 
-    char loc[64], rem[64];
-    if (!c->loc.is_ip6) {
-        /* /proc/net/tcp prints the IPv4 address as ntohl() of the
-           network-order bytes, i.e. byte-reversed vs addr.ip[]. */
-        snprintf(loc, sizeof(loc), "%02X%02X%02X%02X:%04X",
-                 (unsigned)c->loc.addr.ip[3], (unsigned)c->loc.addr.ip[2],
-                 (unsigned)c->loc.addr.ip[1], (unsigned)c->loc.addr.ip[0],
-                 c->loc.port);
-        snprintf(rem, sizeof(rem), "%02X%02X%02X%02X:%04X",
-                 (unsigned)c->rem.addr.ip[3], (unsigned)c->rem.addr.ip[2],
-                 (unsigned)c->rem.addr.ip[1], (unsigned)c->rem.addr.ip[0],
-                 c->rem.port);
-    } else {
-        /* /proc/net/tcp6 prints each 4-byte group byte-reversed. */
-        char *d = loc;
-        for (int g = 0; g < 4; g++)
-            d += snprintf(d, 9, "%02X%02X%02X%02X",
-                          (unsigned)c->loc.addr.ip[g * 4 + 3], (unsigned)c->loc.addr.ip[g * 4 + 2],
-                          (unsigned)c->loc.addr.ip[g * 4 + 1], (unsigned)c->loc.addr.ip[g * 4 + 0]);
-        snprintf(loc + 32, sizeof(loc) - 32, ":%04X", c->loc.port);
-        d = rem;
-        for (int g = 0; g < 4; g++)
-            d += snprintf(d, 9, "%02X%02X%02X%02X",
-                          (unsigned)c->rem.addr.ip[g * 4 + 3], (unsigned)c->rem.addr.ip[g * 4 + 2],
-                          (unsigned)c->rem.addr.ip[g * 4 + 1], (unsigned)c->rem.addr.ip[g * 4 + 0]);
-        snprintf(rem + 32, sizeof(rem) - 32, ":%04X", c->rem.port);
-    }
-
-    const char *proc = c->loc.is_ip6 ? "/proc/net/tcp6" : "/proc/net/tcp";
-    FILE *f = fopen(proc, "r");
-    if (!f) return (uid_t)-1;
-    char line[512];
-    uid_t result = (uid_t)-1;
-    while (fgets(line, sizeof(line), f)) {
-        char l[64] = "", r[64] = "";
-        unsigned int st;
-        unsigned long uid = 0;
-        /* sl local rem st tx_queue:rx_queue tr:tm->when retrnsmt uid … */
-        if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %*s %lu",
-                   l, r, &st, &uid) == 4) {
-            if (st == 1 /* ESTABLISHED */ &&
-                strcmp(l, loc) == 0 && strcmp(r, rem) == 0) {
-                result = (uid_t)uid;
-                break;
+    for (int pass = 0; pass < 2; pass++) {
+        const char *path = pass == 0 ? "/proc/net/tcp" : "/proc/net/tcp6";
+        FILE *f = fopen(path, "r");
+        if (!f) continue;
+        char line[512];
+        uid_t result = (uid_t)-1;
+        while (fgets(line, sizeof(line), f)) {
+            unsigned long line_ino = 0, uid = 0;
+            unsigned int state;
+            /* sl local rem st tx_queue:rx_queue tr:tm->when retrnsmt
+               uid timeout inode … */
+            if (sscanf(line, "%*s %*s %*s %X %*s %*s %*s %lu %*s %lu",
+                       &state, &uid, &line_ino) == 3) {
+                if (state == 1 /* ESTABLISHED */ && line_ino == sock_ino) {
+                    result = (uid_t)uid;
+                    break;
+                }
             }
         }
+        fclose(f);
+        if (result != (uid_t)-1) return result;
     }
-    fclose(f);
-    return result;
+    return (uid_t)-1;
 }
 
 static struct appstat *app_find_or_add(uid_t uid) {
