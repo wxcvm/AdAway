@@ -118,7 +118,10 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshServerStats() {
         viewModelScope.launch {
             try {
-                _serverStats.value = ServerStats.fromJson(WebServerUtils.getStats())
+                // OkHttp request must not run on the main dispatcher
+                _serverStats.value = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    ServerStats.fromJson(WebServerUtils.getStats())
+                }
             } catch (e: Exception) {
                 Timber.w(e, "Failed to refresh server stats")
                 _serverStats.value = null
