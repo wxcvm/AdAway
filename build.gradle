@@ -8,11 +8,16 @@ buildscript {
     }
     dependencies {
         classpath libs.gradle
+        // Kotlin + Compose compiler plugins (applied without version in
+        // module files; kept on the classpath alongside AGP to avoid
+        // AGP 9's built-in Kotlin conflicting with a versioned request)
+        classpath libs.kotlin.gradle.plugin
+        classpath libs.kotlin.compose.compiler
     }
 }
 
 allprojects {
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-        kotlinOptions.jvmTarget = "11"
+        kotlinOptions.jvmTarget = "17"
     }
 }

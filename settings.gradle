@@ -1,3 +1,13 @@
+// Plugin resolution: needed for versioned plugins applied in module
+// build files (org.jetbrains.kotlin.android / kotlin.plugin.compose).
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
 // Project dependency repositories. dependencyResolutionManagement is a
 // Settings-scope API — it MUST live here, not in the root build.gradle.
 // FAIL_ON_PROJECT_REPOS forbids declaring repositories inside module

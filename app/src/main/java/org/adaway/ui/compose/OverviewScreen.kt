@@ -1,0 +1,309 @@
+package org.adaway.ui.compose
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.adaway.util.WebServerUtils
+import java.util.Locale
+
+/**
+ * Overview: service status card, hosts statistics summary, web server
+ * status and block image info. Information-first layout.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun OverviewScreen(viewModel: StatsViewModel) {
+    val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
+    val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
+    val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
+    val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
+
+    Scaffold(
+        topBar = {
+            LargeTopAppBar(
+                title = { Text("AdAway") },
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Service status card
+            StatusCard(
+                running = viewModel.adBlockModel.isApplied().value ?: false,
+                stateText = viewModel.adBlockModel.getState().value ?: "",
+                hostsCount = blockedCount,
+            )
+
+            // Hosts statistics summary row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                StatTile("Blocked", blockedCount, Modifier.weight(1f))
+                StatTile("Allowed", allowedCount, Modifier.weight(1f))
+                StatTile("Redirected", redirectCount, Modifier.weight(1f))
+            }
+
+            // Web server card
+            WebServerCard(
+                running = viewModel.webServerRunning,
+                stats = serverStats,
+            )
+
+            // Quick actions
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Actions",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    ActionRow(
+                        icon = Icons.Filled.Sync,
+                        label = "Synchronize hosts",
+                        subtitle = "Apply latest sources to hosts file",
+                        onClick = { /* sync wired up in a later step */ },
+                    )
+                    ActionRow(
+                        icon = Icons.Outlined.Dns,
+                        label = "Web server settings",
+                        subtitle = "TLS, block images, statistics",
+                        onClick = { /* legacy prefs */ },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
+    val color = if (running) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.error
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .padding(0.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.foundation.Canvas(Modifier.size(12.dp)) {
+                    drawCircle(color = color)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Ad blocking",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    stateText.ifEmpty { if (running) "Active" else "Not applied" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                String.format(Locale.US, "%,d", hostsCount),
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                String.format(Locale.US, "%,d", value),
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WebServerCard(running: Boolean, stats: ServerStats?) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Public,
+                contentDescription = null,
+                tint = if (running) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Web server", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when {
+                        !running -> "Not running"
+                        stats == null -> "Running · fetching stats…"
+                        else -> "Running · ${stats.totalBlocked} blocked · " +
+                            "SNI ${stats.sniCertsIssued} certs"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (running && stats != null) {
+                Text(
+                    formatUptime(stats.uptimeSeconds),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (running) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(16.dp))
+        Column {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+internal fun formatUptime(seconds: Long): String {
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    val secs = seconds % 60
+    return when {
+        hours > 0 -> String.format(Locale.US, "%dh %02dm", hours, minutes)
+        minutes > 0 -> String.format(Locale.US, "%dm %02ds", minutes, secs)
+        else -> String.format(Locale.US, "%ds", secs)
+    }
+}
+
+// LiveData observe helper (non-androidx-activity flavor)
+@Composable
+internal fun <T> androidx.lifecycle.LiveData<T>.observeAsStateCompat(initial: T) =
+    androidx.compose.runtime.produceState(initial, this) {
+        value = initial
+        val observer = androidx.lifecycle.Observer<T> { value = it }
+        observeForever(observer)
+        awaitDispose { removeObserver(observer) }
+    }
