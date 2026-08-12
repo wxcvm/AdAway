@@ -6,6 +6,8 @@
 #include <android/log.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <sys/socket.h>   /* SO_PEERCRED / struct ucred for per-app stats */
+#include <stdint.h>       /* intptr_t (conn_uid) */
 #include <dirent.h>
 #include <linux/limits.h>
 #include <pthread.h>
@@ -217,6 +219,100 @@ static struct webstats s_stats = {0};
 
 static uint64_t uptime_seconds(void) {
     return (mg_millis() - s_stats.start_time_ms) / 1000ULL;
+}
+
+/* ── Per-app statistics ───────────────────────────────────────── */
+/*
+ * Which app (uid) is connecting to the block server, making requests,
+ * getting blocked, and which SNI hostnames it is asking us to sign
+ * certificates for. The server runs as root, so SO_PEERCRED on each
+ * loopback connection yields the requesting app's uid; the Android
+ * side maps uid → package name via PackageManager.
+ *
+ * Same threading note as s_stats: Mongoose 7.x drives everything from
+ * a single mg_mgr_poll() event loop, so all updates below happen on
+ * one thread and plain counters are safe.
+ */
+#define APP_STATS_MAX  32   /* distinct uids tracked */
+#define RECENT_TLS_MAX 64   /* distinct (uid, host) pairs remembered */
+#define TLS_HOST_MAX   128
+
+struct appstat {
+    uid_t    uid;            /* Android app uid (AID_APP_*) */
+    uint64_t connections;    /* accepted connections        */
+    uint64_t requests;       /* HTTP requests seen          */
+    uint64_t blocked;        /* requests answered as blocked */
+    uint64_t tls_hosts;      /* distinct SNI hosts requested */
+};
+static struct appstat s_apps[APP_STATS_MAX];
+static int s_app_count = 0;
+
+/* Distinct (uid, hostname) pairs seen on TLS connections — i.e. the
+   per-domain leaf certs effectively issued per app. Ring buffer. */
+struct tls_host_rec {
+    uid_t    uid;
+    char     host[TLS_HOST_MAX];
+    uint64_t at_ms;          /* last seen */
+};
+static struct tls_host_rec s_recent_tls[RECENT_TLS_MAX];
+static int s_tls_pos = 0;    /* next write slot (ring) */
+static int s_tls_count = 0;  /* distinct pairs recorded so far */
+
+/* Resolve the uid of the peer on the other end of this connection.
+   Works only when we are root (we are) and the peer is local. */
+static uid_t conn_uid(struct mg_connection *c) {
+    int fd = (int)(intptr_t)c->fd;
+    if (fd <= 0) return (uid_t)-1;
+    struct ucred cred;
+    socklen_t len = sizeof(cred);
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0)
+        return cred.uid;
+    return (uid_t)-1;
+}
+
+static struct appstat *app_find_or_add(uid_t uid) {
+    if (uid == (uid_t)-1 || uid == 0) return NULL;  /* unknown/root */
+    for (int i = 0; i < s_app_count; i++)
+        if (s_apps[i].uid == uid) return &s_apps[i];
+    if (s_app_count < APP_STATS_MAX) {
+        struct appstat *a = &s_apps[s_app_count++];
+        memset(a, 0, sizeof(*a));
+        a->uid = uid;
+        return a;
+    }
+    return NULL;  /* table full — drop counters for new uids */
+}
+
+/* Remember that uid asked for a TLS cert for host (SNI). */
+static void app_record_tls_host(uid_t uid, const char *host) {
+    if (uid == (uid_t)-1 || !host || !*host) return;
+    for (int i = 0; i < RECENT_TLS_MAX; i++) {
+        if (s_recent_tls[i].host[0] && s_recent_tls[i].uid == uid &&
+            strcmp(s_recent_tls[i].host, host) == 0) {
+            s_recent_tls[i].at_ms = mg_millis();  /* refresh timestamp */
+            return;
+        }
+    }
+    struct tls_host_rec *r = &s_recent_tls[s_tls_pos % RECENT_TLS_MAX];
+    r->uid = uid;
+    snprintf(r->host, sizeof(r->host), "%s", host);
+    r->at_ms = mg_millis();
+    s_tls_pos++;
+    if (s_tls_count < RECENT_TLS_MAX) s_tls_count++;
+    struct appstat *a = app_find_or_add(uid);
+    if (a) a->tls_hosts++;
+}
+
+/* Store the connection's uid in c->data next to the accepted-at
+   timestamp so request handlers don't re-issue getsockopt(). */
+#define UID_OFFSET (sizeof(uint64_t) + 1)
+static void conn_store_uid(struct mg_connection *c, uid_t uid) {
+    memcpy(c->data + UID_OFFSET, &uid, sizeof(uid));
+}
+static uid_t conn_load_uid(struct mg_connection *c) {
+    uid_t uid;
+    memcpy(&uid, c->data + UID_OFFSET, sizeof(uid));
+    return uid;
 }
 
 /* ── Signal handling ──────────────────────────────────────────── */
@@ -850,6 +946,12 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         memcpy(c->data, &t, sizeof(t));
         c->data[sizeof(t)] = 1;
 
+        /* Per-app: remember which app opened this connection (SO_PEERCRED) */
+        uid_t uid = conn_uid(c);
+        conn_store_uid(c, uid);
+        struct appstat *a = app_find_or_add(uid);
+        if (a) a->connections++;
+
         if (c->is_tls && c->fn_data) {
             struct settings *s = (struct settings *)c->fn_data;
             mg_tls_init(c, &s->tls_opts);
@@ -881,6 +983,20 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
     s_stats.total_requests++;
+
+    /* Per-app request counter + record which TLS (SNI) hostname this
+       app asked us to sign a certificate for. */
+    uid_t req_uid = conn_load_uid(c);
+    if (req_uid == (uid_t)-1) req_uid = conn_uid(c);
+    struct appstat *ra = app_find_or_add(req_uid);
+    if (ra) ra->requests++;
+    if (c->is_tls && c->tls) {
+        SSL *ssl = ((struct mg_tls_openssl *)c->tls)->ssl;
+        if (ssl) {
+            const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+            if (sni && *sni) app_record_tls_host(req_uid, sni);
+        }
+    }
 
     /* Debug: log every request so blocked-domain traffic can be
        inspected (only when started with --debug). */
@@ -917,7 +1033,37 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        SNI certs issued). Like /internal-test it is only reachable on
        loopback; no auth needed since 127.0.0.1 is this device. */
     if (mg_match(hm->uri, mg_str("/internal-stats"), NULL)) {
-        char body[1400];
+        /* Snapshot with per-app breakdown: build the apps array (all
+           tracked uids) and the recent TLS (SNI) host list (most
+           recent first, max 20 entries). */
+        char body[4096];
+        char apps_json[1536] = "";
+        int off = 0;
+        for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
+            int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
+                "%s{\"uid\":%d,\"connections\":%llu,\"requests\":%llu,"
+                "\"blocked\":%llu,\"tls_hosts\":%llu}",
+                off ? "," : "",
+                (int)s_apps[i].uid,
+                (unsigned long long)s_apps[i].connections,
+                (unsigned long long)s_apps[i].requests,
+                (unsigned long long)s_apps[i].blocked,
+                (unsigned long long)s_apps[i].tls_hosts);
+            if (n > 0) off += n;
+        }
+        char tls_json[2048] = "";
+        off = 0;
+        int total = s_tls_count < RECENT_TLS_MAX ? s_tls_count : RECENT_TLS_MAX;
+        /* Ring buffer: most recent entries are the ones written last. */
+        int start = (s_tls_pos - total + RECENT_TLS_MAX) % RECENT_TLS_MAX;
+        for (int k = 0; k < total && k < 20 && off < (int)sizeof(tls_json) - 256; k++) {
+            struct tls_host_rec *r = &s_recent_tls[(start + k) % RECENT_TLS_MAX];
+            if (!r->host[0]) continue;
+            int n = snprintf(tls_json + off, sizeof(tls_json) - (size_t)off,
+                "%s{\"uid\":%d,\"host\":\"%s\"}",
+                off ? "," : "", (int)r->uid, r->host);
+            if (n > 0) off += n;
+        }
         int n = snprintf(body, sizeof(body),
             "{\"uptime_seconds\":%llu,"
             "\"total_requests\":%llu,"
@@ -935,7 +1081,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             "\"blocked_ws_sse\":%llu,"
             "\"blocked_other\":%llu,"
             "\"sni_certs_issued\":%llu,"
-            "\"block_image_count\":%d}",
+            "\"block_image_count\":%d,"
+            "\"apps\":[%s],"
+            "\"recent_tls\":[%s]}",
             (unsigned long long)uptime_seconds(),
             (unsigned long long)s_stats.total_requests,
             (unsigned long long)s_stats.total_connections,
@@ -952,7 +1100,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             (unsigned long long)s_stats.blocked_ws_sse,
             (unsigned long long)s_stats.blocked_other,
             (unsigned long long)s_stats.sni_certs_issued,
-            s->block_image_count);
+            s->block_image_count,
+            apps_json, tls_json);
         mg_http_reply(c, 200,
                       "Content-Type: application/json\r\n"
                       "Cache-Control: no-store\r\n", "%.*s", n, body);
@@ -961,7 +1110,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 
     /* Classify blocked requests by type and reply with the most
        realistic "empty" resource - see reply_blocked_by_type(). */
-    if (reply_blocked_by_type(c, hm)) return;
+    if (reply_blocked_by_type(c, hm)) {
+        struct appstat *ba = app_find_or_add(conn_load_uid(c));
+        if (ba) ba->blocked++;
+        return;
+    }
 
 
     /* Random block image - serve whichever actual filename was found at
@@ -973,6 +1126,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     char img_path[PATH_MAX];
     snprintf(img_path, sizeof(img_path), "%s/%s", s->resource_dir, s->block_images[idx]);
     s_stats.blocked_images++;
+    struct appstat *ba = app_find_or_add(conn_load_uid(c));
+    if (ba) ba->blocked++;
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
     /*

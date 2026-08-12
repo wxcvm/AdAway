@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -159,6 +160,16 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                         categories.forEach { CategoryRow(it, stats.totalBlocked) }
                     }
                 }
+            }
+
+            // Per-app activity
+            if (serverStats != null && serverStats!!.apps.isNotEmpty()) {
+                ActiveAppsCard(serverStats!!.apps)
+            }
+
+            // Recently issued SNI certs
+            if (serverStats != null && serverStats!!.recentTls.isNotEmpty()) {
+                RecentCertsCard(serverStats!!.recentTls)
             }
 
             // Web server details
@@ -354,5 +365,121 @@ private fun DetailRow(label: String, value: Any) {
                 fontFamily = FontFamily.Monospace,
             ),
         )
+    }
+}
+
+/** Map an Android uid to its (first) package label; fall back to "UID n". */
+@Composable
+internal fun appNameForUid(uid: Int): String {
+    if (uid <= 0) return stringResource(R.string.compose_stats_app_unknown, uid)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val name = remember(uid) {
+        try {
+            val pm = context.packageManager
+            val pkgs = pm.getPackagesForUid(uid)
+            if (pkgs.isNullOrEmpty()) {
+                null
+            } else {
+                val info = pm.getApplicationInfo(pkgs[0], 0)
+                pm.getApplicationLabel(info).toString()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+    return name ?: stringResource(R.string.compose_stats_app_unknown, uid)
+}
+
+@Composable
+private fun ActiveAppsCard(apps: List<AppStat>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.compose_stats_active_apps),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        appNameForUid(app.uid),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        stringResource(
+                            R.string.compose_stats_app_sub,
+                            app.connections,
+                            app.requests,
+                            app.blocked,
+                        ),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentCertsCard(hosts: List<TlsHost>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.compose_stats_recent_certs),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                stringResource(R.string.compose_stats_certs_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            hosts.take(10).forEach { host ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        host.host,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        appNameForUid(host.uid),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }

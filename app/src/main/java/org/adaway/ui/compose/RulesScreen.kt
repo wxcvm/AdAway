@@ -3,6 +3,7 @@ package org.adaway.ui.compose
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,12 +45,17 @@ import org.adaway.db.entity.HostListItem
 import org.adaway.db.entity.ListType
 
 /**
- * Rules screen: manual whitelist / blacklist / redirect rules in three
- * tabs, backed by the user-defined hosts list (source_id == 1) in Room.
+ * Rules screen: whitelist / blacklist / redirect tabs backed by the
+ * hosts lists table. Blacklist and redirect show real entries from all
+ * enabled sources (capped at [RULES_PAGE_SIZE] rows with a total), so
+ * the page is never empty even when the user has no manual rules.
  */
+private const val RULES_PAGE_SIZE = 300
+
 private data class RuleTab(
     @StringRes val labelRes: Int,
-    val type: ListType,
+    val type: Int,          // ListType value
+    @StringRes val emptyRes: Int,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,19 +67,23 @@ fun RulesScreen(viewModel: StatsViewModel) {
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var rules by remember { mutableStateOf<List<HostListItem>>(emptyList()) }
-
-    LaunchedEffect(Unit) {
-        viewModel.loadUserRules { rules = it }
-    }
+    var totalCount by remember { mutableIntStateOf(0) }
+    var sourceLabels by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
 
     val tabs = listOf(
-        RuleTab(R.string.compose_rules_whitelist, ListType.ALLOWED),
-        RuleTab(R.string.compose_rules_blacklist, ListType.BLOCKED),
-        RuleTab(R.string.compose_rules_redirect, ListType.REDIRECTED),
+        RuleTab(R.string.compose_rules_whitelist, ListType.ALLOWED.value, R.string.compose_rules_empty_whitelist),
+        RuleTab(R.string.compose_rules_blacklist, ListType.BLOCKED.value, R.string.compose_rules_empty_blacklist),
+        RuleTab(R.string.compose_rules_redirect, ListType.REDIRECTED.value, R.string.compose_rules_empty_redirect),
     )
-    val activeTab = tabs[selectedTab]
-    val filtered = remember(rules, selectedTab) {
-        rules.filter { it.type == activeTab.type }
+
+    LaunchedEffect(Unit) {
+        viewModel.loadSourceLabels { sourceLabels = it }
+    }
+    LaunchedEffect(selectedTab) {
+        viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items, total ->
+            rules = items
+            totalCount = total
+        }
     }
 
     Scaffold(
@@ -113,8 +123,24 @@ fun RulesScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            if (filtered.isEmpty()) {
-                EmptyRulesPlaceholder(tabs[selectedTab].labelRes)
+            // Total count for the active tab
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.compose_rules_total, totalCount),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (rules.isEmpty()) {
+                EmptyRulesPlaceholder(tabs[selectedTab].emptyRes)
             } else {
                 LazyColumn(
                     modifier = Modifier
@@ -125,8 +151,8 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         vertical = 4.dp,
                     ),
                 ) {
-                    items(filtered, key = { it.host }) { item ->
-                        RuleRow(item)
+                    items(rules, key = { "${it.host}:${it.sourceId}" }) { item ->
+                        RuleRow(item = item, sourceLabel = sourceLabels[item.sourceId])
                     }
                 }
             }
@@ -162,7 +188,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         )
                     }
                     Text(
-                        stringResource(R.string.compose_rules_user_total, rules.size),
+                        stringResource(R.string.compose_rules_user_total, sourceLabels.size),
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontFamily = FontFamily.Monospace,
                         ),
@@ -175,7 +201,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
 }
 
 @Composable
-private fun RuleRow(item: HostListItem) {
+private fun RuleRow(item: HostListItem, sourceLabel: String?) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -211,6 +237,15 @@ private fun RuleRow(item: HostListItem) {
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                if (!sourceLabel.isNullOrEmpty()) {
+                    Text(
+                        sourceLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Text(
                 when (item.type) {
@@ -226,20 +261,17 @@ private fun RuleRow(item: HostListItem) {
 }
 
 @Composable
-private fun EmptyRulesPlaceholder(@StringRes labelRes: Int) {
+private fun ColumnScope.EmptyRulesPlaceholder(@StringRes emptyRes: Int) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
+            .weight(1f)
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            when (labelRes) {
-                R.string.compose_rules_whitelist -> stringResource(R.string.compose_rules_empty_whitelist)
-                R.string.compose_rules_blacklist -> stringResource(R.string.compose_rules_empty_blacklist)
-                else -> stringResource(R.string.compose_rules_empty_redirect)
-            },
+            stringResource(emptyRes),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

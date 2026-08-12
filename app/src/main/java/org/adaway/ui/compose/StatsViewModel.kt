@@ -19,6 +19,24 @@ import org.json.JSONObject
 import timber.log.Timber
 
 /**
+ * Per-app statistics from /internal-stats: which uid connected, made
+ * requests, got blocked, and asked for SNI certificates.
+ */
+data class AppStat(
+    val uid: Int,
+    val connections: Long = 0,
+    val requests: Long = 0,
+    val blocked: Long = 0,
+    val tlsHosts: Long = 0,
+)
+
+/** A TLS (SNI) hostname requested by a uid — i.e. a per-domain cert effectively issued. */
+data class TlsHost(
+    val uid: Int,
+    val host: String,
+)
+
+/**
  * Snapshot of the native web server statistics (from /internal-stats).
  */
 data class ServerStats(
@@ -39,6 +57,8 @@ data class ServerStats(
     val blockedOther: Long = 0,
     val sniCertsIssued: Long = 0,
     val blockImageCount: Int = 0,
+    val apps: List<AppStat> = emptyList(),
+    val recentTls: List<TlsHost> = emptyList(),
 ) {
     val totalBlocked: Long
         get() = blockedImages + blockedScripts + blockedStyles + blockedFonts +
@@ -48,6 +68,31 @@ data class ServerStats(
     companion object {
         fun fromJson(json: JSONObject?): ServerStats? {
             if (json == null) return null
+            val apps = mutableListOf<AppStat>()
+            val appsArray = json.optJSONArray("apps")
+            if (appsArray != null) {
+                for (i in 0 until appsArray.length()) {
+                    val o = appsArray.optJSONObject(i) ?: continue
+                    apps += AppStat(
+                        uid = o.optInt("uid", -1),
+                        connections = o.optLong("connections", 0),
+                        requests = o.optLong("requests", 0),
+                        blocked = o.optLong("blocked", 0),
+                        tlsHosts = o.optLong("tls_hosts", 0),
+                    )
+                }
+            }
+            val recentTls = mutableListOf<TlsHost>()
+            val tlsArray = json.optJSONArray("recent_tls")
+            if (tlsArray != null) {
+                for (i in 0 until tlsArray.length()) {
+                    val o = tlsArray.optJSONObject(i) ?: continue
+                    recentTls += TlsHost(
+                        uid = o.optInt("uid", -1),
+                        host = o.optString("host", ""),
+                    )
+                }
+            }
             return ServerStats(
                 uptimeSeconds = json.optLong("uptime_seconds", 0),
                 totalRequests = json.optLong("total_requests", 0),
@@ -66,6 +111,8 @@ data class ServerStats(
                 blockedOther = json.optLong("blocked_other", 0),
                 sniCertsIssued = json.optLong("sni_certs_issued", 0),
                 blockImageCount = json.optInt("block_image_count", 0),
+                apps = apps,
+                recentTls = recentTls,
             )
         }
     }
@@ -155,6 +202,33 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
                 hostsListItemDao.getUserList()
             }
             onResult(items)
+        }
+    }
+
+    /**
+     * Load hosts-list entries of the given type (0=BLOCKED, 1=ALLOWED,
+     * 2=REDIRECTED), capped at [limit] rows, plus the total count.
+     */
+    fun loadRulesByType(
+        type: Int,
+        limit: Int,
+        onResult: (items: List<org.adaway.db.entity.HostListItem>, total: Int) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                hostsListItemDao.getListByType(type, limit) to hostsListItemDao.getCountByType(type)
+            }
+            onResult(result.first, result.second)
+        }
+    }
+
+    /** Load a map sourceId -> label for rule rows (1 = "user"). */
+    fun loadSourceLabels(onResult: (Map<Int, String>) -> Unit) {
+        viewModelScope.launch {
+            val labels = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                database.hostsSourceDao().getAll().associate { it.id to it.label }
+            }
+            onResult(labels)
         }
     }
 

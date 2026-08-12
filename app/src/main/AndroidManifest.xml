@@ -33,6 +33,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Map web-server peer uids (per-app stats) to package names -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <!--
         ROOT CAUSE FIX (issue #2): targetSdk 30+ enables package visibility

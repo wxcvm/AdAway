@@ -41,6 +41,11 @@
     <string name="compose_stats_connections_active">%1$d（%2$d 活跃）</string>
     <string name="compose_stats_sni">SNI证书签发</string>
     <string name="compose_stats_images">占位图数量</string>
+    <string name="compose_stats_active_apps">活跃应用</string>
+    <string name="compose_stats_app_unknown">UID %1$d</string>
+    <string name="compose_stats_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
+    <string name="compose_stats_recent_certs">最近签发的证书</string>
+    <string name="compose_stats_certs_hint">各应用请求签发的域名（SNI）</string>
     <string name="compose_stats_type_images">图片</string>
     <string name="compose_stats_type_scripts">脚本</string>
     <string name="compose_stats_type_styles">样式</string>
@@ -84,4 +89,5 @@
     <string name="compose_rules_user_total">用户规则：%1$d</string>
     <string name="compose_rules_sources_hint">通过手动添加或规则源生成</string>
     <string name="compose_rules_redirect_to">→ %1$s</string>
+    <string name="compose_rules_total">共 %1$d 条</string>
 </resources>

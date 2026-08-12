@@ -43,6 +43,12 @@ public interface HostListItemDao {
     @Query("SELECT * FROM hosts_lists ORDER BY host ASC")
     List<HostListItem> getAll();
 
+    @Query("SELECT * FROM hosts_lists WHERE type = :type ORDER BY host ASC LIMIT :limit")
+    List<HostListItem> getListByType(int type, int limit);
+
+    @Query("SELECT COUNT(*) FROM hosts_lists WHERE type = :type")
+    int getCountByType(int type);
+
     @Query("SELECT * FROM hosts_lists WHERE source_id = 1")
     List<HostListItem> getUserList();
 

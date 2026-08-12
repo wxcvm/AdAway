@@ -41,6 +41,11 @@
     <string name="compose_stats_connections_active">%1$d (%2$d active)</string>
     <string name="compose_stats_sni">SNI certs issued</string>
     <string name="compose_stats_images">Block images</string>
+    <string name="compose_stats_active_apps">Active apps</string>
+    <string name="compose_stats_app_unknown">UID %1$d</string>
+    <string name="compose_stats_app_sub">%1$d conn · %2$d req · %3$d blocked</string>
+    <string name="compose_stats_recent_certs">Recently issued certs</string>
+    <string name="compose_stats_certs_hint">Domains apps asked us to sign (SNI)</string>
     <string name="compose_stats_type_images">Images</string>
     <string name="compose_stats_type_scripts">Scripts</string>
     <string name="compose_stats_type_styles">Styles</string>
@@ -84,4 +89,5 @@
     <string name="compose_rules_user_total">User rules: %1$d</string>
     <string name="compose_rules_sources_hint">Added manually or via hosts sources</string>
     <string name="compose_rules_redirect_to">→ %1$s</string>
+    <string name="compose_rules_total">Total: %1$d</string>
 </resources>
