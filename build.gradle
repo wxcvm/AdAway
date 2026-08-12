@@ -1,18 +1,1 @@
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-
-    dependencies {
-        classpath libs.gradle
-    }
-}
-
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
-    }
-}
-
+ZGVwZW5kZW5jeVJlc29sdXRpb25NYW5hZ2VtZW50IHsKICAgIHJlcG9zaXRvcmllc01vZGUuc2V0KFJlcG9zaXRvcmllc01vZGUuRkFJTF9PTl9QUk9KRUNUX1JFUE9TKQogICAgcmVwb3NpdG9yaWVzIHsKICAgICAgICBnb29nbGUoKQogICAgICAgIG1hdmVuQ2VudHJhbCgpCiAgICB9Cn0KCmJ1aWxkc2NyaXB0IHsKICAgIHJlcG9zaXRvcmllcyB7CiAgICAgICAgZ29vZ2xlKCkKICAgICAgICBtYXZlbkNlbnRyYWwoKQogICAgfQoKICAgIGRlcGVuZGVuY2llcyB7CiAgICAgICAgY2xhc3NwYXRoIGxpYnMuZ3JhZGxlCiAgICB9Cn0KCmFsbHByb2plY3RzIHsKICAgIHJlcG9zaXRvcmllcyB7CiAgICAgICAgZ29vZ2xlKCkKICAgICAgICBtYXZlbkNlbnRyYWwoKQogICAgfQp9Cgo=
