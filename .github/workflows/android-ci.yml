@@ -32,7 +32,7 @@ jobs:
       - name: Build with Gradle
         run: |
           VERSION_CODE=$(date +%s)
-          VERSION_NAME="6.4.3.${{ github.run_number }}"
+          VERSION_NAME="6.5.0.${{ github.run_number }}"
           echo "Building $VERSION_NAME (versionCode $VERSION_CODE)"
           echo "$VERSION_NAME|$VERSION_CODE" > version.txt
           ./gradlew assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME --stacktrace
