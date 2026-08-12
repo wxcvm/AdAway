@@ -1,1 +1,18 @@
-YXBwbHkgcGx1Z2luOiAnY29tLmFuZHJvaWQubGlicmFyeScKCmFuZHJvaWQgewogICAgY29tcGlsZVNkayAzNgogICAgbmRrVmVyc2lvbiAnMjguMS4xMzM1NjcwOScKICAgIG5hbWVzcGFjZSAnaW8uc2VudHJ5JwoKICAgIGRlZmF1bHRDb25maWcgewogICAgICAgIG1pblNkayAzMAogICAgICAgIHRhcmdldFNkayAzNQogICAgfQoKICAgIGNvbXBpbGVPcHRpb25zIHsKICAgICAgICBzb3VyY2VDb21wYXRpYmlsaXR5IEphdmFWZXJzaW9uLlZFUlNJT05fMTcKICAgICAgICB0YXJnZXRDb21wYXRpYmlsaXR5IEphdmFWZXJzaW9uLlZFUlNJT05fMTcKICAgIH0KCn0K
+apply plugin: 'com.android.library'
+
+android {
+    compileSdk 36
+    ndkVersion '28.1.13356709'
+    namespace 'io.sentry'
+
+    defaultConfig {
+        minSdk 30
+        targetSdk 35
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+}

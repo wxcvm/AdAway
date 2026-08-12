@@ -1,1 +1,133 @@
-YXBwbHkgcGx1Z2luOiAnY29tLmFuZHJvaWQubGlicmFyeScKCmFuZHJvaWQgewogICAgY29tcGlsZVNkayAzNgogICAgbmRrVmVyc2lvbiAnMjguMS4xMzM1NjcwOScKICAgIG5hbWVzcGFjZSAnb3JnLmFkYXdheS53ZWJzZXJ2ZXInCgogICAgZGVmYXVsdENvbmZpZyB7CiAgICAgICAgbWluU2RrIDMwCiAgICAgICAgdGFyZ2V0U2RrIDM1CiAgICB9CgogICAgYnVpbGRGZWF0dXJlcyB7CiAgICAgICAgcHJlZmFiID0gdHJ1ZQogICAgfQoKICAgIGV4dGVybmFsTmF0aXZlQnVpbGQgewogICAgICAgIG5ka0J1aWxkIHsKICAgICAgICAgICAgcGF0aCAnam5pL0FuZHJvaWQubWsnCiAgICAgICAgfQogICAgfQoKfQoKZGVwZW5kZW5jaWVzIHsKICAgIGltcGxlbWVudGF0aW9uIGxpYnMub3BlbnNzbAp9CgovKioKICogVGFzayB0byByZW5hbWUgZXhlY3V0YWJsZXMgZnJvbSBoZWxsb193b3JsZCB0byBsaWJoZWxsb193b3JsZF9leGVjLnNvCiAqIElmIHRoZXkgbG9vayBsaWtlIGxpYnJhcmllcywgdGhleSBhcmUgcGFja2FnZWQgaW4gdGhlIGFwayBhbmQgZGVwbG95ZWQgb24gdGhlIGRldmljZSBpbiB0aGUgbGliIGZvbGRlciEKICoKICogSGVscCB3aXRoIGZpbGVzOiBodHRwczovL2RvY3MuZ3JhZGxlLm9yZy9jdXJyZW50L3VzZXJndWlkZS93b3JraW5nX3dpdGhfZmlsZXMuaHRtbAogKi8KZGVmIHJlbmFtZUpuaUxpYkFzRXhlY3V0YWJsZSA9IHRhc2tzLnJlZ2lzdGVyKCdyZW5hbWVKbmlMaWJBc0V4ZWN1dGFibGUnLCBDb3B5KSB7CiAgICBkZWYgZmxhdm9yID0gZ3JhZGxlLnN0YXJ0UGFyYW1ldGVyLnRhc2tSZXF1ZXN0cy50b1N0cmluZygpLmNvbnRhaW5zSWdub3JlQ2FzZSgiZGVidWciKSA/ICJkZWJ1ZyIgOiAicmVsZWFzZSIKICAgIGRlZiBidWlsZEZvbGRlciA9IGxheW91dC5idWlsZERpcmVjdG9yeS5kaXIoImludGVybWVkaWF0ZXMvbmRrQnVpbGQvJHtmbGF2b3J9L29iai9sb2NhbCIpCgogICAgZGVwZW5kc09uICI6JHtwcm9qZWN0Lm5hbWV9OmV4dGVybmFsTmF0aXZlQnVpbGQke2ZsYXZvci5zdWJzdHJpbmcoMCwgMSkudG9VcHBlckNhc2UoKX0ke2ZsYXZvci5zdWJzdHJpbmcoMSl9IgoKICAgIC8vIEJVRyBGSVg6IHRoaXMgdGFzayBjb3BpZXMgRlJPTSBidWlsZEZvbGRlciBJTlRPIHRoYXQgc2FtZSBidWlsZEZvbGRlcgogICAgLy8gKHJlbmFtaW5nIGFzIGl0IGdvZXMpLiBHcmFkbGUncyBpbmNyZW1lbnRhbCB1cC10by1kYXRlIGNoZWNraW5nIGRvZXMKICAgIC8vIG5vdCBoYW5kbGUgc2VsZi1yZWZlcmVudGlhbCBzb3VyY2UvZGVzdGluYXRpb24gdHJlZXMgcmVsaWFibHkg4oCUIGEKICAgIC8vIHN0YWxlIHN0dWIgLnNvIGFscmVhZHkgc2l0dGluZyBpbiB0aGUgb3V0cHV0IGZyb20gYSBwcmV2aW91cyBydW4gY2FuCiAgICAvLyBtYWtlIEdyYWRsZSBjb25zaWRlciB0aGlzIHRhc2sncyBvdXRwdXRzIGFscmVhZHkgc2F0aXNmaWVkIGFuZCBza2lwCiAgICAvLyByZS1leGVjdXRpbmcgaXQsIHNpbGVudGx5IGxlYXZpbmcgdGhlIHBsYWNlaG9sZGVyIHN0dWIgaW4gcGxhY2UKICAgIC8vIGluc3RlYWQgb2YgdGhlIGZyZXNobHktYnVpbHQgcmVhbCBleGVjdXRhYmxlLiBGb3JjZSBpdCB0byBhbHdheXMgcnVuLgogICAgb3V0cHV0cy51cFRvRGF0ZVdoZW4geyBmYWxzZSB9CgogICAgLyoKICAgICAqIEJVRyBGSVggKGJ1aWxkLWFydGlmYWN0IHZlcmlmaWNhdGlvbik6IHByZXZpb3VzbHkgbm90aGluZyBjaGVja2VkCiAgICAgKiB0aGF0IG5ka0J1aWxkIGFjdHVhbGx5IHByb2R1Y2VkIHRoZSByZWFsIGB3ZWJzZXJ2ZXJgIGV4ZWN1dGFibGUKICAgICAqIGJlZm9yZSB0aGlzIHRhc2sgcmVuYW1lZCBpdCBpbnRvIGxpYndlYnNlcnZlcl9leGVjLnNvLiBJZiB0aGUKICAgICAqIEJVSUxEX0VYRUNVVEFCTEUgc3RlcCBmYWlsZWQgb3Igd2FzIHNraXBwZWQgKGUuZy4gYSBjb21waWxlIGVycm9yCiAgICAgKiBpbiB3ZWJzZXJ2ZXIuYyksIHRoaXMgdGFzayB3b3VsZCBzaWxlbnRseSBjb3B5IG5vdGhpbmcg4oCUIG9yIHdvcnNlLAogICAgICogYSBzdGFsZS9zdHViIGFydGlmYWN0IOKAlCBhbmQgdGhlIEFBUi9BUEsgd291bGQgc2hpcCB3aXRob3V0IGEKICAgICAqIHdvcmtpbmcgYmluYXJ5LCByZXByb2R1Y2luZyB0aGUgZXhhY3QgInN0dWIgc2hpcHBlZCBpbnN0ZWFkIG9mCiAgICAgKiByZWFsIGV4ZWN1dGFibGUiIGZhaWx1cmUgdGhpcyB0YXNrIHdhcyBvcmlnaW5hbGx5IGNyZWF0ZWQgdG8gZml4LgogICAgICogRmFpbCB0aGUgYnVpbGQgbG91ZGx5IGluc3RlYWQgb2YgcGFja2FnaW5nIGdhcmJhZ2UuCiAgICAgKi8KICAgIGRvRmlyc3QgewogICAgICAgIGRlZiBleGUgPSBmaWxlKCIke2J1aWxkRm9sZGVyLmdldCgpLmFzRmlsZX0vYXJtNjQtdjhhL3dlYnNlcnZlciIpCiAgICAgICAgaWYgKCFleGUuZXhpc3RzKCkpIHsKICAgICAgICAgICAgdGhyb3cgbmV3IEdyYWRsZUV4Y2VwdGlvbigKICAgICAgICAgICAgICAgICJOYXRpdmUgd2Vic2VydmVyIGV4ZWN1dGFibGUgbm90IGZvdW5kIGF0ICR7ZXhlfSDigJQgIiArCiAgICAgICAgICAgICAgICAibmRrQnVpbGQgQlVJTERfRVhFQ1VUQUJMRSBmYWlsZWQgb3Igd2FzIHNraXBwZWQuICIgKwogICAgICAgICAgICAgICAgIlJlZnVzaW5nIHRvIHBhY2thZ2UgYSBzdHViL2VtcHR5IGxpYnJhcnkuIikKICAgICAgICB9CiAgICAgICAgaWYgKGV4ZS5sZW5ndGgoKSA8IDEwMF8wMDApIHsKICAgICAgICAgICAgdGhyb3cgbmV3IEdyYWRsZUV4Y2VwdGlvbigKICAgICAgICAgICAgICAgICJTdXNwaWNpb3VzbHkgc21hbGwgd2Vic2VydmVyIGV4ZWN1dGFibGUgKCR7ZXhlLmxlbmd0aCgpfSBieXRlcykgIiArCiAgICAgICAgICAgICAgICAiYXQgJHtleGV9IOKAlCB0aGlzIGxvb2tzIGxpa2UgdGhlIHBsYWNlaG9sZGVyIHN0dWIsIG5vdCB0aGUgcmVhbCAiICsKICAgICAgICAgICAgICAgICJsaW5rZWQgYmluYXJ5LiBSZWZ1c2luZyB0byBwYWNrYWdlIGl0LiIpCiAgICAgICAgfQogICAgfQoKICAgIGZyb20oYnVpbGRGb2xkZXIpIHsKICAgICAgICBleGNsdWRlICIqKi9vYmpzIgogICAgICAgIGV4Y2x1ZGUgIioqL29ianMtZGVidWciCiAgICAgICAgZXhjbHVkZSAiKiovKi5hIgogICAgICAgIGV4Y2x1ZGUgIioqLyouZCIKICAgICAgICBleGNsdWRlICIqKi8qLm8iCiAgICAgICAgZXhjbHVkZSAiKiovKi5zbyIKICAgICAgICBleGNsdWRlICIqKi8qLnR4dCIKICAgIH0KCiAgICBpbnRvIGJ1aWxkRm9sZGVyCgogICAgcmVuYW1lICcoLispJywgJ2xpYiQxX2V4ZWMuc28nCgogICAgZWFjaEZpbGUgewogICAgICAgIHByaW50bG4gIlJlcGxhY2luZyAke2l0LmdldFBhdGgoKX0gZnJvbSAke2ZsYXZvcn0gbmRrQnVpbGQgZGlyZWN0b3J5IgogICAgfQp9CgovKgogKiBCVUcgRklYIChyb290IGNhdXNlIG9mICJ3ZWIgc2VydmVyIG5ldmVyIGFjdHVhbGx5IHN0YXJ0cyIsIHN1cnZpdmluZwogKiBldmVyeSBwcmV2aW91cyBmaXggdG8gd2Vic2VydmVyLmMgLyBTaGVsbFV0aWxzLmphdmEpOiB0aGlzIHVzZWQgdG8gYmUKICogd2lyZWQgdXAgYXMKICoKICogICB0YXNrcy53aXRoVHlwZShMaWJyYXJ5Sm5pTGlic1Rhc2spLmNvbmZpZ3VyZUVhY2ggeyBkZXBlbmRzT24gcmVuYW1lSm5pTGliQXNFeGVjdXRhYmxlIH0KICoKICogd2hlcmUgTGlicmFyeUpuaUxpYnNUYXNrIGlzIGFuICppbnRlcm5hbCogQUdQIGltcGxlbWVudGF0aW9uIGNsYXNzCiAqIChjb20uYW5kcm9pZC5idWlsZC5ncmFkbGUuaW50ZXJuYWwudGFza3MuTGlicmFyeUpuaUxpYnNUYXNrKSDigJQgbm90IGEKICogcHVibGljIEFQSS4gR29vZ2xlJ3Mgb3duIEFHUCBkb2NzIGV4cGxpY2l0bHkgd2FybiBhZ2FpbnN0IHRoaXMgZXhhY3QKICogcGF0dGVybjogIlRhc2tzIGNyZWF0ZWQgYnkgQUdQIGFyZSBjb25zaWRlcmVkIGltcGxlbWVudGF0aW9uIGRldGFpbHMKICogYW5kIGFyZSBub3QgZXhwb3NlZCBhcyBhIHB1YmxpYyBBUEkuIFlvdSBtdXN0IGF2b2lkIC4uLiBndWVzc2luZyB0aGUKICogVGFzayBuYW1lcyBhbmQgYWRkaW5nIC4uLiBkZXBlbmRlbmNpZXMgdG8gdGhvc2UgVGFzayBvYmplY3RzCiAqIGRpcmVjdGx5LiIgdGFza3Mud2l0aFR5cGUoWCkgZG9lcyBub3QgZXJyb3Igd2hlbiB6ZXJvIHRhc2tzIG1hdGNoIFgg4oCUCiAqIGl0IHNpbGVudGx5IGNvbmZpZ3VyZXMgbm90aGluZy4gT24tZGV2aWNlIHRlc3RpbmcgY29uZmlybWVkIHRoZQogKiBzaGlwcGVkIGxpYndlYnNlcnZlcl9leGVjLnNvIGlzIGEgfjMuN0tCIGZpbGUgbWF0Y2hpbmcgc3R1Yi5jIGFsbW9zdAogKiBieXRlLWZvci1ieXRlLCBub3QgYSByZWFsIGxpbmtlZCBleGVjdXRhYmxlLCBtZWFuaW5nIHRoaXMgZGVwZW5kZW5jeQogKiB3YXMgbmV2ZXIgYWN0dWFsbHkgYmVpbmcgd2lyZWQgaW50byB0aGUgYnVpbGQgZm9yIHdoYXRldmVyIEFHUAogKiB2ZXJzaW9uIHRoaXMgcHJvamVjdCBjdXJyZW50bHkgdXNlczogcmVuYW1lSm5pTGliQXNFeGVjdXRhYmxlIHdhcwogKiBzaWxlbnRseSBuZXZlciBydW5uaW5nIGFzIHBhcnQgb2YgYSBub3JtYWwgYnVpbGQsIGFuZCB0aGUgQUFSL0FQSwogKiBwYWNrYWdlZCB0aGUgcGxhY2Vob2xkZXIgc3R1YiBsaWJyYXJ5IGluc3RlYWQgb2YgdGhlIHJlYWwgd2Vic2VydmVyCiAqIGJpbmFyeS4gTm8gYW1vdW50IG9mIGZpeGluZyB3ZWJzZXJ2ZXIuYyBjb3VsZCBldmVyIG1hdHRlciB3aGlsZSB0aGlzCiAqIHdhcyBicm9rZW4g4oCUIHRoZSByZWFsIGJpbmFyeSB3YXMgbmV2ZXIgc2hpcHBlZCBpbiB0aGUgZmlyc3QgcGxhY2UuCiAqCiAqIEZpeDogZGVwZW5kIG9uIHN0YWJsZSwgcHVibGljLCB3ZWxsLWRvY3VtZW50ZWQgdGFzayAqbmFtZXMqIGluc3RlYWQKICogb2YgYW4gaW50ZXJuYWwgY2xhc3MgcmVmZXJlbmNlLiBBR1AgaGFzIHVzZWQgdGhlCiAqICJtZXJnZTxWYXJpYW50PkpuaUxpYkZvbGRlcnMiIC8gIm1lcmdlPFZhcmlhbnQ+TmF0aXZlTGlicyIgbmFtaW5nCiAqIGNvbnZlbnRpb24gZm9yIG5hdGl2ZS1saWIgcGFja2FnaW5nIHRhc2tzIHNpbmNlIEFHUCAzLngsIHdlbGwgYmVmb3JlCiAqIExpYnJhcnlKbmlMaWJzVGFzayBleGlzdGVkIHVuZGVyIGl0cyBjdXJyZW50IHBhY2thZ2UsIGFuZCBpdCdzIGEKICogbXVjaCBzbWFsbGVyIHN1cmZhY2UgdG8gYnJlYWsgYWNyb3NzIEFHUCB1cGdyYWRlcyB0aGFuIGFuIGludGVybmFsCiAqIGNsYXNzIHBhdGguIE1hdGNoIGJ5IG5hbWUgYWdhaW5zdCBldmVyeSB0YXNrIGluIHRoZSBwcm9qZWN0IHJhdGhlcgogKiB0aGFuIGZpbHRlcmluZyBieSAocG9zc2libHkgd3JvbmcvcmVuYW1lZCkgdHlwZS4KICovCnRhc2tzLmNvbmZpZ3VyZUVhY2ggeyB0IC0+CiAgICBpZiAodC5uYW1lLm1hdGNoZXMoLyg/aSkuKm1lcmdlLiooSm5pTGliRm9sZGVyc3xOYXRpdmVMaWJzKS4qLykpIHsKICAgICAgICB0LmRlcGVuZHNPbihyZW5hbWVKbmlMaWJBc0V4ZWN1dGFibGUpCiAgICB9Cn0K
+apply plugin: 'com.android.library'
+
+android {
+    compileSdk 36
+    ndkVersion '28.1.13356709'
+    namespace 'org.adaway.webserver'
+
+    defaultConfig {
+        minSdk 30
+        targetSdk 35
+    }
+
+    buildFeatures {
+        prefab = true
+    }
+
+    externalNativeBuild {
+        ndkBuild {
+            path 'jni/Android.mk'
+        }
+    }
+
+}
+
+dependencies {
+    implementation libs.openssl
+}
+
+/**
+ * Task to rename executables from hello_world to libhello_world_exec.so
+ * If they look like libraries, they are packaged in the apk and deployed on the device in the lib folder!
+ *
+ * Help with files: https://docs.gradle.org/current/userguide/working_with_files.html
+ */
+def renameJniLibAsExecutable = tasks.register('renameJniLibAsExecutable', Copy) {
+    def flavor = gradle.startParameter.taskRequests.toString().containsIgnoreCase("debug") ? "debug" : "release"
+    def buildFolder = layout.buildDirectory.dir("intermediates/ndkBuild/${flavor}/obj/local")
+
+    dependsOn ":${project.name}:externalNativeBuild${flavor.substring(0, 1).toUpperCase()}${flavor.substring(1)}"
+
+    // BUG FIX: this task copies FROM buildFolder INTO that same buildFolder
+    // (renaming as it goes). Gradle's incremental up-to-date checking does
+    // not handle self-referential source/destination trees reliably — a
+    // stale stub .so already sitting in the output from a previous run can
+    // make Gradle consider this task's outputs already satisfied and skip
+    // re-executing it, silently leaving the placeholder stub in place
+    // instead of the freshly-built real executable. Force it to always run.
+    outputs.upToDateWhen { false }
+
+    /*
+     * BUG FIX (build-artifact verification): previously nothing checked
+     * that ndkBuild actually produced the real `webserver` executable
+     * before this task renamed it into libwebserver_exec.so. If the
+     * BUILD_EXECUTABLE step failed or was skipped (e.g. a compile error
+     * in webserver.c), this task would silently copy nothing — or worse,
+     * a stale/stub artifact — and the AAR/APK would ship without a
+     * working binary, reproducing the exact "stub shipped instead of
+     * real executable" failure this task was originally created to fix.
+     * Fail the build loudly instead of packaging garbage.
+     */
+    doFirst {
+        def exe = file("${buildFolder.get().asFile}/arm64-v8a/webserver")
+        if (!exe.exists()) {
+            throw new GradleException(
+                "Native webserver executable not found at ${exe} — " +
+                "ndkBuild BUILD_EXECUTABLE failed or was skipped. " +
+                "Refusing to package a stub/empty library.")
+        }
+        if (exe.length() < 100_000) {
+            throw new GradleException(
+                "Suspiciously small webserver executable (${exe.length()} bytes) " +
+                "at ${exe} — this looks like the placeholder stub, not the real " +
+                "linked binary. Refusing to package it.")
+        }
+    }
+
+    from(buildFolder) {
+        exclude "**/objs"
+        exclude "**/objs-debug"
+        exclude "**/*.a"
+        exclude "**/*.d"
+        exclude "**/*.o"
+        exclude "**/*.so"
+        exclude "**/*.txt"
+    }
+
+    into buildFolder
+
+    rename '(.+)', 'lib$1_exec.so'
+
+    eachFile {
+        println "Replacing ${it.getPath()} from ${flavor} ndkBuild directory"
+    }
+}
+
+/*
+ * BUG FIX (root cause of "web server never actually starts", surviving
+ * every previous fix to webserver.c / ShellUtils.java): this used to be
+ * wired up as
+ *
+ *   tasks.withType(LibraryJniLibsTask).configureEach { dependsOn renameJniLibAsExecutable }
+ *
+ * where LibraryJniLibsTask is an *internal* AGP implementation class
+ * (com.android.build.gradle.internal.tasks.LibraryJniLibsTask) — not a
+ * public API. Google's own AGP docs explicitly warn against this exact
+ * pattern: "Tasks created by AGP are considered implementation details
+ * and are not exposed as a public API. You must avoid ... guessing the
+ * Task names and adding ... dependencies to those Task objects
+ * directly." tasks.withType(X) does not error when zero tasks match X —
+ * it silently configures nothing. On-device testing confirmed the
+ * shipped libwebserver_exec.so is a ~3.7KB file matching stub.c almost
+ * byte-for-byte, not a real linked executable, meaning this dependency
+ * was never actually being wired into the build for whatever AGP
+ * version this project currently uses: renameJniLibAsExecutable was
+ * silently never running as part of a normal build, and the AAR/APK
+ * packaged the placeholder stub library instead of the real webserver
+ * binary. No amount of fixing webserver.c could ever matter while this
+ * was broken — the real binary was never shipped in the first place.
+ *
+ * Fix: depend on stable, public, well-documented task *names* instead
+ * of an internal class reference. AGP has used the
+ * "merge<Variant>JniLibFolders" / "merge<Variant>NativeLibs" naming
+ * convention for native-lib packaging tasks since AGP 3.x, well before
+ * LibraryJniLibsTask existed under its current package, and it's a
+ * much smaller surface to break across AGP upgrades than an internal
+ * class path. Match by name against every task in the project rather
+ * than filtering by (possibly wrong/renamed) type.
+ */
+tasks.configureEach { t ->
+    if (t.name.matches(/(?i).*merge.*(JniLibFolders|NativeLibs).*/)) {
+        t.dependsOn(renameJniLibAsExecutable)
+    }
+}

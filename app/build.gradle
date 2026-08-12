@@ -1,1 +1,148 @@
-cGx1Z2lucyB7CiAgICBpZCAnY29tLmFuZHJvaWQuYXBwbGljYXRpb24nCn0KCmJvb2xlYW4ga2V5U3RvcmVEZWZpbmVkID0gcHJvamVjdC5oYXNQcm9wZXJ0eSgnc2lnbmluZ1N0b3JlTG9jYXRpb24nKSAmJgogICAgICAgIHByb2plY3QuaGFzUHJvcGVydHkoJ3NpZ25pbmdTdG9yZVBhc3N3b3JkJykgJiYKICAgICAgICBwcm9qZWN0Lmhhc1Byb3BlcnR5KCdzaWduaW5nS2V5QWxpYXMnKSAmJgogICAgICAgIHByb2plY3QuaGFzUHJvcGVydHkoJ3NpZ25pbmdLZXlQYXNzd29yZCcpCgpyZXBvc2l0b3JpZXMgewogICAgbWF2ZW4gewogICAgICAgIHVybCAnaHR0cHM6Ly9qaXRwYWNrLmlvJwogICAgfQp9CgphbmRyb2lkIHsKICAgIGNvbXBpbGVTZGsgMzYKICAgIG5ka1ZlcnNpb24gJzI4LjEuMTMzNTY3MDknCiAgICBuYW1lc3BhY2UgJ29yZy5hZGF3YXknCgogICAgZGVmYXVsdENvbmZpZyB7CiAgICAgICAgYXBwbGljYXRpb25JZCAnY29tLnd4Y3ZtLkFkYXdheScKICAgICAgICBtaW5TZGsgMzAKICAgICAgICB0YXJnZXRTZGsgMzUKICAgICAgICBuZGsgewogICAgICAgICAgICBhYmlGaWx0ZXJzICJhcm02NC12OGEiCiAgICAgICAgfQogICAgICAgIHZlcnNpb25Db2RlIGxpYnMudmVyc2lvbnMuYXBwQ29kZS5nZXQoKSBhcyBpbnQKICAgICAgICB2ZXJzaW9uTmFtZSBsaWJzLnZlcnNpb25zLmFwcE5hbWUuZ2V0KCkKCiAgICAgICAgamF2YUNvbXBpbGVPcHRpb25zIHsKICAgICAgICAgICAgYW5ub3RhdGlvblByb2Nlc3Nvck9wdGlvbnMgewogICAgICAgICAgICAgICAgYXJndW1lbnRzID0gWwogICAgICAgICAgICAgICAgICAgICAgICAicm9vbS5zY2hlbWFMb2NhdGlvbiI6ICIkcHJvamVjdERpci9zY2hlbWFzIi50b1N0cmluZygpLAogICAgICAgICAgICAgICAgICAgICAgICAicm9vbS5pbmNyZW1lbnRhbCIgICA6ICJ0cnVlIgogICAgICAgICAgICAgICAgXQogICAgICAgICAgICB9CiAgICAgICAgfQoKICAgICAgICB0ZXN0SW5zdHJ1bWVudGF0aW9uUnVubmVyICJhbmRyb2lkeC50ZXN0LnJ1bm5lci5BbmRyb2lkSlVuaXRSdW5uZXIiCiAgICB9CgogICAgLyoKICAgICAqIFRvIHNpZ24gcmVsZWFzZSBidWlsZCwgY3JlYXRlIGZpbGUgZ3JhZGxlLnByb3BlcnRpZXMgaW4gfi8uZ3JhZGxlLyB3aXRoIHRoaXMgY29udGVudDoKICAgICAqCiAgICAgKiBzaWduaW5nU3RvcmVMb2NhdGlvbj0vaG9tZS9rZXkuc3RvcmUKICAgICAqIHNpZ25pbmdTdG9yZVBhc3N3b3JkPXh4eAogICAgICogc2lnbmluZ0tleUFsaWFzPWFsaWFzCiAgICAgKiBzaWduaW5nS2V5UGFzc3dvcmQ9eHh4CiAgICAgKi8KICAgIGlmIChrZXlTdG9yZURlZmluZWQpIHsKICAgICAgICBwcmludGxuICJGb3VuZCBzaWduYXR1cmUgcHJvcGVydGllcyBpbiBncmFkbGUucHJvcGVydGllcy4gQnVpbGQgd2lsbCBiZSBzaWduZWQuIgoKICAgICAgICBzaWduaW5nQ29uZmlncyB7CiAgICAgICAgICAgIHJlbGVhc2UgewogICAgICAgICAgICAgICAgc3RvcmVGaWxlIGZpbGUoc2lnbmluZ1N0b3JlTG9jYXRpb24pCiAgICAgICAgICAgICAgICBzdG9yZVBhc3N3b3JkIHNpZ25pbmdTdG9yZVBhc3N3b3JkCiAgICAgICAgICAgICAgICBrZXlBbGlhcyBzaWduaW5nS2V5QWxpYXMKICAgICAgICAgICAgICAgIGtleVBhc3N3b3JkIHNpZ25pbmdLZXlQYXNzd29yZAogICAgICAgICAgICB9CiAgICAgICAgfQoKICAgICAgICBidWlsZFR5cGVzLmRlYnVnLnNpZ25pbmdDb25maWcgPSBzaWduaW5nQ29uZmlncy5yZWxlYXNlCiAgICAgICAgYnVpbGRUeXBlcy5yZWxlYXNlLnNpZ25pbmdDb25maWcgPSBzaWduaW5nQ29uZmlncy5yZWxlYXNlCiAgICB9CgogICAgY29tcGlsZU9wdGlvbnMgewogICAgICAgIHNvdXJjZUNvbXBhdGliaWxpdHkgSmF2YVZlcnNpb24uVkVSU0lPTl8xNwogICAgICAgIHRhcmdldENvbXBhdGliaWxpdHkgSmF2YVZlcnNpb24uVkVSU0lPTl8xNwogICAgfQoKICAgIGJ1aWxkRmVhdHVyZXMgewogICAgICAgIHZpZXdCaW5kaW5nIHRydWUKICAgIH0KCiAgICBwYWNrYWdpbmcgewogICAgICAgIGpuaUxpYnMgewogICAgICAgICAgICB1c2VMZWdhY3lQYWNrYWdpbmcgPSB0cnVlCiAgICAgICAgfQogICAgfQoKICAgIGJ1aWxkVHlwZXMgewovLyAgICAgICAgZGVidWcgewovLyAgICAgICAgICAgIHNocmlua1Jlc291cmNlcyBmYWxzZQovLyAgICAgICAgICAgIG1pbmlmeUVuYWJsZWQgZmFsc2UKLy8gICAgICAgICAgICBwcm9ndWFyZEZpbGVzIGdldERlZmF1bHRQcm9ndWFyZEZpbGUoJ3Byb2d1YXJkLWFuZHJvaWQudHh0JyksICdwcm9ndWFyZC1ydWxlcy5wcm8nCi8vICAgICAgICB9CiAgICAgICAgcmVsZWFzZSB7CiAgICAgICAgICAgIG1pbmlmeUVuYWJsZWQgdHJ1ZQogICAgICAgICAgICBzaHJpbmtSZXNvdXJjZXMgdHJ1ZQogICAgICAgICAgICBwcm9ndWFyZEZpbGVzIGdldERlZmF1bHRQcm9ndWFyZEZpbGUoJ3Byb2d1YXJkLWFuZHJvaWQtb3B0aW1pemUudHh0JyksICdwcm9ndWFyZC1ydWxlcy5wcm8nCiAgICAgICAgfQogICAgfQoKICAgIGxpbnQgewogICAgICAgIGRpc2FibGUgJ01pc3NpbmdUcmFuc2xhdGlvbicKICAgICAgICBhYm9ydE9uRXJyb3IgZmFsc2UgICAgICAgIC8vIGRvIG5vdCBibG9jayByZWxlYXNlIGJ1aWxkcyBvbiBsaW50IGVycm9ycwogICAgICAgIGNoZWNrUmVsZWFzZUJ1aWxkcyBmYWxzZSAgLy8gc2tpcCBsaW50Vml0YWxSZWxlYXNlIChmYXN0ZXIgYnVpbGRzKQogICAgfQp9CgpkZXBlbmRlbmNpZXMgewogICAgLy8gTmF0aXZlIG1vZHVsZXMKICAgIGltcGxlbWVudGF0aW9uIHByb2plY3QoJzp0Y3BkdW1wJykKICAgIGltcGxlbWVudGF0aW9uIHByb2plY3QoJzp3ZWJzZXJ2ZXInKQoKICAgIC8vIEFuZHJvaWRYIGNvbXBvbmVudHMKICAgIGltcGxlbWVudGF0aW9uICdhbmRyb2lkeC5hcHBjb21wYXQ6YXBwY29tcGF0OjEuNy4wJwogICAgaW1wbGVtZW50YXRpb24gJ2FuZHJvaWR4LmNhcmR2aWV3OmNhcmR2aWV3OjEuMC4wJwogICAgaW1wbGVtZW50YXRpb24gJ2FuZHJvaWR4LmNvbnN0cmFpbnRsYXlvdXQ6Y29uc3RyYWludGxheW91dDoyLjEuNCcKICAgIGltcGxlbWVudGF0aW9uICdhbmRyb2lkeC5mcmFnbWVudDpmcmFnbWVudDoxLjguMScKICAgIC8vICJmcmFnbWVudC1rdHgiIGlzIG5vdCB1c2VkIGJ1dCB3YXMgYWRkZWQgdG8gZml4IHRoZSBmb2xsb3dpbmcgZGVwZW5kZW5jeSBlcnJvcjoKICAgIC8vIER1cGxpY2F0ZSBjbGFzcyBhbmRyb2lkeC5saWZlY3ljbGUuVmlld01vZGVsTGF6eSBmb3VuZCBpbiBtb2R1bGVzIGxpZmVjeWNsZS12aWV3bW9kZWwtMi41LjAtcnVudGltZSAoYW5kcm9pZHgubGlmZWN5Y2xlOmxpZmVjeWNsZS12aWV3bW9kZWw6Mi41LjApIGFuZCBsaWZlY3ljbGUtdmlld21vZGVsLWt0eC0yLjMuMS1ydW50aW1lCiAgICBpbXBsZW1lbnRhdGlvbiAnYW5kcm9pZHguZnJhZ21lbnQ6ZnJhZ21lbnQta3R4OjEuOC4xJwogICAgaW1wbGVtZW50YXRpb24gJ2FuZHJvaWR4LnBhZ2luZzpwYWdpbmctcnVudGltZTozLjMuMCcKICAgIGltcGxlbWVudGF0aW9uICdhbmRyb2lkeC5wcmVmZXJlbmNlOnByZWZlcmVuY2U6MS4yLjEnCiAgICBpbXBsZW1lbnRhdGlvbiAnYW5kcm9pZHgucmVjeWNsZXJ2aWV3OnJlY3ljbGVydmlldzoxLjMuMicKICAgIGltcGxlbWVudGF0aW9uICdhbmRyb2lkeC5yb29tOnJvb20tcnVudGltZToyLjYuMScKICAgIGltcGxlbWVudGF0aW9uICdhbmRyb2lkeC5yb29tOnJvb20tcGFnaW5nOjIuNi4xJwogICAgYW5ub3RhdGlvblByb2Nlc3NvciAnYW5kcm9pZHgucm9vbTpyb29tLWNvbXBpbGVyOjIuNi4xJwogICAgaW1wbGVtZW50YXRpb24gJ2FuZHJvaWR4LnN3aXBlcmVmcmVzaGxheW91dDpzd2lwZXJlZnJlc2hsYXlvdXQ6MS4xLjAnCiAgICBpbXBsZW1lbnRhdGlvbiAnYW5kcm9pZHgud29yazp3b3JrLXJ1bnRpbWU6Mi44LjEnCiAgICBpbXBsZW1lbnRhdGlvbiAnY29tLmdvb2dsZS5hbmRyb2lkLm1hdGVyaWFsOm1hdGVyaWFsOjEuMTIuMCcKCiAgICAvLyBDb2xsZWN0aW9ucyByZWxhdGVkCiAgICBpbXBsZW1lbnRhdGlvbiBsaWJzLmd1YXZhCiAgICAvLyBOZXR3b3JrIHJlbGF0ZWQKICAgIGltcGxlbWVudGF0aW9uIGxpYnMub2todHRwMy5va2h0dHAKICAgIC8vIExvZ2dpbmcgcmVsYXRlZAogICAgaW1wbGVtZW50YXRpb24gbGlicy50aW1iZXIKICAgIGlmIChrZXlTdG9yZURlZmluZWQpIHsKICAgICAgICBpbXBsZW1lbnRhdGlvbiBwcm9qZWN0KCc6c2VudHJ5c3R1YicpCiAgICB9IGVsc2UgewogICAgICAgIGltcGxlbWVudGF0aW9uIHBsYXRmb3JtKCdpby5zZW50cnk6c2VudHJ5LWJvbTo4LjUyLjAnKQogICAgICAgIGltcGxlbWVudGF0aW9uKCdpby5zZW50cnk6c2VudHJ5LWFuZHJvaWQnKQogICAgICAgIGltcGxlbWVudGF0aW9uKCdpby5zZW50cnk6c2VudHJ5LWFuZHJvaWQtZnJhZ21lbnQnKQogICAgICAgIGltcGxlbWVudGF0aW9uKCdpby5zZW50cnk6c2VudHJ5LWFuZHJvaWQtdGltYmVyJykKICAgIH0KCiAgICAvLyBSb290IHJlbGF0ZWQKICAgIGltcGxlbWVudGF0aW9uIGxpYnMubGlic3UKCiAgICAvLyBUZXN0IHJlbGF0ZWQKICAgIHRlc3RJbXBsZW1lbnRhdGlvbiBsaWJzLmp1bml0CiAgICB0ZXN0SW1wbGVtZW50YXRpb24gbGlicy5qc29uCiAgICBhbmRyb2lkVGVzdEltcGxlbWVudGF0aW9uIGxpYnMuYnVuZGxlcy5hbmRyb2lkeC50ZXN0CiAgICBhbmRyb2lkVGVzdEltcGxlbWVudGF0aW9uIGxpYnMuanVuaXQKfQo=
+plugins {
+    id 'com.android.application'
+}
+
+boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
+        project.hasProperty('signingStorePassword') &&
+        project.hasProperty('signingKeyAlias') &&
+        project.hasProperty('signingKeyPassword')
+
+repositories {
+    maven {
+        url 'https://jitpack.io'
+    }
+}
+
+android {
+    compileSdk 36
+    ndkVersion '28.1.13356709'
+    namespace 'org.adaway'
+
+    defaultConfig {
+        applicationId 'com.wxcvm.Adaway'
+        minSdk 30
+        targetSdk 35
+        ndk {
+            abiFilters "arm64-v8a"
+        }
+        versionCode libs.versions.appCode.get() as int
+        versionName libs.versions.appName.get()
+
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments = [
+                        "room.schemaLocation": "$projectDir/schemas".toString(),
+                        "room.incremental"   : "true"
+                ]
+            }
+        }
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    /*
+     * To sign release build, create file gradle.properties in ~/.gradle/ with this content:
+     *
+     * signingStoreLocation=/home/key.store
+     * signingStorePassword=xxx
+     * signingKeyAlias=alias
+     * signingKeyPassword=xxx
+     */
+    if (keyStoreDefined) {
+        println "Found signature properties in gradle.properties. Build will be signed."
+
+        signingConfigs {
+            release {
+                storeFile file(signingStoreLocation)
+                storePassword signingStorePassword
+                keyAlias signingKeyAlias
+                keyPassword signingKeyPassword
+            }
+        }
+
+        buildTypes.debug.signingConfig = signingConfigs.release
+        buildTypes.release.signingConfig = signingConfigs.release
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    buildTypes {
+//        debug {
+//            shrinkResources false
+//            minifyEnabled false
+//            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+//        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    lint {
+        disable 'MissingTranslation'
+        abortOnError false        // do not block release builds on lint errors
+        checkReleaseBuilds false  // skip lintVitalRelease (faster builds)
+    }
+}
+
+dependencies {
+    // Native modules
+    implementation project(':tcpdump')
+    implementation project(':webserver')
+
+    // AndroidX components
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.cardview:cardview:1.0.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.fragment:fragment:1.8.1'
+    // "fragment-ktx" is not used but was added to fix the following dependency error:
+    // Duplicate class androidx.lifecycle.ViewModelLazy found in modules lifecycle-viewmodel-2.5.0-runtime (androidx.lifecycle:lifecycle-viewmodel:2.5.0) and lifecycle-viewmodel-ktx-2.3.1-runtime
+    implementation 'androidx.fragment:fragment-ktx:1.8.1'
+    implementation 'androidx.paging:paging-runtime:3.3.0'
+    implementation 'androidx.preference:preference:1.2.1'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.room:room-runtime:2.6.1'
+    implementation 'androidx.room:room-paging:2.6.1'
+    annotationProcessor 'androidx.room:room-compiler:2.6.1'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.work:work-runtime:2.8.1'
+    implementation 'com.google.android.material:material:1.12.0'
+
+    // Collections related
+    implementation libs.guava
+    // Network related
+    implementation libs.okhttp3.okhttp
+    // Logging related
+    implementation libs.timber
+    if (keyStoreDefined) {
+        implementation project(':sentrystub')
+    } else {
+        implementation platform('io.sentry:sentry-bom:8.52.0')
+        implementation('io.sentry:sentry-android')
+        implementation('io.sentry:sentry-android-fragment')
+        implementation('io.sentry:sentry-android-timber')
+    }
+
+    // Root related
+    implementation libs.libsu
+
+    // Test related
+    testImplementation libs.junit
+    testImplementation libs.json
+    androidTestImplementation libs.bundles.androidx.test
+    androidTestImplementation libs.junit
+}

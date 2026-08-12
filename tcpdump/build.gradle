@@ -1,1 +1,68 @@
-YXBwbHkgcGx1Z2luOiAnY29tLmFuZHJvaWQubGlicmFyeScKCmFuZHJvaWQgewogICAgc291cmNlU2V0cyB7CiAgICAgICAgbWFpbiB7CiAgICAgICAgICAgIGpuaUxpYnMuc3JjRGlycyA9IFsnbGlicyddCiAgICAgICAgfQogICAgfQoKICAgIGNvbXBpbGVTZGsgMzYKICAgIG5ka1ZlcnNpb24gJzI4LjEuMTMzNTY3MDknCiAgICBuYW1lc3BhY2UgJ29yZy5hZGF3YXkubGlicGNhcCcKCiAgICBkZWZhdWx0Q29uZmlnIHsKICAgICAgICBtaW5TZGtWZXJzaW9uIDMwCiAgICAgICAgdGFyZ2V0U2RrIDM1CiAgICB9CgogICAgZXh0ZXJuYWxOYXRpdmVCdWlsZCB7CiAgICAgICAgbmRrQnVpbGQgewogICAgICAgICAgICBwYXRoICdqbmkvQW5kcm9pZC5taycKICAgICAgICB9CiAgICB9Cgp9CgovKioKICogVGFzayB0byByZW5hbWUgZXhlY3V0YWJsZXMgZnJvbSBoZWxsb193b3JsZCB0byBsaWJoZWxsb193b3JsZF9leGVjLnNvCiAqIElmIHRoZXkgbG9vayBsaWtlIGxpYnJhcmllcywgdGhleSBhcmUgcGFja2FnZWQgaW4gdGhlIGFwayBhbmQgZGVwbG95ZWQgb24gdGhlIGRldmljZSBpbiB0aGUgbGliIGZvbGRlciEKICoKICogQlVHIEZJWDogYXBwbHkgdGhlIHNhbWUgTGlicmFyeUpuaUxpYnNUYXNrIOKGkiB0YXNrLW5hbWUtbWF0Y2hpbmcgZml4CiAqIHRoYXQgd2Vic2VydmVyL2J1aWxkLmdyYWRsZSBhbHJlYWR5IHJlY2VpdmVkLiBEZXBlbmRpbmcgb24gYW4gaW50ZXJuYWwKICogQUdQIGNsYXNzIHNpbGVudGx5IGJyZWFrcyBhY3Jvc3MgQUdQIHVwZ3JhZGVzIGFuZCBjYW4gY2F1c2UgdGhlIHJlYWwKICogZXhlY3V0YWJsZSB0byBuZXZlciBnZXQgcGFja2FnZWQuCiAqLwpkZWYgcmVuYW1lSm5pTGliQXNFeGVjdXRhYmxlID0gdGFza3MucmVnaXN0ZXIoJ3JlbmFtZUpuaUxpYkFzRXhlY3V0YWJsZScsIENvcHkpIHsKICAgIGRlZiBmbGF2b3IgPSBncmFkbGUuc3RhcnRQYXJhbWV0ZXIudGFza1JlcXVlc3RzLnRvU3RyaW5nKCkuY29udGFpbnNJZ25vcmVDYXNlKCJkZWJ1ZyIpID8gImRlYnVnIiA6ICJyZWxlYXNlIgogICAgZGVmIGJ1aWxkRm9sZGVyID0gbGF5b3V0LmJ1aWxkRGlyZWN0b3J5LmRpcigiaW50ZXJtZWRpYXRlcy9uZGtCdWlsZC8ke2ZsYXZvcn0vb2JqL2xvY2FsIikKCiAgICBkZXBlbmRzT24gIjoke3Byb2plY3QubmFtZX06ZXh0ZXJuYWxOYXRpdmVCdWlsZCR7Zmxhdm9yLnN1YnN0cmluZygwLCAxKS50b1VwcGVyQ2FzZSgpfSR7Zmxhdm9yLnN1YnN0cmluZygxKX0iCgogICAgb3V0cHV0cy51cFRvRGF0ZVdoZW4geyBmYWxzZSB9CgogICAgZnJvbShidWlsZEZvbGRlcikgewogICAgICAgIGV4Y2x1ZGUgIioqL29ianMiCiAgICAgICAgZXhjbHVkZSAiKiovb2Jqcy1kZWJ1ZyIKICAgICAgICBleGNsdWRlICIqKi8qLmEiCiAgICAgICAgZXhjbHVkZSAiKiovKi5kIgogICAgICAgIGV4Y2x1ZGUgIioqLyoubyIKICAgICAgICBleGNsdWRlICIqKi8qLnNvIgogICAgICAgIGV4Y2x1ZGUgIioqLyoudHh0IgogICAgfQoKICAgIGludG8gYnVpbGRGb2xkZXIKCiAgICByZW5hbWUgJyguKyknLCAnbGliJDFfZXhlYy5zbycKCiAgICBlYWNoRmlsZSB7CiAgICAgICAgcHJpbnRsbiAiUmVwbGFjaW5nICR7aXQuZ2V0UGF0aCgpfSBmcm9tICR7Zmxhdm9yfSBuZGtCdWlsZCBkaXJlY3RvcnkiCiAgICB9Cn0KCnRhc2tzLmNvbmZpZ3VyZUVhY2ggeyB0IC0+CiAgICBpZiAodC5uYW1lLm1hdGNoZXMoLyg/aSkuKm1lcmdlLiooSm5pTGliRm9sZGVyc3xOYXRpdmVMaWJzKS4qLykpIHsKICAgICAgICB0LmRlcGVuZHNPbihyZW5hbWVKbmlMaWJBc0V4ZWN1dGFibGUpCiAgICB9Cn0KCg==
+apply plugin: 'com.android.library'
+
+android {
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['libs']
+        }
+    }
+
+    compileSdk 36
+    ndkVersion '28.1.13356709'
+    namespace 'org.adaway.libpcap'
+
+    defaultConfig {
+        minSdkVersion 30
+        targetSdk 35
+    }
+
+    externalNativeBuild {
+        ndkBuild {
+            path 'jni/Android.mk'
+        }
+    }
+
+}
+
+/**
+ * Task to rename executables from hello_world to libhello_world_exec.so
+ * If they look like libraries, they are packaged in the apk and deployed on the device in the lib folder!
+ *
+ * BUG FIX: apply the same LibraryJniLibsTask → task-name-matching fix
+ * that webserver/build.gradle already received. Depending on an internal
+ * AGP class silently breaks across AGP upgrades and can cause the real
+ * executable to never get packaged.
+ */
+def renameJniLibAsExecutable = tasks.register('renameJniLibAsExecutable', Copy) {
+    def flavor = gradle.startParameter.taskRequests.toString().containsIgnoreCase("debug") ? "debug" : "release"
+    def buildFolder = layout.buildDirectory.dir("intermediates/ndkBuild/${flavor}/obj/local")
+
+    dependsOn ":${project.name}:externalNativeBuild${flavor.substring(0, 1).toUpperCase()}${flavor.substring(1)}"
+
+    outputs.upToDateWhen { false }
+
+    from(buildFolder) {
+        exclude "**/objs"
+        exclude "**/objs-debug"
+        exclude "**/*.a"
+        exclude "**/*.d"
+        exclude "**/*.o"
+        exclude "**/*.so"
+        exclude "**/*.txt"
+    }
+
+    into buildFolder
+
+    rename '(.+)', 'lib$1_exec.so'
+
+    eachFile {
+        println "Replacing ${it.getPath()} from ${flavor} ndkBuild directory"
+    }
+}
+
+tasks.configureEach { t ->
+    if (t.name.matches(/(?i).*merge.*(JniLibFolders|NativeLibs).*/)) {
+        t.dependsOn(renameJniLibAsExecutable)
+    }
+}
+
