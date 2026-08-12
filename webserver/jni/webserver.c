@@ -465,7 +465,10 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
     addr_to_proc_v6mapped(&c->loc, loc_m6, sizeof(loc_m6));
     addr_to_proc_v6mapped(&c->rem, rem_m6, sizeof(rem_m6));
 
-    /* Pass 0: /proc/net/tcp6 with the v4-mapped form (real uid). */
+    /* Pass 0: /proc/net/tcp6 with the v4-mapped form (real uid).
+       NOTE: /proc rows are client-first (local = the connecting end,
+       remote = our listener), while c->loc is our listener and c->rem
+       the client — so compare l against rem_* and r against loc_*. */
     FILE *f = fopen("/proc/net/tcp6", "r");
     if (f) {
         char line[512];
@@ -476,7 +479,7 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
             if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %lu %*s %*s",
                        l, r, &state, &uid) == 4) {
                 if (state == 1 /* ESTABLISHED */ &&
-                    strcmp(l, loc_m6) == 0 && strcmp(r, rem_m6) == 0) {
+                    strcmp(l, rem_m6) == 0 && strcmp(r, loc_m6) == 0) {
                     fclose(f);
                     LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp6/mapped)",
                              loc_m6, rem_m6, (int)uid);
@@ -498,7 +501,7 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
             if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %lu %*s %*s",
                        l, r, &state, &uid) == 4) {
                 if (state == 1 /* ESTABLISHED */ &&
-                    strcmp(l, loc_v4) == 0 && strcmp(r, rem_v4) == 0) {
+                    strcmp(l, rem_v4) == 0 && strcmp(r, loc_v4) == 0) {
                     fclose(f);
                     LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp)",
                              loc_v4, rem_v4, (int)uid);
