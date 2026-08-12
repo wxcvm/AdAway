@@ -79,17 +79,12 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
-        <!-- New Material 3 Compose UI (debug entry) -->
+        <!-- New Material 3 Compose UI (no launcher icon; entered via deep link or adb for now) -->
         <activity
             android:name=".ui.compose.MainActivity"
-            android:exported="true"
+            android:exported="false"
             android:launchMode="singleTop"
-            android:theme="@style/Theme.AdAway.NoActionBar">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/Theme.AdAway.NoActionBar" />
         <activity
             android:name=".ui.welcome.WelcomeActivity"
             android:exported="false"
