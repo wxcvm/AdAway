@@ -36,8 +36,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.adaway.R
 import java.util.Locale
 
 /**
@@ -57,17 +59,17 @@ internal data class BlockCategory(
 internal fun buildCategories(stats: ServerStats): List<BlockCategory> {
     val theme = MaterialTheme.colorScheme
     return listOf(
-        BlockCategory("Images", stats.blockedImages, theme.primary),
-        BlockCategory("Scripts", stats.blockedScripts, theme.secondary),
-        BlockCategory("Styles", stats.blockedStyles, theme.tertiary),
-        BlockCategory("Fonts", stats.blockedFonts, theme.primary.copy(alpha = 0.7f)),
-        BlockCategory("Media", stats.blockedMedia, theme.secondary.copy(alpha = 0.7f)),
-        BlockCategory("API", stats.blockedApi, theme.tertiary.copy(alpha = 0.7f)),
-        BlockCategory("Telemetry", stats.blockedTelemetry, Color(0xFFE6A23C)),
-        BlockCategory("Heartbeat", stats.blockedHeartbeat, Color(0xFF67C23A)),
-        BlockCategory("Config", stats.blockedConfig, Color(0xFF909399)),
-        BlockCategory("WebSocket/SSE", stats.blockedWsSse, Color(0xFF9C27B0)),
-        BlockCategory("Other", stats.blockedOther, Color(0xFF795548)),
+        BlockCategory(stringResource(R.string.compose_stats_type_images), stats.blockedImages, theme.primary),
+        BlockCategory(stringResource(R.string.compose_stats_type_scripts), stats.blockedScripts, theme.secondary),
+        BlockCategory(stringResource(R.string.compose_stats_type_styles), stats.blockedStyles, theme.tertiary),
+        BlockCategory(stringResource(R.string.compose_stats_type_fonts), stats.blockedFonts, theme.primary.copy(alpha = 0.7f)),
+        BlockCategory(stringResource(R.string.compose_stats_type_media), stats.blockedMedia, theme.secondary.copy(alpha = 0.7f)),
+        BlockCategory(stringResource(R.string.compose_stats_type_api), stats.blockedApi, theme.tertiary.copy(alpha = 0.7f)),
+        BlockCategory(stringResource(R.string.compose_stats_type_telemetry), stats.blockedTelemetry, Color(0xFFE6A23C)),
+        BlockCategory(stringResource(R.string.compose_stats_type_heartbeat), stats.blockedHeartbeat, Color(0xFF67C23A)),
+        BlockCategory(stringResource(R.string.compose_stats_type_config), stats.blockedConfig, Color(0xFF909399)),
+        BlockCategory(stringResource(R.string.compose_stats_type_ws), stats.blockedWsSse, Color(0xFF9C27B0)),
+        BlockCategory(stringResource(R.string.compose_stats_type_other), stats.blockedOther, Color(0xFF795548)),
     ).filter { it.count > 0 }
 }
 
@@ -87,7 +89,7 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
     Scaffold(
         topBar = {
             LargeTopAppBar(
-                title = { Text("Statistics") },
+                title = { Text(stringResource(R.string.compose_stats_title)) },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),
@@ -111,7 +113,7 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "Hosts list",
+                        stringResource(R.string.compose_stats_hosts_list),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -120,9 +122,9 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        CountLabel("Blocked", blockedCount)
-                        CountLabel("Allowed", allowedCount)
-                        CountLabel("Redirected", redirectCount)
+                        CountLabel(stringResource(R.string.compose_hosts_blocked), blockedCount)
+                        CountLabel(stringResource(R.string.compose_hosts_allowed), allowedCount)
+                        CountLabel(stringResource(R.string.compose_hosts_redirected), redirectCount)
                     }
                 }
             }
@@ -141,7 +143,7 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
-                        "Blocked requests by type",
+                        stringResource(R.string.compose_stats_blocked_by_type),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.align(Alignment.Start),
@@ -227,7 +229,7 @@ private fun DonutChart(stats: ServerStats) {
                     ),
                 )
                 Text(
-                    "total",
+                    stringResource(R.string.compose_stats_total),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -299,7 +301,7 @@ private fun EmptyChartPlaceholder() {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "No blocked requests recorded yet",
+            stringResource(R.string.compose_stats_no_data),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -316,16 +318,19 @@ private fun ServerDetailsCard(stats: ServerStats) {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                "Web server details",
+                stringResource(R.string.compose_stats_details),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
-            DetailRow("Uptime", formatUptime(stats.uptimeSeconds))
-            DetailRow("Total requests", stats.totalRequests)
-            DetailRow("Connections", "${stats.totalConnections} (${stats.activeConnections} active)")
-            DetailRow("SNI certs issued", stats.sniCertsIssued)
-            DetailRow("Block images", stats.blockImageCount)
+            DetailRow(stringResource(R.string.compose_stats_uptime), formatUptime(stats.uptimeSeconds))
+            DetailRow(stringResource(R.string.compose_stats_requests), stats.totalRequests)
+            DetailRow(
+                stringResource(R.string.compose_stats_connections),
+                stringResource(R.string.compose_stats_connections_active, stats.totalConnections, stats.activeConnections),
+            )
+            DetailRow(stringResource(R.string.compose_stats_sni), stats.sniCertsIssued)
+            DetailRow(stringResource(R.string.compose_stats_images), stats.blockImageCount)
         }
     }
 }

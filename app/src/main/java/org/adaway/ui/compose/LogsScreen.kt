@@ -22,6 +22,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
@@ -31,21 +32,24 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import org.adaway.R
 import org.adaway.db.entity.ListType
 
 /**
  * Logs screen: live DNS request log (tcpdump-backed), with a record
- * toggle, refresh and clear actions. Reuses the existing
+ * toggle, refresh, clear and type filter. Reuses the existing
  * AdBlockModel.getLogs() pipeline.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,6 +59,7 @@ fun LogsScreen(viewModel: StatsViewModel) {
     var entries by remember { mutableStateOf<List<Pair<String, ListType?>>>(emptyList()) }
     var recording by remember { mutableStateOf(model.isRecordingLogs()) }
     var refreshing by remember { mutableStateOf(false) }
+    var filter by remember { mutableIntStateOf(0) }
 
     fun refresh() {
         viewModel.refreshLogEntries { newEntries -> entries = newEntries }
@@ -70,10 +75,21 @@ fun LogsScreen(viewModel: StatsViewModel) {
         }
     }
 
+    val filters = listOf(
+        FilterOption(R.string.compose_logs_filter_all, null),
+        FilterOption(R.string.compose_logs_filter_blocked, ListType.BLOCKED),
+        FilterOption(R.string.compose_logs_filter_allowed, ListType.ALLOWED),
+        FilterOption(R.string.compose_logs_filter_redirected, ListType.REDIRECTED),
+    )
+    val activeFilter = filters[filter]
+    val visibleEntries = remember(entries, filter) {
+        entries.filter { activeFilter.type == null || it.second == activeFilter.type }
+    }
+
     Scaffold(
         topBar = {
             LargeTopAppBar(
-                title = { Text("Logs") },
+                title = { Text(stringResource(R.string.compose_logs_title)) },
                 actions = {
                     FilledTonalIconButton(onClick = {
                         model.setRecordingLogs(!model.isRecordingLogs())
@@ -82,14 +98,16 @@ fun LogsScreen(viewModel: StatsViewModel) {
                     }) {
                         Icon(
                             if (recording) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = if (recording) "Pause recording" else "Start recording",
+                            contentDescription = stringResource(
+                                if (recording) R.string.compose_logs_pause else R.string.compose_logs_start,
+                            ),
                         )
                     }
                     FilledTonalIconButton(onClick = {
                         model.clearLogs()
                         entries = emptyList()
                     }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Clear logs")
+                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.compose_logs_clear))
                     }
                 },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
@@ -111,14 +129,15 @@ fun LogsScreen(viewModel: StatsViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    if (recording) "● Recording DNS queries" else "○ Recording paused",
+                    if (recording) stringResource(R.string.compose_logs_recording)
+                    else stringResource(R.string.compose_logs_paused),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (recording) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "${entries.size} entries",
+                    stringResource(R.string.compose_logs_entries, entries.size),
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontFamily = FontFamily.Monospace,
                     ),
@@ -126,17 +145,46 @@ fun LogsScreen(viewModel: StatsViewModel) {
                 )
             }
 
-            if (entries.isEmpty()) {
-                EmptyLogsPlaceholder(recording)
+            // Type filter row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                filters.forEachIndexed { index, option ->
+                    FilterChip(
+                        selected = index == filter,
+                        onClick = { filter = index },
+                        label = { Text(stringResource(option.labelRes)) },
+                    )
+                }
+            }
+
+            if (visibleEntries.isEmpty()) {
+                if (entries.isEmpty()) {
+                    EmptyLogsPlaceholder(recording)
+                } else {
+                    // Entries exist but none match the active filter
+                    Text(
+                        stringResource(R.string.compose_logs_empty_filtered),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    contentPadding = PaddingValues(
                         horizontal = 8.dp,
                         vertical = 4.dp,
                     ),
                 ) {
-                    items(entries, key = { it.first }) { (host, type) ->
+                    items(visibleEntries, key = { it.first }) { (host, type) ->
                         LogRow(host = host, type = type, onClick = {
                             // TODO: open host action (whitelist etc.) in a later step
                         })
@@ -146,6 +194,11 @@ fun LogsScreen(viewModel: StatsViewModel) {
         }
     }
 }
+
+private data class FilterOption(
+    @androidx.annotation.StringRes val labelRes: Int,
+    val type: ListType?,
+)
 
 @Composable
 private fun LogRow(host: String, type: ListType?, onClick: () -> Unit) {
@@ -172,7 +225,12 @@ private fun LogRow(host: String, type: ListType?, onClick: () -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Text(
-                typeLabel(type),
+                when (type) {
+                    ListType.BLOCKED -> stringResource(R.string.compose_logs_filter_blocked)
+                    ListType.ALLOWED -> stringResource(R.string.compose_logs_filter_allowed)
+                    ListType.REDIRECTED -> stringResource(R.string.compose_logs_filter_redirected)
+                    null -> stringResource(R.string.compose_logs_filter_unknown)
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = typeColor(type),
             )
@@ -186,13 +244,6 @@ private fun TypeDot(type: ListType?) {
     androidx.compose.foundation.Canvas(modifier = Modifier.size(8.dp)) {
         drawCircle(color = color)
     }
-}
-
-private fun typeLabel(type: ListType?): String = when (type) {
-    ListType.BLOCKED -> "blocked"
-    ListType.ALLOWED -> "allowed"
-    ListType.REDIRECTED -> "redirected"
-    null -> "unknown"
 }
 
 @Composable
@@ -213,14 +264,15 @@ private fun EmptyLogsPlaceholder(recording: Boolean) {
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            if (recording) "No DNS queries captured yet" else "Recording is paused",
+            if (recording) stringResource(R.string.compose_logs_empty_recording)
+            else stringResource(R.string.compose_logs_empty_paused),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            if (recording) "Browse the web and queries will appear here."
-            else "Tap play in the top bar to start capturing.",
+            if (recording) stringResource(R.string.compose_logs_empty_recording_hint)
+            else stringResource(R.string.compose_logs_empty_paused_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

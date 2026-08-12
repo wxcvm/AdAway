@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 新 Compose UI 字符串（中文） -->
+
+    <!-- 导航 -->
+    <string name="compose_nav_overview">概览</string>
+    <string name="compose_nav_stats">统计</string>
+    <string name="compose_nav_logs">日志</string>
+    <string name="compose_nav_rules">规则</string>
+
+    <!-- 概览 -->
+    <string name="compose_overview_title">AdAway</string>
+    <string name="compose_status_ad_blocking">广告拦截</string>
+    <string name="compose_status_active">生效中</string>
+    <string name="compose_status_not_applied">未生效</string>
+    <string name="compose_hosts_blocked">已拦截</string>
+    <string name="compose_hosts_allowed">已允许</string>
+    <string name="compose_hosts_redirected">已重定向</string>
+    <string name="compose_web_server">网络服务器</string>
+    <string name="compose_web_server_not_running">未运行</string>
+    <string name="compose_web_server_loading">运行中 · 正在获取统计…</string>
+    <string name="compose_web_server_running">运行中 · 拦截 %1$d · 签发 %2$d 个证书</string>
+    <string name="compose_actions">操作</string>
+    <string name="compose_sync_hosts">同步规则</string>
+    <string name="compose_sync_hosts_subtitle">应用最新规则源到 hosts 文件</string>
+    <string name="compose_ws_settings">网络服务器设置</string>
+    <string name="compose_ws_settings_subtitle">TLS、占位图、统计</string>
+    <string name="compose_legacy_ui">经典界面</string>
+    <string name="compose_legacy_ui_subtitle">打开旧版界面</string>
+
+    <!-- 统计 -->
+    <string name="compose_stats_title">统计</string>
+    <string name="compose_stats_hosts_list">规则列表</string>
+    <string name="compose_stats_blocked_by_type">按类型拦截请求</string>
+    <string name="compose_stats_no_data">暂无拦截记录</string>
+    <string name="compose_stats_total">合计</string>
+    <string name="compose_stats_details">网络服务器详情</string>
+    <string name="compose_stats_uptime">运行时间</string>
+    <string name="compose_stats_requests">请求总数</string>
+    <string name="compose_stats_connections">连接数</string>
+    <string name="compose_stats_connections_active">%1$d（%2$d 活跃）</string>
+    <string name="compose_stats_sni">SNI证书签发</string>
+    <string name="compose_stats_images">占位图数量</string>
+    <string name="compose_stats_type_images">图片</string>
+    <string name="compose_stats_type_scripts">脚本</string>
+    <string name="compose_stats_type_styles">样式</string>
+    <string name="compose_stats_type_fonts">字体</string>
+    <string name="compose_stats_type_media">媒体</string>
+    <string name="compose_stats_type_api">API</string>
+    <string name="compose_stats_type_telemetry">遥测</string>
+    <string name="compose_stats_type_heartbeat">心跳</string>
+    <string name="compose_stats_type_config">配置</string>
+    <string name="compose_stats_type_ws">WebSocket/SSE</string>
+    <string name="compose_stats_type_other">其他</string>
+
+    <!-- 日志 -->
+    <string name="compose_logs_title">日志</string>
+    <string name="compose_logs_recording">● 正在记录DNS查询</string>
+    <string name="compose_logs_paused">○ 记录已暂停</string>
+    <string name="compose_logs_entries">%1$d 条记录</string>
+    <string name="compose_logs_empty_recording">暂无DNS查询记录</string>
+    <string name="compose_logs_empty_recording_hint">浏览网页后，查询记录将显示在这里。</string>
+    <string name="compose_logs_empty_paused">记录已暂停</string>
+    <string name="compose_logs_empty_paused_hint">点击顶部的播放按钮开始记录。</string>
+    <string name="compose_logs_start">开始记录</string>
+    <string name="compose_logs_pause">暂停记录</string>
+    <string name="compose_logs_clear">清空日志</string>
+    <string name="compose_logs_filter_all">全部</string>
+    <string name="compose_logs_filter_blocked">已拦截</string>
+    <string name="compose_logs_filter_allowed">已允许</string>
+    <string name="compose_logs_filter_redirected">已重定向</string>
+    <string name="compose_logs_filter_unknown">未知</string>
+    <string name="compose_logs_empty_filtered">没有符合该筛选条件的记录</string>
+
+    <!-- 规则 -->
+    <string name="compose_rules_title">规则</string>
+    <string name="compose_rules_whitelist">白名单</string>
+    <string name="compose_rules_blacklist">黑名单</string>
+    <string name="compose_rules_redirect">重定向</string>
+    <string name="compose_rules_sources">规则源</string>
+    <string name="compose_rules_empty_whitelist">暂无白名单域名</string>
+    <string name="compose_rules_empty_blacklist">暂无黑名单域名</string>
+    <string name="compose_rules_empty_redirect">暂无重定向规则</string>
+    <string name="compose_rules_user_total">用户规则：%1$d</string>
+    <string name="compose_rules_sources_hint">通过手动添加或规则源生成</string>
+    <string name="compose_rules_redirect_to">→ %1$s</string>
+</resources>

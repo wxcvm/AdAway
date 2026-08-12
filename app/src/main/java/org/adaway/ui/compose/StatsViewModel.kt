@@ -87,6 +87,9 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     // Host entries DAO (for log type lookup)
     val hostEntryDao = database.hostEntryDao()
 
+    // Hosts list DAO (for user-defined rules)
+    val hostsListItemDao = database.hostsListItemDao()
+
     // Ad block model (state, web server enabled, etc.)
     val adBlockModel: AdBlockModel = (application as org.adaway.AdAwayApplication).getAdBlockModel()
 
@@ -139,6 +142,19 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
                 adBlockModel.getLogs().map { host -> host to hostEntryDao.getTypeOfHost(host) }
             }
             onResult(logs)
+        }
+    }
+
+    /**
+     * Load user-defined rule entries (source_id == 1: manual whitelist,
+     * blacklist and redirect rules) on a background thread.
+     */
+    fun loadUserRules(onResult: (List<org.adaway.db.entity.HostListItem>) -> Unit) {
+        viewModelScope.launch {
+            val items = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                hostsListItemDao.getUserList()
+            }
+            onResult(items)
         }
     }
 

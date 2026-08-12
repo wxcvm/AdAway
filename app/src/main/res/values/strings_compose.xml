@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- New Compose UI strings (default: English) -->
+
+    <!-- Navigation -->
+    <string name="compose_nav_overview">Overview</string>
+    <string name="compose_nav_stats">Statistics</string>
+    <string name="compose_nav_logs">Logs</string>
+    <string name="compose_nav_rules">Rules</string>
+
+    <!-- Overview -->
+    <string name="compose_overview_title">AdAway</string>
+    <string name="compose_status_ad_blocking">Ad blocking</string>
+    <string name="compose_status_active">Active</string>
+    <string name="compose_status_not_applied">Not applied</string>
+    <string name="compose_hosts_blocked">Blocked</string>
+    <string name="compose_hosts_allowed">Allowed</string>
+    <string name="compose_hosts_redirected">Redirected</string>
+    <string name="compose_web_server">Web server</string>
+    <string name="compose_web_server_not_running">Not running</string>
+    <string name="compose_web_server_loading">Running · fetching stats…</string>
+    <string name="compose_web_server_running">Running · %1$d blocked · %2$d SNI certs</string>
+    <string name="compose_actions">Actions</string>
+    <string name="compose_sync_hosts">Synchronize hosts</string>
+    <string name="compose_sync_hosts_subtitle">Apply latest sources to hosts file</string>
+    <string name="compose_ws_settings">Web server settings</string>
+    <string name="compose_ws_settings_subtitle">TLS, block images, statistics</string>
+    <string name="compose_legacy_ui">Classic interface</string>
+    <string name="compose_legacy_ui_subtitle">Open the previous Java interface</string>
+
+    <!-- Statistics -->
+    <string name="compose_stats_title">Statistics</string>
+    <string name="compose_stats_hosts_list">Hosts list</string>
+    <string name="compose_stats_blocked_by_type">Blocked requests by type</string>
+    <string name="compose_stats_no_data">No blocked requests recorded yet</string>
+    <string name="compose_stats_total">total</string>
+    <string name="compose_stats_details">Web server details</string>
+    <string name="compose_stats_uptime">Uptime</string>
+    <string name="compose_stats_requests">Total requests</string>
+    <string name="compose_stats_connections">Connections</string>
+    <string name="compose_stats_connections_active">%1$d (%2$d active)</string>
+    <string name="compose_stats_sni">SNI certs issued</string>
+    <string name="compose_stats_images">Block images</string>
+    <string name="compose_stats_type_images">Images</string>
+    <string name="compose_stats_type_scripts">Scripts</string>
+    <string name="compose_stats_type_styles">Styles</string>
+    <string name="compose_stats_type_fonts">Fonts</string>
+    <string name="compose_stats_type_media">Media</string>
+    <string name="compose_stats_type_api">API</string>
+    <string name="compose_stats_type_telemetry">Telemetry</string>
+    <string name="compose_stats_type_heartbeat">Heartbeat</string>
+    <string name="compose_stats_type_config">Config</string>
+    <string name="compose_stats_type_ws">WebSocket/SSE</string>
+    <string name="compose_stats_type_other">Other</string>
+
+    <!-- Logs -->
+    <string name="compose_logs_title">Logs</string>
+    <string name="compose_logs_recording">● Recording DNS queries</string>
+    <string name="compose_logs_paused">○ Recording paused</string>
+    <string name="compose_logs_entries">%1$d entries</string>
+    <string name="compose_logs_empty_recording">No DNS queries captured yet</string>
+    <string name="compose_logs_empty_recording_hint">Browse the web and queries will appear here.</string>
+    <string name="compose_logs_empty_paused">Recording is paused</string>
+    <string name="compose_logs_empty_paused_hint">Tap play in the top bar to start capturing.</string>
+    <string name="compose_logs_start">Start recording</string>
+    <string name="compose_logs_pause">Pause recording</string>
+    <string name="compose_logs_clear">Clear logs</string>
+    <string name="compose_logs_filter_all">All</string>
+    <string name="compose_logs_filter_blocked">Blocked</string>
+    <string name="compose_logs_filter_allowed">Allowed</string>
+    <string name="compose_logs_filter_redirected">Redirected</string>
+    <string name="compose_logs_filter_unknown">unknown</string>
+    <string name="compose_logs_empty_filtered">No entries match this filter</string>
+
+    <!-- Rules -->
+    <string name="compose_rules_title">Rules</string>
+    <string name="compose_rules_whitelist">Whitelist</string>
+    <string name="compose_rules_blacklist">Blacklist</string>
+    <string name="compose_rules_redirect">Redirect</string>
+    <string name="compose_rules_sources">Rule sources</string>
+    <string name="compose_rules_empty_whitelist">No whitelisted hosts</string>
+    <string name="compose_rules_empty_blacklist">No blacklisted hosts</string>
+    <string name="compose_rules_empty_redirect">No redirect rules</string>
+    <string name="compose_rules_user_total">User rules: %1$d</string>
+    <string name="compose_rules_sources_hint">Added manually or via hosts sources</string>
+    <string name="compose_rules_redirect_to">→ %1$s</string>
+</resources>

@@ -1,5 +1,6 @@
 package org.adaway.ui.compose
 
+import android.content.Intent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -33,17 +35,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import org.adaway.util.WebServerUtils
+import org.adaway.R
+import org.adaway.ui.home.HomeActivity
+import org.adaway.ui.prefs.PrefsActivity
 import java.util.Locale
 
 /**
  * Overview: service status card, hosts statistics summary, web server
- * status and block image info. Information-first layout.
+ * status and quick actions. Information-first layout.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,11 +57,12 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
             LargeTopAppBar(
-                title = { Text("AdAway") },
+                title = { Text(stringResource(R.string.compose_overview_title)) },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),
@@ -83,9 +89,9 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                StatTile("Blocked", blockedCount, Modifier.weight(1f))
-                StatTile("Allowed", allowedCount, Modifier.weight(1f))
-                StatTile("Redirected", redirectCount, Modifier.weight(1f))
+                StatTile(stringResource(R.string.compose_hosts_blocked), blockedCount, Modifier.weight(1f))
+                StatTile(stringResource(R.string.compose_hosts_allowed), allowedCount, Modifier.weight(1f))
+                StatTile(stringResource(R.string.compose_hosts_redirected), redirectCount, Modifier.weight(1f))
             }
 
             // Web server card
@@ -103,22 +109,32 @@ fun OverviewScreen(viewModel: StatsViewModel) {
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "Actions",
+                        stringResource(R.string.compose_actions),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
                     ActionRow(
                         icon = Icons.Filled.Sync,
-                        label = "Synchronize hosts",
-                        subtitle = "Apply latest sources to hosts file",
-                        onClick = { /* sync wired up in a later step */ },
+                        label = stringResource(R.string.compose_sync_hosts),
+                        subtitle = stringResource(R.string.compose_sync_hosts_subtitle),
+                        onClick = { /* sync wired in a later step */ },
                     )
                     ActionRow(
                         icon = Icons.Outlined.Dns,
-                        label = "Web server settings",
-                        subtitle = "TLS, block images, statistics",
-                        onClick = { /* legacy prefs */ },
+                        label = stringResource(R.string.compose_ws_settings),
+                        subtitle = stringResource(R.string.compose_ws_settings_subtitle),
+                        onClick = {
+                            context.startActivity(Intent(context, PrefsActivity::class.java))
+                        },
+                    )
+                    ActionRow(
+                        icon = Icons.Outlined.Settings,
+                        label = stringResource(R.string.compose_legacy_ui),
+                        subtitle = stringResource(R.string.compose_legacy_ui_subtitle),
+                        onClick = {
+                            context.startActivity(Intent(context, HomeActivity::class.java))
+                        },
                     )
                 }
             }
@@ -143,24 +159,20 @@ private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
             modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .padding(0.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                androidx.compose.foundation.Canvas(Modifier.size(12.dp)) {
-                    drawCircle(color = color)
-                }
+            Canvas(modifier = Modifier.size(12.dp)) {
+                drawCircle(color = color)
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Ad blocking",
+                    stringResource(R.string.compose_status_ad_blocking),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    stateText.ifEmpty { if (running) "Active" else "Not applied" },
+                    stateText.ifEmpty {
+                        if (running) stringResource(R.string.compose_status_active)
+                        else stringResource(R.string.compose_status_not_applied)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -176,7 +188,7 @@ private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
 }
 
 @Composable
-private fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) {
+internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -226,13 +238,19 @@ private fun WebServerCard(running: Boolean, stats: ServerStats?) {
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text("Web server", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.compose_web_server),
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Text(
                     when {
-                        !running -> "Not running"
-                        stats == null -> "Running · fetching stats…"
-                        else -> "Running · ${stats.totalBlocked} blocked · " +
-                            "SNI ${stats.sniCertsIssued} certs"
+                        !running -> stringResource(R.string.compose_web_server_not_running)
+                        stats == null -> stringResource(R.string.compose_web_server_loading)
+                        else -> stringResource(
+                            R.string.compose_web_server_running,
+                            stats.totalBlocked,
+                            stats.sniCertsIssued,
+                        )
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -298,7 +316,7 @@ internal fun formatUptime(seconds: Long): String {
     }
 }
 
-// LiveData observe helper (non-androidx-activity flavor)
+// LiveData observe helper
 @Composable
 internal fun <T> androidx.lifecycle.LiveData<T>.observeAsStateCompat(initial: T) =
     androidx.compose.runtime.produceState(initial, this) {
