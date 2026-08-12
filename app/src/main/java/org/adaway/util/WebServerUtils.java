@@ -42,7 +42,14 @@ import com.topjohnwu.superuser.Shell;
 public class WebServerUtils {
 
     public static final String TEST_URL = "https://localhost/internal-test";
-    public static final String STATS_URL = "http://127.0.0.1/internal-stats";
+    /*
+     * Use the IPv4-mapped loopback ([::ffff:127.0.0.1]) instead of a
+     * plain 127.0.0.1 connection: on this device's kernel the loopback
+     * uid column in /proc/net/tcp is zeroed for plain IPv4 / IPv6
+     * connections, but preserved for v4-mapped sockets — which is what
+     * per-app statistics rely on to identify the requesting app.
+     */
+    public static final String STATS_URL = "http://[::ffff:127.0.0.1]/internal-stats";
     private static final String WEB_SERVER_EXECUTABLE = "webserver";
     private static final String CA_CERT_FILE = "localhost-2410.crt";
     private static final String CA_KEY_FILE  = "localhost-2410.key";
