@@ -57,6 +57,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
+    val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     Scaffold(
@@ -117,8 +118,9 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                     ActionRow(
                         icon = Icons.Filled.Sync,
                         label = stringResource(R.string.compose_sync_hosts),
-                        subtitle = stringResource(R.string.compose_sync_hosts_subtitle),
-                        onClick = { /* sync wired in a later step */ },
+                        subtitle = if (syncing) stringResource(R.string.compose_sync_hosts_running)
+                        else stringResource(R.string.compose_sync_hosts_subtitle),
+                        onClick = { viewModel.syncHosts() },
                     )
                     ActionRow(
                         icon = Icons.Outlined.Dns,

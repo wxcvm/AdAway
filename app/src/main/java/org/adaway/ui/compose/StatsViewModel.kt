@@ -222,13 +222,46 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Load a map sourceId -> label for rule rows (1 = "user"). */
+    /**
+     * Load a map sourceId -> label for rule rows (1 = "user").
+     */
     fun loadSourceLabels(onResult: (Map<Int, String>) -> Unit) {
         viewModelScope.launch {
             val labels = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 database.hostsSourceDao().getAll().associate { it.id to it.label }
             }
             onResult(labels)
+        }
+    }
+
+    /** True while a hosts sync (sources + apply) is in progress. */
+    private val _syncing = MutableStateFlow(false)
+    val syncing: StateFlow<Boolean> = _syncing
+
+    /**
+     * Synchronize hosts: enable all sources, download them and apply the
+     * hosts file. Mirrors the legacy HomeViewModel.sync() flow, kept
+     * off the main thread. Errors are logged; the UI reflects failure by
+     * clearing the syncing flag (the overview row stays actionable).
+     */
+    fun syncHosts() {
+        if (_syncing.value) return
+        viewModelScope.launch {
+            _syncing.value = true
+            try {
+                withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val application = getApplication<org.adaway.AdAwayApplication>()
+                    val sourceModel = application.getSourceModel()
+                    sourceModel.enableAllSources()
+                    sourceModel.retrieveHostsSources()
+                    adBlockModel.apply()
+                }
+                Timber.i("Hosts sync completed")
+            } catch (e: Exception) {
+                Timber.w(e, "Hosts sync failed")
+            } finally {
+                _syncing.value = false
+            }
         }
     }
 

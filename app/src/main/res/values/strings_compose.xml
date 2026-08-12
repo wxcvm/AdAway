@@ -22,6 +22,7 @@
     <string name="compose_web_server_running">Running · %1$d blocked · %2$d SNI certs</string>
     <string name="compose_actions">Actions</string>
     <string name="compose_sync_hosts">Synchronize hosts</string>
+    <string name="compose_sync_hosts_running">Syncing…</string>
     <string name="compose_sync_hosts_subtitle">Apply latest sources to hosts file</string>
     <string name="compose_ws_settings">Web server settings</string>
     <string name="compose_ws_settings_subtitle">TLS, block images, statistics</string>

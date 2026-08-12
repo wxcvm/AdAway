@@ -114,12 +114,10 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     private void checkFirstStep() {
-        AdBlockMethod adBlockMethod = PreferenceHelper.getAdBlockMethod(this);
-        if (adBlockMethod == UNDEFINED) {
-            // Start welcome activity
-            startActivity(new Intent(this, WelcomeActivity.class));
-            finish();
-        }
+        // The welcome wizard (VPN method, first-run pages) was removed:
+        // the new Compose MainActivity handles first-run setup silently
+        // (defaults to the ROOT hosts-file method and syncs sources).
+        // Nothing to do here anymore.
     }
 
     private void checkUpdateAtStartup() {

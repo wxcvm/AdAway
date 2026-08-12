@@ -259,15 +259,61 @@ static int s_tls_pos = 0;    /* next write slot (ring) */
 static int s_tls_count = 0;  /* distinct pairs recorded so far */
 
 /* Resolve the uid of the peer on the other end of this connection.
-   Works only when we are root (we are) and the peer is local. */
+   SO_PEERCRED only works on AF_UNIX sockets, so for our loopback TCP
+   listeners we match the (local, remote) 4-tuple against
+   /proc/net/tcp[/tcp6], which the kernel populates with the owning
+   uid of every socket. We run as root, so all entries are visible.
+   Cost: one small file read per accepted connection — negligible
+   compared to the TLS handshakes this server already does. */
 static uid_t conn_uid(struct mg_connection *c) {
     int fd = (int)(intptr_t)c->fd;
     if (fd <= 0) return (uid_t)-1;
-    struct ucred cred;
-    socklen_t len = sizeof(cred);
-    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0)
-        return cred.uid;
-    return (uid_t)-1;
+
+    char loc[64], rem[64];
+    if (!c->is_ip6) {
+        snprintf(loc, sizeof(loc), "%02X%02X%02X%02X:%04X",
+                 c->loc.ip[0], c->loc.ip[1], c->loc.ip[2], c->loc.ip[3],
+                 c->loc.port);
+        snprintf(rem, sizeof(rem), "%02X%02X%02X%02X:%04X",
+                 c->rem.ip[0], c->rem.ip[1], c->rem.ip[2], c->rem.ip[3],
+                 c->rem.port);
+    } else {
+        /* /proc/net/tcp6 prints each 4-byte group byte-reversed. */
+        char *d = loc;
+        for (int g = 0; g < 4; g++)
+            d += snprintf(d, 9, "%02X%02X%02X%02X",
+                          c->loc.ip[g * 4 + 3], c->loc.ip[g * 4 + 2],
+                          c->loc.ip[g * 4 + 1], c->loc.ip[g * 4 + 0]);
+        snprintf(loc + 32, sizeof(loc) - 32, ":%04X", c->loc.port);
+        d = rem;
+        for (int g = 0; g < 4; g++)
+            d += snprintf(d, 9, "%02X%02X%02X%02X",
+                          c->rem.ip[g * 4 + 3], c->rem.ip[g * 4 + 2],
+                          c->rem.ip[g * 4 + 1], c->rem.ip[g * 4 + 0]);
+        snprintf(rem + 32, sizeof(rem) - 32, ":%04X", c->rem.port);
+    }
+
+    const char *proc = c->is_ip6 ? "/proc/net/tcp6" : "/proc/net/tcp";
+    FILE *f = fopen(proc, "r");
+    if (!f) return (uid_t)-1;
+    char line[512];
+    uid_t result = (uid_t)-1;
+    while (fgets(line, sizeof(line), f)) {
+        char l[64] = "", r[64] = "";
+        unsigned int st;
+        unsigned long uid = 0;
+        /* sl local rem st tx_queue:rx_queue tr:tm->when retrnsmt uid … */
+        if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %*s %lu",
+                   l, r, &st, &uid) == 4) {
+            if (st == 1 /* ESTABLISHED */ &&
+                strcmp(l, loc) == 0 && strcmp(r, rem) == 0) {
+                result = (uid_t)uid;
+                break;
+            }
+        }
+    }
+    fclose(f);
+    return result;
 }
 
 static struct appstat *app_find_or_add(uid_t uid) {

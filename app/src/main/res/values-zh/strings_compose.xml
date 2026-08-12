@@ -22,6 +22,7 @@
     <string name="compose_web_server_running">运行中 · 拦截 %1$d · 签发 %2$d 个证书</string>
     <string name="compose_actions">操作</string>
     <string name="compose_sync_hosts">同步规则</string>
+    <string name="compose_sync_hosts_running">同步中…</string>
     <string name="compose_sync_hosts_subtitle">应用最新规则源到 hosts 文件</string>
     <string name="compose_ws_settings">网络服务器设置</string>
     <string name="compose_ws_settings_subtitle">TLS、占位图、统计</string>
