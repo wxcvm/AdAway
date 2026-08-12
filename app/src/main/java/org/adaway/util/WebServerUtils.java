@@ -101,7 +101,6 @@ public class WebServerUtils {
             return null;
         }
     }
-    }
 
     /**
      * BUG FIX: Toast.show() must run on the main thread. startWebServer()
