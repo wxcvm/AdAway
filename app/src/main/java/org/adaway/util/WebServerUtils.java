@@ -53,33 +53,54 @@ public class WebServerUtils {
     private static final String WEB_SERVER_EXECUTABLE = "webserver";
     private static final String CA_CERT_FILE = "localhost-2410.crt";
     private static final String CA_KEY_FILE  = "localhost-2410.key";
-
-    /**
+/**
      * Fetch the web server's statistics snapshot (uptime, blocked
-     * request counts broken down by type, SNI certs issued) as a
-     * parsed JSONObject. Returns null when the server is not running
-     * or the response is unparseable.
+     * request counts broken down by type, SNI certs issued, per-app
+     * breakdown) as a parsed JSONObject. Returns null when the server
+     * is not running or the response is unparseable.
+     * <p>
+     * IMPORTANT: the connection must use an IPv4-mapped IPv6 socket
+     * ([::ffff:127.0.0.1]). On this device's kernel, plain IPv4/IPv6
+     * loopback connections show uid 0 in /proc/net/tcp, so the web
+     * server could never tell which app is asking; v4-mapped sockets
+     * keep the real uid. OkHttp normalises "::ffff:127.0.0.1" back to
+     * an Inet4Address on Android, so we build the raw 16-byte address
+     * and connect with a plain Socket instead.
      */
     @androidx.annotation.Nullable
     public static org.json.JSONObject getStats() {
-        OkHttpClient client = new OkHttpClient.Builder()
-                .proxy(java.net.Proxy.NO_PROXY)
-                .connectTimeout(3, TimeUnit.SECONDS)
-                .readTimeout(3, TimeUnit.SECONDS)
-                .build();
         try {
-            try (Response r = client.newCall(
-                    new Request.Builder().url(STATS_URL).build()
-            ).execute()) {
-                if (!r.isSuccessful()) return null;
-                String body = r.body() != null ? r.body().string() : null;
-                if (body == null) return null;
-                return new org.json.JSONObject(body);
-            }
-        } catch (IOException | org.json.JSONException e) {
-            Timber.w(e, "Failed to fetch web server stats.");
+            byte[] v4mapped = new byte[16];
+            v4mapped[10] = (byte) 0xFF;
+            v4mapped[11] = (byte) 0xFF;
+            v4mapped[12] = 127;
+            v4mapped[13] = 0;
+            v4mapped[14] = 0;
+            v4mapped[15] = 1;
+            java.net.InetAddress address = java.net.InetAddress.getByAddress(v4mapped);
+            java.net.Socket socket = new java.net.Socket();
+            socket.connect(new java.net.InetSocketAddress(address, 80), 3000);
+            socket.setSoTimeout(3000);
+            java.io.OutputStream out = socket.getOutputStream();
+            out.write(("GET /internal-stats HTTP/1.1\r\n" +
+                    "Host: adaway\r\n" +
+                    "Connection: close\r\n\r\n").getBytes("UTF-8"));
+            out.flush();
+            java.io.InputStream in = socket.getInputStream();
+            java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) body.write(buf, 0, n);
+            socket.close();
+            String response = body.toString("UTF-8");
+            int headerEnd = response.indexOf("\r\n\r\n");
+            String json = headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
+            return new org.json.JSONObject(json);
+        } catch (Exception e) {
+            Timber.w(e, "Failed to fetch web server stats");
             return null;
         }
+    }
     }
 
     /**
