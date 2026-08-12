@@ -270,30 +270,32 @@ static uid_t conn_uid(struct mg_connection *c) {
     if (fd <= 0) return (uid_t)-1;
 
     char loc[64], rem[64];
-    if (!c->is_ip6) {
+    if (!c->loc.is_ip6) {
         snprintf(loc, sizeof(loc), "%02X%02X%02X%02X:%04X",
-                 c->loc.ip[0], c->loc.ip[1], c->loc.ip[2], c->loc.ip[3],
+                 (unsigned)c->loc.addr.ip[0], (unsigned)c->loc.addr.ip[1],
+                 (unsigned)c->loc.addr.ip[2], (unsigned)c->loc.addr.ip[3],
                  c->loc.port);
         snprintf(rem, sizeof(rem), "%02X%02X%02X%02X:%04X",
-                 c->rem.ip[0], c->rem.ip[1], c->rem.ip[2], c->rem.ip[3],
+                 (unsigned)c->rem.addr.ip[0], (unsigned)c->rem.addr.ip[1],
+                 (unsigned)c->rem.addr.ip[2], (unsigned)c->rem.addr.ip[3],
                  c->rem.port);
     } else {
         /* /proc/net/tcp6 prints each 4-byte group byte-reversed. */
         char *d = loc;
         for (int g = 0; g < 4; g++)
             d += snprintf(d, 9, "%02X%02X%02X%02X",
-                          c->loc.ip[g * 4 + 3], c->loc.ip[g * 4 + 2],
-                          c->loc.ip[g * 4 + 1], c->loc.ip[g * 4 + 0]);
+                          (unsigned)c->loc.addr.ip[g * 4 + 3], (unsigned)c->loc.addr.ip[g * 4 + 2],
+                          (unsigned)c->loc.addr.ip[g * 4 + 1], (unsigned)c->loc.addr.ip[g * 4 + 0]);
         snprintf(loc + 32, sizeof(loc) - 32, ":%04X", c->loc.port);
         d = rem;
         for (int g = 0; g < 4; g++)
             d += snprintf(d, 9, "%02X%02X%02X%02X",
-                          c->rem.ip[g * 4 + 3], c->rem.ip[g * 4 + 2],
-                          c->rem.ip[g * 4 + 1], c->rem.ip[g * 4 + 0]);
+                          (unsigned)c->rem.addr.ip[g * 4 + 3], (unsigned)c->rem.addr.ip[g * 4 + 2],
+                          (unsigned)c->rem.addr.ip[g * 4 + 1], (unsigned)c->rem.addr.ip[g * 4 + 0]);
         snprintf(rem + 32, sizeof(rem) - 32, ":%04X", c->rem.port);
     }
 
-    const char *proc = c->is_ip6 ? "/proc/net/tcp6" : "/proc/net/tcp";
+    const char *proc = c->loc.is_ip6 ? "/proc/net/tcp6" : "/proc/net/tcp";
     FILE *f = fopen(proc, "r");
     if (!f) return (uid_t)-1;
     char line[512];
