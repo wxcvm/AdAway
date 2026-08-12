@@ -55,6 +55,12 @@
             app:persistent="false"
             app:summary="@string/pref_webserver_block_image_summary"
             app:title="@string/pref_webserver_block_image" />
+        <Preference
+            app:dependency="@string/pref_webserver_enabled_key"
+            app:key="@string/pref_webserver_stats_key"
+            app:persistent="false"
+            app:summary="@string/pref_webserver_stats_summary"
+            app:title="@string/pref_webserver_stats" />
     </PreferenceCategory>
 
 </PreferenceScreen>

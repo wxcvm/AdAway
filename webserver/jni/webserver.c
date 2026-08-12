@@ -188,6 +188,37 @@ struct settings {
     char              block_images[BLOCK_IMAGE_MAX_COUNT][BLOCK_IMAGE_NAME_MAX];
 };
 
+/* ── Statistics ───────────────────────────────────────────────── */
+/*
+ * Per-process counters, exposed via the /internal-stats endpoint.
+ * Mongoose 7.x drives every connection from a single mg_mgr_poll()
+ * event loop, so all increments below happen on one thread and plain
+ * (non-atomic) counters are safe; this mirrors the existing comments on
+ * s_active_connections / s_sni_cache about the defensive atomics.
+ */
+struct webstats {
+    uint64_t start_time_ms;      /* mg_millis() at startup          */
+    uint64_t total_requests;     /* every MG_EV_HTTP_MSG seen       */
+    uint64_t total_connections;  /* MG_EV_ACCEPT count              */
+    uint64_t blocked_images;     /* placeholder image served        */
+    uint64_t blocked_scripts;    /* empty JS                        */
+    uint64_t blocked_styles;     /* empty CSS                       */
+    uint64_t blocked_fonts;      /* 204 fonts                       */
+    uint64_t blocked_media;      /* 204 media/streams               */
+    uint64_t blocked_api;        /* {} JSON replies                 */
+    uint64_t blocked_telemetry;  /* 204 analytics                   */
+    uint64_t blocked_heartbeat;  /* 204 probes                      */
+    uint64_t blocked_config;     /* {} config                       */
+    uint64_t blocked_ws_sse;     /* 204 websocket/SSE               */
+    uint64_t blocked_other;      /* fell through to image fallback  */
+    uint64_t sni_certs_issued;   /* SNI per-domain certs generated  */
+};
+static struct webstats s_stats = {0};
+
+static uint64_t uptime_seconds(void) {
+    return (mg_millis() - s_stats.start_time_ms) / 1000ULL;
+}
+
 /* ── Signal handling ──────────────────────────────────────────── */
 static volatile sig_atomic_t s_sig_num = 0;
 static void signal_handler(int n) { s_sig_num = n; }
@@ -538,6 +569,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
         read past the array boundary on subsequent lookups. */
     s_sni_cache[pos].ctx = ctx;
     s_sni_pos++;
+    s_stats.sni_certs_issued++;
     pthread_mutex_unlock(&s_sni_mutex);
 
     SSL_set_SSL_CTX(ssl, ctx);
@@ -610,6 +642,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        re-requesting it after the first time (saves battery/bandwidth
        on every page load). */
     if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
+        s_stats.blocked_scripts++;
         mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
                               CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -618,6 +651,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Stylesheets: empty CSS, HTTP 200. Cached like JS above. */
     if (uri_ends_with_ci(u, ".css")) {
+        s_stats.blocked_styles++;
         mg_http_reply(c, 200, "Content-Type: text/css\r\n"
                               CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -628,6 +662,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
         uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
         uri_ends_with_ci(u, ".eot")) {
+        s_stats.blocked_fonts++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
         return true;
@@ -647,6 +682,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_ends_with_ci(u, ".ts") || uri_ends_with_ci(u, ".m3u8") ||
         uri_ends_with_ci(u, ".mpd") || uri_ends_with_ci(u, ".flv") ||
         uri_ends_with_ci(u, ".mov") || uri_ends_with_ci(u, ".wav")) {
+        s_stats.blocked_media++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
         return true;
@@ -657,6 +693,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".xml") || uri_ends_with_ci(u, ".txt") ||
         uri_ends_with_ci(u, ".map") || uri_ends_with_ci(u, ".wasm") ||
         uri_ends_with_ci(u, ".webmanifest") || uri_ends_with_ci(u, ".jsonp")) {
+        s_stats.blocked_other++;
         mg_http_reply(c, 200, "Content-Type: application/octet-stream\r\n"
                               CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -667,6 +704,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        gateway. Decline politely with 204 instead of serving an image. */
     struct mg_str *upgrade = mg_http_get_header(hm, "Upgrade");
     if (upgrade != NULL && mg_strcasecmp(*upgrade, mg_str("websocket")) == 0) {
+        s_stats.blocked_ws_sse++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
         return true;
@@ -676,6 +714,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        clean "closed" stream (204) rather than a corrupt body. */
     struct mg_str *accept_hdr = mg_http_get_header(hm, "Accept");
     if (accept_hdr != NULL && uri_contains_ci(*accept_hdr, "text/event-stream")) {
+        s_stats.blocked_ws_sse++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: no-cache\r\n", "");
         return true;
@@ -694,18 +733,21 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return false;  /* image request without extension → placeholder image */
         }
         if (mg_strcasecmp(*dest, mg_str("script")) == 0) {
+            s_stats.blocked_scripts++;
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
                                   CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("style")) == 0) {
+            s_stats.blocked_styles++;
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
                                   CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("font")) == 0) {
+            s_stats.blocked_fonts++;
             mg_http_reply(c, 204, CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
             return true;
@@ -719,6 +761,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/ad") || uri_contains_ci(u, "/ads") ||
         uri_contains_ci(u, "/banner") || uri_contains_ci(u, "/feed") ||
         uri_contains_ci(u, "/recommend")) {
+        s_stats.blocked_api++;
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
                               CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "{}");
@@ -729,6 +772,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/track") || uri_contains_ci(u, "/event") ||
         uri_contains_ci(u, "/log") || uri_contains_ci(u, "/collect") ||
         uri_contains_ci(u, "/pixel")) {
+        s_stats.blocked_telemetry++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
         return true;
@@ -740,6 +784,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        is broken. */
     if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat") ||
         uri_contains_ci(u, "/generate_204") || uri_contains_ci(u, "/204")) {
+        s_stats.blocked_heartbeat++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
         return true;
@@ -747,6 +792,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Config endpoints: empty JSON, HTTP 200. */
     if (uri_contains_ci(u, "/config") || uri_contains_ci(u, "/settings")) {
+        s_stats.blocked_config++;
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
                               CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "{}");
@@ -799,6 +845,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                     cur + 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
                 break;
         }
+        s_stats.total_connections++;
         uint64_t t = mg_millis();
         memcpy(c->data, &t, sizeof(t));
         c->data[sizeof(t)] = 1;
@@ -833,6 +880,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev != MG_EV_HTTP_MSG) return;
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
+    s_stats.total_requests++;
 
     /* Debug: log every request so blocked-domain traffic can be
        inspected (only when started with --debug). */
@@ -864,6 +912,53 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
+    /* Internal statistics endpoint: JSON snapshot of the per-process
+       counters (uptime, request totals, blocked-by-type breakdown,
+       SNI certs issued). Like /internal-test it is only reachable on
+       loopback; no auth needed since 127.0.0.1 is this device. */
+    if (mg_match(hm->uri, mg_str("/internal-stats"), NULL)) {
+        char body[1400];
+        int n = snprintf(body, sizeof(body),
+            "{\"uptime_seconds\":%llu,"
+            "\"total_requests\":%llu,"
+            "\"total_connections\":%llu,"
+            "\"active_connections\":%d,"
+            "\"blocked_images\":%llu,"
+            "\"blocked_scripts\":%llu,"
+            "\"blocked_styles\":%llu,"
+            "\"blocked_fonts\":%llu,"
+            "\"blocked_media\":%llu,"
+            "\"blocked_api\":%llu,"
+            "\"blocked_telemetry\":%llu,"
+            "\"blocked_heartbeat\":%llu,"
+            "\"blocked_config\":%llu,"
+            "\"blocked_ws_sse\":%llu,"
+            "\"blocked_other\":%llu,"
+            "\"sni_certs_issued\":%llu,"
+            "\"block_image_count\":%d}",
+            (unsigned long long)uptime_seconds(),
+            (unsigned long long)s_stats.total_requests,
+            (unsigned long long)s_stats.total_connections,
+            atomic_load(&s_active_connections),
+            (unsigned long long)s_stats.blocked_images,
+            (unsigned long long)s_stats.blocked_scripts,
+            (unsigned long long)s_stats.blocked_styles,
+            (unsigned long long)s_stats.blocked_fonts,
+            (unsigned long long)s_stats.blocked_media,
+            (unsigned long long)s_stats.blocked_api,
+            (unsigned long long)s_stats.blocked_telemetry,
+            (unsigned long long)s_stats.blocked_heartbeat,
+            (unsigned long long)s_stats.blocked_config,
+            (unsigned long long)s_stats.blocked_ws_sse,
+            (unsigned long long)s_stats.blocked_other,
+            (unsigned long long)s_stats.sni_certs_issued,
+            s->block_image_count);
+        mg_http_reply(c, 200,
+                      "Content-Type: application/json\r\n"
+                      "Cache-Control: no-store\r\n", "%.*s", n, body);
+        return;
+    }
+
     /* Classify blocked requests by type and reply with the most
        realistic "empty" resource - see reply_blocked_by_type(). */
     if (reply_blocked_by_type(c, hm)) return;
@@ -877,6 +972,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     int idx = (int)(t % (uint64_t)s->block_image_count);
     char img_path[PATH_MAX];
     snprintf(img_path, sizeof(img_path), "%s/%s", s->resource_dir, s->block_images[idx]);
+    s_stats.blocked_images++;
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
     /*
@@ -987,6 +1083,8 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     if (s.debug) mg_log_set(MG_LL_DEBUG);
+
+    s_stats.start_time_ms = mg_millis();
 
     oom_adjust_setup();
 

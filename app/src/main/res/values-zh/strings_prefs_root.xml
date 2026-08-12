@@ -36,6 +36,11 @@
     <string name="pref_webserver_block_image_success">占位图已更新——重启网络服务器后生效</string>
     <string name="pref_webserver_block_image_reset_success">已恢复默认占位图</string>
     <string name="pref_webserver_block_image_failed">设置自定义占位图失败</string>
+    <string name="pref_webserver_stats">网络服务器统计</string>
+    <string name="pref_webserver_stats_summary">查看被拦截请求的统计信息</string>
+    <string name="pref_webserver_stats_dialog_title">网络服务器统计</string>
+    <string name="pref_webserver_stats_unavailable">无法获取统计信息，网络服务器是否在运行？</string>
+    <string name="pref_webserver_stats_format">运行时间：%1$s\n请求总数：%2$d\n连接总数：%3$d（当前活跃：%4$d）\n\n按类型拦截：\n 图片：%5$d\n 脚本：%6$d\n 样式：%7$d\n 字体：%8$d\n 媒体：%9$d\n API：%10$d\n 遥测：%11$d\n 心跳：%12$d\n 配置：%13$d\n WebSocket/SSE：%14$d\n 其他：%15$d\n\nSNI证书签发数：%16$d\n可用拦截图片：%17$d</string>
     <string name="pref_webserver_state_checking">正在检查…</string>
     <string name="pref_webserver_state_not_running">未运行</string>
     <string name="pref_webserver_state_running_not_installed">正在运行，但未安装证书</string>

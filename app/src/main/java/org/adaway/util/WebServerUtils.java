@@ -42,9 +42,38 @@ import com.topjohnwu.superuser.Shell;
 public class WebServerUtils {
 
     public static final String TEST_URL = "https://localhost/internal-test";
+    public static final String STATS_URL = "http://127.0.0.1/internal-stats";
     private static final String WEB_SERVER_EXECUTABLE = "webserver";
     private static final String CA_CERT_FILE = "localhost-2410.crt";
     private static final String CA_KEY_FILE  = "localhost-2410.key";
+
+    /**
+     * Fetch the web server's statistics snapshot (uptime, blocked
+     * request counts broken down by type, SNI certs issued) as a
+     * parsed JSONObject. Returns null when the server is not running
+     * or the response is unparseable.
+     */
+    @androidx.annotation.Nullable
+    public static org.json.JSONObject getStats() {
+        OkHttpClient client = new OkHttpClient.Builder()
+                .proxy(java.net.Proxy.NO_PROXY)
+                .connectTimeout(3, TimeUnit.SECONDS)
+                .readTimeout(3, TimeUnit.SECONDS)
+                .build();
+        try {
+            try (Response r = client.newCall(
+                    new Request.Builder().url(STATS_URL).build()
+            ).execute()) {
+                if (!r.isSuccessful()) return null;
+                String body = r.body() != null ? r.body().string() : null;
+                if (body == null) return null;
+                return new org.json.JSONObject(body);
+            }
+        } catch (IOException | org.json.JSONException e) {
+            Timber.w(e, "Failed to fetch web server stats.");
+            return null;
+        }
+    }
 
     /**
      * BUG FIX: Toast.show() must run on the main thread. startWebServer()

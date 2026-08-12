@@ -87,6 +87,7 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         bindWebServerTest();
         bindWebServerCertificate();
         bindWebServerBlockImage();
+        bindWebServerStats();
         // Update current state
         updateWebServerState();
         // Register as listener
@@ -401,6 +402,69 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
                     .show();
             return true;
         });
+    }
+
+    /**
+     * Bind the "Web server statistics" preference: fetch the native
+     * server's /internal-stats snapshot off the main thread (OkHttp
+     * blocks on network I/O) and show it in a dialog.
+     */
+    private void bindWebServerStats() {
+        Preference statsPref = findPreference(getString(R.string.pref_webserver_stats_key));
+        assert statsPref != null : PREFERENCE_NOT_FOUND;
+        statsPref.setOnPreferenceClickListener(preference -> {
+            Context ctx = requireContext();
+            AppExecutors executors = AppExecutors.getInstance();
+            executors.diskIO().execute(() -> {
+                org.json.JSONObject stats = org.adaway.util.WebServerUtils.getStats();
+                executors.mainThread().execute(() -> showWebServerStats(ctx, stats));
+            });
+            return true;
+        });
+    }
+
+    private void showWebServerStats(Context ctx, @androidx.annotation.Nullable org.json.JSONObject stats) {
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(ctx)
+                .setTitle(R.string.pref_webserver_stats_dialog_title)
+                .setPositiveButton(android.R.string.ok, null);
+        if (stats == null) {
+            builder.setMessage(R.string.pref_webserver_stats_unavailable);
+        } else {
+            long uptime = stats.optLong("uptime_seconds", 0);
+            String message = ctx.getString(R.string.pref_webserver_stats_format,
+                    formatUptime(uptime),
+                    stats.optLong("total_requests", 0),
+                    stats.optLong("total_connections", 0),
+                    stats.optInt("active_connections", 0),
+                    stats.optLong("blocked_images", 0),
+                    stats.optLong("blocked_scripts", 0),
+                    stats.optLong("blocked_styles", 0),
+                    stats.optLong("blocked_fonts", 0),
+                    stats.optLong("blocked_media", 0),
+                    stats.optLong("blocked_api", 0),
+                    stats.optLong("blocked_telemetry", 0),
+                    stats.optLong("blocked_heartbeat", 0),
+                    stats.optLong("blocked_config", 0),
+                    stats.optLong("blocked_ws_sse", 0),
+                    stats.optLong("blocked_other", 0),
+                    stats.optLong("sni_certs_issued", 0),
+                    stats.optInt("block_image_count", 0));
+            builder.setMessage(message);
+        }
+        builder.show();
+    }
+
+    private static String formatUptime(long seconds) {
+        long hours = seconds / 3600;
+        long minutes = (seconds % 3600) / 60;
+        long secs = seconds % 60;
+        if (hours > 0) {
+            return String.format("%dh %02dm %02ds", hours, minutes, secs);
+        }
+        if (minutes > 0) {
+            return String.format("%dm %02ds", minutes, secs);
+        }
+        return String.format("%ds", secs);
     }
 
     private void prepareWebServerCertificate(Uri uri) {
