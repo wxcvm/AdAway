@@ -23,8 +23,14 @@ android {
         ndk {
             abiFilters "arm64-v8a"
         }
-        versionCode libs.versions.appCode.get() as int
-        versionName libs.versions.appName.get()
+        // Version overrides: CI passes -PversionCode / -PversionName so
+        // every build gets a fresh, increasing version (see
+        // .github/workflows/android-ci.yml). Falls back to the static
+        // values in gradle/libs.versions.toml for local builds.
+        def vc = project.findProperty("versionCode")?.toString()?.toInteger()
+        def vn = project.findProperty("versionName")?.toString()
+        versionCode vc ?: (libs.versions.appCode.get() as int)
+        versionName vn ?: libs.versions.appName.get()
 
         javaCompileOptions {
             annotationProcessorOptions {

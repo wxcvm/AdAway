@@ -6,6 +6,7 @@
     <color name="onPrimary">#000000</color>
     <!-- App icon colors -->
     <color name="drawer_icon">#B71C1C</color>
+    <color name="icon_bg">#E22424</color>
     <!-- Host list state -->
     <color name="blocked">#FF5252</color>
     <color name="allowed">#64FFDA</color>

@@ -30,7 +30,12 @@ jobs:
         run: ./gradlew test --stacktrace
 
       - name: Build with Gradle
-        run: ./gradlew assembleRelease --stacktrace
+        run: |
+          VERSION_CODE=$(date +%s)
+          VERSION_NAME="6.4.3.${{ github.run_number }}"
+          echo "Building $VERSION_NAME (versionCode $VERSION_CODE)"
+          echo "$VERSION_NAME|$VERSION_CODE" > version.txt
+          ./gradlew assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME --stacktrace
 
       - name: Sign release APK with release key
         run: |
@@ -46,8 +51,10 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AdAway-release-signed
-          path: app/build/outputs/apk/release/app-release-signed.apk
+          name: ADBlock-release-signed
+          path: |
+            app/build/outputs/apk/release/app-release-signed.apk
+            version.txt
       
 
   release:
@@ -63,15 +70,15 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: AdAway-release-signed
+          name: ADBlock-release-signed
           path: release-assets
 
       - name: Prepare release assets
         run: |
-          APP_NAME=$(grep -oP 'appName = "\K[^"]+' gradle/libs.versions.toml)
-          APP_CODE=$(grep -oP 'appCode = "\K[^"]+' gradle/libs.versions.toml)
-          cp release-assets/app-release-signed.apk release-assets/AdAway-latest.apk
-          printf '{"version":"%s","versionCode":%s,"changelog":"IPv6 web server, Mongoose 7.22, AGP9/Gradle9/OkHttp5 upgrades, crash and sync fixes, official signing"}' ${APP_NAME} ${APP_CODE} > release-assets/manifest.json
+          VERSION_NAME=$(cut -d'|' -f1 release-assets/version.txt)
+          VERSION_CODE=$(cut -d'|' -f2 release-assets/version.txt)
+          cp release-assets/app-release-signed.apk release-assets/ADBlock-latest.apk
+          printf '{"version":"%s","versionCode":%s,"changelog":"New Material 3 UI, per-app stats, ADBlock branding, dynamic versioning"}' "$VERSION_NAME" "$VERSION_CODE" > release-assets/manifest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
