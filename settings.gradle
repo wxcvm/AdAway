@@ -1,1 +1,17 @@
+// Project dependency repositories. dependencyResolutionManagement is a
+// Settings-scope API — it MUST live here, not in the root build.gradle.
+// FAIL_ON_PROJECT_REPOS forbids declaring repositories inside module
+// build files (app/build.gradle used to declare jitpack.io itself).
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        // libsu (com.github.topjohnwu.libsu:core) is served from JitPack
+        maven {
+            url 'https://jitpack.io'
+        }
+    }
+}
+
 include ':app', ':sentrystub', ':tcpdump', ':webserver'

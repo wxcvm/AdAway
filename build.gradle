@@ -1,6 +1,6 @@
 // Buildscript classpath repositories: required to resolve AGP itself.
-// dependencyResolutionManagement only governs *project* dependencies,
-// so the buildscript block needs its own repository declarations.
+// dependencyResolutionManagement (project dependencies) lives in
+// settings.gradle — it is a Settings-scope API and cannot appear here.
 buildscript {
     repositories {
         google()
@@ -8,20 +8,6 @@ buildscript {
     }
     dependencies {
         classpath libs.gradle
-    }
-}
-
-// Project dependency repositories (settings-level, FAIL_ON_PROJECT_REPOS
-// forbids declaring repositories inside module build files).
-dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories {
-        google()
-        mavenCentral()
-        // libsu (com.github.topjohnwu.libsu:core) is served from JitPack
-        maven {
-            url 'https://jitpack.io'
-        }
     }
 }
 

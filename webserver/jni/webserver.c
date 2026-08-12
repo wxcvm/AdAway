@@ -66,6 +66,14 @@
 
 #define MAX_CONNECTIONS   256
 #define IDLE_TIMEOUT_MS   10000
+/* CORS: ad SDKs usually issue cross-origin XHR/fetch/beacon requests
+   from the page origin to their ad endpoints. Those requests are
+   redirected here by the hosts-file block, so this server IS the
+   "remote" origin from the browser's point of view. Without
+   Access-Control-Allow-Origin the browser blocks the response and the
+   SDK sees a failed/errored request (and may retry or log errors).
+   Serving these headers makes the SDK believe its call succeeded. */
+#define CORS_HDR "Access-Control-Allow-Origin: *\r\n"
 /*
  * BUG FIX (usability): the sequential img_00.webp, img_01.webp, ...
  * scheme (see git history for count_block_images(), the previous
@@ -603,6 +611,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        on every page load). */
     if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
         mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
+                              CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
@@ -610,6 +619,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     /* Stylesheets: empty CSS, HTTP 200. Cached like JS above. */
     if (uri_ends_with_ci(u, ".css")) {
         mg_http_reply(c, 200, "Content-Type: text/css\r\n"
+                              CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
@@ -618,7 +628,56 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
         uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
         uri_ends_with_ci(u, ".eot")) {
-        mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
+        mg_http_reply(c, 204, CORS_HDR
+                              "Cache-Control: public, max-age=86400\r\n", "");
+        return true;
+    }
+
+    /* Media & streams: video/audio players don't handle an image body
+       gracefully (they may show a broken frame or try to probe it as a
+       stream). A 204 (no content) is the closest thing to "stream
+       ended / nothing to play" and keeps the player quiet. Covers
+       MP4/WebM audio+video containers, HLS (.m3u8/.ts) and DASH
+       (.mpd) manifests, and legacy formats. */
+    if (uri_ends_with_ci(u, ".mp4") || uri_ends_with_ci(u, ".webm") ||
+        uri_ends_with_ci(u, ".m4a") || uri_ends_with_ci(u, ".m4v") ||
+        uri_ends_with_ci(u, ".mp3") || uri_ends_with_ci(u, ".aac") ||
+        uri_ends_with_ci(u, ".ogg") || uri_ends_with_ci(u, ".oga") ||
+        uri_ends_with_ci(u, ".opus") || uri_ends_with_ci(u, ".flac") ||
+        uri_ends_with_ci(u, ".ts") || uri_ends_with_ci(u, ".m3u8") ||
+        uri_ends_with_ci(u, ".mpd") || uri_ends_with_ci(u, ".flv") ||
+        uri_ends_with_ci(u, ".mov") || uri_ends_with_ci(u, ".wav")) {
+        mg_http_reply(c, 204, CORS_HDR
+                              "Cache-Control: public, max-age=86400\r\n", "");
+        return true;
+    }
+
+    /* Structured/text assets that must look "loaded": source maps,
+       WebAssembly, XML configs, manifests. Empty body, HTTP 200. */
+    if (uri_ends_with_ci(u, ".xml") || uri_ends_with_ci(u, ".txt") ||
+        uri_ends_with_ci(u, ".map") || uri_ends_with_ci(u, ".wasm") ||
+        uri_ends_with_ci(u, ".webmanifest") || uri_ends_with_ci(u, ".jsonp")) {
+        mg_http_reply(c, 200, "Content-Type: application/octet-stream\r\n"
+                              CORS_HDR
+                              "Cache-Control: public, max-age=86400\r\n", "");
+        return true;
+    }
+
+    /* WebSocket upgrades: some SDKs open a WS channel to their ad
+       gateway. Decline politely with 204 instead of serving an image. */
+    struct mg_str *upgrade = mg_http_get_header(hm, "Upgrade");
+    if (upgrade != NULL && mg_strcasecmp(*upgrade, mg_str("websocket")) == 0) {
+        mg_http_reply(c, 204, CORS_HDR
+                              "Cache-Control: public, max-age=86400\r\n", "");
+        return true;
+    }
+
+    /* Server-Sent Events: SDKs subscribing to an event stream get a
+       clean "closed" stream (204) rather than a corrupt body. */
+    struct mg_str *accept_hdr = mg_http_get_header(hm, "Accept");
+    if (accept_hdr != NULL && uri_contains_ci(*accept_hdr, "text/event-stream")) {
+        mg_http_reply(c, 204, CORS_HDR
+                              "Cache-Control: no-cache\r\n", "");
         return true;
     }
 
@@ -636,16 +695,19 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         }
         if (mg_strcasecmp(*dest, mg_str("script")) == 0) {
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
+                                  CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("style")) == 0) {
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
+                                  CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("font")) == 0) {
-            mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
+            mg_http_reply(c, 204, CORS_HDR
+                                  "Cache-Control: public, max-age=86400\r\n", "");
             return true;
         }
         /* "empty" (XHR/fetch/beacon), "document", others: fall through
@@ -658,6 +720,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/banner") || uri_contains_ci(u, "/feed") ||
         uri_contains_ci(u, "/recommend")) {
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
+                              CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "{}");
         return true;
     }
@@ -666,7 +729,8 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/track") || uri_contains_ci(u, "/event") ||
         uri_contains_ci(u, "/log") || uri_contains_ci(u, "/collect") ||
         uri_contains_ci(u, "/pixel")) {
-        mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
+        mg_http_reply(c, 204, CORS_HDR
+                              "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
 
@@ -676,13 +740,15 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        is broken. */
     if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat") ||
         uri_contains_ci(u, "/generate_204") || uri_contains_ci(u, "/204")) {
-        mg_http_reply(c, 204, "Cache-Control: public, max-age=86400\r\n", "");
+        mg_http_reply(c, 204, CORS_HDR
+                              "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
 
     /* Config endpoints: empty JSON, HTTP 200. */
     if (uri_contains_ci(u, "/config") || uri_contains_ci(u, "/settings")) {
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
+                              CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "{}");
         return true;
     }
@@ -700,12 +766,14 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         }
         if (uri_contains_ci(*accept, "text/css")) {
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
+                                  CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
             return true;
         }
         if (uri_contains_ci(*accept, "application/javascript") ||
             uri_contains_ci(*accept, "text/javascript")) {
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
+                                  CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
             return true;
         }
@@ -765,6 +833,30 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev != MG_EV_HTTP_MSG) return;
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
+
+    /* Debug: log every request so blocked-domain traffic can be
+       inspected (only when started with --debug). */
+    if (s->debug) {
+        LOG_INFO("[req] %.*s %.*s", (int)hm->method.len, hm->method.buf,
+                 (int)hm->uri.len, hm->uri.buf);
+    }
+
+    /* CORS preflight: browsers send OPTIONS + Access-Control-Request-*
+       before any cross-origin XHR with non-simple headers (e.g.
+       Authorization). Answer 204 with permissive CORS headers so the
+       subsequent real request proceeds and the SDK sees a successful
+       exchange. */
+    if (mg_strcasecmp(hm->method, mg_str("OPTIONS")) == 0 &&
+        mg_http_get_header(hm, "Access-Control-Request-Method") != NULL) {
+        mg_http_reply(c, 204,
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Access-Control-Allow-Methods: GET, HEAD, POST, PUT, DELETE, OPTIONS\r\n"
+                      "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin\r\n"
+                      "Access-Control-Max-Age: 86400\r\n"
+                      "Cache-Control: public, max-age=86400\r\n", "");
+        return;
+    }
+
     if (mg_match(hm->uri, mg_str("/internal-test"), NULL)) {
         struct mg_http_serve_opts o = {0};
         o.mime_types = "html=text/html";
