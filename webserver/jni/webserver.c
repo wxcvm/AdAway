@@ -1200,13 +1200,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        succeeds for real apps (unlike at accept time). */
     uid_t req_uid = conn_load_uid(c);
     if (req_uid == (uid_t)-1) {
-        req_uid = conn_uid_from_ino(conn_load_ino(c));
+        unsigned long req_ino = conn_load_ino(c);
+        req_uid = conn_uid_from_ino(req_ino);
         conn_store_uid(c, req_uid);
+        LOG_INFO("resolve-on-request: ino=%lu -> uid=%d", req_ino, (int)req_uid);
         struct appstat *first = app_find_or_add(req_uid);
         if (first && !c->data[REC_OFFSET]) {
             first->connections++;
             c->data[REC_OFFSET] = 1;
         }
+    } else {
+        LOG_INFO("resolve cached: uid=%d", (int)req_uid);
     }
     struct appstat *ra = app_find_or_add(req_uid);
     if (ra) ra->requests++;
