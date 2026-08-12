@@ -422,20 +422,11 @@ static struct tls_host_rec s_recent_tls[RECENT_TLS_MAX];
 static int s_tls_pos = 0;    /* next write slot (ring) */
 static int s_tls_count = 0;  /* distinct pairs recorded so far */
 
-/* Resolve the uid of the peer on the other end of this connection.
-   We run as root. SO_PEERCRED only works on AF_UNIX sockets, and
-   4-tuple matching against /proc/net/tcp is fragile (IPv4/IPv6 byte
-   order, short-lived connections), so instead we match the socket
-   INODE: fstat() on the accepted fd yields the same inode number that
-   /proc/net/tcp[/tcp6] lists in its last column. Exact, cheap and
-   independent of address formatting. */
-static uid_t conn_uid(struct mg_connection *c) {
-    int fd = (int)(intptr_t)c->fd;
-    if (fd <= 0) return (uid_t)-1;
-    struct stat st;
-    if (fstat(fd, &st) != 0) return (uid_t)-1;
-    unsigned long sock_ino = (unsigned long)st.st_ino;
-
+/* Resolve the uid owning a socket from its inode: fstat() on the fd
+   yields the same inode number that /proc/net/tcp[/tcp6] lists in its
+   last column, whose line carries the owning uid. We run as root, so
+   all entries are visible. */
+static uid_t conn_uid_from_ino(unsigned long sock_ino) {
     for (int pass = 0; pass < 2; pass++) {
         const char *path = pass == 0 ? "/proc/net/tcp" : "/proc/net/tcp6";
         FILE *f = fopen(path, "r");
@@ -456,15 +447,33 @@ static uid_t conn_uid(struct mg_connection *c) {
             }
         }
         fclose(f);
-        if (result != (uid_t)-1) {
-            LOG_INFO("conn_uid: fd=%d ino=%lu -> uid=%d (path=%s)",
-                     fd, sock_ino, (int)result, path);
-            return result;
-        }
+        if (result != (uid_t)-1) return result;
     }
-    LOG_INFO("conn_uid: fd=%d ino=%lu -> NOT FOUND in /proc/net/tcp[6]",
-             fd, sock_ino);
     return (uid_t)-1;
+}
+
+/* Store the connection's socket inode + resolved uid in c->data next
+   to the accepted-at timestamp. The uid may be unresolved (-1) at
+   accept time (short-lived connections can already be gone from
+   /proc); it is re-resolved on the first request on the connection. */
+#define UID_OFFSET (sizeof(uint64_t) + 1)
+#define INO_OFFSET (UID_OFFSET + sizeof(uid_t))  /* after uid */
+#define REC_OFFSET (INO_OFFSET + sizeof(unsigned long))
+static void conn_store_ino(struct mg_connection *c, unsigned long ino) {
+    memcpy(c->data + INO_OFFSET, &ino, sizeof(ino));
+}
+static unsigned long conn_load_ino(struct mg_connection *c) {
+    unsigned long ino;
+    memcpy(&ino, c->data + INO_OFFSET, sizeof(ino));
+    return ino;
+}
+static void conn_store_uid(struct mg_connection *c, uid_t uid) {
+    memcpy(c->data + UID_OFFSET, &uid, sizeof(uid));
+}
+static uid_t conn_load_uid(struct mg_connection *c) {
+    uid_t uid;
+    memcpy(&uid, c->data + UID_OFFSET, sizeof(uid));
+    return uid;
 }
 
 static struct appstat *app_find_or_add(uid_t uid) {
@@ -498,18 +507,6 @@ static void app_record_tls_host(uid_t uid, const char *host) {
     if (s_tls_count < RECENT_TLS_MAX) s_tls_count++;
     struct appstat *a = app_find_or_add(uid);
     if (a) a->tls_hosts++;
-}
-
-/* Store the connection's uid in c->data next to the accepted-at
-   timestamp so request handlers don't re-issue getsockopt(). */
-#define UID_OFFSET (sizeof(uint64_t) + 1)
-static void conn_store_uid(struct mg_connection *c, uid_t uid) {
-    memcpy(c->data + UID_OFFSET, &uid, sizeof(uid));
-}
-static uid_t conn_load_uid(struct mg_connection *c) {
-    uid_t uid;
-    memcpy(&uid, c->data + UID_OFFSET, sizeof(uid));
-    return uid;
 }
 
 /* ── Signal handling ──────────────────────────────────────────── */
@@ -1145,11 +1142,23 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         memcpy(c->data, &t, sizeof(t));
         c->data[sizeof(t)] = 1;
 
-        /* Per-app: remember which app opened this connection (SO_PEERCRED) */
-        uid_t uid = conn_uid(c);
+        /* Per-app: remember which app opened this connection. Resolve
+           the uid via the socket inode; short-lived connections may
+           already be gone from /proc, so an unresolved (-1) uid is
+           re-resolved on the first request (see MG_EV_HTTP_MSG). */
+        int accept_fd = (int)(intptr_t)c->fd;
+        struct stat accept_st;
+        uid_t uid = (uid_t)-1;
+        if (accept_fd > 0 && fstat(accept_fd, &accept_st) == 0) {
+            conn_store_ino(c, (unsigned long)accept_st.st_ino);
+            uid = conn_uid_from_ino((unsigned long)accept_st.st_ino);
+        }
         conn_store_uid(c, uid);
         struct appstat *a = app_find_or_add(uid);
-        if (a) a->connections++;
+        if (a) {
+            a->connections++;
+            c->data[REC_OFFSET] = 1;  /* connections already counted */
+        }
 
         if (c->is_tls && c->fn_data) {
             struct settings *s = (struct settings *)c->fn_data;
@@ -1185,9 +1194,20 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     hist_add(HIST_REQ);
 
     /* Per-app request counter + record which TLS (SNI) hostname this
-       app asked us to sign a certificate for. */
+       app asked us to sign a certificate for. The uid is (re-)resolved
+       here: by the time a request arrives the connection is
+       ESTABLISHED and present in /proc/net/tcp, so the lookup always
+       succeeds for real apps (unlike at accept time). */
     uid_t req_uid = conn_load_uid(c);
-    if (req_uid == (uid_t)-1) req_uid = conn_uid(c);
+    if (req_uid == (uid_t)-1) {
+        req_uid = conn_uid_from_ino(conn_load_ino(c));
+        conn_store_uid(c, req_uid);
+        struct appstat *first = app_find_or_add(req_uid);
+        if (first && !c->data[REC_OFFSET]) {
+            first->connections++;
+            c->data[REC_OFFSET] = 1;
+        }
+    }
     struct appstat *ra = app_find_or_add(req_uid);
     if (ra) ra->requests++;
     if (c->is_tls && c->tls) {
