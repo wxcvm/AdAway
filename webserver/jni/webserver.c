@@ -1327,8 +1327,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         /* Snapshot with per-app breakdown: build the apps array (all
            tracked uids) and the recent TLS (SNI) host list (most
            recent first, max 20 entries). */
-        char body[4096];
-        char apps_json[1536] = "";
+        char body[16384];
+        char apps_json[4096] = "";
         int off = 0;
         for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
             int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
