@@ -22,25 +22,22 @@
 #include "mongoose/mongoose.h"
 
 #define THIS_FILE "WebServer"
-/* BUG FIX: bind the loopback IP literal, not the hostname "localhost".
-   mg_http_listen() resolves a hostname via getaddrinfo()/the hosts file
-   before it can bind, so "localhost" here silently depends on AdAway's
-   own hosts file (or /etc/hosts) still containing a working
-   "127.0.0.1 localhost" line. AdAway's whole purpose is rewriting that
-   file, so any transient state where that line is missing, stale, or
-   still being synced turns into "web server failed to start" with no
-   obvious cause. Binding 127.0.0.1 directly removes that dependency
-   entirely, while intentionally NOT switching to 0.0.0.0 — that would
-   expose the block-page server to the whole LAN instead of just this
-   device, which is why an earlier attempt at 0.0.0.0 was reverted. */
-#define HTTP_URL  "http://127.0.0.1:80"
-#define HTTPS_URL "https://127.0.0.1:443"
-/* Same services on the IPv6 loopback (::1), so IPv6-first clients
-   (e.g. Android resolving "localhost" via ::1, NAT64/DNS64 setups)
-   can reach the block server too. Optional: see main() — failure to
-   bind these only logs a warning and the IPv4 listeners still serve. */
-#define HTTP_URL_IPV6  "http://[::1]:80"
-#define HTTPS_URL_IPV6 "https://[::1]:443"
+/*
+ * Listen on ALL interfaces (0.0.0.0 / [::]) instead of loopback only.
+ * This lets other devices on the LAN reach the block-page server too
+ * (e.g. a second phone or a PC that uses this device as its hosts
+ * gateway). NOTE: this intentionally exposes the block page / TLS
+ * interception endpoints to the local network — the device firewall
+ * is the only thing that can restrict access now. Per-app uid
+ * attribution only works for loopback clients (LAN clients have no
+ * local uid and are counted as unknown), blocking itself works for
+ * everyone.
+ */
+#define HTTP_URL  "http://0.0.0.0:80"
+#define HTTPS_URL "https://0.0.0.0:443"
+/* Same services on IPv6 any-address ([::]). */
+#define HTTP_URL_IPV6  "http://[::]:80"
+#define HTTPS_URL_IPV6 "https://[::]:443"
 
 /* BUG FIX: __android_log_print() only reaches logcat, never the process's
    own stdout/stderr. The Java side (ShellUtils.runBundledExecutable)
