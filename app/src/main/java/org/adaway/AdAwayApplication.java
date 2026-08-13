@@ -35,6 +35,8 @@ public class AdAwayApplication extends Application {
         super.onCreate();
         // Initialize logging
         ApplicationLog.init(this);
+        // Sync web server port cache (getStats has no Context).
+        org.adaway.util.WebServerUtils.initPortCache(this);
         // Create notification channels
         NotificationHelper.createNotificationChannels(this);
         // Create models

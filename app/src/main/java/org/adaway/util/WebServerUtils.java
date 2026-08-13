@@ -87,6 +87,14 @@ public class WebServerUtils {
     private static volatile int sHttpPortCached = 80;
     private static volatile int sHttpsPortCached = 443;
 
+    /** Load persisted ports into the static cache (called at app start). */
+    public static void initPortCache(Context context) {
+        sHttpPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .getInt("http_port", 80);
+        sHttpsPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .getInt("https_port", 443);
+    }
+
     /** Port used by the stats client (cached; no Context needed). */
     public static int getStatsHttpPort() {
         return sHttpPortCached;
