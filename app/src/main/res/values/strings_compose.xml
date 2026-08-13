@@ -76,6 +76,13 @@
     <string name="compose_settings_chart_certs">Recent certs</string>
     <string name="compose_settings_chart_certs_hint">Recently issued SNI certificates</string>
     <string name="compose_settings_chart_style">Bar chart style</string>
+    <string name="compose_settings_ws_title">Web server</string>
+    <string name="compose_settings_ws_hint">Listen range and ports (server restarts)</string>
+    <string name="compose_settings_ws_bind">LAN access</string>
+    <string name="compose_settings_ws_bind_all">Listening on all interfaces</string>
+    <string name="compose_settings_ws_bind_loop">Loopback only</string>
+    <string name="compose_settings_ws_http_port">HTTP port</string>
+    <string name="compose_settings_ws_https_port">HTTPS port</string>
     <string name="compose_stats_type_images">Images</string>
     <string name="compose_stats_type_scripts">Scripts</string>
     <string name="compose_stats_type_styles">Styles</string>

@@ -53,6 +53,51 @@ public class WebServerUtils {
     private static final String WEB_SERVER_EXECUTABLE = "webserver";
     private static final String CA_CERT_FILE = "localhost-2410.crt";
     private static final String CA_KEY_FILE  = "localhost-2410.key";
+    private static final String PREFS_WS = "compose_webserver";
+
+    /** Whether the web server listens on all interfaces (LAN). Default false. */
+    public static boolean isBindAll(Context context) {
+        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .getBoolean("bind_all", false);
+    }
+
+    /** Configured HTTP listen port (default 80). */
+    public static int getHttpPort(Context context) {
+        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .getInt("http_port", 80);
+    }
+
+    /** Configured HTTPS listen port (default 443). */
+    public static int getHttpsPort(Context context) {
+        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .getInt("https_port", 443);
+    }
+
+    public static void setWebServerSettings(Context context, boolean bindAll, int httpPort, int httpsPort) {
+        context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("bind_all", bindAll)
+                .putInt("http_port", httpPort)
+                .putInt("https_port", httpsPort)
+                .apply();
+        sHttpPortCached = httpPort;
+        sHttpsPortCached = httpsPort;
+    }
+
+    private static volatile int sHttpPortCached = 80;
+    private static volatile int sHttpsPortCached = 443;
+
+    /** Port used by the stats client (cached; no Context needed). */
+    public static int getStatsHttpPort() {
+        return sHttpPortCached;
+    }
+
+    /** Test page URL honoring the configured HTTPS port. */
+    public static String getTestUrl(Context context) {
+        int port = getHttpsPort(context);
+        return port == 443 ? "https://localhost/internal-test" :
+                "https://localhost:" + port + "/internal-test";
+    }
 /**
      * Fetch the web server's statistics snapshot (uptime, blocked
      * request counts broken down by type, SNI certs issued, per-app
@@ -74,7 +119,7 @@ public class WebServerUtils {
         try {
             Process process = new ProcessBuilder(
                     "/system/bin/toybox", "nc", "-w", "3",
-                    "::ffff:127.0.0.1", "80")
+                    "::ffff:127.0.0.1", String.valueOf(getStatsHttpPort()))
                     .redirectErrorStream(false)
                     .start();
             java.io.OutputStream out = process.getOutputStream();
@@ -154,7 +199,10 @@ public class WebServerUtils {
             try { Thread.sleep(600); } catch (InterruptedException ignored) {}
         }
 
-        String params = "--resources " + resourcePath.toAbsolutePath() + " --debug";
+        String params = "--resources " + resourcePath.toAbsolutePath() +
+                " --debug --bind " + (isBindAll(context) ? "all" : "loop") +
+                " --http-port " + getHttpPort(context) +
+                " --https-port " + getHttpsPort(context);
         boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
         if (!started) {
             Timber.e("Webserver failed to start; check logs in /data/local/tmp/webserver_start_*.log for details.");

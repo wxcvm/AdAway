@@ -76,6 +76,13 @@
     <string name="compose_settings_chart_certs">最近签发证书</string>
     <string name="compose_settings_chart_certs_hint">最近签发的SNI证书</string>
     <string name="compose_settings_chart_style">柱状图样式</string>
+    <string name="compose_settings_ws_title">网络服务器</string>
+    <string name="compose_settings_ws_hint">监听范围与端口（切换后自动重启）</string>
+    <string name="compose_settings_ws_bind">局域网访问</string>
+    <string name="compose_settings_ws_bind_all">监听所有接口</string>
+    <string name="compose_settings_ws_bind_loop">仅本机回环</string>
+    <string name="compose_settings_ws_http_port">HTTP 端口</string>
+    <string name="compose_settings_ws_https_port">HTTPS 端口</string>
     <string name="compose_stats_type_images">图片</string>
     <string name="compose_stats_type_scripts">脚本</string>
     <string name="compose_stats_type_styles">样式</string>

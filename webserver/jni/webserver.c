@@ -23,21 +23,18 @@
 
 #define THIS_FILE "WebServer"
 /*
- * Listen on ALL interfaces (0.0.0.0 / [::]) instead of loopback only.
- * This lets other devices on the LAN reach the block-page server too
- * (e.g. a second phone or a PC that uses this device as its hosts
- * gateway). NOTE: this intentionally exposes the block page / TLS
- * interception endpoints to the local network — the device firewall
- * is the only thing that can restrict access now. Per-app uid
- * attribution only works for loopback clients (LAN clients have no
- * local uid and are counted as unknown), blocking itself works for
- * everyone.
+ * Listen addresses are configurable at runtime via CLI flags:
+ *   --bind all     → 0.0.0.0 / [::]  (all interfaces)
+ *   --bind loop    → 127.0.0.1 / [::1]  (loopback only, default)
+ *   --http-port N  → HTTP listen port (default 80)
+ *   --https-port N → HTTPS listen port (default 443)
+ * Defaults keep the historical loopback-only behaviour; the app passes
+ * --bind all when the user enables LAN access in settings.
  */
-#define HTTP_URL  "http://0.0.0.0:80"
-#define HTTPS_URL "https://0.0.0.0:443"
-/* Same services on IPv6 any-address ([::]). */
-#define HTTP_URL_IPV6  "http://[::]:80"
-#define HTTPS_URL_IPV6 "https://[::]:443"
+#define HTTP_URL_DEFAULT  "http://127.0.0.1:80"
+#define HTTPS_URL_DEFAULT "https://127.0.0.1:443"
+#define HTTP_URL_IPV6_DEFAULT  "http://[::1]:80"
+#define HTTPS_URL_IPV6_DEFAULT "https://[::1]:443"
 
 /* BUG FIX: __android_log_print() only reaches logcat, never the process's
    own stdout/stderr. The Java side (ShellUtils.runBundledExecutable)
@@ -183,6 +180,9 @@ struct settings {
     char              test_path[PATH_MAX];
     struct ca_state   ca;
     bool              debug;
+    bool              bind_all;   /* listen on all interfaces */
+    int               http_port;  /* HTTP listen port (default 80) */
+    int               https_port; /* HTTPS listen port (default 443) */
     int               block_image_count;
     char              block_images[BLOCK_IMAGE_MAX_COUNT][BLOCK_IMAGE_NAME_MAX];
 };
@@ -1469,6 +1469,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 /* ── CLI parsing ──────────────────────────────────────────────── */
 static struct settings parse_cli_parameters(int argc, char *argv[]) {
     struct settings s = {0};
+    s.http_port = 80;
+    s.https_port = 443;
+    s.bind_all = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--resources") == 0 && i < argc-1) {
             const char *rpath = argv[++i];
@@ -1511,6 +1514,15 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             s.init = true;
         } else if (strcmp(argv[i], "--debug") == 0) {
             s.debug = true;
+        } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
+            s.bind_all = strcmp(argv[++i], "all") == 0;
+            LOG_INFO("Bind mode: %s", s.bind_all ? "all interfaces" : "loopback");
+        } else if (strcmp(argv[i], "--http-port") == 0 && i < argc-1) {
+            s.http_port = atoi(argv[++i]);
+            LOG_INFO("HTTP port: %d", s.http_port);
+        } else if (strcmp(argv[i], "--https-port") == 0 && i < argc-1) {
+            s.https_port = atoi(argv[++i]);
+            LOG_INFO("HTTPS port: %d", s.https_port);
         }
     }
     return s;
@@ -1552,12 +1564,21 @@ int main(int argc, char *argv[]) {
     struct mg_mgr mgr;
     mg_mgr_init(&mgr);
 
-    if (!mg_http_listen(&mgr, HTTP_URL,  fn, &s)) {
-        LOG_FATAL("HTTP bind failed (port 80).");
+    /* Build listen URLs from the configured bind mode + ports. */
+    char http_url[128], https_url[128], http_url6[128], https_url6[128];
+    const char *v4 = s.bind_all ? "0.0.0.0" : "127.0.0.1";
+    const char *v6 = s.bind_all ? "[::]" : "[::1]";
+    snprintf(http_url, sizeof(http_url), "http://%s:%d", v4, s.http_port);
+    snprintf(https_url, sizeof(https_url), "https://%s:%d", v4, s.https_port);
+    snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);
+    snprintf(https_url6, sizeof(https_url6), "https://%s:%d", v6, s.https_port);
+
+    if (!mg_http_listen(&mgr, http_url, fn, &s)) {
+        LOG_FATAL("HTTP bind failed (%s).", http_url);
         mg_mgr_free(&mgr); return EXIT_FAILURE;
     }
-    if (!mg_http_listen(&mgr, HTTPS_URL, fn, &s)) {
-        LOG_FATAL("HTTPS bind failed (port 443).");
+    if (!mg_http_listen(&mgr, https_url, fn, &s)) {
+        LOG_FATAL("HTTPS bind failed (%s).", https_url);
         mg_mgr_free(&mgr); return EXIT_FAILURE;
     }
     /*
@@ -1567,12 +1588,12 @@ int main(int argc, char *argv[]) {
      * log reflects the actual state.
      */
     bool ipv6_ok = true;
-    if (!mg_http_listen(&mgr, HTTP_URL_IPV6, fn, &s)) {
-        LOG_WARN("HTTP IPv6 bind failed (http://[::1]:80) — continuing with IPv4 only.");
+    if (!mg_http_listen(&mgr, http_url6, fn, &s)) {
+        LOG_WARN("HTTP IPv6 bind failed (%s) — continuing with IPv4 only.", http_url6);
         ipv6_ok = false;
     }
-    if (!mg_http_listen(&mgr, HTTPS_URL_IPV6, fn, &s)) {
-        LOG_WARN("HTTPS IPv6 bind failed (https://[::1]:443) — continuing with IPv4 only.");
+    if (!mg_http_listen(&mgr, https_url6, fn, &s)) {
+        LOG_WARN("HTTPS IPv6 bind failed (%s) — continuing with IPv4 only.", https_url6);
         ipv6_ok = false;
     }
 

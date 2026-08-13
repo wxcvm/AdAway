@@ -107,8 +107,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_settings_title)) },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
             )
         },
@@ -121,6 +121,116 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // ── Web server settings ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_ws_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_settings_ws_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    var bindAll by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.isBindAll(context))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_ws_bind),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(
+                                    if (bindAll) R.string.compose_settings_ws_bind_all
+                                    else R.string.compose_settings_ws_bind_loop,
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = bindAll,
+                            onCheckedChange = { v ->
+                                bindAll = v
+                                org.adaway.util.WebServerUtils.setWebServerSettings(
+                                    context, v,
+                                    org.adaway.util.WebServerUtils.getHttpPort(context),
+                                    org.adaway.util.WebServerUtils.getHttpsPort(context),
+                                )
+                                org.adaway.util.WebServerUtils.stopWebServer()
+                                org.adaway.util.WebServerUtils.startWebServer(context)
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_ws_http_port),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    var httpPort by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.getHttpPort(context))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(80, 8080, 8888).forEach { p ->
+                            FilterChip(
+                                selected = httpPort == p,
+                                onClick = {
+                                    httpPort = p
+                                    org.adaway.util.WebServerUtils.setWebServerSettings(
+                                        context, bindAll, p,
+                                        org.adaway.util.WebServerUtils.getHttpsPort(context),
+                                    )
+                                    org.adaway.util.WebServerUtils.stopWebServer()
+                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                },
+                                label = { Text("$p") },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_ws_https_port),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    var httpsPort by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.getHttpsPort(context))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(443, 8443).forEach { p ->
+                            FilterChip(
+                                selected = httpsPort == p,
+                                onClick = {
+                                    httpsPort = p
+                                    org.adaway.util.WebServerUtils.setWebServerSettings(
+                                        context, bindAll,
+                                        org.adaway.util.WebServerUtils.getHttpPort(context), p,
+                                    )
+                                    org.adaway.util.WebServerUtils.stopWebServer()
+                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                },
+                                label = { Text("$p") },
+                            )
+                        }
+                    }
+                }
+            }
+
             // ── Logs settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),

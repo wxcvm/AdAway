@@ -75,8 +75,8 @@ fun OverviewScreen(viewModel: StatsViewModel) {
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_overview_title)) },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
             )
         },
@@ -116,6 +116,8 @@ fun OverviewScreen(viewModel: StatsViewModel) {
             WebServerControlCard(
                 enabled = wsEnabled,
                 stats = serverStats,
+                httpPort = org.adaway.util.WebServerUtils.getHttpPort(context),
+                httpsPort = org.adaway.util.WebServerUtils.getHttpsPort(context),
                 onToggle = { enable ->
                     if (enable) {
                         org.adaway.util.WebServerUtils.startWebServer(context)
@@ -126,7 +128,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 },
                 onTest = {
                     try {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(org.adaway.util.WebServerUtils.TEST_URL)))
+                        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(org.adaway.util.WebServerUtils.getTestUrl(context))))
                     } catch (e: Exception) {
                         // no browser available; ignore
                     }
@@ -172,6 +174,8 @@ fun OverviewScreen(viewModel: StatsViewModel) {
 private fun WebServerControlCard(
     enabled: Boolean,
     stats: ServerStats?,
+    httpPort: Int,
+    httpsPort: Int,
     onToggle: (Boolean) -> Unit,
     onTest: () -> Unit,
 ) {
@@ -220,7 +224,7 @@ private fun WebServerControlCard(
             ) {
                 DetailChip(
                     stringResource(R.string.compose_ws_control_ports),
-                    "80 / 443",
+                    "$httpPort / $httpsPort",
                 )
                 DetailChip(
                     stringResource(R.string.compose_ws_control_images),
