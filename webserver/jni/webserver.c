@@ -1269,10 +1269,14 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     hist_add(HIST_REQ);
 
     /* Per-app request counter + record which TLS (SNI) hostname this
-       app asked us to sign a certificate for. The uid is resolved from
-       the live connection's 4-tuple (see conn_uid_by_tuple). */
-    uid_t req_uid = conn_uid_by_tuple(c);
-    conn_store_uid(c, req_uid);
+       app asked us to sign a certificate for. The uid is resolved once
+       per connection (cached in c->data) to avoid /proc scans on every
+       request of a keep-alive connection. */
+    uid_t req_uid = conn_load_uid(c);
+    if (req_uid == (uid_t)-1) {
+        req_uid = conn_uid_by_tuple(c);
+        conn_store_uid(c, req_uid);
+    }
     struct appstat *ra = app_find_or_add(req_uid);
     if (ra) {
         if (!c->data[REC_OFFSET]) {
