@@ -286,9 +286,11 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     Spacer(Modifier.height(8.dp))
                     var refreshKey by remember { mutableStateOf(0) }
                     val chartToggles = listOf(
+                        Triple("chart_lifetime", R.string.compose_settings_chart_lifetime, R.string.compose_settings_chart_lifetime_hint),
+                        Triple("chart_rate", R.string.compose_settings_chart_rate, R.string.compose_settings_chart_rate_hint),
                         Triple("chart_donut", R.string.compose_settings_chart_donut, R.string.compose_settings_chart_donut_hint),
                         Triple("chart_trend", R.string.compose_settings_chart_trend, R.string.compose_settings_chart_trend_hint),
-                        Triple("chart_bars", R.string.compose_settings_chart_bars, R.string.compose_settings_chart_bars_hint),
+                        Triple("chart_conn", R.string.compose_settings_chart_conn, R.string.compose_settings_chart_conn_hint),
                         Triple("chart_apps", R.string.compose_settings_chart_apps, R.string.compose_settings_chart_apps_hint),
                         Triple("chart_certs", R.string.compose_settings_chart_certs, R.string.compose_settings_chart_certs_hint),
                     )

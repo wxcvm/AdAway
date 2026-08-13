@@ -95,19 +95,22 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
     val context = androidx.compose.ui.platform.LocalContext.current
+    val showLifetime = isChartEnabled(context, "chart_lifetime")
+    val showRate = isChartEnabled(context, "chart_rate")
     val showDonut = isChartEnabled(context, "chart_donut")
     val showTrend = isChartEnabled(context, "chart_trend")
     val showBars = isChartEnabled(context, "chart_bars")
     val showApps = isChartEnabled(context, "chart_apps")
     val showCerts = isChartEnabled(context, "chart_certs")
+    val showConn = isChartEnabled(context, "chart_conn")
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_stats_title)) },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
             )
         },
@@ -180,22 +183,23 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
             }
 
             // Lifetime totals
-            if (serverStats != null) {
+            if (showLifetime && serverStats != null) {
                 LifetimeCard(serverStats!!)
             }
 
             // Block rate ring
-            if (serverStats != null && serverStats!!.totalRequests > 0) {
+            if (showRate && serverStats != null && serverStats!!.totalRequests > 0) {
                 BlockRateCard(serverStats!!)
             }
 
             // Trend + traffic chart (AdGuard Home style)
-            if (showBars && serverStats != null &&
+            if (showTrend && serverStats != null &&
                 (serverStats!!.history.isNotEmpty() || serverStats!!.daily.isNotEmpty())
             ) {
                 TrafficTrendCard(
                     hourly = serverStats!!.history,
                     daily = serverStats!!.daily,
+                    showConnections = showConn,
                 )
             }
 
@@ -480,18 +484,28 @@ private fun CountLabel(label: String, value: Long) {
 }
 
 @Composable
-private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
+private fun TrafficTrendCard(
+    hourly: List<HistPoint>,
+    daily: List<HistPoint>,
+    showConnections: Boolean,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var mode by remember { mutableIntStateOf(0) }  // 0 = 24h, 1 = 30d
+    var mode by remember { mutableIntStateOf(0) }  // 0 = 24h, 1 = 7d, 2 = 30d
     var style by remember { mutableIntStateOf(chartStyle(context)) } // 0 = line, 1 = area, 2 = bars
-    val data = if (mode == 0) hourly else daily
+    val data = when (mode) {
+        0 -> hourly
+        1 -> daily.takeLast(7)
+        else -> daily
+    }
     if (data.isEmpty()) return
 
     val maxReq = (data.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
     val maxBlocked = (data.maxOfOrNull { it.blocked } ?: 0L).coerceAtLeast(1L)
+    val maxConn = (data.maxOfOrNull { it.connections } ?: 0L).coerceAtLeast(1L)
     val maxAll = (maxReq + maxBlocked).coerceAtLeast(1L)
     val reqColor = MaterialTheme.colorScheme.primary
     val blockColor = MaterialTheme.colorScheme.error
+    val connColor = MaterialTheme.colorScheme.tertiary
     val gridColor = MaterialTheme.colorScheme.surfaceVariant
     val axisColor = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -516,6 +530,9 @@ private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
                     label = { Text(stringResource(R.string.compose_stats_range_24h)) })
                 Spacer(Modifier.width(6.dp))
                 FilterChip(selected = mode == 1, onClick = { mode = 1 },
+                    label = { Text(stringResource(R.string.compose_stats_range_7d)) })
+                Spacer(Modifier.width(6.dp))
+                FilterChip(selected = mode == 2, onClick = { mode = 2 },
                     label = { Text(stringResource(R.string.compose_stats_range_30d)) })
             }
             Row(
@@ -533,7 +550,7 @@ private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
             }
             Spacer(Modifier.height(12.dp))
 
-            Canvas(modifier = Modifier.fillMaxWidth().height(170.dp)) {
+            Canvas(modifier = Modifier.fillMaxWidth().height(180.dp)) {
                 val n = data.size
                 if (n == 0) return@Canvas
                 val leftPad = 34.dp.toPx()
@@ -544,9 +561,8 @@ private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
 
                 fun xAt(i: Int): Float = leftPad + (if (n == 1) chartW / 2 else chartW * i / (n - 1))
                 fun yReq(v: Long): Float = base - (v.toFloat() / maxAll) * chartH
-                fun yBlk(v: Long): Float = base - (v.toFloat() / maxAll) * chartH
 
-                // Y-axis grid + labels (0, 50%, 100% of maxAll)
+                // Y-axis grid + labels
                 for (g in 0..4) {
                     val frac = g / 4f
                     val y = base - chartH * frac
@@ -591,11 +607,12 @@ private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
                             )
                         }
                     }
-                    else -> { // line / area — smooth curves for both series
+                    else -> { // line / area — smooth curves
                         val reqPts = data.mapIndexed { i, p -> Offset(xAt(i), yReq(p.requests)) }
-                        val blkPts = data.mapIndexed { i, p -> Offset(xAt(i), yBlk(p.blocked)) }
+                        val blkPts = data.mapIndexed { i, p -> Offset(xAt(i), yReq(p.blocked)) }
+                        val connPts = if (showConnections)
+                            data.mapIndexed { i, p -> Offset(xAt(i), yReq(p.connections)) } else emptyList()
 
-                        // area fill under blocked
                         if (style == 1) {
                             val fill = Path()
                             fill.moveTo(reqPts.first().x, base)
@@ -610,7 +627,6 @@ private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
                             fillB.close()
                             drawPath(fillB, blockColor.copy(alpha = 0.20f))
                         } else {
-                            // subtle gradient under request line
                             val fill = Path()
                             fill.moveTo(reqPts.first().x, base)
                             reqPts.forEach { fill.lineTo(it.x, it.y) }
@@ -627,7 +643,9 @@ private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
 
                         drawPath(smoothPath(reqPts), reqColor, style = Stroke(width = 2.dp.toPx()))
                         drawPath(smoothPath(blkPts), blockColor, style = Stroke(width = 2.dp.toPx()))
-                        // end dots
+                        if (connPts.isNotEmpty()) {
+                            drawPath(smoothPath(connPts), connColor, style = Stroke(width = 2.dp.toPx()))
+                        }
                         drawCircle(reqColor, 3.5.dp.toPx(), reqPts.last())
                         drawCircle(blockColor, 3.5.dp.toPx(), blkPts.last())
                     }
@@ -642,10 +660,18 @@ private fun TrafficTrendCard(hourly: List<HistPoint>, daily: List<HistPoint>) {
             ) {
                 LegendDot(reqColor, stringResource(R.string.compose_stats_history_requests))
                 LegendDot(blockColor, stringResource(R.string.compose_stats_history_blocked))
+                if (showConnections) {
+                    LegendDot(connColor, stringResource(R.string.compose_stats_history_connections))
+                }
                 Spacer(Modifier.weight(1f))
                 Text(
-                    stringResource(if (mode == 0) R.string.compose_stats_history_window
-                    else R.string.compose_stats_daily_window),
+                    stringResource(
+                        when (mode) {
+                            0 -> R.string.compose_stats_history_window
+                            1 -> R.string.compose_stats_7d_window
+                            else -> R.string.compose_stats_daily_window
+                        },
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -36,6 +36,7 @@
     <string name="compose_ws_control_test">打开测试页面</string>
     <string name="compose_legacy_ui">经典界面</string>
     <string name="compose_legacy_ui_subtitle">打开旧版界面</string>
+    <string name="compose_legacy_removed">旧版界面已完全由本界面取代。</string>
 
     <!-- 统计 -->
     <string name="compose_stats_title">统计</string>
@@ -76,6 +77,12 @@
     <string name="compose_settings_chart_certs">最近签发证书</string>
     <string name="compose_settings_chart_certs_hint">最近签发的SNI证书</string>
     <string name="compose_settings_chart_style">柱状图样式</string>
+    <string name="compose_settings_chart_lifetime">累计统计</string>
+    <string name="compose_settings_chart_lifetime_hint">请求/拦截/连接/证书累计计数</string>
+    <string name="compose_settings_chart_rate">拦截率</string>
+    <string name="compose_settings_chart_rate_hint">拦截/请求百分比环</string>
+    <string name="compose_settings_chart_conn">连接数曲线</string>
+    <string name="compose_settings_chart_conn_hint">趋势图中的第三条线</string>
     <string name="compose_settings_ws_title">网络服务器</string>
     <string name="compose_settings_ws_hint">监听范围与端口（切换后自动重启）</string>
     <string name="compose_settings_ws_bind">局域网访问</string>
@@ -100,7 +107,10 @@
     <string name="compose_stats_history_window">每小时</string>
     <string name="compose_stats_daily_window">每天</string>
     <string name="compose_stats_range_24h">24小时</string>
+    <string name="compose_stats_range_7d">7天</string>
     <string name="compose_stats_range_30d">30天</string>
+    <string name="compose_stats_7d_window">每天 · 7天</string>
+    <string name="compose_stats_history_connections">连接</string>
     <string name="compose_stats_style_bars">柱状</string>
     <string name="compose_stats_style_line">折线</string>
     <string name="compose_stats_style_stacked">堆叠</string>

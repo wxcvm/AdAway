@@ -36,6 +36,7 @@
     <string name="compose_ws_control_test">Open test page</string>
     <string name="compose_legacy_ui">Classic interface</string>
     <string name="compose_legacy_ui_subtitle">Open the previous Java interface</string>
+    <string name="compose_legacy_removed">The legacy interface has been fully replaced by this one.</string>
 
     <!-- Statistics -->
     <string name="compose_stats_title">Statistics</string>
@@ -76,6 +77,12 @@
     <string name="compose_settings_chart_certs">Recent certs</string>
     <string name="compose_settings_chart_certs_hint">Recently issued SNI certificates</string>
     <string name="compose_settings_chart_style">Bar chart style</string>
+    <string name="compose_settings_chart_lifetime">All-time totals</string>
+    <string name="compose_settings_chart_lifetime_hint">Cumulative request/block/conn/cert counters</string>
+    <string name="compose_settings_chart_rate">Block rate</string>
+    <string name="compose_settings_chart_rate_hint">Blocked / requests percentage ring</string>
+    <string name="compose_settings_chart_conn">Connections line</string>
+    <string name="compose_settings_chart_conn_hint">Third series on the trend chart</string>
     <string name="compose_settings_ws_title">Web server</string>
     <string name="compose_settings_ws_hint">Listen range and ports (server restarts)</string>
     <string name="compose_settings_ws_bind">LAN access</string>
@@ -100,7 +107,10 @@
     <string name="compose_stats_history_window">hourly</string>
     <string name="compose_stats_daily_window">daily</string>
     <string name="compose_stats_range_24h">24h</string>
+    <string name="compose_stats_range_7d">7d</string>
     <string name="compose_stats_range_30d">30d</string>
+    <string name="compose_stats_7d_window">daily · 7d</string>
+    <string name="compose_stats_history_connections">Connections</string>
     <string name="compose_stats_style_bars">Bars</string>
     <string name="compose_stats_style_line">Line</string>
     <string name="compose_stats_style_stacked">Stacked</string>

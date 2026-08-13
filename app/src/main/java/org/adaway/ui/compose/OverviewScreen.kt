@@ -156,13 +156,10 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                         else stringResource(R.string.compose_sync_hosts_subtitle),
                         onClick = { viewModel.syncHosts() },
                     )
-                    ActionRow(
-                        icon = Icons.Outlined.Dns,
-                        label = stringResource(R.string.compose_ws_settings),
-                        subtitle = stringResource(R.string.compose_ws_settings_subtitle),
-                        onClick = {
-                            context.startActivity(Intent(context, PrefsActivity::class.java))
-                        },
+                    Text(
+                        stringResource(R.string.compose_legacy_removed),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
