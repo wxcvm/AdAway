@@ -102,6 +102,8 @@
     <string name="compose_settings_about_title">About</string>
     <string name="compose_settings_about_version">Version %1$s</string>
     <string name="compose_settings_chart_style">Bar chart style</string>
+    <string name="compose_settings_realtime">Real-time updates</string>
+    <string name="compose_settings_realtime_hint">Push stats over WebSocket when enabled (faster than polling)</string>
     <string name="compose_settings_chart_lifetime">All-time totals</string>
     <string name="compose_settings_chart_lifetime_hint">Cumulative request/block/conn/cert counters</string>
     <string name="compose_settings_chart_rate">Block rate</string>
@@ -180,6 +182,10 @@
     <string name="compose_logs_filter_redirected">Redirected</string>
     <string name="compose_logs_filter_unknown">unknown</string>
     <string name="compose_logs_empty_filtered">No entries match this filter</string>
+    <string name="compose_logs_action_hint">Add this host to a manual rule list:</string>
+    <string name="compose_logs_action_block">Block (blacklist)</string>
+    <string name="compose_logs_action_allow">Allow (whitelist)</string>
+    <string name="compose_logs_action_cancel">Cancel</string>
 
     <!-- Rules -->
     <string name="compose_rules_title">Rules</string>

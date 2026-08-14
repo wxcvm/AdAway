@@ -161,6 +161,18 @@ internal fun setChartRange(context: Context, range: Int) {
         .edit().putInt("chart_range", range).apply()
 }
 
+/* ── Real-time WebSocket push toggle ──────────────────────────── */
+
+internal fun isRealtimeEnabled(context: Context): Boolean {
+    return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .getBoolean("realtime_enabled", false)
+}
+
+internal fun setRealtimeEnabled(context: Context, enabled: Boolean) {
+    context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .edit().putBoolean("realtime_enabled", enabled).apply()
+}
+
 /* ── Theme mode: 0 = follow system, 1 = light, 2 = dark ────────── */
 
 internal fun themeMode(context: Context): Int {
@@ -631,6 +643,32 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 label = { Text(stringResource(labelRes)) },
                             )
                         }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    // 实时推送开关（WebSocket）
+                    var realtime by remember { mutableStateOf(isRealtimeEnabled(context)) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_realtime),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_realtime_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = realtime,
+                            onCheckedChange = { v ->
+                                realtime = v
+                                setRealtimeEnabled(context, v)
+                            },
+                        )
                     }
                 }
             }

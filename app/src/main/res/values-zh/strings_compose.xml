@@ -102,6 +102,8 @@
     <string name="compose_settings_about_title">关于</string>
     <string name="compose_settings_about_version">版本 %1$s</string>
     <string name="compose_settings_chart_style">柱状图样式</string>
+    <string name="compose_settings_realtime">实时更新</string>
+    <string name="compose_settings_realtime_hint">启用 WebSocket 推送统计（比轮询更快）</string>
     <string name="compose_settings_chart_lifetime">累计统计</string>
     <string name="compose_settings_chart_lifetime_hint">请求/拦截/连接/证书累计计数</string>
     <string name="compose_settings_chart_rate">拦截率</string>
@@ -180,6 +182,10 @@
     <string name="compose_logs_filter_redirected">已重定向</string>
     <string name="compose_logs_filter_unknown">未知</string>
     <string name="compose_logs_empty_filtered">没有符合该筛选条件的记录</string>
+    <string name="compose_logs_action_hint">将此域名加入手动规则列表：</string>
+    <string name="compose_logs_action_block">加入黑名单（拦截）</string>
+    <string name="compose_logs_action_allow">加入白名单（放行）</string>
+    <string name="compose_logs_action_cancel">取消</string>
 
     <!-- 规则 -->
     <string name="compose_rules_title">规则</string>

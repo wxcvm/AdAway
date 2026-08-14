@@ -204,6 +204,57 @@ private fun startPolling() {
         }
     }
 
+    /*
+     * WebSocket 实时推送（可选）：当用户在设置页启用 realtime_enabled
+     * 时，连到 webserver 的 /internal-ws，服务器在每次拦截事件后推送
+     * JSON 快照，替代/补充 10s 轮询。连接失败时自动回退轮询。
+     */
+    private var wsJob: Job? = null
+
+    fun startRealtime() {
+        if (wsJob?.isActive == true) return
+        wsJob = viewModelScope.launch {
+            val client = okhttp3.OkHttpClient.Builder()
+                .pingInterval(15, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+            val request = okhttp3.Request.Builder()
+                .url("http://[::ffff:127.0.0.1]:${org.adaway.util.WebServerUtils.getStatsHttpPort()}/internal-ws")
+                .build()
+            try {
+                val ws = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
+                    override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
+                        try {
+                            _serverStats.value = ServerStats.fromJson(org.json.JSONObject(text))
+                        } catch (e: Exception) {
+                            Timber.w(e, "Bad WS payload")
+                        }
+                    }
+
+                    override fun onFailure(
+                        webSocket: okhttp3.WebSocket,
+                        t: Throwable,
+                        response: okhttp3.Response?,
+                    ) {
+                        Timber.w(t, "WebSocket failed — falling back to polling")
+                    }
+                })
+                // 保持连接直到协程取消
+                try {
+                    while (isActive) delay(1000)
+                } finally {
+                    ws.close(1000, null)
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "WebSocket connect failed")
+            }
+        }
+    }
+
+    fun stopRealtime() {
+        wsJob?.cancel()
+        wsJob = null
+    }
+
     /**
      * 拉取一次 webserver 统计并更新 UI 状态。
      *

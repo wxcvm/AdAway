@@ -26,9 +26,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +42,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -72,6 +76,7 @@ fun LogsScreen(viewModel: StatsViewModel) {
     var recording by remember { mutableStateOf(model.isRecordingLogs()) }
     var refreshing by remember { mutableStateOf(false) }
     var filter by remember { mutableIntStateOf(0) }
+    var actionHost by remember { mutableStateOf<String?>(null) }
     val limit = logLimit(context)
 
     /**
@@ -207,15 +212,65 @@ fun refresh() {
                 ) {
                     items(visibleEntries, key = { it.first }) { (host, type) ->
                         LogRow(host = host, type = type, onClick = {
-                            // TODO: open host action (whitelist etc.) in a later step
+                            // 点击日志条目：弹出操作选择（加入黑名单/白名单）
+                            actionHost = host
                         })
                     }
-                }
             }
         }
     }
+
+    // 点击日志条目后的操作对话框：加入黑名单 / 白名单
+    actionHost?.let { host ->
+        AlertDialog(
+            onDismissRequest = { actionHost = null },
+            title = { Text(host, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.compose_logs_action_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // 加入黑名单（拦截）
+                    TextButton(
+                        onClick = {
+                            viewModel.addUserRule(host, ListType.BLOCKED.value, null) {
+                                actionHost = null
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.compose_logs_action_block))
+                    }
+                    // 加入白名单（放行）
+                    TextButton(
+                        onClick = {
+                            viewModel.addUserRule(host, ListType.ALLOWED.value, null) {
+                                actionHost = null
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.compose_logs_action_allow))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { actionHost = null }) {
+                    Text(stringResource(R.string.compose_logs_action_cancel))
+                }
+            },
+        )
+    }
 }
 
+}
 private data class FilterOption(
     @androidx.annotation.StringRes val labelRes: Int,
     val type: ListType?,

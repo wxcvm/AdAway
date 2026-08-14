@@ -130,6 +130,32 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 StatTile(stringResource(R.string.compose_hosts_redirected), redirectCount, Modifier.weight(1f))
             }
 
+            // Web server quick stats row（利用空位：证书/请求/拦截率）
+            if (serverStats != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    StatTile(
+                        stringResource(R.string.compose_ws_control_certs),
+                        serverStats!!.sniCertsIssued.toInt(),
+                        Modifier.weight(1f),
+                    )
+                    StatTile(
+                        stringResource(R.string.compose_stats_kpi_requests),
+                        serverStats!!.totalRequests.toInt(),
+                        Modifier.weight(1f),
+                    )
+                    val rate = if (serverStats!!.totalRequests > 0)
+                        (serverStats!!.totalBlocked * 100 / serverStats!!.totalRequests).toInt() else 0
+                    StatTile(
+                        stringResource(R.string.compose_stats_kpi_rate),
+                        rate,
+                        Modifier.weight(1f),
+                    )
+                }
+            }
+
             // Web server card
             WebServerCard(
                 running = viewModel.webServerRunning,

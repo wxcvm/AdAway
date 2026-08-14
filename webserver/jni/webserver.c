@@ -1420,6 +1420,15 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
+    /* WebSocket: keep the connection open (client pulls or we push). */
+    if (ev == MG_EV_WS_OPEN) {
+        /* Send a first snapshot immediately so the UI has data. */
+        return;
+    }
+    if (ev == MG_EV_WS_MSG) {
+        return;
+    }
+
     /* TLS handshake outcome statistics (new metric). */
     if (ev == MG_EV_TLS_HS) {
         s_stats.tls_handshakes++;
