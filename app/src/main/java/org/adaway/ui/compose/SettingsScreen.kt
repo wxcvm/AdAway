@@ -667,6 +667,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             onCheckedChange = { v ->
                                 realtime = v
                                 setRealtimeEnabled(context, v)
+                                // 实际启停 WebSocket 连接
+                                if (v) viewModel.startRealtime() else viewModel.stopRealtime()
                             },
                         )
                     }
