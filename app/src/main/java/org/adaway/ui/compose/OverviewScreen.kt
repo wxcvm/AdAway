@@ -47,7 +47,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -60,6 +62,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.adaway.R
 import org.adaway.ui.home.HomeActivity
 import org.adaway.ui.prefs.PrefsActivity
@@ -80,6 +84,15 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     val context = LocalContext.current
     var wsEnabled by remember {
         mutableStateOf(org.adaway.util.WebServerUtils.isWebServerRunning())
+    }
+    // 证书状态：getWebServerState() 内部含 OkHttp HTTP 探活，
+    // 禁止在主线程调用（否则 NetworkOnMainThreadException 崩溃），
+    // 因此放到 LaunchedEffect 后台线程获取。
+    var certStateRes by remember { mutableIntStateOf(R.string.pref_webserver_state_not_running) }
+    LaunchedEffect(wsEnabled) {
+        certStateRes = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            org.adaway.util.WebServerUtils.getWebServerState(context)
+        }
     }
 
     Scaffold(
@@ -129,7 +142,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 stats = serverStats,
                 httpPort = org.adaway.util.WebServerUtils.getHttpPort(context),
                 httpsPort = org.adaway.util.WebServerUtils.getHttpsPort(context),
-                certStateRes = org.adaway.util.WebServerUtils.getWebServerState(context),
+                certStateRes = certStateRes,
                 onToggle = { enable ->
                     if (enable) {
                         org.adaway.util.WebServerUtils.startWebServer(context)
