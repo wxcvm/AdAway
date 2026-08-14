@@ -377,6 +377,21 @@ fun refreshServerStats() {
     }
 
     /**
+     * 删除订阅源及其所有规则条目（source_id != 1 的订阅）。
+     * 删除后重新同步 hosts 文件使变更生效。
+     */
+    fun removeSource(source: org.adaway.db.entity.HostsSource, onDone: () -> Unit) {
+        viewModelScope.launch {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val dao = database.hostsSourceDao()
+                dao.delete(source)
+                hostsListItemDao.clearSourceHosts(source.id)
+            }
+            onDone()
+        }
+    }
+
+    /**
      * 删除一条用户自定义规则（source_id == 1 的手动规则）。
      * 使用 HostListItemDao.deleteUserFromHost() 清理 hosts_lists，
      * 并用 HostEntryDao.allowHost() 从生效的 host_entries 中移除该域名，
