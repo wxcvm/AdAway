@@ -76,6 +76,17 @@
     <string name="compose_settings_chart_apps_hint">Per-app connection list</string>
     <string name="compose_settings_chart_certs">Recent certs</string>
     <string name="compose_settings_chart_certs_hint">Recently issued SNI certificates</string>
+    <string name="compose_settings_theme_title">Appearance</string>
+    <string name="compose_settings_theme_hint">Choose the app color scheme</string>
+    <string name="compose_settings_theme_system">System</string>
+    <string name="compose_settings_theme_light">Light</string>
+    <string name="compose_settings_theme_dark">Dark</string>
+    <string name="compose_settings_logs_retention">Keep logs for</string>
+    <string name="compose_settings_logs_retention_forever">Forever</string>
+    <string name="compose_settings_logs_retention_1d">1 day</string>
+    <string name="compose_settings_logs_retention_7d">7 days</string>
+    <string name="compose_settings_logs_retention_30d">30 days</string>
+    <string name="compose_settings_about_license">Open source (GPLv3) — AdAway fork with per-app stats, SNI interception and a Material 3 UI.</string>
     <string name="compose_settings_data_title">Data</string>
     <string name="compose_settings_data_hint">Clear statistics and history</string>
     <string name="compose_settings_clear_stats">Clear all stats</string>

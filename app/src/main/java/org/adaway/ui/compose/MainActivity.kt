@@ -1,9 +1,20 @@
 package org.adaway.ui.compose
 
+/**
+ * ADBlock (AdAway fork) Compose UI 入口 Activity。
+ *
+ * 职责：
+ *  1. 首次启动引导（firstRunSetup）：静默选择 ROOT hosts 方法并同步规则源；
+ *  2. 根据用户偏好（theme_mode：0=跟随系统 / 1=浅色 / 2=深色）应用主题；
+ *  3. 挂载 Compose 导航根组件 AdAwayApp。
+ *
+ * 注意：本 Activity 不再调用 enableEdgeToEdge()，避免状态栏 inset
+ * 双重叠加导致各页面顶部出现空白（历史 BUG）。
+ */
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -25,10 +36,16 @@ import timber.log.Timber
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         firstRunSetup()
         setContent {
-            AdAwayTheme {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val mode = org.adaway.ui.compose.themeMode(context)
+            val darkTheme = when (mode) {
+                1 -> false
+                2 -> true
+                else -> androidx.compose.foundation.isSystemInDarkTheme()
+            }
+            AdAwayTheme(darkTheme = darkTheme) {
                 AdAwayApp()
             }
         }

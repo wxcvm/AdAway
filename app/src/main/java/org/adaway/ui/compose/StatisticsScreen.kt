@@ -1,5 +1,20 @@
 package org.adaway.ui.compose
 
+/**
+ * 统计页面：ADBlock 的核心数据展示。
+ *
+ * 图表组成（均可通过设置页开关控制）：
+ *  - LifetimeCard    累计统计（请求/拦截/连接/证书，重启不丢失）
+ *  - DonutChart      环形图（按类型展示拦截占比，中心显示总数）
+ *  - BlockRateCard   拦截率环（拦截/请求百分比）
+ *  - TrafficTrendCard 趋势图（24h/7d/30d/永久，line/area/bars 三种样式）
+ *  - ActiveAppsCard  活跃应用（per-app 连接/请求/拦截统计）
+ *  - RecentCertsCard 最近签发的 SNI 证书列表
+ *  - ServerDetailsCard 服务器详情（uptime/类型计数）
+ *
+ * 数据来源：StatsViewModel 每 10s 轮询 webserver /internal-stats。
+ */
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
@@ -86,15 +101,31 @@ internal fun buildCategories(stats: ServerStats): List<BlockCategory> {
  * Statistics screen: hosts totals, web server blocked-request donut
  * chart with per-type breakdown, and server details. AdGuard-style
  * data density without third-party chart dependencies.
+ *
+ * 页面布局自上而下：
+ *  1. hosts 列表总量卡（拦截/放行/重定向数量）
+ *  2. 累计统计卡（LifetimeCard，重启不丢失）
+ *  3. 拦截率环（BlockRateCard）
+ *  4. 分类环形图（DonutChart，中心显示拦截总数）
+ *  5. 趋势图（TrafficTrendCard，24h/7d/30d/永久 + 三样式）
+ *  6. 活跃应用（ActiveAppsCard）
+ *  7. 最近签发证书（RecentCertsCard）
+ *  8. 服务器详情（ServerDetailsCard）
+ *
+ * 每个卡片的显隐均由设置页 isChartEnabled(key) 控制，
+ * 用户可高度自定义统计页内容。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StatisticsScreen(viewModel: StatsViewModel) {
+    // ── 从 ViewModel 收集数据流（每 10s 轮询一次 webserver）──
     val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    // ── 读取设置页的图表开关（键值见 SettingsScreen.kt）──
     val showLifetime = isChartEnabled(context, "chart_lifetime")
     val showRate = isChartEnabled(context, "chart_rate")
     val showDonut = isChartEnabled(context, "chart_donut")
@@ -105,8 +136,7 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
     val showConn = isChartEnabled(context, "chart_conn")
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
+                topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_stats_title)) },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -243,6 +273,15 @@ private fun CountLabel(label: String, value: Int) {
  * Donut chart drawn with Canvas. Center shows the total.
  */
 @Composable
+/**
+ * 环形图（Canvas 手绘，无第三方图表库）。
+ *
+ * 绘制逻辑：
+ *  - 每个拦截类型（图片/脚本/样式/API/遥测等）占一段圆弧；
+ *  - 弧长 = 该类型拦截数 / 总拦截数 * 360°，段间留 1° 空隙；
+ *  - 中心文字显示拦截总数（Monospace 字体）。
+ *  - 颜色取自 MaterialTheme 主题色 + 固定语义色。
+ */
 private fun DonutChart(stats: ServerStats) {
     val categories = buildCategories(stats)
     val total = stats.totalBlocked
@@ -432,6 +471,10 @@ internal fun appNameForUid(uid: Int): String {
 }
 
 @Composable
+/**
+ * 累计统计卡：请求/拦截/连接/证书四个自 webserver 启动以来
+ * 的累计计数（持久化于 stats.dat，重启不丢失）。
+ */
 private fun LifetimeCard(stats: ServerStats) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -484,6 +527,20 @@ private fun CountLabel(label: String, value: Long) {
 }
 
 @Composable
+/**
+ * 趋势图（AdGuard Home 风格）：支持 4 个时间范围与 3 种样式。
+ *
+ * 时间范围（mode）：
+ *  0 = 24h（hourly 桶）  1 = 7d（daily 取最近 7 天）
+ *  2 = 30d（daily 全部） 3 = 永久（所有历史数据）
+ *
+ * 样式（style，取自偏好 chart_style）：
+ *  0 = 折线（平滑 Catmull-Rom 曲线 + 渐变面积）
+ *  1 = 堆叠柱状图  2 = 面积图
+ *
+ * 绘制细节：网格线 + Y 轴刻度 + 图例 + 三条数据系列
+ * （请求=primary、拦截=error、连接=tertiary，连接线可开关）。
+ */
 private fun TrafficTrendCard(
     hourly: List<HistPoint>,
     daily: List<HistPoint>,
@@ -699,6 +756,10 @@ private fun smoothPath(points: List<Offset>): androidx.compose.ui.graphics.Path 
 }
 
 @Composable
+/**
+ * 拦截率环：环形进度条展示 拦截数/请求数 的百分比。
+ * 中心大字显示百分比，下方显示 拦截/请求 计数。
+ */
 private fun BlockRateCard(stats: ServerStats) {
     val total = stats.totalRequests.coerceAtLeast(1L)
     val rate = stats.totalBlocked.toFloat() / total
@@ -767,6 +828,10 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) 
 }
 
 @Composable
+/**
+ * 活跃应用卡：按 拦截+请求 总数降序展示各 uid 的
+ * 连接数/请求数/拦截数。uid → 应用名通过 PackageManager 解析。
+ */
 private fun ActiveAppsCard(apps: List<AppStat>) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val monitoredApps = apps.filter { isAppMonitored(context, it.uid) }
@@ -817,6 +882,10 @@ private fun ActiveAppsCard(apps: List<AppStat>) {
 }
 
 @Composable
+/**
+ * 最近签发证书卡：展示 webserver 为各广告域名（SNI）
+ * 动态签发的叶子证书列表（域名 + 时间）。
+ */
 private fun RecentCertsCard(hosts: List<TlsHost>) {
     Card(
         modifier = Modifier.fillMaxWidth(),

@@ -1,5 +1,20 @@
 package org.adaway.ui.compose
 
+/**
+ * 设置页面：高度自定义的偏好中心。
+ *
+ * 卡片分组：
+ *  - 外观    主题切换（跟随系统/浅色/深色）
+ *  - 数据管理  清除累计统计与历史
+ *  - Web 服务器 监听范围（LAN/回环）+ HTTP/HTTPS 端口
+ *  - 日志    条数上限 + 保留时间（永久/1天/7天/30天）
+ *  - 图表    各类统计卡开关 + 柱状图样式
+ *  - 应用监控  每个已识别 uid 的独立监控开关
+ *  - 关于    版本号 + 开源声明
+ *
+ * 偏好存储：compose_general / compose_app_monitor / compose_webserver。
+ */
+
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
@@ -94,6 +109,30 @@ internal fun setChartStyle(context: Context, style: Int) {
         .edit().putInt("chart_style", style).apply()
 }
 
+/* ── Theme mode: 0 = follow system, 1 = light, 2 = dark ────────── */
+
+internal fun themeMode(context: Context): Int {
+    return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .getInt("theme_mode", 0)
+}
+
+internal fun setThemeMode(context: Context, mode: Int) {
+    context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .edit().putInt("theme_mode", mode).apply()
+}
+
+/* ── Log retention: 0 = forever, else hours ────────────────────── */
+
+internal fun logRetentionHours(context: Context): Int {
+    return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .getInt("log_retention", 0)
+}
+
+internal fun setLogRetentionHours(context: Context, hours: Int) {
+    context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .edit().putInt("log_retention", hours).apply()
+}
+
 /**
  * Settings screen: lets the user choose which detected apps are tracked
  * in the per-app statistics (connections / requests / blocked / SNI).
@@ -124,6 +163,47 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // ── Appearance (theme) ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_theme_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_settings_theme_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    var theme by remember { mutableStateOf(themeMode(context)) }
+                    LaunchedEffect(Unit) { theme = themeMode(context) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            Triple(0, R.string.compose_settings_theme_system, 0),
+                            Triple(1, R.string.compose_settings_theme_light, 1),
+                            Triple(2, R.string.compose_settings_theme_dark, 2),
+                        ).forEach { (mode, labelRes, _) ->
+                            FilterChip(
+                                selected = theme == mode,
+                                onClick = {
+                                    theme = mode
+                                    setThemeMode(context, mode)
+                                    // Recreate activity to apply theme
+                                    (context as? android.app.Activity)?.recreate()
+                                },
+                                label = { Text(stringResource(labelRes)) },
+                            )
+                        }
+                    }
+                }
+            }
+
 // ── Data management ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -298,6 +378,32 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             )
                         }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_logs_retention),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    var retention by remember { mutableStateOf(logRetentionHours(context)) }
+                    LaunchedEffect(Unit) { retention = logRetentionHours(context) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            Triple(0, R.string.compose_settings_logs_retention_forever, 0),
+                            Triple(24, R.string.compose_settings_logs_retention_1d, 24),
+                            Triple(168, R.string.compose_settings_logs_retention_7d, 168),
+                            Triple(720, R.string.compose_settings_logs_retention_30d, 720),
+                        ).forEach { (hours, labelRes, _) ->
+                            FilterChip(
+                                selected = retention == hours,
+                                onClick = {
+                                    retention = hours
+                                    setLogRetentionHours(context, hours)
+                                },
+                                label = { Text(stringResource(labelRes)) },
+                            )
+                        }
+                    }
                 }
             }
 
@@ -457,6 +563,42 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             }
                         }
                     }
+                }
+            }
+
+            // ── About ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_about_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    val pkgInfo = remember {
+                        try {
+                            context.packageManager.getPackageInfo(context.packageName, 0)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    Text(
+                        stringResource(
+                            R.string.compose_settings_about_version,
+                            pkgInfo?.versionName ?: "?",
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_about_license),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

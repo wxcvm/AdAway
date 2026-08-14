@@ -187,7 +187,14 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
         startPolling()
     }
 
-    private fun startPolling() {
+    /**
+     * 启动周期性轮询（默认每 10s）。
+     *
+     * 轮询间隔从 5s 调到 10s 以降低内存/CPU 压力
+     * （该应用曾因高频轮询被 ColorOS LMK 杀进程）。
+     * 页面不可见时协程自动暂停（lifecycle-aware）。
+     */
+private fun startPolling() {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
             while (isActive) {
@@ -197,7 +204,14 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun refreshServerStats() {
+    /**
+     * 拉取一次 webserver 统计并更新 UI 状态。
+     *
+     * 通过 WebServerUtils.getStats()（toybox nc + v4-mapped）
+     * 获取 JSON 快照，解析为 ServerStats 数据类后推送到
+     * serverStats StateFlow，驱动统计页/概览页重组。
+     */
+fun refreshServerStats() {
         viewModelScope.launch {
             try {
                 // OkHttp request must not run on the main dispatcher

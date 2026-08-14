@@ -1,5 +1,16 @@
 package org.adaway.ui.compose
 
+/**
+ * 应用根导航组件：底部导航栏 + 5 个页面。
+ *
+ * 页面：
+ *  - overview  概览（服务状态、hosts 统计、Web 服务器控制）
+ *  - stats     统计（累计/环形图/趋势图/活跃应用/证书）
+ *  - rules     规则（hosts 黑白名单 + 订阅源管理）
+ *  - logs      日志（实时 DNS 请求日志）
+ *  - settings  设置（外观/数据/Web服务器/图表/应用监控/关于）
+ */
+
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home

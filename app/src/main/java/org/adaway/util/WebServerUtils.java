@@ -124,7 +124,21 @@ public class WebServerUtils {
      * preserved in /proc/net/tcp6).
      */
     @androidx.annotation.Nullable
-    public static org.json.JSONObject getStats() {
+    /**
+     * 拉取 webserver 统计快照（/internal-stats）并解析为 JSON。
+     *
+     * 实现要点（历史踩坑记录）：
+     *  1. 必须使用 toybox nc 子进程而非 Java Socket：
+     *     Java 会把 v4-mapped 地址折叠回纯 IPv4，导致 /proc/net/tcp
+     *     中 uid 被 ColorOS 内核清零，per-app 统计失效。
+     *  2. 目标地址为 ::ffff:127.0.0.1（v4-mapped），子进程继承
+     *     app uid，内核在 tcp6 表中保留真实 uid。
+     *  3. 响应体可能超过 4KB（history+daily+apps），使用 ByteArrayOutputStream
+     *     累积读取，避免截断导致 JSON 解析失败。
+     *
+     * @return 解析后的 JSONObject；webserver 未运行或响应不可解析时返回 null。
+     */
+public static org.json.JSONObject getStats() {
         try {
             Process process = new ProcessBuilder(
                     "/system/bin/toybox", "nc", "-w", "3",
@@ -180,7 +194,20 @@ public class WebServerUtils {
      * Start the web server, killing any stale instance first and waiting for
      * the port to be released before relaunching.
      */
-    public static void startWebServer(Context context) {
+    /**
+     * 启动 webserver 守护进程（libwebserver_exec.so）。
+     *
+     * 流程：
+     *  1. ensureStaticResources() 生成/更新 CA 证书与拦截占位图；
+     *  2. 检查原生库可执行文件存在且可读；
+     *  3. 杀掉残留旧进程，等待端口释放；
+     *  4. 以 root 身份（ShellUtils.runBundledExecutable）启动，
+     *     传入 --bind/--http-port/--https-port 参数（来自偏好）。
+     *
+     * 注意：所有 Toast 必须通过 showToast() 切到主线程，
+     * 否则在后台线程调用会抛 CalledFromWrongThreadException。
+     */
+public static void startWebServer(Context context) {
         Timber.d("Starting web server…");
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
@@ -230,7 +257,22 @@ public class WebServerUtils {
     }
 
     @StringRes
-    public static int getWebServerState(Context context) {
+    /**
+     * 计算 webserver 状态字符串资源 ID。
+     *
+     * 判定顺序：
+     *  1. 进程未运行 → not_running
+     *  2. HTTP 探活失败 → not_running
+     *  3. 证书哈希与上次记录不一致（cert_hash 偏好）→ cert_expired
+     *     （证书被重新生成，用户需重新安装 CA）
+     *  4. 系统信任库存在 → installed_system（所有应用信任）
+     *  5. 用户信任库存在 → installed（仅用户级）
+     *  6. 否则 → not_installed
+     *
+     * 说明：证书哈希比较是纯文件级检测（MD5(subject DER)），
+     * 不依赖 OS TLS 握手，避免网络安全配置差异导致的误报。
+     */
+public static int getWebServerState(Context context) {
         if (!isWebServerRunning()) return R.string.pref_webserver_state_not_running;
 
         OkHttpClient client = new OkHttpClient.Builder()
@@ -326,7 +368,14 @@ public class WebServerUtils {
      * Install AdAway's CA into the user trust store (KeyChain).
      * Works on all Android versions but requires the user to confirm.
      */
-    public static void installUserCertificate(Context context) {
+    /**
+     * 引导用户安装 CA 证书（KeyChain 系统弹窗）。
+     *
+     * Android 11+ 禁止应用静默安装 CA，必须由用户在
+     * “设置 → 安全 → 加密与凭据 → 安装证书”中手动确认。
+     * 这里构造 KeyChain.createInstallIntent() 并附带证书字节。
+     */
+public static void installUserCertificate(Context context) {
         Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) {
             Toast.makeText(context, R.string.pref_webserver_certificate_enable_first,
@@ -355,7 +404,14 @@ public class WebServerUtils {
      * handshake and hoping network_security_config's per-domain trust
      * override kicks in. See the comment in getWebServerState() for why.
      */
-    public static boolean isUserCertificateInstalled(Context context) {
+    /**
+     * 检查 AdAway CA 是否已安装为“用户”信任锚。
+     *
+     * 直接检查 KeyChain 写入的证书文件
+     * /data/misc/user/0/cacerts-added/<subject_hash_old>.0 是否存在
+     * （需要 root 读取），文件名哈希与 OpenSSL c_rehash 一致。
+     */
+public static boolean isUserCertificateInstalled(Context context) {
         Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) return false;
         String hash;
@@ -398,7 +454,14 @@ public class WebServerUtils {
      * legacy /system path for older devices that never had a conscrypt
      * APEX module at all.
      */
-    public static boolean isSystemCertificateInstalled(Context context) {
+    /**
+     * 检查 CA 是否已进入“系统”信任库。
+     *
+     * Android 14+ 实际读取的是 /apex/com.android.conscrypt/cacerts
+     * （只读 APEX），旧设备仍是 /system/etc/security/cacerts；
+     * 优先检测 APEX 路径，不存在时回退旧路径。
+     */
+public static boolean isSystemCertificateInstalled(Context context) {
         Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
         if (!Files.isRegularFile(certFile)) return false;
         String hash;
@@ -425,7 +488,14 @@ public class WebServerUtils {
      * Reimplemented here in pure Java so this app never depends on an
      * `openssl` CLI binary actually existing on the device.
      */
-    private static String computeSubjectHashOld(Path certFile)
+    /**
+     * 计算 OpenSSL subject_hash_old（c_rehash 文件名哈希）。
+     *
+     * 算法：MD5(DER 编码的 subject DN)，取前 4 字节按
+     * 小端序拼成 32 位整数，格式化为 8 位十六进制。
+     * 纯 Java 实现，避免依赖设备上的 openssl 二进制。
+     */
+private static String computeSubjectHashOld(Path certFile)
             throws IOException, CertificateException, NoSuchAlgorithmException {
         X509Certificate cert;
         try (InputStream is = Files.newInputStream(certFile)) {

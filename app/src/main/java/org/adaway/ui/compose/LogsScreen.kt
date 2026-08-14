@@ -1,5 +1,15 @@
 package org.adaway.ui.compose
 
+/**
+ * 日志页面：实时 DNS 请求日志（基于 tcpdump 管道）。
+ *
+ * 功能：
+ *  - 录制开关（记录/暂停）、手动刷新、清空
+ *  - 类型过滤（全部/拦截/放行/重定向）
+ *  - 按设置截断：log_limit（条数上限）+ log_retention（保留时间）
+ *  - 录制时每 3s 自动刷新
+ */
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
@@ -64,7 +74,13 @@ fun LogsScreen(viewModel: StatsViewModel) {
     var filter by remember { mutableIntStateOf(0) }
     val limit = logLimit(context)
 
-    fun refresh() {
+    /**
+ * 刷新日志：从 AdBlockModel 拉取最新条目，
+ * 按设置截断（log_limit 条数上限 + log_retention 保留时间）。
+ *
+ * 注意：刷新在 IO 线程执行，回调切回主线程更新 Compose 状态。
+ */
+fun refresh() {
         viewModel.refreshLogEntries { newEntries ->
             entries = if (newEntries.size > limit) newEntries.takeLast(limit) else newEntries
         }
@@ -92,8 +108,7 @@ fun LogsScreen(viewModel: StatsViewModel) {
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
+                topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_logs_title)) },
                 actions = {
@@ -116,8 +131,8 @@ fun LogsScreen(viewModel: StatsViewModel) {
                         Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.compose_logs_clear))
                     }
                 },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
             )
         },

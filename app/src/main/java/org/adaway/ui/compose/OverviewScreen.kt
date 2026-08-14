@@ -1,5 +1,16 @@
 package org.adaway.ui.compose
 
+/**
+ * 概览页面：信息优先布局。
+ *
+ * 卡片顺序：
+ *  1. StatusCard         hosts 拦截服务状态（启用/运行中/规则数）
+ *  2. StatTile x3        拦截/放行/重定向 hosts 数量摘要
+ *  3. WebServerCard      Web 服务器运行状态摘要
+ *  4. WebServerControlCard Web 服务器开关/端口/测试入口（设置项移入概览）
+ *  5. Quick actions      同步 hosts、打开旧版界面等快捷操作
+ */
+
 import android.content.Intent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -71,8 +82,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
+                topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_overview_title)) },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -168,6 +178,18 @@ fun OverviewScreen(viewModel: StatsViewModel) {
 }
 
 @Composable
+/**
+ * Web 服务器控制卡：概览页的核心交互区。
+ *
+ * 功能：
+ *  - 启停开关（调用 WebServerUtils.start/stopWebServer）
+ *  - 显示当前 HTTP/HTTPS 端口与累计统计摘要
+ *  - “打开测试页”按钮（https://localhost:<port>/internal-test）
+ *  - “设置”按钮（跳转 PrefsActivity 旧版设置页）
+ *
+ * 设计意图：把用户最常用的 webserver 操作从设置页
+ * 提升到首页，利用概览页空位，减少跳转层级。
+ */
 private fun WebServerControlCard(
     enabled: Boolean,
     stats: ServerStats?,
@@ -260,6 +282,10 @@ private fun DetailChip(label: String, value: String) {
 }
 
 @Composable
+/**
+ * 服务状态卡：显示 hosts 拦截服务是否已应用、
+ * 当前状态文本与规则条数。颜色语义：运行=主色，停止=错误色。
+ */
 private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
     val color = if (running) {
         MaterialTheme.colorScheme.primary
@@ -336,6 +362,10 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) 
 }
 
 @Composable
+/**
+ * Web 服务器状态摘要卡：运行状态点 + 关键指标
+ * （请求数/拦截数/SNI 证书数，取自最近一次统计快照）。
+ */
 private fun WebServerCard(running: Boolean, stats: ServerStats?) {
     Card(
         modifier = Modifier.fillMaxWidth(),

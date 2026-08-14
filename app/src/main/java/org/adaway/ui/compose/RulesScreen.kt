@@ -1,5 +1,17 @@
 package org.adaway.ui.compose
 
+/**
+ * 规则页面：管理 hosts 黑白名单与订阅源。
+ *
+ * 三个标签页（Tab）：
+ *  - 拦截（BLOCKED）   被重定向到本机 webserver 的广告域名
+ *  - 放行（ALLOWED）   豁免拦截的域名
+ *  - 重定向（REDIRECTED）重定向到自定义地址的域名
+ *
+ * 底部 SourcesCard：规则订阅源列表（名称/条数/开关/添加按钮），
+ * 空状态时订阅卡片仍保留以便用户添加第一个订阅源。
+ */
+
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
@@ -102,12 +114,11 @@ fun RulesScreen(viewModel: StatsViewModel) {
     }
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
+                topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_rules_title)) },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
             )
         },
@@ -246,6 +257,10 @@ fun RulesScreen(viewModel: StatsViewModel) {
 }
 
 @Composable
+/**
+ * 规则订阅源卡：列出所有 hosts 订阅源（名称/条数/启用开关），
+ * 提供“添加订阅源”按钮。空列表时仍显示以便添加首个订阅。
+ */
 private fun SourcesCard(
     sources: List<org.adaway.db.entity.HostsSource>,
     onToggle: (org.adaway.db.entity.HostsSource) -> Unit,
