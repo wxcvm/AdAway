@@ -115,6 +115,10 @@
     <string name="compose_settings_ws_bind_loop">Loopback only</string>
     <string name="compose_settings_ws_http_port">HTTP port</string>
     <string name="compose_settings_ws_https_port">HTTPS port</string>
+    <string name="compose_settings_cert_title">Certificate</string>
+    <string name="compose_settings_cert_days">%1$d days left</string>
+    <string name="compose_settings_cert_fingerprint">SHA-256 fingerprint</string>
+    <string name="compose_settings_cert_install">Install certificate</string>
     <string name="compose_stats_type_images">Images</string>
     <string name="compose_stats_type_scripts">Scripts</string>
     <string name="compose_stats_type_styles">Styles</string>

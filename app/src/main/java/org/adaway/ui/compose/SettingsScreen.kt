@@ -29,9 +29,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -61,6 +63,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.adaway.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 private const val PREFS_MONITOR = "compose_app_monitor"
@@ -419,10 +423,75 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             )
                         }
                     }
+                    // ── 证书管理区 ──
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_cert_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    // 证书状态（后台获取避免主线程网络）
+                    var certStateRes by remember { mutableIntStateOf(R.string.pref_webserver_state_not_running) }
+                    LaunchedEffect(Unit) {
+                        certStateRes = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            org.adaway.util.WebServerUtils.getWebServerState(context)
+                        }
+                    }
+                    Text(
+                        stringResource(certStateRes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (certStateRes == R.string.pref_webserver_state_running_and_installed ||
+                            certStateRes == R.string.pref_webserver_state_running_and_installed_system)
+                            MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error,
+                    )
+                    // 剩余天数
+                    val daysLeft = org.adaway.util.WebServerUtils.getCertificateDaysLeft(context)
+                    if (daysLeft != null) {
+                        Text(
+                            stringResource(R.string.compose_settings_cert_days, daysLeft),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (daysLeft < 30) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // SHA-256 指纹（可展开查看）
+                    val fingerprint = remember {
+                        org.adaway.util.WebServerUtils.getCertificateFingerprint(context)
+                    }
+                    if (fingerprint != null) {
+                        Text(
+                            stringResource(R.string.compose_settings_cert_fingerprint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            fingerprint,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    // 安装证书按钮
+                    Button(
+                        onClick = {
+                            org.adaway.util.WebServerUtils.installUserCertificate(context)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.compose_settings_cert_install))
+                    }
                 }
             }
-
-            // ── Logs settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
