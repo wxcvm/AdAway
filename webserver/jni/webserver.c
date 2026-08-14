@@ -216,16 +216,17 @@ struct webstats {
     uint64_t blocked_clickbait;  /* tracker/click/pixel (204)       */
     uint64_t sni_certs_issued;   /* SNI per-domain certs generated  */
     uint64_t sni_cache_hits;     /* SNI cache hits (avoid re-issue) */
-    /* Sum of every blocked_* counter — used for block_rate metrics. */
-    uint64_t total_blocked(void) {
-        return blocked_images + blocked_scripts + blocked_styles +
-               blocked_fonts + blocked_media + blocked_api +
-               blocked_telemetry + blocked_heartbeat + blocked_config +
-               blocked_ws_sse + blocked_other + blocked_crypto +
-               blocked_clickbait;
-    }
 };
 static struct webstats s_stats = {0};
+
+/* Sum of every blocked_* counter — used for block_rate metrics. */
+static uint64_t stats_total_blocked(void) {
+    return s_stats.blocked_images + s_stats.blocked_scripts + s_stats.blocked_styles +
+           s_stats.blocked_fonts + s_stats.blocked_media + s_stats.blocked_api +
+           s_stats.blocked_telemetry + s_stats.blocked_heartbeat + s_stats.blocked_config +
+           s_stats.blocked_ws_sse + s_stats.blocked_other + s_stats.blocked_crypto +
+           s_stats.blocked_clickbait;
+}
 
 /* ── Persistent lifetime counters ─────────────────────────────── */
 /*
@@ -1433,7 +1434,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
 
     uint64_t uptime = uptime_seconds();
     uint64_t req = s_stats.total_requests;
-    uint64_t blk = s_stats.total_blocked();
+    uint64_t blk = stats_total_blocked();
     uint64_t hs  = s_stats.tls_handshakes;
     uint64_t hits = s_stats.sni_cache_hits;
     double block_rate = req > 0 ? (double)blk * 100.0 / (double)req : 0.0;
