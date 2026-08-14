@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,7 +29,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -103,7 +107,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     var refreshKey by remember { mutableStateOf(0) }
 
     Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_settings_title)) },
@@ -121,6 +124,37 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+// ── Data management ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_data_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_settings_data_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    val prefs = context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+                    Button(
+                        onClick = {
+                            prefs.edit().remove("s_hist_pos").remove("s_daily_pos").apply()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    ) {
+                        Text(stringResource(R.string.compose_settings_clear_stats))
+                    }
+                }
+            }
+
             // ── Web server settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -249,10 +283,11 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
-                    val limits = listOf(100, 500, 1000, 2000)
                     var limit by remember { mutableStateOf(logLimit(context)) }
+                    // Sync from preferences on composition start
+                    LaunchedEffect(Unit) { limit = logLimit(context) }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        limits.forEach { l ->
+                        listOf(100, 500, 1000, 2000).forEach { l ->
                             FilterChip(
                                 selected = limit == l,
                                 onClick = {
@@ -327,6 +362,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     )
                     Spacer(Modifier.height(4.dp))
                     var style by remember { mutableStateOf(chartStyle(context)) }
+                    // Sync from preferences on composition start
+                    LaunchedEffect(Unit) { style = chartStyle(context) }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf(
                             R.string.compose_stats_style_bars to 0,

@@ -76,7 +76,14 @@
     <string name="compose_settings_chart_apps_hint">Per-app connection list</string>
     <string name="compose_settings_chart_certs">Recent certs</string>
     <string name="compose_settings_chart_certs_hint">Recently issued SNI certificates</string>
+    <string name="compose_settings_data_title">Data</string>
+    <string name="compose_settings_data_hint">Clear statistics and history</string>
+    <string name="compose_settings_about_title">About</string>
+    <string name="compose_settings_about_version">Version %1$s</string>
     <string name="compose_settings_chart_style">Bar chart style</string>
+    <string name="compose_settings_data_hint">Clear statistics and history</string>
+    <string name="compose_settings_about_title">About</string>
+    <string name="compose_settings_about_version">Version %1$s</string>
     <string name="compose_settings_chart_lifetime">All-time totals</string>
     <string name="compose_settings_chart_lifetime_hint">Cumulative request/block/conn/cert counters</string>
     <string name="compose_settings_chart_rate">Block rate</string>

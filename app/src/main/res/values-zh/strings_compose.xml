@@ -76,7 +76,14 @@
     <string name="compose_settings_chart_apps_hint">各应用连接列表</string>
     <string name="compose_settings_chart_certs">最近签发证书</string>
     <string name="compose_settings_chart_certs_hint">最近签发的SNI证书</string>
+    <string name="compose_settings_data_title">数据管理</string>
+    <string name="compose_settings_data_hint">清除统计数据和历史</string>
+    <string name="compose_settings_about_title">关于</string>
+    <string name="compose_settings_about_version">版本 %1$s</string>
     <string name="compose_settings_chart_style">柱状图样式</string>
+    <string name="compose_settings_data_hint">清除统计数据和历史</string>
+    <string name="compose_settings_about_title">关于</string>
+    <string name="compose_settings_about_version">版本 %1$s</string>
     <string name="compose_settings_chart_lifetime">累计统计</string>
     <string name="compose_settings_chart_lifetime_hint">请求/拦截/连接/证书累计计数</string>
     <string name="compose_settings_chart_rate">拦截率</string>
