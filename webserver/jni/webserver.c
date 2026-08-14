@@ -770,7 +770,7 @@ static int generate_root_ca(const char *cert_path, const char *key_path) {
     /* Root CA: RSA-3072 for a stronger trust anchor (Android system
        trust store fully supports 3072-bit keys; keygen happens only
        once per CA life). */
-    int ret = make_cert("AdAway Root CA", NULL, NULL, 1, 3650, NULL, /*use_ec=*/0, /*rsa_bits=*/3072, &cert, &key);
+    int ret = make_cert("ADBlock Root CA", NULL, NULL, 1, 3650, NULL, /*use_ec=*/0, /*rsa_bits=*/3072, &cert, &key);
     if (ret != EXIT_SUCCESS) return ret;
     ret = EXIT_FAILURE;
     FILE *f = NULL;
@@ -1744,13 +1744,13 @@ int main(int argc, char *argv[]) {
     }
 
     setup_signal_handler();
-    LOG_INFO("AdAway webserver ready — arm64, Mongoose " MG_VERSION
+    LOG_INFO("ADBlock webserver ready — arm64, Mongoose " MG_VERSION
         ", SNI cert issuance enabled, IPv6 loopback %s.",
         ipv6_ok ? "on" : "off");
 
     while (s_sig_num == 0) mg_mgr_poll(&mgr, 1000);
     save_stats(&s);
-    LOG_INFO("AdAway webserver exiting (signal %d), stats saved", s_sig_num);
+    LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);
     mg_mgr_free(&mgr);

@@ -33,7 +33,7 @@ public class PrefsBackupRestoreFragment extends PreferenceFragmentCompat {
     /**
      * The default backup file name.
      */
-    private static final String BACKUP_FILE_NAME = "adaway-backup.json";
+    private static final String BACKUP_FILE_NAME = "adblock-backup.json";
     /**
      * The launcher to start import backup activity.
      */

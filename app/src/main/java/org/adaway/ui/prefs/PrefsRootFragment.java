@@ -355,7 +355,7 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
              * ended up trusted at the system level (e.g. via a Magisk
              * "move certificates"-style module) - see getWebServerState().
              */
-            this.prepareCertificateLauncher.launch("adaway-webserver-certificate.crt");
+            this.prepareCertificateLauncher.launch("adblock-webserver-certificate.crt");
             return true;
         });
     }

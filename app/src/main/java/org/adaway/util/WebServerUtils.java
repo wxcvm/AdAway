@@ -390,7 +390,7 @@ public static void installUserCertificate(Context context) {
             }
             Intent intent = android.security.KeyChain.createInstallIntent();
             intent.putExtra(android.security.KeyChain.EXTRA_CERTIFICATE, cert.getEncoded());
-            intent.putExtra(android.security.KeyChain.EXTRA_NAME, "AdAway CA");
+            intent.putExtra(android.security.KeyChain.EXTRA_NAME, "ADBlock CA");
             context.startActivity(intent);
         } catch (IOException | CertificateException e) {
             Timber.w(e, "Failed to prepare certificate for install.");
