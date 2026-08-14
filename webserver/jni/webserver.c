@@ -1449,6 +1449,9 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
 /* ── HTTP event handler ───────────────────────────────────────── */
 
+/* Forward declaration (ws_push_broadcast below calls it). */
+static int build_stats_json(struct settings *s, char *out, size_t out_sz);
+
 /* WebSocket push subscribers: connections that upgraded to /internal-ws.
    Registered on MG_EV_WS_OPEN, removed on MG_EV_CLOSE; broadcast after
    every counted request so clients get real-time updates. */
