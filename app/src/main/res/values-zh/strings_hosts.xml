@@ -3,7 +3,7 @@
     <string name="hosts_title">hosts 来源</string>
     <!-- Default hosts source -->
     <string name="hosts_user_source">用户列表</string>
-    <string name="hosts_adaway_source">AdAway 官方 hosts</string>
+    <string name="hosts_adaway_source">ADBlock 官方 hosts</string>
     <string name="hosts_stevenblack_source">StevenBlack Unified hosts</string>
     <string name="hosts_peterlowe_source">Pete Lowe blocklist hosts</string>
     <!-- List -->

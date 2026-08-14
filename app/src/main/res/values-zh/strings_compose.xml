@@ -10,7 +10,7 @@
     <string name="compose_nav_settings">设置</string>
 
     <!-- 概览 -->
-    <string name="compose_overview_title">AdAway</string>
+    <string name="compose_overview_title">ADBlock</string>
     <string name="compose_status_ad_blocking">广告拦截</string>
     <string name="compose_status_active">生效中</string>
     <string name="compose_status_not_applied">未生效</string>
@@ -87,7 +87,7 @@
     <string name="compose_settings_logs_retention_1d">1 天</string>
     <string name="compose_settings_logs_retention_7d">7 天</string>
     <string name="compose_settings_logs_retention_30d">30 天</string>
-    <string name="compose_settings_about_license">开源项目（GPLv3）——基于 AdAway 的分支，新增 per-app 统计、SNI 拦截与 Material 3 界面。</string>
+    <string name="compose_settings_about_license">开源项目（GPLv3）——基于 ADBlock 的分支，新增 per-app 统计、SNI 拦截与 Material 3 界面。</string>
     <string name="compose_settings_data_title">数据管理</string>
     <string name="compose_settings_data_hint">清除统计数据和历史</string>
     <string name="compose_settings_clear_stats">清除所有统计</string>

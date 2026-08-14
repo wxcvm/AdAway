@@ -2,5 +2,5 @@
 <resources>
     <string name="app_name">ADBlock</string>
     <string name="app_description">Open Source ad blocker</string>
-    <string name="app_logo">AdAway logo</string>
+    <string name="app_logo">ADBlock logo</string>
 </resources>

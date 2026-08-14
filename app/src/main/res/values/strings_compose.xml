@@ -10,7 +10,7 @@
     <string name="compose_nav_settings">Settings</string>
 
     <!-- Overview -->
-    <string name="compose_overview_title">AdAway</string>
+    <string name="compose_overview_title">ADBlock</string>
     <string name="compose_status_ad_blocking">Ad blocking</string>
     <string name="compose_status_active">Active</string>
     <string name="compose_status_not_applied">Not applied</string>
@@ -87,7 +87,7 @@
     <string name="compose_settings_logs_retention_1d">1 day</string>
     <string name="compose_settings_logs_retention_7d">7 days</string>
     <string name="compose_settings_logs_retention_30d">30 days</string>
-    <string name="compose_settings_about_license">Open source (GPLv3) — AdAway fork with per-app stats, SNI interception and a Material 3 UI.</string>
+    <string name="compose_settings_about_license">Open source (GPLv3) — ADBlock fork with per-app stats, SNI interception and a Material 3 UI.</string>
     <string name="compose_settings_data_title">Data</string>
     <string name="compose_settings_data_hint">Clear statistics and history</string>
     <string name="compose_settings_clear_stats">Clear all stats</string>

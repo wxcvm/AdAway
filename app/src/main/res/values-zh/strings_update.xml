@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <resources>
-    <string name="update_title">AdAway 更新</string>
+    <string name="update_title">ADBlock 更新</string>
     <!-- Home screen -->
     <string name="update_available">有更新可用！</string>
 
     <!-- Update activity -->
     <string name="update_up_to_date_header">您已安装最新版本</string>
     <string name="update_update_available_header">有更新可用</string>
-    <string name="update_updating_header">正在更新AdAway</string>
+    <string name="update_updating_header">正在更新ADBlock</string>
     <string name="update_update_button">立即更新</string>
     <string name="update_progress_label">%1$s/%2$s</string>
     <string name="update_complete_label">完毕</string>
@@ -18,5 +18,5 @@
     <string name="update_sponsor_button">赞助者</string>
 
     <!-- Notification -->
-    <string name="update_notification_description">正在下载最新AdAway版本…</string>
+    <string name="update_notification_description">正在下载最新ADBlock版本…</string>
 </resources>
