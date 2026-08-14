@@ -100,7 +100,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
     var ruleType by remember { mutableIntStateOf(ListType.BLOCKED.value) }
     var ruleRedirectInput by remember { mutableStateOf("") }
     // 订阅源规则删除提示
-    var deleteSourceHint by remember { mutableStateOf<String?>(null) }
+    var deleteSourceHint by remember { mutableStateOf<org.adaway.db.entity.HostsSource?>(null) }
 
     val tabs = listOf(
         RuleTab(R.string.compose_rules_whitelist, ListType.ALLOWED.value, R.string.compose_rules_empty_whitelist),
@@ -203,6 +203,9 @@ fun RulesScreen(viewModel: StatsViewModel) {
                                 viewModel.toggleSource(source) { reloadSources() }
                             },
                             onAddClick = { showAddDialog = true },
+                            onDelete = { source ->
+                                deleteSourceHint = source
+                            },
                         )
                     }
                 }
@@ -230,8 +233,9 @@ fun RulesScreen(viewModel: StatsViewModel) {
                                         }
                                     }
                                 } else {
-                                    // 订阅源规则：提示到订阅源中禁用/移除
-                                    deleteSourceHint = item.host
+                                    // 订阅源规则：提示可在订阅源中管理
+                                    // （该条目来自订阅，删除后会随下次同步恢复）
+                                    rules = rules.filterNot { it.host == item.host }
                                 }
                             },
                         )
@@ -243,6 +247,9 @@ fun RulesScreen(viewModel: StatsViewModel) {
                                 viewModel.toggleSource(source) { reloadSources() }
                             },
                             onAddClick = { showAddDialog = true },
+                            onDelete = { source ->
+                                deleteSourceHint = source
+                            },
                         )
                     }
                 }
@@ -360,14 +367,26 @@ fun RulesScreen(viewModel: StatsViewModel) {
     }
 
     // ── 订阅源规则删除提示对话框 ──
-    deleteSourceHint?.let { host ->
+    deleteSourceHint?.let { source ->
         AlertDialog(
             onDismissRequest = { deleteSourceHint = null },
             title = { Text(stringResource(R.string.compose_rules_delete_source_title)) },
-            text = { Text(stringResource(R.string.compose_rules_delete_source_hint, host)) },
+            text = { Text(stringResource(R.string.compose_rules_delete_source_confirm, source.label)) },
             confirmButton = {
+                TextButton(onClick = {
+                    val s = source
+                    deleteSourceHint = null
+                    viewModel.removeSource(s) {
+                        reloadSources()
+                        viewModel.syncHosts()
+                    }
+                }) {
+                    Text(stringResource(R.string.compose_rules_delete))
+                }
+            },
+            dismissButton = {
                 TextButton(onClick = { deleteSourceHint = null }) {
-                    Text(stringResource(R.string.compose_rules_ok))
+                    Text(stringResource(R.string.compose_rules_cancel))
                 }
             },
         )
@@ -383,6 +402,7 @@ private fun SourcesCard(
     sources: List<org.adaway.db.entity.HostsSource>,
     onToggle: (org.adaway.db.entity.HostsSource) -> Unit,
     onAddClick: () -> Unit,
+    onDelete: (org.adaway.db.entity.HostsSource) -> Unit,
 ) {
     Card(
         modifier = Modifier
@@ -446,6 +466,15 @@ private fun SourcesCard(
                             checked = source.isEnabled(),
                             onCheckedChange = { onToggle(source) },
                         )
+                        Spacer(Modifier.width(4.dp))
+                        // 删除订阅源（确认对话框在 RulesScreen 弹出）
+                        IconButton(onClick = { onDelete(source) }) {
+                            Icon(
+                                Icons.Outlined.Delete,
+                                contentDescription = stringResource(R.string.compose_rules_delete_source),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
