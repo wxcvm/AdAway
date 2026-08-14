@@ -597,6 +597,23 @@ private fun ServerDetailsCard(stats: ServerStats) {
             )
             DetailRow(stringResource(R.string.compose_stats_sni), stats.sniCertsIssued)
             DetailRow(stringResource(R.string.compose_stats_images), stats.blockImageCount)
+            // 新增指标：拦截率 / TLS 会话复用率 / 运行天数 / 每日峰值
+            DetailRow(
+                stringResource(R.string.compose_stats_block_rate),
+                String.format(Locale.US, "%.1f%%", stats.blockRate),
+            )
+            DetailRow(
+                stringResource(R.string.compose_stats_sni_hit_rate),
+                String.format(Locale.US, "%.1f%%", stats.sniHitRate),
+            )
+            DetailRow(
+                stringResource(R.string.compose_stats_uptime_days),
+                String.format(Locale.US, "%.1f d", stats.uptimeDays),
+            )
+            DetailRow(
+                stringResource(R.string.compose_stats_daily_peak),
+                ChartUtils.compactNumber(stats.dailyPeak),
+            )
         }
     }
 }

@@ -216,6 +216,14 @@ struct webstats {
     uint64_t blocked_clickbait;  /* tracker/click/pixel (204)       */
     uint64_t sni_certs_issued;   /* SNI per-domain certs generated  */
     uint64_t sni_cache_hits;     /* SNI cache hits (avoid re-issue) */
+    /* Sum of every blocked_* counter — used for block_rate metrics. */
+    uint64_t total_blocked(void) {
+        return blocked_images + blocked_scripts + blocked_styles +
+               blocked_fonts + blocked_media + blocked_api +
+               blocked_telemetry + blocked_heartbeat + blocked_config +
+               blocked_ws_sse + blocked_other + blocked_crypto +
+               blocked_clickbait;
+    }
 };
 static struct webstats s_stats = {0};
 
@@ -1377,6 +1385,123 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 }
 
 /* ── HTTP event handler ───────────────────────────────────────── */
+
+/*
+ * Build the /internal-stats JSON snapshot into out[]. Shared by the
+ * HTTP endpoint and (optionally) the WebSocket push so both always
+ * serve identical data. Adds derived metrics:
+ *   - block_rate:      blocked/total as percent (0-100)
+ *   - sni_hit_rate:    SNI cache hits / handshakes as percent
+ *   - uptime_days:     uptime in days (for long-running daemons)
+ *   - daily_peak:      max blocked in any single daily bucket
+ */
+static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
+    char apps_json[4096] = "";
+    int off = 0;
+    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
+        int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
+            "%s{\"uid\":%d,\"connections\":%llu,\"requests\":%llu,"
+            "\"blocked\":%llu,\"tls_hosts\":%llu}",
+            off ? "," : "",
+            (int)s_apps[i].uid,
+            (unsigned long long)s_apps[i].connections,
+            (unsigned long long)s_apps[i].requests,
+            (unsigned long long)s_apps[i].blocked,
+            (unsigned long long)s_apps[i].tls_hosts);
+        if (n > 0) off += n;
+    }
+    char tls_json[2048] = "";
+    off = 0;
+    int total = s_tls_count < RECENT_TLS_MAX ? s_tls_count : RECENT_TLS_MAX;
+    int start = (s_tls_pos - total + RECENT_TLS_MAX) % RECENT_TLS_MAX;
+    for (int k = 0; k < total && k < 20 && off < (int)sizeof(tls_json) - 256; k++) {
+        struct tls_host_rec *r = &s_recent_tls[(start + k) % RECENT_TLS_MAX];
+        if (!r->host[0]) continue;
+        int n = snprintf(tls_json + off, sizeof(tls_json) - (size_t)off,
+            "%s{\"uid\":%d,\"host\":\"%s\"}",
+            off ? "," : "", (int)r->uid, r->host);
+        if (n > 0) off += n;
+    }
+    char hist_json[4096] = "";
+    buckets_to_json(hist_json, sizeof(hist_json),
+                    s_hist, HIST_SLOTS, s_hist_pos,
+                    s_hist_slot_start, HIST_INTERVAL_S, 24);
+    char daily_json[6144] = "";
+    buckets_to_json(daily_json, sizeof(daily_json),
+                    s_daily, DAILY_SLOTS, s_daily_pos,
+                    s_daily_slot_start, DAILY_INTERVAL_S, 30);
+
+    uint64_t uptime = uptime_seconds();
+    uint64_t req = s_stats.total_requests;
+    uint64_t blk = s_stats.total_blocked();
+    uint64_t hs  = s_stats.tls_handshakes;
+    uint64_t hits = s_stats.sni_cache_hits;
+    double block_rate = req > 0 ? (double)blk * 100.0 / (double)req : 0.0;
+    double hit_rate   = hs  > 0 ? (double)hits * 100.0 / (double)hs  : 0.0;
+    uint64_t daily_peak = 0;
+    for (int i = 0; i < DAILY_SLOTS; i++)
+        if (s_daily[i].blocked > daily_peak) daily_peak = s_daily[i].blocked;
+
+    return snprintf(out, out_sz,
+        "{\"uptime_seconds\":%llu,"
+        "\"uptime_days\":%.1f,"
+        "\"total_requests\":%llu,"
+        "\"total_connections\":%llu,"
+        "\"active_connections\":%d,"
+        "\"tls_handshakes\":%llu,"
+        "\"tls_failures\":%llu,"
+        "\"sni_cache_hits\":%llu,"
+        "\"sni_hit_rate\":%.1f,"
+        "\"block_rate\":%.1f,"
+        "\"daily_peak\":%llu,"
+        "\"blocked_images\":%llu,"
+        "\"blocked_scripts\":%llu,"
+        "\"blocked_styles\":%llu,"
+        "\"blocked_fonts\":%llu,"
+        "\"blocked_media\":%llu,"
+        "\"blocked_api\":%llu,"
+        "\"blocked_telemetry\":%llu,"
+        "\"blocked_heartbeat\":%llu,"
+        "\"blocked_config\":%llu,"
+        "\"blocked_ws_sse\":%llu,"
+        "\"blocked_other\":%llu,"
+        "\"blocked_crypto\":%llu,"
+        "\"blocked_clickbait\":%llu,"
+        "\"sni_certs_issued\":%llu,"
+        "\"block_image_count\":%d,"
+        "\"apps\":[%s],"
+        "\"recent_tls\":[%s],"
+        "\"history\":[%s],"
+        "\"daily\":[%s]}",
+        (unsigned long long)uptime,
+        (double)uptime / 86400.0,
+        (unsigned long long)req,
+        (unsigned long long)s_stats.total_connections,
+        atomic_load(&s_active_connections),
+        (unsigned long long)hs,
+        (unsigned long long)s_stats.tls_failures,
+        (unsigned long long)hits,
+        hit_rate,
+        block_rate,
+        (unsigned long long)daily_peak,
+        (unsigned long long)s_stats.blocked_images,
+        (unsigned long long)s_stats.blocked_scripts,
+        (unsigned long long)s_stats.blocked_styles,
+        (unsigned long long)s_stats.blocked_fonts,
+        (unsigned long long)s_stats.blocked_media,
+        (unsigned long long)s_stats.blocked_api,
+        (unsigned long long)s_stats.blocked_telemetry,
+        (unsigned long long)s_stats.blocked_heartbeat,
+        (unsigned long long)s_stats.blocked_config,
+        (unsigned long long)s_stats.blocked_ws_sse,
+        (unsigned long long)s_stats.blocked_other,
+        (unsigned long long)s_stats.blocked_crypto,
+        (unsigned long long)s_stats.blocked_clickbait,
+        (unsigned long long)s_stats.sni_certs_issued,
+        s->block_image_count,
+        apps_json, tls_json, hist_json, daily_json);
+}
+
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev == MG_EV_ACCEPT) {
         /* Atomic cap check + increment (see the note on
@@ -1423,6 +1548,12 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     /* WebSocket: keep the connection open (client pulls or we push). */
     if (ev == MG_EV_WS_OPEN) {
         /* Send a first snapshot immediately so the UI has data. */
+        struct settings *ws_s = (struct settings *)c->fn_data;
+        if (ws_s && ws_s->init) {
+            char body[16384];
+            int n = build_stats_json(ws_s, body, sizeof(body));
+            if (n > 0) mg_ws_send(c, body, (size_t)n, WEBSOCKET_OP_TEXT);
+        }
         return;
     }
     if (ev == MG_EV_WS_MSG) {
@@ -1588,9 +1719,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
-    /* Real-time statistics push: the app may upgrade to a WebSocket to
-       receive a JSON snapshot every time a blocked request is counted,
-       instead of polling /internal-stats. Loopback only. */
+    /* Real-time WebSocket endpoint: upgrade to WS. The app may push
+       requests here to receive a snapshot; on open we send one
+       immediately, then the client keeps polling as fallback. */
     if (mg_match(hm->uri, mg_str("/internal-ws"), NULL)) {
         mg_ws_upgrade(c, hm, NULL);
         return;
@@ -1601,95 +1732,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        SNI certs issued). Like /internal-test it is only reachable on
        loopback; no auth needed since 127.0.0.1 is this device. */
     if (mg_match(hm->uri, mg_str("/internal-stats"), NULL)) {
-        /* Snapshot with per-app breakdown: build the apps array (all
-           tracked uids) and the recent TLS (SNI) host list (most
-           recent first, max 20 entries). */
         char body[16384];
-        char apps_json[4096] = "";
-        int off = 0;
-        for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
-            int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
-                "%s{\"uid\":%d,\"connections\":%llu,\"requests\":%llu,"
-                "\"blocked\":%llu,\"tls_hosts\":%llu}",
-                off ? "," : "",
-                (int)s_apps[i].uid,
-                (unsigned long long)s_apps[i].connections,
-                (unsigned long long)s_apps[i].requests,
-                (unsigned long long)s_apps[i].blocked,
-                (unsigned long long)s_apps[i].tls_hosts);
-            if (n > 0) off += n;
-        }
-        char tls_json[2048] = "";
-        off = 0;
-        int total = s_tls_count < RECENT_TLS_MAX ? s_tls_count : RECENT_TLS_MAX;
-        /* Ring buffer: most recent entries are the ones written last. */
-        int start = (s_tls_pos - total + RECENT_TLS_MAX) % RECENT_TLS_MAX;
-        for (int k = 0; k < total && k < 20 && off < (int)sizeof(tls_json) - 256; k++) {
-            struct tls_host_rec *r = &s_recent_tls[(start + k) % RECENT_TLS_MAX];
-            if (!r->host[0]) continue;
-            int n = snprintf(tls_json + off, sizeof(tls_json) - (size_t)off,
-                "%s{\"uid\":%d,\"host\":\"%s\"}",
-                off ? "," : "", (int)r->uid, r->host);
-            if (n > 0) off += n;
-        }
-        char hist_json[4096] = "";
-        buckets_to_json(hist_json, sizeof(hist_json),
-                        s_hist, HIST_SLOTS, s_hist_pos,
-                        s_hist_slot_start, HIST_INTERVAL_S, 24);
-        char daily_json[6144] = "";
-        buckets_to_json(daily_json, sizeof(daily_json),
-                        s_daily, DAILY_SLOTS, s_daily_pos,
-                        s_daily_slot_start, DAILY_INTERVAL_S, 30);
-        int n = snprintf(body, sizeof(body),
-            "{\"uptime_seconds\":%llu,"
-            "\"total_requests\":%llu,"
-            "\"total_connections\":%llu,"
-            "\"active_connections\":%d,"
-            "\"tls_handshakes\":%llu,"
-            "\"tls_failures\":%llu,"
-            "\"sni_cache_hits\":%llu,"
-            "\"blocked_images\":%llu,"
-            "\"blocked_scripts\":%llu,"
-            "\"blocked_styles\":%llu,"
-            "\"blocked_fonts\":%llu,"
-            "\"blocked_media\":%llu,"
-            "\"blocked_api\":%llu,"
-            "\"blocked_telemetry\":%llu,"
-            "\"blocked_heartbeat\":%llu,"
-            "\"blocked_config\":%llu,"
-            "\"blocked_ws_sse\":%llu,"
-            "\"blocked_other\":%llu,"
-            "\"blocked_crypto\":%llu,"
-            "\"blocked_clickbait\":%llu,"
-            "\"sni_certs_issued\":%llu,"
-            "\"block_image_count\":%d,"
-            "\"apps\":[%s],"
-            "\"recent_tls\":[%s],"
-            "\"history\":[%s],"
-            "\"daily\":[%s]}",
-            (unsigned long long)uptime_seconds(),
-            (unsigned long long)s_stats.total_requests,
-            (unsigned long long)s_stats.total_connections,
-            atomic_load(&s_active_connections),
-            (unsigned long long)s_stats.tls_handshakes,
-            (unsigned long long)s_stats.tls_failures,
-            (unsigned long long)s_stats.sni_cache_hits,
-            (unsigned long long)s_stats.blocked_images,
-            (unsigned long long)s_stats.blocked_scripts,
-            (unsigned long long)s_stats.blocked_styles,
-            (unsigned long long)s_stats.blocked_fonts,
-            (unsigned long long)s_stats.blocked_media,
-            (unsigned long long)s_stats.blocked_api,
-            (unsigned long long)s_stats.blocked_telemetry,
-            (unsigned long long)s_stats.blocked_heartbeat,
-            (unsigned long long)s_stats.blocked_config,
-            (unsigned long long)s_stats.blocked_ws_sse,
-            (unsigned long long)s_stats.blocked_other,
-            (unsigned long long)s_stats.blocked_crypto,
-            (unsigned long long)s_stats.blocked_clickbait,
-            (unsigned long long)s_stats.sni_certs_issued,
-            s->block_image_count,
-            apps_json, tls_json, hist_json, daily_json);
+        int n = build_stats_json(s, body, sizeof(body));
         mg_http_reply(c, 200,
                       "Content-Type: application/json\r\n"
                       "Cache-Control: no-store\r\n", "%.*s", n, body);

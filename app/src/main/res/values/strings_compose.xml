@@ -57,6 +57,10 @@
     <string name="compose_stats_connections_active">%1$d (%2$d active)</string>
     <string name="compose_stats_sni">SNI certs issued</string>
     <string name="compose_stats_images">Block images</string>
+    <string name="compose_stats_block_rate">Block rate</string>
+    <string name="compose_stats_sni_hit_rate">SNI cache hit rate</string>
+    <string name="compose_stats_uptime_days">Uptime</string>
+    <string name="compose_stats_daily_peak">Daily peak blocked</string>
     <string name="compose_stats_active_apps">Active apps</string>
     <string name="compose_stats_app_unknown">UID %1$d</string>
     <string name="compose_stats_app_sub">%1$d conn · %2$d req · %3$d blocked</string>

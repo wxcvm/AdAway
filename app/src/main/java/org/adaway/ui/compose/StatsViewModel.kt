@@ -67,9 +67,16 @@ private fun parseHistArray(json: JSONObject, key: String): List<HistPoint> {
  */
 data class ServerStats(
     val uptimeSeconds: Long = 0,
+    val uptimeDays: Double = 0.0,
     val totalRequests: Long = 0,
     val totalConnections: Long = 0,
     val activeConnections: Int = 0,
+    val tlsHandshakes: Long = 0,
+    val tlsFailures: Long = 0,
+    val sniCacheHits: Long = 0,
+    val sniHitRate: Double = 0.0,
+    val blockRate: Double = 0.0,
+    val dailyPeak: Long = 0,
     val blockedImages: Long = 0,
     val blockedScripts: Long = 0,
     val blockedStyles: Long = 0,
@@ -81,6 +88,8 @@ data class ServerStats(
     val blockedConfig: Long = 0,
     val blockedWsSse: Long = 0,
     val blockedOther: Long = 0,
+    val blockedCrypto: Long = 0,
+    val blockedClickbait: Long = 0,
     val sniCertsIssued: Long = 0,
     val blockImageCount: Int = 0,
     val apps: List<AppStat> = emptyList(),
@@ -91,7 +100,8 @@ data class ServerStats(
     val totalBlocked: Long
         get() = blockedImages + blockedScripts + blockedStyles + blockedFonts +
             blockedMedia + blockedApi + blockedTelemetry + blockedHeartbeat +
-            blockedConfig + blockedWsSse + blockedOther
+            blockedConfig + blockedWsSse + blockedOther +
+            blockedCrypto + blockedClickbait
 
     companion object {
         fun fromJson(json: JSONObject?): ServerStats? {
@@ -125,9 +135,16 @@ data class ServerStats(
             val daily = parseHistArray(json, "daily")
             return ServerStats(
                 uptimeSeconds = json.optLong("uptime_seconds", 0),
+                uptimeDays = json.optDouble("uptime_days", 0.0),
                 totalRequests = json.optLong("total_requests", 0),
                 totalConnections = json.optLong("total_connections", 0),
                 activeConnections = json.optInt("active_connections", 0),
+                tlsHandshakes = json.optLong("tls_handshakes", 0),
+                tlsFailures = json.optLong("tls_failures", 0),
+                sniCacheHits = json.optLong("sni_cache_hits", 0),
+                sniHitRate = json.optDouble("sni_hit_rate", 0.0),
+                blockRate = json.optDouble("block_rate", 0.0),
+                dailyPeak = json.optLong("daily_peak", 0),
                 blockedImages = json.optLong("blocked_images", 0),
                 blockedScripts = json.optLong("blocked_scripts", 0),
                 blockedStyles = json.optLong("blocked_styles", 0),
@@ -139,6 +156,8 @@ data class ServerStats(
                 blockedConfig = json.optLong("blocked_config", 0),
                 blockedWsSse = json.optLong("blocked_ws_sse", 0),
                 blockedOther = json.optLong("blocked_other", 0),
+                blockedCrypto = json.optLong("blocked_crypto", 0),
+                blockedClickbait = json.optLong("blocked_clickbait", 0),
                 sniCertsIssued = json.optLong("sni_certs_issued", 0),
                 blockImageCount = json.optInt("block_image_count", 0),
                 apps = apps,

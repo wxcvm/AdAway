@@ -57,6 +57,10 @@
     <string name="compose_stats_connections_active">%1$d（%2$d 活跃）</string>
     <string name="compose_stats_sni">SNI证书签发</string>
     <string name="compose_stats_images">占位图数量</string>
+    <string name="compose_stats_block_rate">拦截率</string>
+    <string name="compose_stats_sni_hit_rate">SNI 缓存命中率</string>
+    <string name="compose_stats_uptime_days">运行时长</string>
+    <string name="compose_stats_daily_peak">每日峰值拦截</string>
     <string name="compose_stats_active_apps">活跃应用</string>
     <string name="compose_stats_app_unknown">UID %1$d</string>
     <string name="compose_stats_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
