@@ -1341,15 +1341,18 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             if (mg_match(hm->uri, mg_str(kCaptivePaths[i]), NULL)) { captive = true; break; }
         }
     }
-    if (!captive && hm->host.len > 0) {
-        char host[256];
-        size_t hl = hm->host.len < sizeof(host) - 1 ? hm->host.len : sizeof(host) - 1;
-        memcpy(host, hm->host.ptr, hl); host[hl] = '\0';
-        for (int i = 0; kCaptiveHosts[i]; i++) {
-            size_t klen = strlen(kCaptiveHosts[i]);
-            size_t hlen = strlen(host);
-            if (hlen >= klen && strcasecmp(host + hlen - klen, kCaptiveHosts[i]) == 0) {
-                captive = true; break;
+    if (!captive) {
+        struct mg_str *host_hdr = mg_http_get_header(hm, "Host");
+        if (host_hdr != NULL && host_hdr->len > 0) {
+            char host[256];
+            size_t hl = host_hdr->len < sizeof(host) - 1 ? host_hdr->len : sizeof(host) - 1;
+            memcpy(host, host_hdr->ptr, hl); host[hl] = '\0';
+            for (int i = 0; kCaptiveHosts[i]; i++) {
+                size_t klen = strlen(kCaptiveHosts[i]);
+                size_t hlen = strlen(host);
+                if (hlen >= klen && strcasecmp(host + hlen - klen, kCaptiveHosts[i]) == 0) {
+                    captive = true; break;
+                }
             }
         }
     }
