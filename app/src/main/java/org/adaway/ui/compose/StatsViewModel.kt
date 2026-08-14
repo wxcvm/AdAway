@@ -204,6 +204,11 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     init {
         refreshServerStats()
         startPolling()
+        // 若用户在设置页启用了实时推送，则自动连接 WebSocket
+        val app = getApplication<org.adaway.AdAwayApplication>()
+        if (org.adaway.ui.compose.isRealtimeEnabled(app)) {
+            startRealtime()
+        }
     }
 
     /**
