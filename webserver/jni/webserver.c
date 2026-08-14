@@ -647,6 +647,7 @@ static int make_cert(const char  *hostname,
                      int          validity_days,
                      const char  *san_override,
                      int          use_ec,
+                     int          rsa_bits,  /* RSA key size (0 → 2048)    */
                      X509       **out_cert,
                      EVP_PKEY   **out_key) {
     int ret = EXIT_FAILURE;
@@ -661,9 +662,10 @@ static int make_cert(const char  *hostname,
             EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx, NID_X9_62_prime256v1) <= 0 ||
             EVP_PKEY_keygen(pctx, &pkey) <= 0) goto done;
     } else {
+        int bits = rsa_bits > 0 ? rsa_bits : 2048;
         pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
         if (!pctx || EVP_PKEY_keygen_init(pctx) <= 0 ||
-            EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, 2048) <= 0 ||
+            EVP_PKEY_CTX_set_rsa_keygen_bits(pctx, bits) <= 0 ||
             EVP_PKEY_keygen(pctx, &pkey) <= 0) goto done;
     }
     LOG_INFO("make_cert(%s): %s key generated", hostname, use_ec ? "EC" : "RSA");
@@ -750,7 +752,10 @@ done:
 /* Generate root CA cert + key and write as PEM files */
 static int generate_root_ca(const char *cert_path, const char *key_path) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
-    int ret = make_cert("AdAway Root CA", NULL, NULL, 1, 3650, NULL, /*use_ec=*/0, &cert, &key);
+    /* Root CA: RSA-3072 for a stronger trust anchor (Android system
+       trust store fully supports 3072-bit keys; keygen happens only
+       once per CA life). */
+    int ret = make_cert("AdAway Root CA", NULL, NULL, 1, 3650, NULL, /*use_ec=*/0, /*rsa_bits=*/3072, &cert, &key);
     if (ret != EXIT_SUCCESS) return ret;
     ret = EXIT_FAILURE;
     FILE *f = NULL;
@@ -876,7 +881,7 @@ static struct mg_str key_to_pem_mgstr(EVP_PKEY *key) {
 static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
     if (make_cert("localhost", ca->cert, ca->key, 0, 397,
-                  "DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1", /*use_ec=*/0, &cert, &key) != EXIT_SUCCESS)
+                  "DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1", /*use_ec=*/0, /*rsa_bits=*/0, &cert, &key) != EXIT_SUCCESS)
         return EXIT_FAILURE;
     out_opts->cert = cert_to_pem_mgstr(cert);
     out_opts->key  = key_to_pem_mgstr(key);
@@ -890,7 +895,7 @@ static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts
 static SSL_CTX *make_domain_ctx(const char *hostname, struct ca_state *ca) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
     if (make_cert(hostname, ca->cert, ca->key, 0, SNI_CERT_VALIDITY_DAYS,
-                  NULL, /*use_ec=*/1, &cert, &key) != EXIT_SUCCESS)
+                  NULL, /*use_ec=*/1, /*rsa_bits=*/0, &cert, &key) != EXIT_SUCCESS)
         return NULL;
     SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) goto fail;

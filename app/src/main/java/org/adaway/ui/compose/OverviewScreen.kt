@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
@@ -128,6 +129,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 stats = serverStats,
                 httpPort = org.adaway.util.WebServerUtils.getHttpPort(context),
                 httpsPort = org.adaway.util.WebServerUtils.getHttpsPort(context),
+                certStateRes = org.adaway.util.WebServerUtils.getWebServerState(context),
                 onToggle = { enable ->
                     if (enable) {
                         org.adaway.util.WebServerUtils.startWebServer(context)
@@ -142,6 +144,9 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                     } catch (e: Exception) {
                         // no browser available; ignore
                     }
+                },
+                onInstallCert = {
+                    org.adaway.util.WebServerUtils.installUserCertificate(context)
                 },
             )
 
@@ -195,9 +200,15 @@ private fun WebServerControlCard(
     stats: ServerStats?,
     httpPort: Int,
     httpsPort: Int,
+    @androidx.annotation.StringRes certStateRes: Int,
     onToggle: (Boolean) -> Unit,
     onTest: () -> Unit,
+    onInstallCert: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val certInstalled = certStateRes == R.string.pref_webserver_state_running_and_installed ||
+        certStateRes == R.string.pref_webserver_state_running_and_installed_system
+    val certNeedsAction = enabled && !certInstalled
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -255,10 +266,35 @@ private fun WebServerControlCard(
                 )
             }
             Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onTest, enabled = enabled) {
-                Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.compose_ws_control_test))
+            // 证书状态行：未安装/已变更时高亮提示 + 一键安装按钮
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(certStateRes),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (certNeedsAction) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                if (certNeedsAction) {
+                    TextButton(onClick = onInstallCert) {
+                        Icon(Icons.Outlined.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.compose_ws_control_install_cert))
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                TextButton(onClick = onTest, enabled = enabled) {
+                    Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.compose_ws_control_test))
+                }
             }
         }
     }

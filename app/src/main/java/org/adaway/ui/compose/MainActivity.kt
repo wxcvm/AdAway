@@ -15,6 +15,7 @@ package org.adaway.ui.compose
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -46,6 +47,20 @@ class MainActivity : ComponentActivity() {
                 else -> androidx.compose.foundation.isSystemInDarkTheme()
             }
             AdAwayTheme(darkTheme = darkTheme) {
+                // 状态栏/导航栏颜色跟随 Compose 主题（修复旧红色 statusBar）
+                val surfaceColor = androidx.compose.material3.MaterialTheme.colorScheme.surface
+                androidx.compose.runtime.SideEffect {
+                    val window = (context as android.app.Activity).window
+                    window.statusBarColor = surfaceColor.toArgb()
+                    window.navigationBarColor = surfaceColor.toArgb()
+                    // 浅色主题时状态栏图标用深色
+                    val isLight = !darkTheme
+                    window.decorView.systemUiVisibility = if (isLight) {
+                        window.decorView.systemUiVisibility or android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    } else {
+                        window.decorView.systemUiVisibility and android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                    }
+                }
                 AdAwayApp()
             }
         }
