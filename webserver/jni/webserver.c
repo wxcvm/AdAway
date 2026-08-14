@@ -1346,7 +1346,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         if (host_hdr != NULL && host_hdr->len > 0) {
             char host[256];
             size_t hl = host_hdr->len < sizeof(host) - 1 ? host_hdr->len : sizeof(host) - 1;
-            memcpy(host, host_hdr->ptr, hl); host[hl] = '\0';
+            memcpy(host, host_hdr->buf, hl); host[hl] = '\0';
             for (int i = 0; kCaptiveHosts[i]; i++) {
                 size_t klen = strlen(kCaptiveHosts[i]);
                 size_t hlen = strlen(host);
