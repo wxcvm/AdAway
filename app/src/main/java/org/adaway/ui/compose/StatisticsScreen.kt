@@ -16,6 +16,7 @@ package org.adaway.ui.compose
  */
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
@@ -40,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -272,7 +275,18 @@ private fun CountLabel(label: String, value: Int) {
 /**
  * Donut chart drawn with Canvas. Center shows the total.
  */
-@Composable
+/**
+ * 将大数字格式化为紧凑形式：1_234 → "1.2k"，3_456_789 → "3.5M"。
+ * 用于图表 Y 轴刻度，避免超长数字溢出绘图区域。
+ */
+private fun compactNumber(value: Long): String {
+    return when {
+        value >= 1_000_000 -> String.format(Locale.US, "%.1fM", value / 1_000_000f)
+        value >= 1_000 -> String.format(Locale.US, "%.1fk", value / 1_000f)
+        else -> "$value"
+    }
+}
+
 /**
  * 环形图（Canvas 手绘，无第三方图表库）。
  *
@@ -282,6 +296,7 @@ private fun CountLabel(label: String, value: Int) {
  *  - 中心文字显示拦截总数（Monospace 字体）。
  *  - 颜色取自 MaterialTheme 主题色 + 固定语义色。
  */
+@Composable
 private fun DonutChart(stats: ServerStats) {
     val categories = buildCategories(stats)
     val total = stats.totalBlocked
@@ -547,12 +562,13 @@ private fun TrafficTrendCard(
     showConnections: Boolean,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var mode by remember { mutableIntStateOf(0) }  // 0 = 24h, 1 = 7d, 2 = 30d
+    var mode by remember { mutableIntStateOf(0) }  // 0 = 24h, 1 = 7d, 2 = 30d, 3 = all-time
     var style by remember { mutableIntStateOf(chartStyle(context)) } // 0 = line, 1 = area, 2 = bars
     val data = when (mode) {
         0 -> hourly
         1 -> daily.takeLast(7)
-        else -> daily
+        2 -> daily
+        else -> hourly + daily // 永久：全部历史（小时 + 日）
     }
     if (data.isEmpty()) return
 
@@ -591,6 +607,9 @@ private fun TrafficTrendCard(
                 Spacer(Modifier.width(6.dp))
                 FilterChip(selected = mode == 2, onClick = { mode = 2 },
                     label = { Text(stringResource(R.string.compose_stats_range_30d)) })
+                Spacer(Modifier.width(6.dp))
+                FilterChip(selected = mode == 3, onClick = { mode = 3 },
+                    label = { Text(stringResource(R.string.compose_stats_range_all)) })
             }
             Row(
                 modifier = Modifier
@@ -607,7 +626,32 @@ private fun TrafficTrendCard(
             }
             Spacer(Modifier.height(12.dp))
 
-            Canvas(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+            // 触摸交互：点击图表显示最近数据点的具体数值（tooltip）
+            var selectedIndex by remember { mutableIntStateOf(-1) }
+            val tipReq = if (selectedIndex in data.indices) data[selectedIndex].requests else 0L
+            val tipBlk = if (selectedIndex in data.indices) data[selectedIndex].blocked else 0L
+            val tipConn = if (selectedIndex in data.indices) data[selectedIndex].connections else 0L
+            val tipTs = if (selectedIndex in data.indices) data[selectedIndex].ts else 0L
+
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp)
+                    .pointerInput(data.size) {
+                        detectTapGestures { offset ->
+                            // 把点击 x 坐标映射到最近的数据点索引
+                            val n = data.size
+                            if (n == 0) return@detectTapGestures
+                            val leftPad = 34.dp.toPx()
+                            val chartW = size.width - leftPad - 6.dp.toPx()
+                            val idx = if (n == 1) 0 else {
+                                val raw = ((offset.x - leftPad) / chartW * (n - 1)).toInt()
+                                raw.coerceIn(0, n - 1)
+                            }
+                            selectedIndex = if (selectedIndex == idx) -1 else idx
+                        }
+                    },
+            ) {
                 val n = data.size
                 if (n == 0) return@Canvas
                 val leftPad = 34.dp.toPx()
@@ -619,18 +663,31 @@ private fun TrafficTrendCard(
                 fun xAt(i: Int): Float = leftPad + (if (n == 1) chartW / 2 else chartW * i / (n - 1))
                 fun yReq(v: Long): Float = base - (v.toFloat() / maxAll) * chartH
 
-                // Y-axis grid + labels
+                // 选中点高亮（垂直参考线 + 圆点）
+                if (selectedIndex in data.indices) {
+                    val sx = xAt(selectedIndex)
+                    drawLine(
+                        axisColor.copy(alpha = 0.4f),
+                        Offset(sx, topPad), Offset(sx, base),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                    drawCircle(reqColor, radius = 4.dp.toPx(), center = Offset(sx, yReq(data[selectedIndex].requests)))
+                    drawCircle(blockColor, radius = 4.dp.toPx(), center = Offset(sx, yReq(data[selectedIndex].blocked)))
+                }
+
+                // Y-axis grid + labels (compact notation: 1.2k / 3.4M)
                 for (g in 0..4) {
                     val frac = g / 4f
                     val y = base - chartH * frac
                     drawLine(gridColor, Offset(leftPad, y), Offset(size.width, y), strokeWidth = 1f)
-                    val label = when (g) {
-                        0 -> "${maxAll}"
-                        1 -> "${maxAll * 3 / 4}"
-                        2 -> "${maxAll / 2}"
-                        3 -> "${maxAll / 4}"
-                        else -> "0"
+                    val raw = when (g) {
+                        0 -> maxAll
+                        1 -> maxAll * 3 / 4
+                        2 -> maxAll / 2
+                        3 -> maxAll / 4
+                        else -> 0L
                     }
+                    val label = compactNumber(raw)
                     drawContext.canvas.nativeCanvas.drawText(
                         label, 2.dp.toPx(), y + 4.dp.toPx(),
                         android.graphics.Paint().apply {
@@ -726,12 +783,43 @@ private fun TrafficTrendCard(
                         when (mode) {
                             0 -> R.string.compose_stats_history_window
                             1 -> R.string.compose_stats_7d_window
-                            else -> R.string.compose_stats_daily_window
+                            2 -> R.string.compose_stats_daily_window
+                            else -> R.string.compose_stats_range_all
                         },
                     ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            // ── 选中数据点 tooltip（点击图表触发）──
+            if (selectedIndex in data.indices) {
+                Spacer(Modifier.height(6.dp))
+                androidx.compose.animation.AnimatedVisibility(visible = true) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.medium,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                            Text(
+                                java.text.SimpleDateFormat(
+                                    if (mode <= 0) "MM-dd HH:mm" else "yyyy-MM-dd",
+                                    Locale.US,
+                                ).format(java.util.Date(tipTs * 1000L)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                LegendDot(reqColor, stringResource(R.string.compose_stats_history_requests) + ": " + compactNumber(tipReq))
+                                LegendDot(blockColor, stringResource(R.string.compose_stats_history_blocked) + ": " + compactNumber(tipBlk))
+                                if (showConnections) {
+                                    LegendDot(connColor, stringResource(R.string.compose_stats_history_connections) + ": " + compactNumber(tipConn))
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

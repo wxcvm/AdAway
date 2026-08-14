@@ -125,6 +125,7 @@
     <string name="compose_stats_range_24h">24小时</string>
     <string name="compose_stats_range_7d">7天</string>
     <string name="compose_stats_range_30d">30天</string>
+    <string name="compose_stats_range_all">永久</string>
     <string name="compose_stats_7d_window">每天 · 7天</string>
     <string name="compose_stats_history_connections">连接</string>
     <string name="compose_stats_style_bars">柱状</string>
