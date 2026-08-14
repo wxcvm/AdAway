@@ -212,6 +212,8 @@ struct webstats {
     uint64_t blocked_config;     /* {} config                       */
     uint64_t blocked_ws_sse;     /* 204 websocket/SSE               */
     uint64_t blocked_other;      /* fell through to image fallback  */
+    uint64_t blocked_crypto;     /* mining pool requests (204)      */
+    uint64_t blocked_clickbait;  /* tracker/click/pixel (204)       */
     uint64_t sni_certs_issued;   /* SNI per-domain certs generated  */
     uint64_t sni_cache_hits;     /* SNI cache hits (avoid re-issue) */
 };
@@ -242,6 +244,8 @@ struct stats_file {
     uint64_t blocked_config;
     uint64_t blocked_ws_sse;
     uint64_t blocked_other;
+    uint64_t blocked_crypto;
+    uint64_t blocked_clickbait;
     uint64_t sni_certs_issued;
     /* New metrics (appended to keep old stats.dat files readable:
        fread() reads only what the current struct needs; the file has
@@ -271,6 +275,8 @@ static void save_stats(const struct settings *s) {
     f.blocked_config    = s_stats.blocked_config;
     f.blocked_ws_sse    = s_stats.blocked_ws_sse;
     f.blocked_other     = s_stats.blocked_other;
+    f.blocked_crypto    = s_stats.blocked_crypto;
+    f.blocked_clickbait = s_stats.blocked_clickbait;
     f.sni_certs_issued  = s_stats.sni_certs_issued;
     f.tls_handshakes    = s_stats.tls_handshakes;
     f.tls_failures      = s_stats.tls_failures;
@@ -303,6 +309,8 @@ static void load_stats(const struct settings *s) {
         s_stats.blocked_config    += f.blocked_config;
         s_stats.blocked_ws_sse    += f.blocked_ws_sse;
         s_stats.blocked_other     += f.blocked_other;
+        s_stats.blocked_crypto    += f.blocked_crypto;
+        s_stats.blocked_clickbait += f.blocked_clickbait;
         s_stats.sni_certs_issued  += f.sni_certs_issued;
         s_stats.tls_handshakes    += f.tls_handshakes;
         s_stats.tls_failures      += f.tls_failures;
@@ -369,6 +377,64 @@ static void hist_add(enum hist_kind kind) {
         case HIST_BLOCKED: h->blocked++;     d->blocked++;     break;
         case HIST_CERT:    h->certs++;       d->certs++;       break;
     }
+}
+
+/*
+ * PERSISTENT HISTORY (no reset on reboot):
+ * The hourly/daily ring buckets used to live only in RAM, so every
+ * webserver restart (boot, app reinstall, crash) zeroed the charts.
+ * Now the full ring state is snapshotted to <resource_dir>/hist.dat
+ * whenever /internal-stats is polled (same cadence as stats.dat) and
+ * loaded again at startup. Wall-clock slot starts are stored too, so
+ * hist_tick() simply rolls forward to the correct slot after a long
+ * downtime instead of losing the pre-reboot data.
+ */
+#define HIST_MAGIC 0x48495354u  /* "HIST" */
+struct hist_file {
+    uint32_t magic;
+    int32_t  hist_pos;
+    int32_t  daily_pos;
+    int64_t  hist_slot_start;
+    int64_t  daily_slot_start;
+    struct hist_slot hist[HIST_SLOTS];
+    struct hist_slot daily[DAILY_SLOTS];
+};
+
+static void save_hist(const struct settings *s) {
+    if (!s || !s->resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/hist.dat", s->resource_dir);
+    struct hist_file f;
+    memset(&f, 0, sizeof(f));
+    f.magic = HIST_MAGIC;
+    f.hist_pos = s_hist_pos;
+    f.daily_pos = s_daily_pos;
+    f.hist_slot_start = (int64_t)s_hist_slot_start;
+    f.daily_slot_start = (int64_t)s_daily_slot_start;
+    memcpy(f.hist, s_hist, sizeof(s_hist));
+    memcpy(f.daily, s_daily, sizeof(s_daily));
+    FILE *fp = fopen(path, "wb");
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+}
+
+static void load_hist(const struct settings *s) {
+    if (!s || !s->resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/hist.dat", s->resource_dir);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return;
+    struct hist_file f;
+    if (fread(&f, sizeof(f), 1, fp) == 1 && f.magic == HIST_MAGIC) {
+        s_hist_pos = f.hist_pos;
+        s_daily_pos = f.daily_pos;
+        s_hist_slot_start = (time_t)f.hist_slot_start;
+        s_daily_slot_start = (time_t)f.daily_slot_start;
+        memcpy(s_hist, f.hist, sizeof(s_hist));
+        memcpy(s_daily, f.daily, sizeof(s_daily));
+        /* Roll forward to now so buckets tick into the correct slots. */
+        hist_tick();
+    }
+    fclose(fp);
 }
 
 /* Serialize the last N buckets (oldest first) into out[]. */
@@ -1135,6 +1201,27 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         return true;
     }
 
+    /* ── Extended classification (new categories) ──────────────────
+       Crypto-mining: known mining pool paths (stratum, worker, hash).
+       Clickbait/trackers: generic tracker pixel & click-redirect paths.
+       These get counted separately so the chart shows more detail. */
+    if (uri_contains_ci(u, "/stratum") || uri_contains_ci(u, "/worker") ||
+        uri_contains_ci(u, "/mining") || uri_contains_ci(u, "/hashrate") ||
+        uri_contains_ci(u, "/pool")) {
+        s_stats.blocked_crypto++;
+        mg_http_reply(c, 204, CORS_HDR
+                              "Cache-Control: public, max-age=86400\r\n", "");
+        return true;
+    }
+    if (uri_contains_ci(u, "/click") || uri_contains_ci(u, "/track") ||
+        uri_contains_ci(u, "/pixel") || uri_contains_ci(u, "/beacon") ||
+        uri_contains_ci(u, "/impression")) {
+        s_stats.blocked_clickbait++;
+        mg_http_reply(c, 204, CORS_HDR
+                              "Cache-Control: public, max-age=86400\r\n", "");
+        return true;
+    }
+
     /* WebSocket upgrades: some SDKs open a WS channel to their ad
        gateway. Decline politely with 204 instead of serving an image. */
     struct mg_str *upgrade = mg_http_get_header(hm, "Upgrade");
@@ -1518,6 +1605,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             "\"blocked_config\":%llu,"
             "\"blocked_ws_sse\":%llu,"
             "\"blocked_other\":%llu,"
+            "\"blocked_crypto\":%llu,"
+            "\"blocked_clickbait\":%llu,"
             "\"sni_certs_issued\":%llu,"
             "\"block_image_count\":%d,"
             "\"apps\":[%s],"
@@ -1542,6 +1631,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             (unsigned long long)s_stats.blocked_config,
             (unsigned long long)s_stats.blocked_ws_sse,
             (unsigned long long)s_stats.blocked_other,
+            (unsigned long long)s_stats.blocked_crypto,
+            (unsigned long long)s_stats.blocked_clickbait,
             (unsigned long long)s_stats.sni_certs_issued,
             s->block_image_count,
             apps_json, tls_json, hist_json, daily_json);
@@ -1549,6 +1640,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                       "Content-Type: application/json\r\n"
                       "Cache-Control: no-store\r\n", "%.*s", n, body);
         save_stats(s);  /* persist lifetime counters (polled every 5 s) */
+        save_hist(s);   /* persist chart buckets (no reset on reboot) */
         return;
     }
 
@@ -1704,6 +1796,7 @@ int main(int argc, char *argv[]) {
 
     s_stats.start_time_ms = mg_millis();
     load_stats(&s);  /* lifetime counters survive restarts */
+    load_hist(&s);   /* chart buckets survive restarts (reboot-proof) */
 
     oom_adjust_setup();
 
@@ -1750,6 +1843,7 @@ int main(int argc, char *argv[]) {
 
     while (s_sig_num == 0) mg_mgr_poll(&mgr, 1000);
     save_stats(&s);
+    save_hist(&s);   /* final flush of chart buckets on exit */
     LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);

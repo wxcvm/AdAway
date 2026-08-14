@@ -113,6 +113,18 @@ internal fun setChartStyle(context: Context, style: Int) {
         .edit().putInt("chart_style", style).apply()
 }
 
+/* ── Trend chart range: 0=24h 1=7d 2=30d 3=all (persisted) ────── */
+
+internal fun chartRange(context: Context): Int {
+    return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .getInt("chart_range", 0)
+}
+
+internal fun setChartRange(context: Context, range: Int) {
+    context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .edit().putInt("chart_range", range).apply()
+}
+
 /* ── Theme mode: 0 = follow system, 1 = light, 2 = dark ────────── */
 
 internal fun themeMode(context: Context): Int {

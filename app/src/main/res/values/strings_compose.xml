@@ -35,6 +35,7 @@
     <string name="compose_ws_control_certs">Certs</string>
     <string name="compose_ws_control_test">Open test page</string>
     <string name="compose_ws_control_install_cert">Install cert</string>
+    <string name="compose_ws_control_cert_days">%1$d days left</string>
     <string name="compose_legacy_ui">Classic interface</string>
     <string name="compose_legacy_ui_subtitle">Open the previous Java interface</string>
     <string name="compose_legacy_removed">The legacy interface has been fully replaced by this one.</string>

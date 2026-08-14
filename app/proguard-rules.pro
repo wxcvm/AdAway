@@ -22,7 +22,31 @@
     <init>();
 }
 
--dontobfuscate
+### Room entities / DAOs (reflection + generated impls) ###
+-keep class org.adaway.db.entity.** { *; }
+-keep interface org.adaway.db.dao.** { *; }
+-keep class org.adaway.db.AppDatabase { *; }
+-keep class org.adaway.db.Converters { *; }
+
+### libsu (Shell reflection) ###
+-keep class com.topjohnwu.superuser.** { *; }
+-keep class com.topjohnwu.core.** { *; }
+
+### Compose / Kotlin serialization-safe ###
+-keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
+-keepclassmembers class * {
+    @androidx.compose.runtime.Composable <methods>;
+}
+-keep class kotlin.Metadata { *; }
+-keep class org.adaway.ui.compose.ServerStats { *; }
+-keep class org.adaway.ui.compose.HistPoint { *; }
+-keep class org.adaway.ui.compose.AppStat { *; }
+-keep class org.adaway.ui.compose.TlsHost { *; }
+-keep class org.adaway.ui.compose.BlockCategory { *; }
+
+### WebServerUtils native-launch path (used via reflection in some flows) ###
+-keep class org.adaway.util.WebServerUtils { *; }
+-keep class org.adaway.model.root.ShellUtils { *; }
 
 ### Android Jetpack ###
 -dontwarn com.google.**

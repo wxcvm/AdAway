@@ -429,6 +429,58 @@ public static boolean isUserCertificateInstalled(Context context) {
     }
 
     /**
+     * 返回 CA 证书剩余有效天数（负数=已过期，null=无法读取）。
+     * 概览页/设置页据此提示“证书剩余 X 天”。
+     */
+    @androidx.annotation.Nullable
+    public static Long getCertificateDaysLeft(Context context) {
+        try {
+            Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+            if (!Files.isRegularFile(certFile)) return null;
+            java.security.cert.CertificateFactory cf =
+                    java.security.cert.CertificateFactory.getInstance("X.509");
+            java.security.cert.X509Certificate cert;
+            try (InputStream is = Files.newInputStream(certFile)) {
+                cert = (java.security.cert.X509Certificate) cf.generateCertificate(is);
+            }
+            long now = System.currentTimeMillis();
+            return (cert.getNotAfter().getTime() - now) / (24L * 3600 * 1000);
+        } catch (Exception e) {
+            Timber.w(e, "Failed to read cert validity.");
+            return null;
+        }
+    }
+
+    /**
+     * 返回 CA 证书 SHA-256 指纹（冒号分隔大写十六进制），
+     * 便于用户在信任库中核对安装的是否为同一证书。
+     */
+    @androidx.annotation.Nullable
+    public static String getCertificateFingerprint(Context context) {
+        try {
+            Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+            if (!Files.isRegularFile(certFile)) return null;
+            java.security.cert.CertificateFactory cf =
+                    java.security.cert.CertificateFactory.getInstance("X.509");
+            java.security.cert.X509Certificate cert;
+            try (InputStream is = Files.newInputStream(certFile)) {
+                cert = (java.security.cert.X509Certificate) cf.generateCertificate(is);
+            }
+            byte[] der = cert.getEncoded();
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(der);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < digest.length; i++) {
+                if (i > 0) sb.append(':');
+                sb.append(String.format("%02X", digest[i]));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            Timber.w(e, "Failed to compute cert fingerprint.");
+            return null;
+        }
+    }
+
+    /**
      * Check whether AdAway's CA is already present in the system trust store
      * - e.g. via a Magisk "move certificates"-style module promoting an
      * already-installed user cert, since this app no longer attempts a

@@ -279,7 +279,8 @@ private fun WebServerControlCard(
                 )
             }
             Spacer(Modifier.height(8.dp))
-            // 证书状态行：未安装/已变更时高亮提示 + 一键安装按钮
+            // 证书状态行：未安装/已变更时高亮提示 + 一键安装按钮 + 剩余天数
+            val daysLeft = org.adaway.util.WebServerUtils.getCertificateDaysLeft(context)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -291,6 +292,14 @@ private fun WebServerControlCard(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
+                if (daysLeft != null && enabled) {
+                    Text(
+                        stringResource(R.string.compose_ws_control_cert_days, daysLeft),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (daysLeft < 30) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (certNeedsAction) {
                     TextButton(onClick = onInstallCert) {
                         Icon(Icons.Outlined.Lock, contentDescription = null, modifier = Modifier.size(16.dp))

@@ -281,13 +281,8 @@ private fun CountLabel(label: String, value: Int) {
  * 将大数字格式化为紧凑形式：1_234 → "1.2k"，3_456_789 → "3.5M"。
  * 用于图表 Y 轴刻度，避免超长数字溢出绘图区域。
  */
-private fun compactNumber(value: Long): String {
-    return when {
-        value >= 1_000_000 -> String.format(Locale.US, "%.1fM", value / 1_000_000f)
-        value >= 1_000 -> String.format(Locale.US, "%.1fk", value / 1_000f)
-        else -> "$value"
-    }
-}
+@Suppress("DEPRECATION") // keep for backward-compat callers; use ChartUtils.compactNumber
+private fun compactNumber(value: Long): String = ChartUtils.compactNumber(value)
 
 /**
  * 环形图（Canvas 手绘，无第三方图表库）。
@@ -608,8 +603,11 @@ private fun TrafficTrendCard(
     showConnections: Boolean,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var mode by remember { mutableIntStateOf(0) }  // 0 = 24h, 1 = 7d, 2 = 30d, 3 = all-time
-    var style by remember { mutableIntStateOf(chartStyle(context)) } // 0 = line, 1 = area, 2 = bars
+    // 范围与样式均从偏好恢复（用户上次选择不丢失）
+    var mode by remember { mutableIntStateOf(chartRange(context)) }  // 0=24h 1=7d 2=30d 3=all
+    var style by remember { mutableIntStateOf(chartStyle(context)) } // 0=line 1=area 2=bars
+    fun setMode(m: Int) { mode = m; setChartRange(context, m) }
+    fun setStyle(s: Int) { style = s; setChartStyle(context, s) }
     val data = when (mode) {
         0 -> hourly
         1 -> daily.takeLast(7)
@@ -645,16 +643,16 @@ private fun TrafficTrendCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                FilterChip(selected = mode == 0, onClick = { mode = 0 },
+                FilterChip(selected = mode == 0, onClick = { setMode(0) },
                     label = { Text(stringResource(R.string.compose_stats_range_24h)) })
                 Spacer(Modifier.width(6.dp))
-                FilterChip(selected = mode == 1, onClick = { mode = 1 },
+                FilterChip(selected = mode == 1, onClick = { setMode(1) },
                     label = { Text(stringResource(R.string.compose_stats_range_7d)) })
                 Spacer(Modifier.width(6.dp))
-                FilterChip(selected = mode == 2, onClick = { mode = 2 },
+                FilterChip(selected = mode == 2, onClick = { setMode(2) },
                     label = { Text(stringResource(R.string.compose_stats_range_30d)) })
                 Spacer(Modifier.width(6.dp))
-                FilterChip(selected = mode == 3, onClick = { mode = 3 },
+                FilterChip(selected = mode == 3, onClick = { setMode(3) },
                     label = { Text(stringResource(R.string.compose_stats_range_all)) })
             }
             Row(
@@ -663,11 +661,11 @@ private fun TrafficTrendCard(
                     .padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                FilterChip(selected = style == 0, onClick = { style = 0 },
+                FilterChip(selected = style == 0, onClick = { setStyle(0) },
                     label = { Text(stringResource(R.string.compose_stats_style_line)) })
-                FilterChip(selected = style == 1, onClick = { style = 1 },
+                FilterChip(selected = style == 1, onClick = { setStyle(1) },
                     label = { Text(stringResource(R.string.compose_stats_style_area)) })
-                FilterChip(selected = style == 2, onClick = { style = 2 },
+                FilterChip(selected = style == 2, onClick = { setStyle(2) },
                     label = { Text(stringResource(R.string.compose_stats_style_bars)) })
             }
             Spacer(Modifier.height(12.dp))
@@ -682,7 +680,7 @@ private fun TrafficTrendCard(
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
+                    .height(200.dp)  // +20dp 为 X 轴时间标签预留空间
                     .pointerInput(data.size) {
                         detectTapGestures { offset ->
                             // 把点击 x 坐标映射到最近的数据点索引
@@ -702,7 +700,7 @@ private fun TrafficTrendCard(
                 if (n == 0) return@Canvas
                 val leftPad = 34.dp.toPx()
                 val chartW = size.width - leftPad - 6.dp.toPx()
-                val base = size.height - 8.dp.toPx()
+                val base = size.height - 22.dp.toPx()  // 底部预留 X 轴标签
                 val topPad = 8.dp.toPx()
                 val chartH = base - topPad - 4.dp.toPx()
 
@@ -766,6 +764,44 @@ private fun TrafficTrendCard(
                 }
                 // Baseline
                 drawLine(axisColor, Offset(leftPad, base), Offset(size.width, base), strokeWidth = 1.5f)
+
+                // X 轴时间标签（参考 AdGuard Home：24h 用 HH:mm，7d+ 用 MM/dd）
+                val timePaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.argb(170, 128, 128, 128)
+                    textSize = 9.dp.toPx()
+                    textAlign = android.graphics.Paint.Align.CENTER
+                }
+                val labelStep = when {
+                    n <= 6 -> 1
+                    n <= 12 -> 2
+                    n <= 24 -> 4
+                    else -> n / 6
+                }
+                for (i in 0 until n step labelStep) {
+                    val ts = data[i].ts * 1000L
+                    val text = if (mode == 0) {
+                        // 24h: HH:mm
+                        java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(ts))
+                    } else {
+                        // 7d/30d/all: MM/dd
+                        java.text.SimpleDateFormat("MM/dd", Locale.US).format(java.util.Date(ts))
+                    }
+                    drawContext.canvas.nativeCanvas.drawText(
+                        text, xAt(i), base + 14.dp.toPx(), timePaint,
+                    )
+                }
+                // 最后一个点也标注（避免标签缺失）
+                if (n > 1 && (n - 1) % labelStep != 0) {
+                    val ts = data[n - 1].ts * 1000L
+                    val text = if (mode == 0) {
+                        java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(ts))
+                    } else {
+                        java.text.SimpleDateFormat("MM/dd", Locale.US).format(java.util.Date(ts))
+                    }
+                    drawContext.canvas.nativeCanvas.drawText(
+                        text, xAt(n - 1), base + 14.dp.toPx(), timePaint,
+                    )
+                }
 
                 when (style) {
                     2 -> { // bars — gradient fill + rounded top, cleaner look
