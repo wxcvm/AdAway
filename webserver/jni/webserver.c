@@ -323,6 +323,29 @@ static uint64_t uptime_seconds(void) {
     return (mg_millis() - s_stats.start_time_ms) / 1000ULL;
 }
 
+/*
+ * PER-APP ALLOWLIST lookup: reads <resource_dir>/allowlist.txt
+ * (one decimal uid per line) and returns true if uid is present.
+ * The file is re-read on every call (it's tiny; the app rewrites it
+ * only when the user toggles a switch, so a few extra syscalls are
+ * cheaper than keeping an in-memory copy in sync).
+ */
+static bool uid_is_allowed(uid_t uid, const char *resource_dir) {
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/allowlist.txt", resource_dir);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return false;
+    char line[32];
+    bool allowed = false;
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        char *end = NULL;
+        long v = strtol(line, &end, 10);
+        if (end != line && v >= 0 && (uid_t)v == uid) { allowed = true; break; }
+    }
+    fclose(fp);
+    return allowed;
+}
+
 /* ── Hourly history (for the time-series chart) ────────────────── */
 /* Ring of 24 hourly buckets + 30 daily buckets: requests / blocked /
    connections (and certs) per hour / per day, exposed via
@@ -1496,6 +1519,20 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         req_uid = conn_uid_by_tuple(c);
         conn_store_uid(c, req_uid);
     }
+
+    /*
+     * PER-APP ALLOWLIST: the app writes <resource_dir>/allowlist.txt
+     * (one decimal uid per line, from the Settings > App monitoring
+     * "allow" switches). A uid on the list has its traffic forwarded
+     * as-is (200 OK with a tiny body) instead of being blocked, so
+     * e.g. banking apps that need ads SDKs for auth still work.
+     */
+    if (req_uid != (uid_t)-1 && uid_is_allowed(req_uid, s->resource_dir)) {
+        mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
+                              "Cache-Control: no-store\r\n", "ok");
+        return;
+    }
+
     struct appstat *ra = app_find_or_add(req_uid);
     if (ra) {
         if (!c->data[REC_OFFSET]) {
@@ -1539,6 +1576,14 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         struct mg_http_serve_opts o = {0};
         o.mime_types = "html=text/html";
         mg_http_serve_file(c, hm, s->test_path, &o);
+        return;
+    }
+
+    /* Real-time statistics push: the app may upgrade to a WebSocket to
+       receive a JSON snapshot every time a blocked request is counted,
+       instead of polling /internal-stats. Loopback only. */
+    if (mg_match(hm->uri, mg_str("/internal-ws"), NULL)) {
+        mg_ws_upgrade(c, hm, NULL);
         return;
     }
 

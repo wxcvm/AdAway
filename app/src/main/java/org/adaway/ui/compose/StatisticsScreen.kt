@@ -183,6 +183,11 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                 }
             }
 
+            // ── KPI 卡片行（参考 AdGuard Home：数值 + 迷你趋势线）──
+            if (serverStats != null) {
+                KpiCardRow(stats = serverStats!!)
+            }
+
             // Blocked-request chart
             if (showDonut) {
                 Card(
@@ -271,6 +276,120 @@ private fun CountLabel(label: String, value: Int) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * KPI 卡片行（AdGuard Home 风格）：4 个关键指标 + 迷你趋势线。
+ * 请求总数 / 拦截总数 / 拦截率 / SNI 证书数。
+ * 趋势线取自最近 12 个 hourly 桶，让用户一眼感知走势。
+ */
+@Composable
+private fun KpiCardRow(stats: ServerStats) {
+    val trend = stats.history.takeLast(12)
+    val rate = if (stats.totalRequests > 0) stats.totalBlocked * 100f / stats.totalRequests else 0f
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        KpiCard(
+            label = stringResource(R.string.compose_stats_kpi_requests),
+            value = ChartUtils.compactNumber(stats.totalRequests),
+            points = trend.map { it.requests },
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f),
+        )
+        KpiCard(
+            label = stringResource(R.string.compose_stats_kpi_blocked),
+            value = ChartUtils.compactNumber(stats.totalBlocked),
+            points = trend.map { it.blocked },
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.weight(1f),
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        KpiCard(
+            label = stringResource(R.string.compose_stats_kpi_rate),
+            value = String.format(Locale.US, "%.1f%%", rate),
+            points = trend.map { it.blocked },
+            color = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.weight(1f),
+        )
+        KpiCard(
+            label = stringResource(R.string.compose_stats_kpi_certs),
+            value = ChartUtils.compactNumber(stats.sniCertsIssued),
+            points = trend.map { it.certs },
+            color = Color(0xFFE6A23C),
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** 单个 KPI 卡：数字 + 标签 + 迷你趋势线（sparkline）。 */
+@Composable
+private fun KpiCard(
+    label: String,
+    value: String,
+    points: List<Long>,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(
+                value,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = color,
+                maxLines = 1,
+            )
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(6.dp))
+            // 迷你趋势线
+            Canvas(modifier = Modifier.fillMaxWidth().height(24.dp)) {
+                val n = points.size
+                if (n < 2) {
+                    drawLine(color.copy(alpha = 0.4f), Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 1.dp.toPx())
+                    return@Canvas
+                }
+                val maxV = (points.maxOrNull() ?: 1L).coerceAtLeast(1L).toFloat()
+                val stepX = size.width / (n - 1)
+                val path = androidx.compose.ui.graphics.Path()
+                points.forEachIndexed { i, v ->
+                    val x = i * stepX
+                    val y = size.height - (v.toFloat() / maxV) * size.height
+                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawPath(path, color, style = Stroke(width = 1.5.dp.toPx()))
+                // 面积填充
+                val fill = androidx.compose.ui.graphics.Path()
+                fill.moveTo(0f, size.height)
+                points.forEachIndexed { i, v ->
+                    val x = i * stepX
+                    val y = size.height - (v.toFloat() / maxV) * size.height
+                    fill.lineTo(x, y)
+                }
+                fill.lineTo(size.width, size.height)
+                fill.close()
+                drawPath(fill, color.copy(alpha = 0.12f))
+            }
+        }
     }
 }
 

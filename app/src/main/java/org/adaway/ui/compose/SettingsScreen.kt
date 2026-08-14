@@ -77,6 +77,38 @@ internal fun setAppMonitored(context: Context, uid: Int, monitored: Boolean) {
         .edit().putBoolean("monitor_$uid", monitored).apply()
 }
 
+/* ── Per-app allowlist: bypass blocking for this uid (allow_<uid>) ── */
+
+internal fun isAppAllowed(context: Context, uid: Int): Boolean {
+    return context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
+        .getBoolean("allow_$uid", false)
+}
+
+internal fun setAppAllowed(context: Context, uid: Int, allowed: Boolean) {
+    context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
+        .edit().putBoolean("allow_$uid", allowed).apply()
+    // 同步写 allowlist.txt 供 webserver 实时读取
+    syncAllowlistFile(context)
+}
+
+/** 把所有 allow_<uid>=true 的 uid 写入 webserver 目录 allowlist.txt。 */
+private fun syncAllowlistFile(context: Context) {
+    try {
+        val prefs = context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
+        val uids = prefs.all
+            .filterKeys { it.startsWith("allow_") }
+            .filterValues { it == true }
+            .keys
+            .mapNotNull { it.removePrefix("allow_").toIntOrNull() }
+        val content = uids.joinToString("\n")
+        val dir = java.io.File(context.filesDir, "webserver")
+        dir.mkdirs()
+        java.io.File(dir, "allowlist.txt").writeText(content)
+    } catch (e: Exception) {
+        Timber.w(e, "Failed to sync allowlist")
+    }
+}
+
 /* ── General settings (logs + chart options) ──────────────────── */
 
 /** Max log entries shown in the Logs screen. Default 500. */
@@ -574,6 +606,9 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             val monitored = remember(refreshKey, app.uid) {
                                 isAppMonitored(context, app.uid)
                             }
+                            val allowed = remember(refreshKey, app.uid) {
+                                isAppAllowed(context, app.uid)
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -598,6 +633,23 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
+                                // 放行开关：该应用流量完全绕过拦截
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Switch(
+                                        checked = allowed,
+                                        onCheckedChange = { v ->
+                                            setAppAllowed(context, app.uid, v)
+                                            refreshKey++
+                                        },
+                                    )
+                                    Text(
+                                        stringResource(R.string.compose_settings_app_allow),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (allowed) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(Modifier.width(4.dp))
                                 Switch(
                                     checked = monitored,
                                     onCheckedChange = { newValue ->

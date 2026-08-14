@@ -42,6 +42,10 @@
 
     <!-- Statistics -->
     <string name="compose_stats_title">Statistics</string>
+    <string name="compose_stats_kpi_requests">Requests</string>
+    <string name="compose_stats_kpi_blocked">Blocked</string>
+    <string name="compose_stats_kpi_rate">Block rate</string>
+    <string name="compose_stats_kpi_certs">Certs</string>
     <string name="compose_stats_hosts_list">Hosts list</string>
     <string name="compose_stats_blocked_by_type">Blocked requests by type</string>
     <string name="compose_stats_no_data">No blocked requests recorded yet</string>
@@ -62,6 +66,7 @@
     <string name="compose_settings_apps_title">App monitoring</string>
     <string name="compose_settings_apps_hint">Choose which apps appear in the per-app statistics</string>
     <string name="compose_settings_apps_empty">No apps detected yet — browse the web and apps will show up here.</string>
+    <string name="compose_settings_app_allow">Allow</string>
     <string name="compose_settings_app_sub">%1$d conn · %2$d req · %3$d blocked</string>
     <string name="compose_settings_logs_title">Logs</string>
     <string name="compose_settings_logs_hint">Maximum entries shown in the Logs screen</string>
@@ -189,7 +194,7 @@
     <string name="compose_rules_delete">Delete rule</string>
     <string name="compose_rules_add_rule">Add rule</string>
     <string name="compose_rules_add_rule_title">Add manual rule</string>
-    <string name="compose_rules_rule_host_hint">hostname (e.g. ads.example.com)</string>
+    <string name="compose_rules_rule_host_hint">hostname or *.example.com (wildcard)</string>
     <string name="compose_rules_rule_redirect_hint">Redirect target (e.g. 0.0.0.0)</string>
     <string name="compose_rules_delete_source_title">Rule from a subscription</string>
     <string name="compose_rules_delete_source_hint">"%1$s" comes from a subscribed source and will return on the next sync. Disable or remove the source in the subscriptions list below to keep it blocked-free.</string>

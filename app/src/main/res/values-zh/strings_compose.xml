@@ -42,6 +42,10 @@
 
     <!-- 统计 -->
     <string name="compose_stats_title">统计</string>
+    <string name="compose_stats_kpi_requests">请求</string>
+    <string name="compose_stats_kpi_blocked">拦截</string>
+    <string name="compose_stats_kpi_rate">拦截率</string>
+    <string name="compose_stats_kpi_certs">证书</string>
     <string name="compose_stats_hosts_list">规则列表</string>
     <string name="compose_stats_blocked_by_type">按类型拦截请求</string>
     <string name="compose_stats_no_data">暂无拦截记录</string>
@@ -62,6 +66,7 @@
     <string name="compose_settings_apps_title">应用监控</string>
     <string name="compose_settings_apps_hint">选择要在应用统计中显示的应用</string>
     <string name="compose_settings_apps_empty">暂未检测到应用——浏览网页后应用会显示在这里。</string>
+    <string name="compose_settings_app_allow">放行</string>
     <string name="compose_settings_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
     <string name="compose_settings_logs_title">日志</string>
     <string name="compose_settings_logs_hint">日志页最多显示的条数</string>
@@ -189,7 +194,7 @@
     <string name="compose_rules_delete">删除规则</string>
     <string name="compose_rules_add_rule">添加规则</string>
     <string name="compose_rules_add_rule_title">添加手动规则</string>
-    <string name="compose_rules_rule_host_hint">域名（如 ads.example.com）</string>
+    <string name="compose_rules_rule_host_hint">域名或 *.example.com（通配符）</string>
     <string name="compose_rules_rule_redirect_hint">重定向目标（如 0.0.0.0）</string>
     <string name="compose_rules_delete_source_title">来自订阅源的规则</string>
     <string name="compose_rules_delete_source_hint">“%1$s”来自订阅源，下次同步后会恢复。请在下方的订阅源列表中禁用或移除该订阅源。</string>
