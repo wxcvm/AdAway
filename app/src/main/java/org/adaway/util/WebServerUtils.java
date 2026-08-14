@@ -248,6 +248,20 @@ public class WebServerUtils {
             return R.string.pref_webserver_state_not_running;
         }
 
+        // Check if certificate has changed since last check
+        String currentHash = computeCertHash(context);
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE);
+        String storedHash = prefs.getString("cert_hash", null);
+        
+        if (currentHash != null && storedHash != null && !currentHash.equals(storedHash)) {
+            // Certificate has changed — cache is stale, need reinstall
+            return R.string.pref_webserver_state_running_cert_expired;
+        }
+        // Store current hash for next comparison
+        if (currentHash != null) {
+            prefs.edit().putString("cert_hash", currentHash).apply();
+        }
+
         /*
          * BUG FIX: previously determined "is the cert installed" by
          * actually performing an HTTPS handshake (HttpsURLConnection) and
@@ -271,7 +285,7 @@ public class WebServerUtils {
          * scope (system certs are honored by apps that ignore user-added
          * ones), and this can change without any action inside AdAway
          * itself, e.g. a Magisk "move certificates"-style module
-         * promoting the already-installed user cert to system on the next
+         * promoting an already-installed user cert to system on the next
          * boot.
          */
         if (isSystemCertificateInstalled(context)) {
@@ -280,6 +294,31 @@ public class WebServerUtils {
         return isUserCertificateInstalled(context)
                 ? R.string.pref_webserver_state_running_and_installed
                 : R.string.pref_webserver_state_running_not_installed;
+    }
+
+    /** Compute MD5-based subject hash of the CA certificate file. Returns null on error. */
+    private static String computeCertHash(Context context) {
+        try {
+            Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+            if (!Files.isRegularFile(certFile)) return null;
+            java.security.cert.CertificateFactory cf = 
+                java.security.cert.CertificateFactory.getInstance("X.509");
+            java.security.cert.X509Certificate cert;
+            try (java.io.InputStream is = Files.newInputStream(certFile)) {
+                cert = (java.security.cert.X509Certificate) cf.generateCertificate(is);
+            }
+            byte[] subjectDer = cert.getSubjectX500Principal().getEncoded();
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] digest = md.digest(subjectDer);
+            long hash = ((long)(digest[0] & 0xFF)) 
+                      | ((digest[1] & 0xFFL) << 8) 
+                      | ((digest[2] & 0xFFL) << 16) 
+                      | ((digest[3] & 0xFFL) << 24);
+            return String.format("%08x", hash);
+        } catch (Exception e) {
+            Timber.w(e, "Failed to compute certificate hash.");
+            return null;
+        }
     }
 
     /**
