@@ -125,6 +125,7 @@
     <string name="compose_settings_cert_days">%1$d days left</string>
     <string name="compose_settings_cert_fingerprint">SHA-256 fingerprint</string>
     <string name="compose_settings_cert_install">Install certificate</string>
+    <string name="compose_settings_cert_export">Export certificate</string>
     <string name="compose_stats_type_images">Images</string>
     <string name="compose_stats_type_scripts">Scripts</string>
     <string name="compose_stats_type_styles">Styles</string>

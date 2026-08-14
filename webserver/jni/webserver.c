@@ -537,6 +537,45 @@ struct appstat {
 static struct appstat s_apps[APP_STATS_MAX];
 static int s_app_count = 0;
 
+/* Per-app stats persistence: s_apps is otherwise RAM-only and would be
+   zeroed on every webserver restart. Save to <resource_dir>/apps.dat at
+   the same cadence as stats.dat (each /internal-stats poll + on exit)
+   and load at startup, so the per-app list also survives reboots. */
+#define APPS_MAGIC 0x41505053u  /* "APPS" */
+struct apps_file {
+    uint32_t magic;
+    uint32_t count;
+    struct appstat entries[APP_STATS_MAX];
+};
+static void apps_save(const char *resource_dir) {
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/apps.dat", resource_dir);
+    struct apps_file f;
+    memset(&f, 0, sizeof(f));
+    f.magic = APPS_MAGIC;
+    f.count = (uint32_t)s_app_count;
+    for (int i = 0; i < s_app_count && i < APP_STATS_MAX; i++)
+        f.entries[i] = s_apps[i];
+    FILE *fp = fopen(path, "wb");
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+}
+static void apps_load(const char *resource_dir) {
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/apps.dat", resource_dir);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return;
+    struct apps_file f;
+    if (fread(&f, sizeof(f), 1, fp) == 1 && f.magic == APPS_MAGIC) {
+        int n = f.count < APP_STATS_MAX ? (int)f.count : APP_STATS_MAX;
+        for (int i = 0; i < n; i++) s_apps[i] = f.entries[i];
+        s_app_count = n;
+        LOG_INFO("Per-app stats loaded: %d uids", n);
+    }
+    fclose(fp);
+}
+
 /* Distinct (uid, hostname) pairs seen on TLS connections — i.e. the
    per-domain leaf certs effectively issued per app. Ring buffer. */
 struct tls_host_rec {
@@ -1846,6 +1885,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         save_stats(s);  /* persist lifetime counters (polled every 5 s) */
         save_hist(s);   /* persist chart buckets (no reset on reboot) */
         sni_cache_save(s->resource_dir);  /* persist SNI cache every poll */
+        apps_save(s->resource_dir);       /* persist per-app stats */
         return;
     }
 
@@ -2005,6 +2045,7 @@ int main(int argc, char *argv[]) {
     load_stats(&s);  /* lifetime counters survive restarts */
     load_hist(&s);   /* chart buckets survive restarts (reboot-proof) */
     sni_cache_load(s.resource_dir);  /* SNI cert cache survives restarts */
+    apps_load(s.resource_dir);       /* per-app stats survive restarts */
 
     oom_adjust_setup();
 
@@ -2053,6 +2094,7 @@ int main(int argc, char *argv[]) {
     save_stats(&s);
     save_hist(&s);   /* final flush of chart buckets on exit */
     sni_cache_save(s.resource_dir);  /* persist SNI cache (max hit rate) */
+    apps_save(s.resource_dir);       /* persist per-app stats on exit */
     LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);

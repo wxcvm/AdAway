@@ -125,6 +125,7 @@
     <string name="compose_settings_cert_days">剩余 %1$d 天</string>
     <string name="compose_settings_cert_fingerprint">SHA-256 指纹</string>
     <string name="compose_settings_cert_install">安装证书</string>
+    <string name="compose_settings_cert_export">导出证书</string>
     <string name="compose_stats_type_images">图片</string>
     <string name="compose_stats_type_scripts">脚本</string>
     <string name="compose_stats_type_styles">样式</string>

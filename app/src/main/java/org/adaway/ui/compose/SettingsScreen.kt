@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -502,6 +503,20 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.compose_settings_cert_install))
                     }
+                    Spacer(Modifier.height(6.dp))
+                    // 导出证书到 Download 目录（供其他设备/模块使用）
+                    OutlinedButton(
+                        onClick = { exportCertificate(context) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Save,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.compose_settings_cert_export))
+                    }
                 }
             }
             Card(
@@ -812,6 +827,29 @@ fun SettingsScreen(viewModel: StatsViewModel) {
 }
 
 /* ── 备份 / 恢复 ──────────────────────────────────────────────── */
+
+/**
+ * 导出 CA 证书到 Download/adblock-ca.crt，供其他设备/模块（如 Magisk 证书模块）使用。
+ */
+private fun exportCertificate(context: Context) {
+    try {
+        val src = java.io.File(context.filesDir, "webserver/localhost-2410.crt")
+        if (!src.exists()) {
+            Toast.makeText(context, "Certificate not found — start the web server first", Toast.LENGTH_LONG).show()
+            return
+        }
+        val dest = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+            "adblock-ca.crt",
+        )
+        dest.parentFile?.mkdirs()
+        src.copyTo(dest, overwrite = true)
+        Toast.makeText(context, "Certificate exported: ${dest.absolutePath}", Toast.LENGTH_LONG).show()
+    } catch (e: Exception) {
+        Timber.w(e, "Failed to export certificate")
+        Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
 
 /**
  * 导出备份：把所有偏好（compose_general / compose_app_monitor /
