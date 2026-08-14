@@ -322,6 +322,46 @@ fun refreshServerStats() {
         }
     }
 
+    /**
+     * 添加一条用户自定义规则（source_id == 1）。
+     * @param host    域名（不带通配符）
+     * @param type    0=拦截 1=放行 2=重定向
+     * @param redirection 重定向目标（type==2 时使用）
+     */
+    fun addUserRule(host: String, type: Int, redirection: String?, onDone: () -> Unit) {
+        viewModelScope.launch {
+            val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val item = org.adaway.db.entity.HostListItem()
+                    item.host = host.trim().lowercase()
+                    item.type = org.adaway.db.entity.ListType.fromValue(type)
+                    item.sourceId = 1
+                    if (type == 2 && !redirection.isNullOrBlank()) {
+                        item.redirection = redirection.trim()
+                    }
+                    hostsListItemDao.insert(item)
+                    // 生效到 host_entries（拦截/重定向写入，放行清理）
+                    when (type) {
+                        0 -> hostEntryDao.importBlocked()
+                        2 -> if (redirection != null) {
+                            val entry = org.adaway.db.entity.HostEntry()
+                            entry.host = item.host
+                            entry.type = org.adaway.db.entity.ListType.REDIRECTED
+                            entry.redirection = redirection.trim()
+                            hostEntryDao.redirectHosts(listOf(entry))
+                        }
+                        else -> hostEntryDao.allowHost(item.host)
+                    }
+                    true
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to add user rule %s", host)
+                    false
+                }
+            }
+            onDone()
+        }
+    }
+
     /** Add a new subscription from a hosts URL; returns false on failure. */
     fun addSource(url: String, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {

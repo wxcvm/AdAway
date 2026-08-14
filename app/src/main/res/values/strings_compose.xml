@@ -183,6 +183,13 @@
     <string name="compose_rules_total">Total: %1$d</string>
     <string name="compose_rules_add_source">Add subscription</string>
     <string name="compose_rules_delete">Delete rule</string>
+    <string name="compose_rules_add_rule">Add rule</string>
+    <string name="compose_rules_add_rule_title">Add manual rule</string>
+    <string name="compose_rules_rule_host_hint">hostname (e.g. ads.example.com)</string>
+    <string name="compose_rules_rule_redirect_hint">Redirect target (e.g. 0.0.0.0)</string>
+    <string name="compose_rules_delete_source_title">Rule from a subscription</string>
+    <string name="compose_rules_delete_source_hint">"%1$s" comes from a subscribed source and will return on the next sync. Disable or remove the source in the subscriptions list below to keep it blocked-free.</string>
+    <string name="compose_rules_ok">OK</string>
     <string name="compose_rules_source_url_hint">https://example.com/hosts.txt</string>
     <string name="compose_rules_add">Add</string>
     <string name="compose_rules_cancel">Cancel</string>

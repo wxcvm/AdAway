@@ -183,6 +183,13 @@
     <string name="compose_rules_total">共 %1$d 条</string>
     <string name="compose_rules_add_source">添加订阅</string>
     <string name="compose_rules_delete">删除规则</string>
+    <string name="compose_rules_add_rule">添加规则</string>
+    <string name="compose_rules_add_rule_title">添加手动规则</string>
+    <string name="compose_rules_rule_host_hint">域名（如 ads.example.com）</string>
+    <string name="compose_rules_rule_redirect_hint">重定向目标（如 0.0.0.0）</string>
+    <string name="compose_rules_delete_source_title">来自订阅源的规则</string>
+    <string name="compose_rules_delete_source_hint">“%1$s”来自订阅源，下次同步后会恢复。请在下方的订阅源列表中禁用或移除该订阅源。</string>
+    <string name="compose_rules_ok">确定</string>
     <string name="compose_rules_source_url_hint">https://example.com/hosts.txt</string>
     <string name="compose_rules_add">添加</string>
     <string name="compose_rules_cancel">取消</string>

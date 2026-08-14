@@ -37,6 +37,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
@@ -92,7 +93,14 @@ fun RulesScreen(viewModel: StatsViewModel) {
     var sourceLabels by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     var sources by remember { mutableStateOf<List<org.adaway.db.entity.HostsSource>>(emptyList()) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showAddRuleDialog by remember { mutableStateOf(false) }
     var urlInput by remember { mutableStateOf("") }
+    // 添加用户规则对话框状态
+    var ruleHostInput by remember { mutableStateOf("") }
+    var ruleType by remember { mutableIntStateOf(ListType.BLOCKED.value) }
+    var ruleRedirectInput by remember { mutableStateOf("") }
+    // 订阅源规则删除提示
+    var deleteSourceHint by remember { mutableStateOf<String?>(null) }
 
     val tabs = listOf(
         RuleTab(R.string.compose_rules_whitelist, ListType.ALLOWED.value, R.string.compose_rules_empty_whitelist),
@@ -165,7 +173,14 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         fontFamily = FontFamily.Monospace,
                     ),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
                 )
+                // 添加用户规则按钮（当前标签页类型）
+                TextButton(onClick = { showAddRuleDialog = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.compose_rules_add_rule))
+                }
             }
 
             if (rules.isEmpty()) {
@@ -206,11 +221,17 @@ fun RulesScreen(viewModel: StatsViewModel) {
                             item = item,
                             sourceLabel = sourceLabels[item.sourceId],
                             onDelete = {
-                                viewModel.removeRule(item.host) {
-                                    viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items2, total2 ->
-                                        rules = items2
-                                        totalCount = total2
+                                if (item.sourceId == 1) {
+                                    // 用户自定义规则：直接删除
+                                    viewModel.removeRule(item.host) {
+                                        viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items2, total2 ->
+                                            rules = items2
+                                            totalCount = total2
+                                        }
                                     }
+                                } else {
+                                    // 订阅源规则：提示到订阅源中禁用/移除
+                                    deleteSourceHint = item.host
                                 }
                             },
                         )
@@ -263,6 +284,90 @@ fun RulesScreen(viewModel: StatsViewModel) {
             dismissButton = {
                 TextButton(onClick = { showAddDialog = false }) {
                     Text(stringResource(R.string.compose_rules_cancel))
+                }
+            },
+        )
+    }
+
+    // ── 添加用户规则对话框 ──
+    if (showAddRuleDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddRuleDialog = false },
+            title = { Text(stringResource(R.string.compose_rules_add_rule_title)) },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = ruleHostInput,
+                        onValueChange = { ruleHostInput = it },
+                        label = { Text(stringResource(R.string.compose_rules_rule_host_hint)) },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
+                        ),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    // 规则类型选择：拦截 / 放行 / 重定向
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            Triple(ListType.BLOCKED.value, R.string.compose_logs_filter_blocked, 0),
+                            Triple(ListType.ALLOWED.value, R.string.compose_logs_filter_allowed, 1),
+                            Triple(ListType.REDIRECTED.value, R.string.compose_logs_filter_redirected, 2),
+                        ).forEach { (value, labelRes, _) ->
+                            FilterChip(
+                                selected = ruleType == value,
+                                onClick = { ruleType = value },
+                                label = { Text(stringResource(labelRes)) },
+                            )
+                        }
+                    }
+                    if (ruleType == ListType.REDIRECTED.value) {
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = ruleRedirectInput,
+                            onValueChange = { ruleRedirectInput = it },
+                            label = { Text(stringResource(R.string.compose_rules_rule_redirect_hint)) },
+                            singleLine = true,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = ruleHostInput.isNotBlank() &&
+                        (ruleType != ListType.REDIRECTED.value || ruleRedirectInput.isNotBlank()),
+                    onClick = {
+                        val host = ruleHostInput
+                        val type = ruleType
+                        val redirect = ruleRedirectInput
+                        showAddRuleDialog = false
+                        ruleHostInput = ""
+                        ruleRedirectInput = ""
+                        viewModel.addUserRule(host, type, redirect) {
+                            viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items2, total2 ->
+                                rules = items2
+                                totalCount = total2
+                            }
+                        }
+                    },
+                ) { Text(stringResource(R.string.compose_rules_add)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddRuleDialog = false }) {
+                    Text(stringResource(R.string.compose_rules_cancel))
+                }
+            },
+        )
+    }
+
+    // ── 订阅源规则删除提示对话框 ──
+    deleteSourceHint?.let { host ->
+        AlertDialog(
+            onDismissRequest = { deleteSourceHint = null },
+            title = { Text(stringResource(R.string.compose_rules_delete_source_title)) },
+            text = { Text(stringResource(R.string.compose_rules_delete_source_hint, host)) },
+            confirmButton = {
+                TextButton(onClick = { deleteSourceHint = null }) {
+                    Text(stringResource(R.string.compose_rules_ok))
                 }
             },
         )
@@ -408,14 +513,15 @@ private fun RuleRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = ruleTint(item.type),
             )
-            // 用户自定义规则（source_id == 1）可删除
-            if (onDelete != null && item.sourceId == 1) {
+            // 用户自定义规则（source_id == 1）可删除；订阅源规则也可触发提示
+            if (onDelete != null) {
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = onDelete) {
                     Icon(
                         Icons.Outlined.Delete,
                         contentDescription = stringResource(R.string.compose_rules_delete),
-                        tint = MaterialTheme.colorScheme.error,
+                        tint = if (item.sourceId == 1) MaterialTheme.colorScheme.error
+                               else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
