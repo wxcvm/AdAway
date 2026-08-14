@@ -1802,6 +1802,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                       "Cache-Control: no-store\r\n", "%.*s", n, body);
         save_stats(s);  /* persist lifetime counters (polled every 5 s) */
         save_hist(s);   /* persist chart buckets (no reset on reboot) */
+        sni_cache_save(s->resource_dir);  /* persist SNI cache every poll */
         return;
     }
 
