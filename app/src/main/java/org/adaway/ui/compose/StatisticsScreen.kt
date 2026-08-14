@@ -16,6 +16,7 @@ package org.adaway.ui.compose
  */
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
@@ -48,6 +49,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -349,47 +351,91 @@ private fun CategoryRow(category: BlockCategory, total: Long) {
     val fraction = if (total > 0) category.count.toFloat() / total.toFloat() else 0f
     // Capture colors before the Canvas draw block (not @Composable context)
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
-    Row(
+    // 点击分类行时展开/收起说明文字（telemetry/heartbeat 等专业术语释义）
+    var expanded by remember { mutableStateOf(false) }
+    val description = categoryDescription(category.label)
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .clickable(enabled = description != null) { expanded = !expanded },
     ) {
-        Canvas(modifier = Modifier.size(10.dp)) {
-            drawCircle(color = category.color)
-        }
-        Spacer(Modifier.width(10.dp))
-        Text(
-            category.label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            String.format(Locale.US, "%,d", category.count),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = FontFamily.Monospace,
-            ),
-        )
-        Spacer(Modifier.width(12.dp))
-        // Mini progress bar
-        androidx.compose.foundation.layout.Box(
+        Row(
             modifier = Modifier
-                .width(64.dp)
-                .height(4.dp),
+                .fillMaxWidth()
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                drawRoundRect(
-                    color = trackColor,
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
-                )
-                drawRoundRect(
-                    color = category.color,
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
-                    size = Size(size.width * fraction, size.height),
-                )
+            Canvas(modifier = Modifier.size(10.dp)) {
+                drawCircle(color = category.color)
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                category.label,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                String.format(Locale.US, "%,d", category.count),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                ),
+            )
+            Spacer(Modifier.width(12.dp))
+            // Mini progress bar
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .width(64.dp)
+                    .height(4.dp),
+            ) {
+                androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawRoundRect(
+                        color = trackColor,
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+                    )
+                    drawRoundRect(
+                        color = category.color,
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+                        size = Size(size.width * fraction, size.height),
+                    )
+                }
+            }
+        }
+        // 展开的分类说明
+        if (expanded && description != null) {
+            androidx.compose.animation.AnimatedVisibility(visible = true) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                ) {
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
             }
         }
     }
+}
+
+/**
+ * 返回拦截分类的简要说明（点击分类行时展示）。
+ * 未知分类返回 null（不可点击）。
+ */
+@Composable
+private fun categoryDescription(label: String): String? {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val res = when (label) {
+        context.getString(R.string.compose_stats_type_telemetry) -> R.string.compose_stats_type_telemetry_desc
+        context.getString(R.string.compose_stats_type_heartbeat) -> R.string.compose_stats_type_heartbeat_desc
+        context.getString(R.string.compose_stats_type_scripts) -> R.string.compose_stats_type_scripts_desc
+        context.getString(R.string.compose_stats_type_images) -> R.string.compose_stats_type_images_desc
+        context.getString(R.string.compose_stats_type_api) -> R.string.compose_stats_type_api_desc
+        else -> null
+    }
+    return res?.let { context.getString(it) }
 }
 
 @Composable

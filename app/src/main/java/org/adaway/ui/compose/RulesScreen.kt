@@ -29,9 +29,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -200,7 +202,18 @@ fun RulesScreen(viewModel: StatsViewModel) {
                     ),
                 ) {
                     items(rules, key = { "${it.host}:${it.sourceId}" }) { item ->
-                        RuleRow(item = item, sourceLabel = sourceLabels[item.sourceId])
+                        RuleRow(
+                            item = item,
+                            sourceLabel = sourceLabels[item.sourceId],
+                            onDelete = {
+                                viewModel.removeRule(item.host) {
+                                    viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items2, total2 ->
+                                        rules = items2
+                                        totalCount = total2
+                                    }
+                                }
+                            },
+                        )
                     }
                     item(key = "sources") {
                         SourcesCard(
@@ -336,7 +349,11 @@ private fun SourcesCard(
 }
 
 @Composable
-private fun RuleRow(item: HostListItem, sourceLabel: String?) {
+private fun RuleRow(
+    item: HostListItem,
+    sourceLabel: String?,
+    onDelete: (() -> Unit)? = null,
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -391,6 +408,17 @@ private fun RuleRow(item: HostListItem, sourceLabel: String?) {
                 style = MaterialTheme.typography.labelSmall,
                 color = ruleTint(item.type),
             )
+            // 用户自定义规则（source_id == 1）可删除
+            if (onDelete != null && item.sourceId == 1) {
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Outlined.Delete,
+                        contentDescription = stringResource(R.string.compose_rules_delete),
+                        tint = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
     }
 }

@@ -306,6 +306,22 @@ fun refreshServerStats() {
         }
     }
 
+    /**
+     * 删除一条用户自定义规则（source_id == 1 的手动规则）。
+     * 使用 HostListItemDao.deleteUserFromHost() 清理 hosts_lists，
+     * 并用 HostEntryDao.allowHost() 从生效的 host_entries 中移除该域名，
+     * 随后重新同步 hosts 文件使变更生效。
+     */
+    fun removeRule(host: String, onDone: () -> Unit) {
+        viewModelScope.launch {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                hostsListItemDao.deleteUserFromHost(host)
+                hostEntryDao.allowHost(host)
+            }
+            onDone()
+        }
+    }
+
     /** Add a new subscription from a hosts URL; returns false on failure. */
     fun addSource(url: String, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {

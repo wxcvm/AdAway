@@ -792,6 +792,44 @@ static int load_ca(const char *cert_path, const char *key_path,
     return (out->cert && out->key) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
+/*
+ * CERT ROTATION (enhancement): check the loaded CA's remaining validity.
+ * If it expires within 30 days (or is already expired), regenerate the
+ * root CA in place. The app detects the change via the cert-hash
+ * comparison in WebServerUtils.getWebServerState() and shows
+ * "certificate has changed — tap to reinstall", so the user is guided
+ * to reinstall the new CA. Returns 1 if regenerated, 0 otherwise.
+ */
+static int maybe_rotate_ca(const char *cert_path, const char *key_path,
+                           struct ca_state *ca) {
+    if (!ca->cert) return 0;
+    const ASN1_TIME *not_after = X509_get0_notAfter(ca->cert);
+    if (!not_after) return 0;
+    /* Parse ASN1_TIME (YYYYMMDDHHMMSSZ) into a time_t. */
+    int y, M, d, h, m, s;
+    if (sscanf((const char *)not_after->data, "%4d%2d%2d%2d%2d%2d",
+               &y, &M, &d, &h, &m, &s) != 6) return 0;
+    struct tm tm = {0};
+    tm.tm_year = y - 1900; tm.tm_mon = M - 1; tm.tm_mday = d;
+    tm.tm_hour = h; tm.tm_min = m; tm.tm_sec = s;
+    time_t expiry = mktime(&tm);
+    time_t now = time(NULL);
+    if (expiry - now > 30L * 24 * 3600) return 0; /* still valid */
+    LOG_WARN("CA expires within 30 days (%s) — regenerating", not_after->data);
+    X509_free(ca->cert); ca->cert = NULL;
+    EVP_PKEY_free(ca->key); ca->key = NULL;
+    if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
+        LOG_FATAL("CA rotation failed");
+        return 0;
+    }
+    if (load_ca(cert_path, key_path, ca) != EXIT_SUCCESS) {
+        LOG_FATAL("Failed to reload rotated CA");
+        return 0;
+    }
+    LOG_INFO("CA rotated; user must reinstall the new certificate");
+    return 1;
+}
+
 /* Serialize an X509 cert / private key to PEM into a freshly malloc'd
    buffer (via a memory BIO, then copied out so the result is owned by
    plain malloc/free like the rest of this file — not OpenSSL's
@@ -1262,6 +1300,69 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev != MG_EV_HTTP_MSG) return;
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
+
+    /*
+     * CAPTIVE PORTAL PROTECTION (Android connectivity check):
+     * Android (and iOS/Windows) periodically probe well-known URLs to
+     * decide whether the current network has real Internet access or is
+     * a captive portal ("Sign in to network" notification). When the
+     * hosts file redirects those probe domains to us, a non-204 reply
+     * would make the OS believe a login page is being served, popping
+     * the "network requires authentication" banner. Answer with 204 No
+     * Content exactly like a healthy network would.
+     *
+     * Probes covered (host match OR path match):
+     *  - connectivitycheck.gstatic.com/generate_204
+     *  - clients3.google.com/generate_204
+     *  - connectivitycheck.android.com/generate_204
+     *  - /generate_204 /gen_204 /generate_204.php etc.
+     *  - www.msftconnecttest.com/connecttest.txt (Windows)
+     *  - captive.apple.com/hotspot-detect.html (iOS/macOS)
+     * The hostname may arrive in the Host header, the SNI name (already
+     * in s_stats), or both; matching by suffix keeps it robust.
+     */
+    static const char *kCaptiveHosts[] = {
+        "connectivitycheck.gstatic.com",
+        "connectivitycheck.android.com",
+        "clients3.google.com",
+        "www.msftconnecttest.com",
+        "connecttest.com",
+        "captive.apple.com",
+        "gstatic.com",
+        NULL,
+    };
+    bool captive = false;
+    if (hm->uri.len > 0) {
+        static const char *kCaptivePaths[] = {
+            "/generate_204", "/gen_204", "/generate_204.php",
+            "/connecttest.txt", "/hotspot-detect.html", NULL,
+        };
+        for (int i = 0; kCaptivePaths[i]; i++) {
+            if (mg_match(hm->uri, mg_str(kCaptivePaths[i]), NULL)) { captive = true; break; }
+        }
+    }
+    if (!captive && hm->host.len > 0) {
+        char host[256];
+        size_t hl = hm->host.len < sizeof(host) - 1 ? hm->host.len : sizeof(host) - 1;
+        memcpy(host, hm->host.ptr, hl); host[hl] = '\0';
+        for (int i = 0; kCaptiveHosts[i]; i++) {
+            size_t klen = strlen(kCaptiveHosts[i]);
+            size_t hlen = strlen(host);
+            if (hlen >= klen && strcasecmp(host + hlen - klen, kCaptiveHosts[i]) == 0) {
+                captive = true; break;
+            }
+        }
+    }
+    if (captive) {
+        /* 204 = "network is fine, no portal". Add CORS + no-store.
+           total_requests / hist_add are only incremented after this
+           early-return block, so no counter rollback is needed. */
+        mg_http_reply(c, 204,
+                      "Cache-Control: no-store, max-age=0\r\n"
+                      "Access-Control-Allow-Origin: *\r\n", "");
+        return;
+    }
+
     s_stats.total_requests++;
     hist_add(HIST_REQ);
 
@@ -1497,6 +1598,11 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             if (load_ca(cert_path, key_path, &s.ca) != EXIT_SUCCESS) {
                 LOG_FATAL("Failed to load CA");
                 return s;
+            }
+
+            /* Cert rotation: regenerate when the CA nears expiry (30d). */
+            if (maybe_rotate_ca(cert_path, key_path, &s.ca)) {
+                LOG_INFO("CA rotated — app will prompt to reinstall");
             }
             LOG_INFO("CA loaded OK");
 
