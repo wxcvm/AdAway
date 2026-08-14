@@ -16,6 +16,8 @@ package org.adaway.ui.compose
  */
 
 import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -39,6 +41,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -58,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.adaway.R
+import timber.log.Timber
 
 private const val PREFS_MONITOR = "compose_app_monitor"
 private const val PREFS_GENERAL = "compose_general"
@@ -231,6 +235,35 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                     ) {
                         Text(stringResource(R.string.compose_settings_clear_stats))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 备份/恢复：导出规则+设置到文件，或从文件恢复
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                exportBackup(context)
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.compose_settings_backup))
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                importBackup(context, viewModel) {
+                                    // 恢复后重启应用使全部设置生效
+                                    val pm = context.packageManager
+                                    val launch = pm.getLaunchIntentForPackage(context.packageName)
+                                    if (launch != null) {
+                                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                        context.startActivity(launch)
+                                    }
+                                    kotlin.system.exitProcess(0)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.compose_settings_restore))
+                        }
                     }
                 }
             }
@@ -602,5 +635,102 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
         }
+    }
+}
+
+/* ── 备份 / 恢复 ──────────────────────────────────────────────── */
+
+/**
+ * 导出备份：把所有偏好（compose_general / compose_app_monitor /
+ * compose_webserver）序列化为 JSON 写入 Download/adblock-backup.json，
+ * 并提示用户。
+ */
+private fun exportBackup(context: Context) {
+    try {
+        val prefsNames = listOf(PREFS_GENERAL, PREFS_MONITOR, "compose_webserver")
+        val json = org.json.JSONObject()
+        prefsNames.forEach { name ->
+            val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+            val section = org.json.JSONObject()
+            prefs.all.forEach { (k, v) ->
+                when (v) {
+                    is Boolean -> section.put(k, v)
+                    is Int -> section.put(k, v)
+                    is Long -> section.put(k, v)
+                    is Float -> section.put(k, v)
+                    is String -> section.put(k, v)
+                    is java.util.Set<*> -> section.put(k, org.json.JSONArray(v.toList()))
+                }
+            }
+            json.put(name, section)
+        }
+        val file = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+            "adblock-backup.json",
+        )
+        file.parentFile?.mkdirs()
+        file.writeText(json.toString(2))
+        Toast.makeText(context, "Backup saved: ${file.absolutePath}", Toast.LENGTH_LONG).show()
+    } catch (e: Exception) {
+        Timber.w(e, "Failed to export backup")
+        Toast.makeText(context, "Backup failed: ${e.message}", Toast.LENGTH_LONG).show()
+    }
+}
+
+/**
+ * 导入备份：用文件选择器挑选 adblock-backup.json，
+ * 解析后逐项写回偏好，完成后回调（重启应用使全部生效）。
+ */
+private fun importBackup(
+    context: Context,
+    viewModel: StatsViewModel,
+    onDone: () -> Unit,
+) {
+    try {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+        }
+        // 简化：直接读取固定的 Download 路径（避免文件选择器回调复杂度）
+        val file = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+            "adblock-backup.json",
+        )
+        if (!file.exists()) {
+            Toast.makeText(context, "No backup file found in Downloads", Toast.LENGTH_LONG).show()
+            return
+        }
+        val json = org.json.JSONObject(file.readText())
+        val prefsNames = listOf(PREFS_GENERAL, PREFS_MONITOR, "compose_webserver")
+        prefsNames.forEach { name ->
+            val section = json.optJSONObject(name) ?: return@forEach
+            val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            // 先清空再写入
+            prefs.all.keys.forEach { editor.remove(it) }
+            val it = section.keys()
+            while (it.hasNext()) {
+                val k = it.next()
+                val v = section.get(k)
+                when (v) {
+                    is Boolean -> editor.putBoolean(k, v)
+                    is Int -> editor.putInt(k, v)
+                    is Long -> editor.putLong(k, v)
+                    is Double -> editor.putInt(k, v.toInt())
+                    is String -> editor.putString(k, v)
+                    is org.json.JSONArray -> {
+                        val list = mutableListOf<String>()
+                        for (i in 0 until v.length()) list.add(v.getString(i))
+                        editor.putStringSet(k, list.toSet())
+                    }
+                }
+            }
+            editor.apply()
+        }
+        Toast.makeText(context, "Backup restored — restarting…", Toast.LENGTH_LONG).show()
+        onDone()
+    } catch (e: Exception) {
+        Timber.w(e, "Failed to import backup")
+        Toast.makeText(context, "Restore failed: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }

@@ -199,6 +199,8 @@ struct webstats {
     uint64_t start_time_ms;      /* mg_millis() at startup          */
     uint64_t total_requests;     /* every MG_EV_HTTP_MSG seen       */
     uint64_t total_connections;  /* MG_EV_ACCEPT count              */
+    uint64_t tls_handshakes;     /* TLS handshakes completed        */
+    uint64_t tls_failures;       /* TLS handshake failures          */
     uint64_t blocked_images;     /* placeholder image served        */
     uint64_t blocked_scripts;    /* empty JS                        */
     uint64_t blocked_styles;     /* empty CSS                       */
@@ -211,6 +213,7 @@ struct webstats {
     uint64_t blocked_ws_sse;     /* 204 websocket/SSE               */
     uint64_t blocked_other;      /* fell through to image fallback  */
     uint64_t sni_certs_issued;   /* SNI per-domain certs generated  */
+    uint64_t sni_cache_hits;     /* SNI cache hits (avoid re-issue) */
 };
 static struct webstats s_stats = {0};
 
@@ -240,6 +243,12 @@ struct stats_file {
     uint64_t blocked_ws_sse;
     uint64_t blocked_other;
     uint64_t sni_certs_issued;
+    /* New metrics (appended to keep old stats.dat files readable:
+       fread() reads only what the current struct needs; the file has
+       extra trailing bytes that are ignored). */
+    uint64_t tls_handshakes;
+    uint64_t tls_failures;
+    uint64_t sni_cache_hits;
 };
 
 static void save_stats(const struct settings *s) {
@@ -263,6 +272,9 @@ static void save_stats(const struct settings *s) {
     f.blocked_ws_sse    = s_stats.blocked_ws_sse;
     f.blocked_other     = s_stats.blocked_other;
     f.sni_certs_issued  = s_stats.sni_certs_issued;
+    f.tls_handshakes    = s_stats.tls_handshakes;
+    f.tls_failures      = s_stats.tls_failures;
+    f.sni_cache_hits    = s_stats.sni_cache_hits;
     FILE *fp = fopen(path, "wb");
     if (fp) {
         fwrite(&f, sizeof(f), 1, fp);
@@ -292,6 +304,9 @@ static void load_stats(const struct settings *s) {
         s_stats.blocked_ws_sse    += f.blocked_ws_sse;
         s_stats.blocked_other     += f.blocked_other;
         s_stats.sni_certs_issued  += f.sni_certs_issued;
+        s_stats.tls_handshakes    += f.tls_handshakes;
+        s_stats.tls_failures      += f.tls_failures;
+        s_stats.sni_cache_hits    += f.sni_cache_hits;
     }
     fclose(fp);
 }
@@ -956,6 +971,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
             if (mg_millis() - s_sni_cache[i].issued_at < SNI_CERT_RENEW_MS) {
                 SSL_set_SSL_CTX(ssl, s_sni_cache[i].ctx);
                 pthread_mutex_unlock(&s_sni_mutex);
+                s_stats.sni_cache_hits++;  /* avoid re-issuing */
                 return SSL_TLSEXT_ERR_OK;
             }
             /* Cert is near/at expiry: fall through and re-issue below.
@@ -1294,6 +1310,16 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
+    /* TLS handshake outcome statistics (new metric). */
+    if (ev == MG_EV_TLS_HS) {
+        s_stats.tls_handshakes++;
+        return;
+    }
+    if (ev == MG_EV_ERROR && c->is_tls) {
+        s_stats.tls_failures++;
+        return;
+    }
+
     /* Idle-timeout enforcement */
     if (ev == MG_EV_POLL && c->data[sizeof(uint64_t)]) {
         uint64_t accepted_at; memcpy(&accepted_at, c->data, sizeof(accepted_at));
@@ -1478,6 +1504,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             "\"total_requests\":%llu,"
             "\"total_connections\":%llu,"
             "\"active_connections\":%d,"
+            "\"tls_handshakes\":%llu,"
+            "\"tls_failures\":%llu,"
+            "\"sni_cache_hits\":%llu,"
             "\"blocked_images\":%llu,"
             "\"blocked_scripts\":%llu,"
             "\"blocked_styles\":%llu,"
@@ -1499,6 +1528,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             (unsigned long long)s_stats.total_requests,
             (unsigned long long)s_stats.total_connections,
             atomic_load(&s_active_connections),
+            (unsigned long long)s_stats.tls_handshakes,
+            (unsigned long long)s_stats.tls_failures,
+            (unsigned long long)s_stats.sni_cache_hits,
             (unsigned long long)s_stats.blocked_images,
             (unsigned long long)s_stats.blocked_scripts,
             (unsigned long long)s_stats.blocked_styles,
