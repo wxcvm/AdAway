@@ -1449,6 +1449,34 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
 /* ── HTTP event handler ───────────────────────────────────────── */
 
+/* WebSocket push subscribers: connections that upgraded to /internal-ws.
+   Registered on MG_EV_WS_OPEN, removed on MG_EV_CLOSE; broadcast after
+   every counted request so clients get real-time updates. */
+#define WS_PUSH_MAX 16
+static struct mg_connection *ws_clients[WS_PUSH_MAX] = {0};
+
+/*
+ * Broadcast the current stats snapshot to every registered WebSocket
+ * subscriber. Call after each request is counted (blocked or served).
+ * Must not be called from inside mg_mgr_poll() while holding locks that
+ * the event handler also takes — we only read the pointer array and
+ * mg_ws_send() is async (appends to c->send), safe from the event loop.
+ */
+static void ws_push_broadcast(struct settings *s) {
+    if (!s || !s->init) return;
+    char body[16384];
+    int n = build_stats_json(s, body, sizeof(body));
+    if (n <= 0) return;
+    pthread_mutex_lock(&s_sni_mutex);
+    for (int i = 0; i < WS_PUSH_MAX; i++) {
+        struct mg_connection *cl = ws_clients[i];
+        if (cl && !cl->is_closing && !cl->is_draining) {
+            mg_ws_send(cl, body, (size_t)n, WEBSOCKET_OP_TEXT);
+        }
+    }
+    pthread_mutex_unlock(&s_sni_mutex);
+}
+
 /*
  * Build the /internal-stats JSON snapshot into out[]. Shared by the
  * HTTP endpoint and (optionally) the WebSocket push so both always
@@ -1604,12 +1632,24 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
 
     if (ev == MG_EV_CLOSE) {
+        /* Unregister from the WS push list. */
+        pthread_mutex_lock(&s_sni_mutex);
+        for (int i = 0; i < WS_PUSH_MAX; i++) {
+            if (ws_clients[i] == c) { ws_clients[i] = NULL; break; }
+        }
+        pthread_mutex_unlock(&s_sni_mutex);
         if (c->data[sizeof(uint64_t)]) atomic_sub_fetch(&s_active_connections, 1);
         return;
     }
 
     /* WebSocket: keep the connection open (client pulls or we push). */
     if (ev == MG_EV_WS_OPEN) {
+        /* Register this connection as a push subscriber. */
+        pthread_mutex_lock(&s_sni_mutex);  /* reuse cache mutex as a cheap lock */
+        for (int i = 0; i < WS_PUSH_MAX; i++) {
+            if (ws_clients[i] == NULL) { ws_clients[i] = c; break; }
+        }
+        pthread_mutex_unlock(&s_sni_mutex);
         /* Send a first snapshot immediately so the UI has data. */
         struct settings *ws_s = (struct settings *)c->fn_data;
         if (ws_s && ws_s->init) {
@@ -1812,6 +1852,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         hist_add(HIST_BLOCKED);
         struct appstat *ba = app_find_or_add(conn_load_uid(c));
         if (ba) ba->blocked++;
+        ws_push_broadcast(s);  /* real-time push to WS subscribers */
         return;
     }
 
@@ -1828,6 +1869,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     hist_add(HIST_BLOCKED);
     struct appstat *ba = app_find_or_add(conn_load_uid(c));
     if (ba) ba->blocked++;
+    ws_push_broadcast(s);  /* real-time push to WS subscribers */
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
     /*
