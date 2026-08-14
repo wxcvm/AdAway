@@ -830,6 +830,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
 
 /**
  * 导出 CA 证书到 Download/adblock-ca.crt，供其他设备/模块（如 Magisk 证书模块）使用。
+ * Android 11+ scoped storage：通过 MediaStore 写入公共 Download 目录（无需存储权限）。
  */
 private fun exportCertificate(context: Context) {
     try {
@@ -838,13 +839,21 @@ private fun exportCertificate(context: Context) {
             Toast.makeText(context, "Certificate not found — start the web server first", Toast.LENGTH_LONG).show()
             return
         }
-        val dest = java.io.File(
-            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-            "adblock-ca.crt",
-        )
-        dest.parentFile?.mkdirs()
-        src.copyTo(dest, overwrite = true)
-        Toast.makeText(context, "Certificate exported: ${dest.absolutePath}", Toast.LENGTH_LONG).show()
+        val resolver = context.contentResolver
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "adblock-ca.crt")
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/x-x509-ca-cert")
+            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+        }
+        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if (uri == null) {
+            Toast.makeText(context, "Export failed: no MediaStore slot", Toast.LENGTH_LONG).show()
+            return
+        }
+        resolver.openOutputStream(uri)?.use { out ->
+            src.inputStream().use { it.copyTo(out) }
+        } ?: throw java.io.IOException("cannot open output stream")
+        Toast.makeText(context, "Certificate exported: Download/adblock-ca.crt", Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
         Timber.w(e, "Failed to export certificate")
         Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
@@ -854,7 +863,7 @@ private fun exportCertificate(context: Context) {
 /**
  * 导出备份：把所有偏好（compose_general / compose_app_monitor /
  * compose_webserver）序列化为 JSON 写入 Download/adblock-backup.json，
- * 并提示用户。
+ * 并提示用户。Android 11+ 通过 MediaStore 写入（无需存储权限）。
  */
 private fun exportBackup(context: Context) {
     try {
@@ -875,13 +884,21 @@ private fun exportBackup(context: Context) {
             }
             json.put(name, section)
         }
-        val file = java.io.File(
-            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-            "adblock-backup.json",
-        )
-        file.parentFile?.mkdirs()
-        file.writeText(json.toString(2))
-        Toast.makeText(context, "Backup saved: ${file.absolutePath}", Toast.LENGTH_LONG).show()
+        val resolver = context.contentResolver
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "adblock-backup.json")
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/json")
+            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+        }
+        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if (uri == null) {
+            Toast.makeText(context, "Backup failed: no MediaStore slot", Toast.LENGTH_LONG).show()
+            return
+        }
+        resolver.openOutputStream(uri)?.use { out ->
+            out.write(json.toString(2).toByteArray())
+        } ?: throw java.io.IOException("cannot open output stream")
+        Toast.makeText(context, "Backup saved: Download/adblock-backup.json", Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
         Timber.w(e, "Failed to export backup")
         Toast.makeText(context, "Backup failed: ${e.message}", Toast.LENGTH_LONG).show()
@@ -898,20 +915,29 @@ private fun importBackup(
     onDone: () -> Unit,
 ) {
     try {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "application/json"
+        // 通过 MediaStore 查询 Download 中的 adblock-backup.json（scoped storage 兼容）
+        val resolver = context.contentResolver
+        val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
+        var text: String? = null
+        resolver.query(
+            collection,
+            projection,
+            "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+            arrayOf("adblock-backup.json"),
+            "${android.provider.MediaStore.MediaColumns.DATE_MODIFIED} DESC",
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(0)
+                val uri = android.content.ContentUris.withAppendedId(collection, id)
+                text = resolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }
         }
-        // 简化：直接读取固定的 Download 路径（避免文件选择器回调复杂度）
-        val file = java.io.File(
-            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-            "adblock-backup.json",
-        )
-        if (!file.exists()) {
+        if (text == null) {
             Toast.makeText(context, "No backup file found in Downloads", Toast.LENGTH_LONG).show()
             return
         }
-        val json = org.json.JSONObject(file.readText())
+        val json = org.json.JSONObject(text)
         val prefsNames = listOf(PREFS_GENERAL, PREFS_MONITOR, "compose_webserver")
         prefsNames.forEach { name ->
             val section = json.optJSONObject(name) ?: return@forEach
