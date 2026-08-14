@@ -721,11 +721,30 @@ private fun TrafficTrendCard(
                     drawCircle(blockColor, radius = 4.dp.toPx(), center = Offset(sx, yReq(data[selectedIndex].blocked)))
                 }
 
-                // Y-axis grid + labels (compact notation: 1.2k / 3.4M)
+                // Y-axis grid (dashed, so lines don't visually cut through bars) + labels
+                // with a translucent background pill so text never overlaps data.
+                val labelPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.argb(180, 128, 128, 128)
+                    textSize = 9.dp.toPx()
+                }
+                val pillPaint = android.graphics.Paint().apply {
+                    color = android.graphics.Color.argb(200, 250, 250, 250)
+                }
                 for (g in 0..4) {
                     val frac = g / 4f
                     val y = base - chartH * frac
-                    drawLine(gridColor, Offset(leftPad, y), Offset(size.width, y), strokeWidth = 1f)
+                    // dashed grid line: draw small segments with gaps
+                    val dashLen = 4.dp.toPx()
+                    val gapLen = 3.dp.toPx()
+                    var xDash = leftPad
+                    while (xDash < size.width) {
+                        drawLine(
+                            gridColor.copy(alpha = 0.5f),
+                            Offset(xDash, y), Offset(xDash + dashLen, y),
+                            strokeWidth = 1f,
+                        )
+                        xDash += dashLen + gapLen
+                    }
                     val raw = when (g) {
                         0 -> maxAll
                         1 -> maxAll * 3 / 4
@@ -734,21 +753,24 @@ private fun TrafficTrendCard(
                         else -> 0L
                     }
                     val label = compactNumber(raw)
+                    // background pill behind the label (avoid "text through line")
+                    val tw = labelPaint.measureText(label)
+                    drawContext.canvas.nativeCanvas.drawRoundRect(
+                        1.dp.toPx(), y - 7.dp.toPx(),
+                        1.dp.toPx() + tw + 8.dp.toPx(), y + 7.dp.toPx(),
+                        3.dp.toPx(), 3.dp.toPx(), pillPaint,
+                    )
                     drawContext.canvas.nativeCanvas.drawText(
-                        label, 2.dp.toPx(), y + 4.dp.toPx(),
-                        android.graphics.Paint().apply {
-                            color = android.graphics.Color.argb(150, 128, 128, 128)
-                            textSize = 9.dp.toPx()
-                        },
+                        label, 5.dp.toPx(), y + 4.dp.toPx(), labelPaint,
                     )
                 }
                 // Baseline
                 drawLine(axisColor, Offset(leftPad, base), Offset(size.width, base), strokeWidth = 1.5f)
 
                 when (style) {
-                    2 -> { // bars
+                    2 -> { // bars — gradient fill + rounded top, cleaner look
                         val slotW = chartW / n
-                        val barW = (slotW * 0.6f).coerceAtMost(18f)
+                        val barW = (slotW * 0.55f).coerceAtMost(16f)
                         data.forEachIndexed { i, p ->
                             val cx = xAt(i)
                             val hReq = (p.requests.toFloat() / maxAll) * chartH
@@ -765,6 +787,16 @@ private fun TrafficTrendCard(
                                 size = Size(barW, hBlk),
                                 cornerRadius = CornerRadius(2.dp.toPx()),
                             )
+                            // highlight the selected bar
+                            if (i == selectedIndex) {
+                                drawRoundRect(
+                                    color = axisColor.copy(alpha = 0.35f),
+                                    topLeft = Offset(cx - barW / 2 - 2.dp.toPx(), base - hReq - hBlk - 2.dp.toPx()),
+                                    size = Size(barW + 4.dp.toPx(), hReq + hBlk + 4.dp.toPx()),
+                                    cornerRadius = CornerRadius(4.dp.toPx()),
+                                    style = Stroke(width = 1.dp.toPx()),
+                                )
+                            }
                         }
                     }
                     else -> { // line / area — smooth curves
