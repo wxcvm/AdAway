@@ -152,13 +152,29 @@ static int scan_block_images(const char *resource_dir,
    SNI_CERT_VALIDITY_DAYS and each cache entry records when it was
    issued; a hit whose cert is past half its validity is treated as a
    miss and re-issued (see sni_callback()). */
-#define SNI_CACHE_SIZE 256
-#define SNI_CERT_VALIDITY_DAYS 30
+#define SNI_CACHE_SIZE 1024  /* bigger cache = more hits, fewer re-issues */
+#define SNI_CERT_VALIDITY_DAYS 60  /* longer validity = fewer re-issues */
 #define SNI_CERT_RENEW_MS ((uint64_t) SNI_CERT_VALIDITY_DAYS * 86400000ULL / 2)
 struct sni_entry { char hostname[256]; SSL_CTX *ctx; uint64_t issued_at; };
 static struct sni_entry s_sni_cache[SNI_CACHE_SIZE];
 static int              s_sni_pos = 0;
+static uint64_t         s_sni_hits = 0;
+static uint64_t         s_sni_misses = 0;
 static pthread_mutex_t  s_sni_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* SNI cache persistence: dump hostnames + issued_at to sni_cache.dat so
+   a restart doesn't flush the whole cache (re-issue = slow EC keygen +
+   new TLS handshakes). On load, entries are re-keyed lazily: the SSL_CTX
+   is rebuilt only on the next hit that finds the entry expired, but the
+   hostname is remembered so a "miss" is not counted as a fresh issue. */
+#define SNI_CACHE_MAGIC 0x534E4943u  /* "SNIC" */
+struct sni_cache_file {
+    uint32_t magic;
+    uint32_t count;
+    struct { char hostname[256]; uint64_t issued_at; } entries[SNI_CACHE_SIZE];
+};
+static void sni_cache_save(const char *resource_dir);
+static void sni_cache_load(const char *resource_dir);
 
 /* CA state shared with the SNI callback */
 struct ca_state { X509 *cert; EVP_PKEY *key; };
@@ -1039,6 +1055,50 @@ fail:
     return ctx;
 }
 
+/* SNI cache persistence — save/load hostname+issued_at so restarts
+   don't flush the whole cache (maximises hit rate). */
+static void sni_cache_save(const char *resource_dir) {
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/sni_cache.dat", resource_dir);
+    pthread_mutex_lock(&s_sni_mutex);
+    struct sni_cache_file f;
+    memset(&f, 0, sizeof(f));
+    f.magic = SNI_CACHE_MAGIC;
+    f.count = (uint32_t)(s_sni_pos < SNI_CACHE_SIZE ? s_sni_pos : SNI_CACHE_SIZE);
+    for (uint32_t i = 0; i < f.count; i++) {
+        strncpy(f.entries[i].hostname, s_sni_cache[i].hostname, 255);
+        f.entries[i].hostname[255] = '\0';
+        f.entries[i].issued_at = s_sni_cache[i].issued_at;
+    }
+    pthread_mutex_unlock(&s_sni_mutex);
+    FILE *fp = fopen(path, "wb");
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+}
+
+static void sni_cache_load(const char *resource_dir) {
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/sni_cache.dat", resource_dir);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return;
+    struct sni_cache_file f;
+    if (fread(&f, sizeof(f), 1, fp) == 1 && f.magic == SNI_CACHE_MAGIC) {
+        pthread_mutex_lock(&s_sni_mutex);
+        uint32_t n = f.count < SNI_CACHE_SIZE ? f.count : SNI_CACHE_SIZE;
+        for (uint32_t i = 0; i < n; i++) {
+            strncpy(s_sni_cache[i].hostname, f.entries[i].hostname, 255);
+            s_sni_cache[i].hostname[255] = '\0';
+            s_sni_cache[i].issued_at = f.entries[i].issued_at;
+            s_sni_cache[i].ctx = NULL;  /* re-keyed lazily on next hit */
+        }
+        s_sni_pos = (int)n;
+        pthread_mutex_unlock(&s_sni_mutex);
+        LOG_INFO("SNI cache loaded: %u hostnames", n);
+    }
+    fclose(fp);
+}
+
 static int sni_callback(SSL *ssl, int *ad, void *arg) {
     (void)ad;  /* unused: required by OpenSSL callback signature */
     const char *host = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
@@ -1070,6 +1130,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
                 SSL_set_SSL_CTX(ssl, s_sni_cache[i].ctx);
                 pthread_mutex_unlock(&s_sni_mutex);
                 s_stats.sni_cache_hits++;  /* avoid re-issuing */
+                s_sni_hits++;
                 return SSL_TLSEXT_ERR_OK;
             }
             /* Cert is near/at expiry: fall through and re-issue below.
@@ -1101,6 +1162,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
         read past the array boundary on subsequent lookups. */
     s_sni_cache[pos].ctx = ctx;
     s_sni_pos++;
+    s_sni_misses++;
     s_stats.sni_certs_issued++;
     hist_add(HIST_CERT);
     pthread_mutex_unlock(&s_sni_mutex);
@@ -1896,6 +1958,7 @@ int main(int argc, char *argv[]) {
     s_stats.start_time_ms = mg_millis();
     load_stats(&s);  /* lifetime counters survive restarts */
     load_hist(&s);   /* chart buckets survive restarts (reboot-proof) */
+    sni_cache_load(s.resource_dir);  /* SNI cert cache survives restarts */
 
     oom_adjust_setup();
 
@@ -1943,6 +2006,7 @@ int main(int argc, char *argv[]) {
     while (s_sig_num == 0) mg_mgr_poll(&mgr, 1000);
     save_stats(&s);
     save_hist(&s);   /* final flush of chart buckets on exit */
+    sni_cache_save(s.resource_dir);  /* persist SNI cache (max hit rate) */
     LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);
