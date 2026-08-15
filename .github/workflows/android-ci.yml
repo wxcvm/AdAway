@@ -55,7 +55,7 @@ jobs:
           path: |
             app/build/outputs/apk/release/app-release-signed.apk
             version.txt
-      
+        
 
   release:
     name: Publish GitHub Release
@@ -75,10 +75,18 @@ jobs:
 
       - name: Prepare release assets
         run: |
-          VERSION_NAME=$(cut -d'|' -f1 release-assets/version.txt)
-          VERSION_CODE=$(cut -d'|' -f2 release-assets/version.txt)
-          cp release-assets/app-release-signed.apk release-assets/ADBlock-latest.apk
-          printf '{"version":"%s","versionCode":%s,"changelog":"New Material 3 UI, per-app stats, ADBlock branding, dynamic versioning"}' "$VERSION_NAME" "$VERSION_CODE" > release-assets/manifest.json
+          # Find the APK and version.txt regardless of nested structure
+          APK_FILE=$(find release-assets -name 'app-release-signed.apk' | head -1)
+          VERSION_FILE=$(find release-assets -name 'version.txt' | head -1)
+          if [ -z "$APK_FILE" ] || [ -z "$VERSION_FILE" ]; then
+            echo "Missing files"
+            find release-assets -type f
+            exit 1
+          fi
+          VERSION_NAME=$(cut -d'|' -f1 "$VERSION_FILE")
+          VERSION_CODE=$(cut -d'|' -f2 "$VERSION_FILE")
+          cp "$APK_FILE" release-assets/ADBlock-latest.apk
+          printf '{"version":"%s","versionCode":%s,"changelog":"New Material 3 UI, per-app stats, ADBlock branding, dynamic versioning, captive portal fix"}' "$VERSION_NAME" "$VERSION_CODE" > release-assets/manifest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
