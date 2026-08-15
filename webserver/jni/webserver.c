@@ -1750,18 +1750,25 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     static const char *kCaptiveHosts[] = {
         "connectivitycheck.gstatic.com",
         "connectivitycheck.android.com",
+        "connectivitycheck.oppomobile.com",
+        "connectivitycheck.platform.hicloud.com",
+        "connectivitycheck.miui.com",
+        "connectivitycheck.vivoglobal.com",
+        "connectivitycheck.vivo.com.cn",
+        "connectivitycheck.samsung.com",
         "clients3.google.com",
         "www.msftconnecttest.com",
         "connecttest.com",
         "captive.apple.com",
         "gstatic.com",
+        "detectportal.firefox.com",
         NULL,
     };
     bool captive = false;
     if (hm->uri.len > 0) {
         static const char *kCaptivePaths[] = {
-            "/generate_204", "/gen_204", "/generate_204.php",
-            "/connecttest.txt", "/hotspot-detect.html", NULL,
+            "/generate_204*", "/gen_204*", "/generate_204.php*",
+            "/connecttest.txt*", "/hotspot-detect.html*", NULL,
         };
         for (int i = 0; kCaptivePaths[i]; i++) {
             if (mg_match(hm->uri, mg_str(kCaptivePaths[i]), NULL)) { captive = true; break; }
@@ -1773,11 +1780,32 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             char host[256];
             size_t hl = host_hdr->len < sizeof(host) - 1 ? host_hdr->len : sizeof(host) - 1;
             memcpy(host, host_hdr->buf, hl); host[hl] = '\0';
+            /* Strip an optional ":port" suffix from the Host header so
+               "connectivitycheck.gstatic.com:80" still matches. */
+            char *colon = strchr(host, ':');
+            if (colon != NULL) *colon = '\0';
             for (int i = 0; kCaptiveHosts[i]; i++) {
                 size_t klen = strlen(kCaptiveHosts[i]);
                 size_t hlen = strlen(host);
                 if (hlen >= klen && strcasecmp(host + hlen - klen, kCaptiveHosts[i]) == 0) {
                     captive = true; break;
+                }
+            }
+        }
+    }
+    if (!captive && c->is_tls && c->tls) {
+        /* SNI fallback: some HTTPS clients probe with a missing or
+           odd Host header; the SNI name is authoritative here. */
+        SSL *ssl = ((struct mg_tls_openssl *)c->tls)->ssl;
+        if (ssl) {
+            const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+            if (sni && *sni) {
+                for (int i = 0; kCaptiveHosts[i]; i++) {
+                    size_t klen = strlen(kCaptiveHosts[i]);
+                    size_t hlen = strlen(sni);
+                    if (hlen >= klen && strcasecmp(sni + hlen - klen, kCaptiveHosts[i]) == 0) {
+                        captive = true; break;
+                    }
                 }
             }
         }
