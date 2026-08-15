@@ -1436,12 +1436,16 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     /* Heartbeats & connectivity probes: HTTP 204. /generate_204 and
        /204 are used by YouTube/Google to probe connectivity - they
        must return 204 (empty body) or the client thinks the network
-       is broken. */
+       is broken. Also covers vendor-specific probes:
+       /gen_204, /generate_204.php, /connecttest.txt (Windows),
+       /hotspot-detect.html (iOS/macOS). */
     if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat") ||
-        uri_contains_ci(u, "/generate_204") || uri_contains_ci(u, "/204")) {
+        uri_contains_ci(u, "/generate_204") || uri_contains_ci(u, "/204") ||
+        uri_contains_ci(u, "/gen_204") || uri_contains_ci(u, "/generate_204.php") ||
+        uri_contains_ci(u, "/connecttest.txt") || uri_contains_ci(u, "/hotspot-detect.html")) {
         s_stats.blocked_heartbeat++;
         mg_http_reply(c, 204, CORS_HDR
-                              "Cache-Control: public, max-age=86400\r\n", "");
+                      "Cache-Control: public, max-age=86400\r\n", "");
         return true;
     }
 
@@ -1764,14 +1768,19 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         "detectportal.firefox.com",
         NULL,
     };
+    static const char *kCaptivePaths[] = {
+        "/generate_204", "/gen_204", "/generate_204.php",
+        "/connecttest.txt", "/hotspot-detect.html", "/hotspot-detect.html",
+        NULL,
+    };
     bool captive = false;
     if (hm->uri.len > 0) {
-        static const char *kCaptivePaths[] = {
-            "/generate_204*", "/gen_204*", "/generate_204.php*",
-            "/connecttest.txt*", "/hotspot-detect.html*", NULL,
-        };
         for (int i = 0; kCaptivePaths[i]; i++) {
-            if (mg_match(hm->uri, mg_str(kCaptivePaths[i]), NULL)) { captive = true; break; }
+            size_t plen = strlen(kCaptivePaths[i]);
+            if (hm->uri.len >= plen &&
+                mg_strcasecmp(mg_str_n(hm->uri.buf, plen), mg_str(kCaptivePaths[i])) == 0) {
+                captive = true; break;
+            }
         }
     }
     if (!captive) {
