@@ -135,7 +135,7 @@
     <string name="compose_stats_type_media">Media</string>
     <string name="compose_stats_type_api">API</string>
     <string name="compose_stats_type_telemetry">Telemetry</string>
-    <string name="compose_stats_type_telemetry_desc">Analytics & usage reporting requests (e.g. app analytics SDKs). Blocked with an empty 204 response so SDKs see a "successful" call.</string>
+    <string name="compose_stats_type_telemetry_desc">Analytics &amp; usage reporting requests (e.g. app analytics SDKs). Blocked with an empty 204 response so SDKs see a "successful" call.</string>
     <string name="compose_stats_type_heartbeat_desc">Keep-alive / status probes from SDKs and ad frameworks, answered with 204.</string>
     <string name="compose_stats_type_scripts_desc">JavaScript files served as empty responses so ad scripts silently fail.</string>
     <string name="compose_stats_type_images_desc">Ad images replaced by a placeholder (customizable in settings).</string>
