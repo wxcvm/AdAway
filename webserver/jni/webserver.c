@@ -1438,11 +1438,16 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        must return 204 (empty body) or the client thinks the network
        is broken. Also covers vendor-specific probes:
        /gen_204, /generate_204.php, /connecttest.txt (Windows),
-       /hotspot-detect.html (iOS/macOS). */
+       /hotspot-detect.html (iOS/macOS).
+       CMCC/China Mobile: /wlan/userip, /wlan/ac_portal, /wlan/login,
+       /portal/*, /eportal/*, /cmcc/* */
     if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat") ||
         uri_contains_ci(u, "/generate_204") || uri_contains_ci(u, "/204") ||
         uri_contains_ci(u, "/gen_204") || uri_contains_ci(u, "/generate_204.php") ||
-        uri_contains_ci(u, "/connecttest.txt") || uri_contains_ci(u, "/hotspot-detect.html")) {
+        uri_contains_ci(u, "/connecttest.txt") || uri_contains_ci(u, "/hotspot-detect.html") ||
+        uri_contains_ci(u, "/wlan/userip") || uri_contains_ci(u, "/wlan/ac_portal") ||
+        uri_contains_ci(u, "/wlan/login") || uri_contains_ci(u, "/portal/") ||
+        uri_contains_ci(u, "/eportal/") || uri_contains_ci(u, "/cmcc/")) {
         s_stats.blocked_heartbeat++;
         mg_http_reply(c, 204, CORS_HDR
                       "Cache-Control: public, max-age=86400\r\n", "");
@@ -1786,6 +1791,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     static const char *kCaptivePaths[] = {
         "/generate_204", "/gen_204", "/generate_204.php",
         "/connecttest.txt", "/hotspot-detect.html", "/hotspot-detect.html",
+        /* CMCC/China Mobile specific captive portal paths */
+        "/wlan/userip", "/wlan/ac_portal", "/wlan/login",
+        "/portal/index.jsp", "/portal/auth.jsp", "/portal/login.jsp",
+        "/eportal/index.jsp", "/eportal/auth.jsp", "/eportal/login.jsp",
+        "/cmcc/wlan", "/cmcc/portal", "/cmcc/login",
         NULL,
     };
     bool captive = false;
