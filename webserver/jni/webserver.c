@@ -1926,6 +1926,27 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
+    /* Control endpoint: reload resources, flush stats, shutdown. */
+    if (mg_match(hm->uri, mg_str("/control"), NULL)) {
+        struct mg_str cmd = mg_http_get_var(&hm->body, "cmd", NULL);
+        if (mg_strcmp(cmd, mg_str("reload_images")) == 0) {
+            s->block_image_count = scan_block_images(s->resource_dir, s->block_images);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);
+        } else if (mg_strcmp(cmd, mg_str("flush_stats")) == 0) {
+            save_stats(s);
+            save_hist(s);
+            sni_cache_save(s->resource_dir);
+            apps_save(s->resource_dir);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: stats flushed");
+        } else if (mg_strcmp(cmd, mg_str("shutdown")) == 0) {
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: shutting down");
+            s_sig_num = SIGTERM;  /* trigger main loop exit */
+        } else {
+            mg_http_reply(c, 400, "Content-Type: text/plain\r\n", "Usage: cmd=reload_images|flush_stats|shutdown");
+        }
+        return;
+    }
+
     /* Classify blocked requests by type and reply with the most
        realistic "empty" resource - see reply_blocked_by_type(). */
     if (reply_blocked_by_type(c, hm)) {
