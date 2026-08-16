@@ -252,6 +252,82 @@ public static void startWebServer(Context context) {
         killBundledExecutable(WEB_SERVER_EXECUTABLE);
     }
 
+    /**
+     * Send a control command to the running web server via the /control endpoint.
+     * Uses toybox nc (same as getStats()) to preserve v4-mapped socket uid.
+     *
+     * @param cmd one of "reload_images", "flush_stats", "shutdown"
+     * @return response body string, or null on failure
+     */
+    @androidx.annotation.Nullable
+    private static String sendControlCommand(String cmd) {
+        try {
+            Process process = new ProcessBuilder(
+                    "/system/bin/toybox", "nc", "-w", "3",
+                    "::ffff:127.0.0.1", String.valueOf(getStatsHttpPort()))
+                    .redirectErrorStream(false)
+                    .start();
+            java.io.OutputStream out = process.getOutputStream();
+            String body = "cmd=" + cmd;
+            out.write(("POST /control HTTP/1.1\r\n" +
+                    "Host: adaway\r\n" +
+                    "Content-Type: application/x-www-form-urlencoded\r\n" +
+                    "Content-Length: " + body.length() + "\r\n" +
+                    "Connection: close\r\n\r\n" +
+                    body).getBytes("UTF-8"));
+            out.close();
+            java.io.InputStream in = process.getInputStream();
+            java.io.ByteArrayOutputStream respBody = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) > 0) respBody.write(buf, 0, n);
+            in.close();
+            if (!process.waitFor(4000, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                process.destroy();
+                return null;
+            }
+            String response = respBody.toString("UTF-8");
+            int headerEnd = response.indexOf("\r\n\r\n");
+            return headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
+        } catch (Exception e) {
+            Timber.w(e, "Failed to send control command: %s", cmd);
+            return null;
+        }
+    }
+
+    /**
+     * Reload block-placeholder images from the resource directory.
+     * Call after user picks a custom image or resets to defaults.
+     *
+     * @return true if server acknowledged the reload
+     */
+    public static boolean reloadImages() {
+        String resp = sendControlCommand("reload_images");
+        return resp != null && resp.startsWith("OK:");
+    }
+
+    /**
+     * Force-flush all statistics to disk (stats.dat, hist.dat, sni_cache.dat, apps.dat).
+     * Call before app exit or when user wants guaranteed persistence.
+     *
+     * @return true if server acknowledged the flush
+     */
+    public static boolean flushStats() {
+        String resp = sendControlCommand("flush_stats");
+        return resp != null && resp.startsWith("OK:");
+    }
+
+    /**
+     * Gracefully shut down the web server process.
+     * The server will finish current requests and exit cleanly.
+     *
+     * @return true if server acknowledged the shutdown
+     */
+    public static boolean shutdown() {
+        String resp = sendControlCommand("shutdown");
+        return resp != null && resp.startsWith("OK:");
+    }
+
     public static boolean isWebServerRunning() {
         return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
     }
