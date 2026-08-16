@@ -139,6 +139,8 @@ dependencies {
     implementation libs.okhttp3.okhttp
     // Logging related
     implementation libs.timber
+    // QR Code
+    implementation libs.zxing.core
     if (keyStoreDefined) {
         implementation project(':sentrystub')
     } else {
