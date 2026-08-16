@@ -1771,6 +1771,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         "captive.apple.com",
         "gstatic.com",
         "detectportal.firefox.com",
+        /* OPPO/ColorOS captive portal probe domains (conn-service-*.allawntech.com) */
+        "allawntech.com",
         /* Chinese carriers captive portal domains */
         "wifi.cmcc.com",
         "portal.cmcc.com",
@@ -1789,7 +1791,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         NULL,
     };
     static const char *kCaptivePaths[] = {
-        "/generate_204", "/gen_204", "/generate_204.php",
+        "/generate_204", "/generate204", "/gen_204", "/generate_204.php",
         "/connecttest.txt", "/hotspot-detect.html", "/hotspot-detect.html",
         /* CMCC/China Mobile specific captive portal paths */
         "/wlan/userip", "/wlan/ac_portal", "/wlan/login",
@@ -2067,7 +2069,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      * If-None-Match (see mg_http_etag() in mongoose.c), so "no-cache"
      * keeps the win this header was added for - clients still cache the
      * bytes and, on every use, get back a cheap 304 with no body as
-     * long as the file is actually unchanged — while making sure a
+     * long as the file is actually unchanged - while making sure a
      * genuine content change (different size/mtime → different ETag) is
      * always picked up on the very next request instead of being stuck
      * behind a stale cache.
