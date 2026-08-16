@@ -93,6 +93,13 @@ public class BootReceiver extends BroadcastReceiver {
             return;
         }
 
+        if (org.adaway.ui.compose.SettingsScreenKt.isLightMode(context)) {
+            // Light mode: the web server is only started when the user opens
+            // the app; do not keep it resident after boot.
+            Timber.d("BootReceiver: light mode enabled, skipping web server start.");
+            return;
+        }
+
         final PendingResult pendingResult = goAsync();
 
         new Thread(() -> {
