@@ -1928,7 +1928,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 
     /* Control endpoint: reload resources, flush stats, shutdown. */
     if (mg_match(hm->uri, mg_str("/control"), NULL)) {
-        struct mg_str cmd = mg_http_get_var(&hm->body, "cmd", NULL);
+        char cmd_buf[32];
+        mg_http_get_var(&hm->body, "cmd", cmd_buf, sizeof(cmd_buf));
+        struct mg_str cmd = mg_str(cmd_buf);
         if (mg_strcmp(cmd, mg_str("reload_images")) == 0) {
             s->block_image_count = scan_block_images(s->resource_dir, s->block_images);
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);
