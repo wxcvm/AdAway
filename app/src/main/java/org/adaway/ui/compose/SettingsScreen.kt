@@ -18,7 +18,9 @@ package org.adaway.ui.compose
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Environment
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -67,10 +69,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import org.adaway.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import java.io.File
+import java.io.FileOutputStream
 
 private const val PREFS_MONITOR = "compose_app_monitor"
 private const val PREFS_GENERAL = "compose_general"
@@ -473,23 +481,83 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    // SHA-256 指纹（可展开查看）
+                    // SHA-256 指纹（可展开查看、复制、分享二维码）
                     val fingerprint = remember {
                         org.adaway.util.WebServerUtils.getCertificateFingerprint(context)
                     }
                     if (fingerprint != null) {
-                        Text(
-                            stringResource(R.string.compose_settings_cert_fingerprint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            fingerprint,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        var showFingerprint by remember { mutableStateOf(true) }
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    stringResource(R.string.compose_settings_cert_fingerprint),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                IconButton(onClick = { showFingerprint = !showFingerprint }) {
+                                    Icon(
+                                        imageVector = if (showFingerprint) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = if (showFingerprint) "Collapse" else "Expand"
+                                    )
+                                }
+                            }
+                            AnimatedVisibility(visible = showFingerprint) {
+                                Column(modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            fingerprint,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            IconButton(onClick = {
+                                                context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                                    .setPrimaryClip(android.content.ClipData.newPlainText("ADBlock CA Fingerprint", fingerprint))
+                                                Toast.makeText(context, "指纹已复制", Toast.LENGTH_SHORT).show()
+                                            }) {
+                                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy fingerprint")
+                                            }
+                                            IconButton(onClick = {
+                                                // Generate QR code for fingerprint sharing
+                                                val qrData = "ADBlock CA SHA-256 Fingerprint:\n$fingerprint"
+                                                val writer = com.google.zxing.qrcode.QRCodeWriter()
+                                                val hints = mapOf(com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M)
+                                                val bitMatrix = writer.encode(qrData, com.google.zxing.BarcodeFormat.QR_CODE, 256, 256, hints)
+                                                val bitmap = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
+                                                for (x in 0 until 256) {
+                                                    for (y in 0 until 256) {
+                                                        bitmap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                                                    }
+                                                }
+                                                // Share via system share sheet
+                                                val uri = saveBitmapToCache(context, bitmap, "adblock_ca_fingerprint.png")
+                                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "image/png"
+                                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                                    putExtra(Intent.EXTRA_TEXT, qrData)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                context.startActivity(Intent.createChooser(shareIntent, "分享证书指纹"))
+                                            }) {
+                                                Icon(Icons.Default.QrCode, contentDescription = "Share QR code")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     Spacer(Modifier.height(4.dp))
                     // 导出证书到 Download 目录（供其他设备/模块使用）
@@ -1002,4 +1070,19 @@ private fun importBackup(
         Timber.w(e, "Failed to import backup")
         Toast.makeText(context, "Restore failed: ${e.message}", Toast.LENGTH_LONG).show()
     }
+}
+
+/**
+ * 保存 Bitmap 到缓存目录并返回 content:// URI 供分享使用。
+ */
+private fun saveBitmapToCache(context: Context, bitmap: Bitmap, filename: String): Uri {
+    val cacheFile = File(context.cacheDir, filename)
+    FileOutputStream(cacheFile).use { out ->
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+    }
+    return androidx.core.content.FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        cacheFile
+    )
 }
