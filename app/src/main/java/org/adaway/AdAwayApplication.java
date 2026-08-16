@@ -10,6 +10,8 @@ import org.adaway.model.source.SourceModel;
 import org.adaway.model.update.UpdateModel;
 import org.adaway.util.log.ApplicationLog;
 
+import timber.log.Timber;
+
 /**
  * This class is a custom {@link Application} for AdAway app.
  *
@@ -42,6 +44,46 @@ public class AdAwayApplication extends Application {
         // Create models
         this.sourceModel = new SourceModel(this);
         this.updateModel = new UpdateModel(this);
+        // Crash diagnostics: persist any uncaught exception to filesDir/crash.log
+        // so a "it just closed" report can be diagnosed afterwards
+        // (readable via root/adb even if logcat buffers have rotated).
+        final Thread.UncaughtExceptionHandler previousHandler = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+            try {
+                java.io.File logFile = new java.io.File(getFilesDir(), "crash.log");
+                try (java.io.FileOutputStream fos = new java.io.FileOutputStream(logFile, true);
+                     java.io.PrintWriter pw = new java.io.PrintWriter(fos)) {
+                    pw.println("=== crash at " + new java.util.Date()
+                            + " thread=" + (thread != null ? thread.getName() : "?") + " ===");
+                    throwable.printStackTrace(pw);
+                    pw.flush();
+                }
+            } catch (Throwable ignored) {
+            }
+            if (previousHandler != null) {
+                previousHandler.uncaughtException(thread, throwable);
+            } else {
+                android.os.Process.killProcess(android.os.Process.myPid());
+            }
+        });
+        // Light mode: when enabled, the web server only runs while the app
+        // is in the foreground (minimum process footprint). Stop it on
+        // background, restart it on foreground.
+        androidx.lifecycle.ProcessLifecycleOwner.get().getLifecycle().addObserver(
+                (androidx.lifecycle.LifecycleEventObserver) (owner, event) -> {
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                        if (org.adaway.ui.compose.SettingsScreenKt.isLightMode(getApplicationContext())) {
+                            Timber.d("Light mode: app backgrounded, stopping web server.");
+                            org.adaway.util.WebServerUtils.stopWebServer();
+                        }
+                    } else if (event == androidx.lifecycle.Lifecycle.Event.ON_START) {
+                        if (org.adaway.ui.compose.SettingsScreenKt.isLightMode(getApplicationContext())
+                                && PreferenceHelper.getWebServerEnabled(getApplicationContext())) {
+                            Timber.d("Light mode: app foregrounded, starting web server.");
+                            org.adaway.util.WebServerUtils.startWebServer(getApplicationContext());
+                        }
+                    }
+                });
     }
 
     /**
