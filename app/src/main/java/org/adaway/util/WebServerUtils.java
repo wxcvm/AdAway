@@ -402,10 +402,10 @@ public static void installUserCertificate(Context context) {
      * looking directly at the on-disk file Android's KeyChain writes
      * user-installed CA certs to, rather than performing a live HTTPS
      * handshake and hoping network_security_config's per-domain trust
-     * override kicks in. See the comment in getWebServerState() for why.
+     * anchor override kicks in. See the comment in getWebServerState() for why.
      */
     /**
-     * 检查 AdAway CA 是否已安装为“用户”信任锚。
+     * 检查 AdAway CA 是否已安装为"用户"信任锚。
      *
      * 直接检查 KeyChain 写入的证书文件
      * /data/misc/user/0/cacerts-added/<subject_hash_old>.0 是否存在
@@ -424,8 +424,13 @@ public static boolean isUserCertificateInstalled(Context context) {
         // Standard AOSP location for KeyChain-installed user CA certs
         // since Android 4.0 (ICS) - readable directly with root, same
         // approach as isSystemCertificateInstalled() above.
-        return Shell.cmd("test -f /data/misc/user/0/cacerts-added/" + hash + ".0")
-                    .exec().isSuccess();
+        try {
+            return Shell.cmd("test -f /data/misc/user/0/cacerts-added/" + hash + ".0")
+                        .exec().isSuccess();
+        } catch (Exception e) {
+            Timber.w(e, "Root shell check for user cert failed.");
+            return false;
+        }
     }
 
     /**
@@ -507,7 +512,7 @@ public static boolean isUserCertificateInstalled(Context context) {
      * APEX module at all.
      */
     /**
-     * 检查 CA 是否已进入“系统”信任库。
+     * 检查 CA 是否已进入"系统"信任库。
      *
      * Android 14+ 实际读取的是 /apex/com.android.conscrypt/cacerts
      * （只读 APEX），旧设备仍是 /system/etc/security/cacerts；
@@ -523,12 +528,17 @@ public static boolean isSystemCertificateInstalled(Context context) {
             Timber.w(e, "Failed to compute certificate hash.");
             return false;
         }
-        boolean hasApexStore = Shell.cmd("test -d /apex/com.android.conscrypt/cacerts")
-                                     .exec().isSuccess();
-        String certsDir = hasApexStore
-                ? "/apex/com.android.conscrypt/cacerts/"
-                : "/system/etc/security/cacerts/";
-        return Shell.cmd("test -f " + certsDir + hash + ".0").exec().isSuccess();
+        try {
+            boolean hasApexStore = Shell.cmd("test -d /apex/com.android.conscrypt/cacerts")
+                                         .exec().isSuccess();
+            String certsDir = hasApexStore
+                    ? "/apex/com.android.conscrypt/cacerts/"
+                    : "/system/etc/security/cacerts/";
+            return Shell.cmd("test -f " + certsDir + hash + ".0").exec().isSuccess();
+        } catch (Exception e) {
+            Timber.w(e, "Root shell check for system cert failed.");
+            return false;
+        }
     }
 
     /**
