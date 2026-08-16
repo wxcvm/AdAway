@@ -1766,6 +1766,21 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         "captive.apple.com",
         "gstatic.com",
         "detectportal.firefox.com",
+        /* Chinese carriers captive portal domains */
+        "wifi.cmcc.com",
+        "portal.cmcc.com",
+        "cmccwifi.com",
+        "wlan.cmcc.com",
+        "wifi.chinaunicom.cn",
+        "portal.chinaunicom.cn",
+        "wifi.189.cn",
+        "portal.189.cn",
+        "wifi.ctc.com.cn",
+        "portal.ctc.com.cn",
+        "cmcc.com",
+        "chinaunicom.cn",
+        "189.cn",
+        "ctc.com.cn",
         NULL,
     };
     static const char *kCaptivePaths[] = {
