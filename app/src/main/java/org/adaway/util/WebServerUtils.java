@@ -57,6 +57,18 @@ public class WebServerUtils {
     private static final String CA_KEY_FILE  = "localhost-2410.key";
     private static final String PREFS_WS = "compose_webserver";
 
+    /**
+     * Captive portal login packages that must always stay in the allowlist
+     * (their traffic passes through unblocked, otherwise the portal page
+     * renders blank/white). Exposed publicly so the settings UI can render
+     * the default allowlist entries with a warning note.
+     * See: https://github.com/AdguardTeam/AdguardForAndroid/issues/2713
+     */
+    public static final String[] CAPTIVE_PORTAL_PACKAGES = {
+            "com.google.android.captiveportallogin",
+            "com.android.captiveportallogin"
+    };
+
     /** Whether the web server listens on all interfaces (LAN). Default false. */
     public static boolean isBindAll(Context context) {
         return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
@@ -216,11 +228,7 @@ public static org.json.JSONObject getStats() {
             }
 
             // Add UIDs for captive portal login packages
-            String[] captivePackages = {
-                    "com.google.android.captiveportallogin",
-                    "com.android.captiveportallogin"
-            };
-            for (String pkg : captivePackages) {
+            for (String pkg : CAPTIVE_PORTAL_PACKAGES) {
                 try {
                     int uid = context.getPackageManager()
                             .getPackageUid(pkg, 0);
@@ -529,6 +537,45 @@ public static void installUserCertificate(Context context) {
             context.startActivity(intent);
         } catch (IOException | CertificateException e) {
             Timber.w(e, "Failed to prepare certificate for install.");
+        }
+    }
+
+    /**
+     * One-tap trust (root devices): copy the CA directly into Android's
+     * user-added CA store (/data/misc/user/0/cacerts-added/<hash>.0) via
+     * root shell. No KeyChain confirmation dialog needed. The system
+     * re-scans this directory when certificates change.
+     *
+     * @return true if the copy + permission commands all succeeded.
+     */
+    public static boolean installCertificateToSystemStore(Context context) {
+        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+        if (!Files.isRegularFile(certFile)) return false;
+        String hash;
+        try {
+            hash = computeSubjectHashOld(certFile);
+        } catch (IOException | CertificateException | NoSuchAlgorithmException e) {
+            Timber.w(e, "Failed to compute certificate hash.");
+            return false;
+        }
+        String dest = "/data/misc/user/0/cacerts-added/" + hash + ".0";
+        String src = certFile.toAbsolutePath().toString();
+        try {
+            Shell.Result r = Shell.cmd(
+                    "cp '" + src + "' '" + dest + "'",
+                    "chmod 644 '" + dest + "'",
+                    "chown system:system '" + dest + "'"
+            ).exec();
+            boolean ok = r.isSuccess();
+            if (ok) {
+                // Touch the store dir so Android's trust store rescans it.
+                Shell.cmd("chmod 644 /data/misc/user/0/cacerts-added").exec();
+            }
+            Timber.d("System-store CA install: %s", ok ? "success" : "failed: " + r.getOut());
+            return ok;
+        } catch (Exception e) {
+            Timber.w(e, "Root shell install failed.");
+            return false;
         }
     }
 
