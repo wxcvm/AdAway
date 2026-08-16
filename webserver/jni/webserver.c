@@ -1798,6 +1798,22 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         "/cmcc/wlan", "/cmcc/portal", "/cmcc/login",
         NULL,
     };
+    /* Portal hosts that should be FULLY ALLOWED (not blocked) so the
+       actual portal page can load (HTML, CSS, JS, images).
+       These are the domains users visit when they click "Sign in to network". */
+    static const char *kPortalHosts[] = {
+        "wifi.cmcc.com",
+        "portal.cmcc.com",
+        "cmccwifi.com",
+        "wlan.cmcc.com",
+        "wifi.chinaunicom.cn",
+        "portal.chinaunicom.cn",
+        "wifi.189.cn",
+        "portal.189.cn",
+        "wifi.ctc.com.cn",
+        "portal.ctc.com.cn",
+        NULL,
+    };
     bool captive = false;
     if (hm->uri.len > 0) {
         for (int i = 0; kCaptivePaths[i]; i++) {
@@ -1852,6 +1868,35 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                       "Cache-Control: no-store, max-age=0\r\n"
                       "Access-Control-Allow-Origin: *\r\n", "");
         return;
+    }
+
+    /* Check if this is a known portal host (user clicked "Sign in to network").
+       If so, allow the request through so the portal page loads properly
+       (HTML, CSS, JS, images) instead of being blocked by reply_blocked_by_type. */
+    struct mg_str *host_hdr = mg_http_get_header(hm, "Host");
+    if (host_hdr != NULL && host_hdr->len > 0) {
+        char host[256];
+        size_t hl = host_hdr->len < sizeof(host) - 1 ? host_hdr->len : sizeof(host) - 1;
+        memcpy(host, host_hdr->buf, hl); host[hl] = '\0';
+        char *colon = strchr(host, ':');
+        if (colon != NULL) *colon = '\0';
+        for (int i = 0; kPortalHosts[i]; i++) {
+            size_t klen = strlen(kPortalHosts[i]);
+            size_t hlen = strlen(host);
+            if (hlen >= klen && strcasecmp(host + hlen - klen, kPortalHosts[i]) == 0) {
+                /* Known portal host - serve a minimal page instead of blocking */
+                mg_http_reply(c, 200,
+                              "Content-Type: text/html; charset=utf-8\r\n"
+                              "Cache-Control: no-store\r\n",
+                              "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head>"
+                              "<body style=\"font-family:sans-serif;padding:20px;text-align:center;\">"
+                              "<h2>ADBlock: Portal Page Allowed</h2>"
+                              "<p>This is a carrier portal domain. The page should load normally.</p>"
+                              "<p>If you see this, the portal page resources are being allowed through.</p>"
+                              "</body></html>");
+                return;
+            }
+        }
     }
 
     s_stats.total_requests++;
