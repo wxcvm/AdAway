@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <!--
+        Base config: trust both system and user CAs for all domains.
+        This allows apps using standard network stack (targetSdk 24+)
+        to automatically trust the ADBlock CA when installed in user store,
+        without requiring per-app network security config.
+    -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+
+    <!--
         Allow plain HTTP to the loopback IP for the "is server running?"
         health-check in WebServerUtils (http://127.0.0.1/internal-test).
         Without this, Android 9+ blocks cleartext to 127.0.0.1 at OS level,
