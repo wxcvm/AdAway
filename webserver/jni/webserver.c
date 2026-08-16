@@ -1870,6 +1870,32 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
+    /* Per-app request counter + record which TLS (SNI) hostname this
+       app asked us to sign a certificate for. The uid is resolved once
+       per connection (cached in c->data) to avoid /proc scans on every
+       request of a keep-alive connection. */
+    uid_t req_uid = conn_load_uid(c);
+    if (req_uid == (uid_t)-1) {
+        req_uid = conn_uid_by_tuple(c);
+        conn_store_uid(c, req_uid);
+    }
+
+    /*
+     * PER-APP ALLOWLIST: the app writes <resource_dir>/allowlist.txt
+     * (one decimal uid per line, from the Settings > App monitoring
+     * "allow" switches). A uid on the list has its traffic forwarded
+     * as-is (200 OK with a tiny body) instead of being blocked, so
+     * e.g. banking apps that need ads SDKs for auth still work.
+     */
+    if (req_uid != (uid_t)-1 && uid_is_allowed(req_uid, s->resource_dir)) {
+        mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
+                              "Cache-Control: no-store\r\n", "ok");
+        return;
+    }
+
+    s_stats.total_requests++;
+    hist_add(HIST_REQ);
+
     /* Check if this is a known portal host (user clicked "Sign in to network").
        If so, allow the request through so the portal page loads properly
        (HTML, CSS, JS, images) instead of being blocked by reply_blocked_by_type. */
@@ -1897,32 +1923,6 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                 return;
             }
         }
-    }
-
-    s_stats.total_requests++;
-    hist_add(HIST_REQ);
-
-    /* Per-app request counter + record which TLS (SNI) hostname this
-       app asked us to sign a certificate for. The uid is resolved once
-       per connection (cached in c->data) to avoid /proc scans on every
-       request of a keep-alive connection. */
-    uid_t req_uid = conn_load_uid(c);
-    if (req_uid == (uid_t)-1) {
-        req_uid = conn_uid_by_tuple(c);
-        conn_store_uid(c, req_uid);
-    }
-
-    /*
-     * PER-APP ALLOWLIST: the app writes <resource_dir>/allowlist.txt
-     * (one decimal uid per line, from the Settings > App monitoring
-     * "allow" switches). A uid on the list has its traffic forwarded
-     * as-is (200 OK with a tiny body) instead of being blocked, so
-     * e.g. banking apps that need ads SDKs for auth still work.
-     */
-    if (req_uid != (uid_t)-1 && uid_is_allowed(req_uid, s->resource_dir)) {
-        mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
-                              "Cache-Control: no-store\r\n", "ok");
-        return;
     }
 
     struct appstat *ra = app_find_or_add(req_uid);
@@ -2067,7 +2067,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      * If-None-Match (see mg_http_etag() in mongoose.c), so "no-cache"
      * keeps the win this header was added for - clients still cache the
      * bytes and, on every use, get back a cheap 304 with no body as
-     * long as the file is actually unchanged - while making sure a
+     * long as the file is actually unchanged — while making sure a
      * genuine content change (different size/mtime → different ETag) is
      * always picked up on the very next request instead of being stuck
      * behind a stale cache.
