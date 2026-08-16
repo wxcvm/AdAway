@@ -371,6 +371,81 @@ static bool uid_is_allowed(uid_t uid, const char *resource_dir) {
     return allowed;
 }
 
+/*
+ * WEBVIEW ISOLATED UID RESOLUTION (allowlist fix):
+ * Android runs WebView renderers as "isolated" processes with uids in
+ * 99000-99999 that are allocated dynamically per renderer. A static
+ * allowlist.txt entry can never match them, so a user-allowed host app
+ * (e.g. a browser the user switched "Allow" on) still had its WebView
+ * requests blocked -> blank pages / broken portal login.
+ *
+ * Fix: when a request comes from an isolated uid, walk /proc to find
+ * the process with that uid, then follow PPid links upward until a
+ * non-isolated uid is reached (the host app). The allowlist decision is
+ * then made on the host app uid. We run as root, so all /proc entries
+ * are readable. If the chain cannot be resolved the original uid is
+ * returned unchanged (conservative: the request stays blocked unless
+ * the host app is explicitly allowlisted).
+ */
+#define ISOLATED_UID_MIN 99000
+#define ISOLATED_UID_MAX 99999
+
+static bool uid_is_isolated(uid_t uid) {
+    return uid >= ISOLATED_UID_MIN && uid <= ISOLATED_UID_MAX;
+}
+
+/* Read "Uid:" / "PPid:" from /proc/<pid>/status. Returns 0 on success. */
+static int proc_status_uid_ppid(const char *pid_str, uid_t *uid_out, int *ppid_out) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%s/status", pid_str);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return -1;
+    char line[256];
+    *uid_out = (uid_t)-1;
+    *ppid_out = -1;
+    while (fgets(line, sizeof(line), fp)) {
+        unsigned long u = 0;
+        long p = 0;
+        if (sscanf(line, "Uid:%lu", &u) == 1) *uid_out = (uid_t)u;
+        else if (sscanf(line, "PPid:%ld", &p) == 1) *ppid_out = (int)p;
+        if (*uid_out != (uid_t)-1 && *ppid_out != -1) break;
+    }
+    fclose(fp);
+    return (*uid_out == (uid_t)-1) ? -1 : 0;
+}
+
+static uid_t resolve_effective_uid(uid_t uid) {
+    if (!uid_is_isolated(uid)) return uid;
+    DIR *dir = opendir("/proc");
+    if (!dir) return uid;
+    uid_t cur = uid;
+    int guard = 0;
+    while (uid_is_isolated(cur) && guard++ < 8) {
+        bool advanced = false;
+        rewinddir(dir);
+        struct dirent *de;
+        while ((de = readdir(dir)) != NULL) {
+            if (de->d_name[0] < '0' || de->d_name[0] > '9') continue;
+            uid_t suid;
+            int ppid;
+            if (proc_status_uid_ppid(de->d_name, &suid, &ppid) != 0) continue;
+            if (suid != cur || ppid <= 0) continue;
+            char ppid_str[16];
+            snprintf(ppid_str, sizeof(ppid_str), "%d", ppid);
+            uid_t puid;
+            int dummy;
+            if (proc_status_uid_ppid(ppid_str, &puid, &dummy) == 0 && puid != (uid_t)-1) {
+                cur = puid;
+                advanced = true;
+                break;
+            }
+        }
+        if (!advanced) break; /* parent chain broken (process exited) */
+    }
+    closedir(dir);
+    return cur;
+}
+
 /* ── Hourly history (for the time-series chart) ────────────────── */
 /* Ring of 24 hourly buckets + 30 daily buckets: requests / blocked /
    connections (and certs) per hour / per day, exposed via
@@ -1889,7 +1964,16 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      * as-is (200 OK with a tiny body) instead of being blocked, so
      * e.g. banking apps that need ads SDKs for auth still work.
      */
-    if (req_uid != (uid_t)-1 && uid_is_allowed(req_uid, s->resource_dir)) {
+    uid_t chk_uid = req_uid;
+    if (uid_is_isolated(req_uid)) {
+        uid_t eff = resolve_effective_uid(req_uid);
+        if (eff != req_uid) {
+            LOG_INFO("allowlist: isolated uid %d -> host uid %d",
+                     (int)req_uid, (int)eff);
+        }
+        chk_uid = eff;
+    }
+    if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
         mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
                               "Cache-Control: no-store\r\n", "ok");
         return;
