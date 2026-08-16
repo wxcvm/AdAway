@@ -516,6 +516,36 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             )
                         }
                     }
+                    Spacer(Modifier.height(8.dp))
+                    // ── 轻量模式（省内存）──
+                    var lightMode by remember { mutableStateOf(isLightMode(context)) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_light_mode),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_light_mode_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = lightMode,
+                            onCheckedChange = { v ->
+                                lightMode = v
+                                setLightMode(context, v)
+                                if (!v) {
+                                    // 恢复常驻：确保 webserver 正在运行
+                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                }
+                            },
+                        )
+                    }
                     // ── 证书管理区 ──
                     Spacer(Modifier.height(12.dp))
                     Text(
@@ -539,6 +569,57 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.error,
                     )
+                    // ── 一键信任（root 系统信任库）/ 手动安装 ──
+                    var certTrusted by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        certTrusted = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            org.adaway.util.WebServerUtils.isUserCertificateInstalled(context)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (certTrusted) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.Lock,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(R.string.compose_settings_cert_trusted),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    val ok = org.adaway.util.WebServerUtils
+                                        .installCertificateToSystemStore(context)
+                                    Toast.makeText(
+                                        context,
+                                        if (ok) R.string.compose_settings_cert_trust_ok
+                                        else R.string.compose_settings_cert_trust_fail,
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    certTrusted = ok
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(stringResource(R.string.compose_settings_cert_trust))
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    org.adaway.util.WebServerUtils.installUserCertificate(context)
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(stringResource(R.string.compose_settings_cert_install_manual))
+                            }
+                        }
+                    }
                     // 剩余天数
                     val daysLeft = org.adaway.util.WebServerUtils.getCertificateDaysLeft(context)
                     if (daysLeft != null) {
@@ -854,6 +935,113 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 if (v) viewModel.startRealtime() else viewModel.stopRealtime()
                             },
                         )
+                    }
+                }
+            }
+
+            // ── Allowlist (bypass blocking) ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_title),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_warning),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 默认白名单（系统门户登录，自动维护）
+                    Text(
+                        stringResource(R.string.compose_settings_allowlist_default),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    defaultAllowlistUids(context).forEach { uid ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                appNameForUid(uid),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_uid, uid),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 用户放行的应用（可移除）
+                    Text(
+                        stringResource(R.string.compose_settings_allowlist_user),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val userUids = userAllowedUids(context)
+                    if (userUids.isEmpty()) {
+                        Text(
+                            stringResource(R.string.compose_settings_allowlist_empty),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        userUids.forEach { uid ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    appNameForUid(uid),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    stringResource(R.string.compose_settings_allowlist_uid, uid),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                IconButton(onClick = {
+                                    setAppAllowed(context, uid, false)
+                                    refreshKey++
+                                }) {
+                                    Icon(
+                                        Icons.Outlined.RemoveCircle,
+                                        contentDescription = stringResource(R.string.compose_settings_allowlist_remove),
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
