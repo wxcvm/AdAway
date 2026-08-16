@@ -45,7 +45,9 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.QrCode
+import androidx.compose.material.icons.outlined.RemoveCircle
 import androidx.compose.material.icons.outlined.Save
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -132,6 +134,54 @@ private fun syncAllowlistFile(context: Context) {
     }
 }
 
+/* ── Allowlist inspection (default + user entries) ───────────────── */
+
+/** Read all uid entries from the webserver's allowlist.txt. */
+internal fun readAllowlistUids(context: Context): List<Int> {
+    return try {
+        val f = java.io.File(context.filesDir, "webserver/allowlist.txt")
+        if (!f.exists()) emptyList()
+        else f.readLines().mapNotNull { it.trim().toIntOrNull() }.filter { it > 0 }
+    } catch (e: Exception) {
+        Timber.w(e, "Failed to read allowlist")
+        emptyList()
+    }
+}
+
+/**
+ * Default allowlist entries (captive portal login packages).
+ * These are written automatically on every web server start and are
+ * required for the system "Sign in to network" page to work.
+ */
+internal fun defaultAllowlistUids(context: Context): List<Int> {
+    return try {
+        val pm = context.packageManager
+        org.adaway.util.WebServerUtils.CAPTIVE_PORTAL_PACKAGES.mapNotNull { pkg ->
+            try {
+                pm.getPackageUid(pkg, 0)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    } catch (e: Exception) {
+        Timber.w(e, "Failed to resolve captive portal uids")
+        emptyList()
+    }
+}
+
+/** User-allowed uids (allow_<uid> = true), excluding default entries. */
+internal fun userAllowedUids(context: Context): List<Int> {
+    val defaults = defaultAllowlistUids(context).toSet()
+    return context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
+        .all
+        .filterKeys { it.startsWith("allow_") }
+        .filterValues { it == true }
+        .keys
+        .mapNotNull { it.removePrefix("allow_").toIntOrNull() }
+        .filter { it > 0 && it !in defaults }
+        .sorted()
+}
+
 /* ── General settings (logs + chart options) ──────────────────── */
 
 /** Max log entries shown in the Logs screen. Default 500. */
@@ -202,6 +252,18 @@ internal fun themeMode(context: Context): Int {
 internal fun setThemeMode(context: Context, mode: Int) {
     context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
         .edit().putInt("theme_mode", mode).apply()
+}
+
+/* ── Light mode: keep webserver running only while app is foregrounded ── */
+
+internal fun isLightMode(context: Context): Boolean {
+    return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .getBoolean("light_mode", false)
+}
+
+internal fun setLightMode(context: Context, enabled: Boolean) {
+    context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        .edit().putBoolean("light_mode", enabled).apply()
 }
 
 /* ── Log retention: 0 = forever, else hours ────────────────────── */
