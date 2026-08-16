@@ -4,6 +4,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
@@ -191,6 +192,60 @@ public static org.json.JSONObject getStats() {
     }
 
     /**
+     * Ensure allowlist.txt contains UIDs for captive portal login packages
+     * so they can work properly (their traffic must pass through unblocked).
+     * This fixes the issue where AdGuard blocks captive portal login apps
+     * (com.google.android.captiveportallogin / com.android.captiveportallogin),
+     * causing the portal page to show blank/white screen.
+     * See: https://github.com/AdguardTeam/AdguardForAndroid/issues/2713
+     */
+    private static void ensureCaptivePortalAllowlist(Context context) {
+        try {
+            java.util.List<String> lines = new java.util.ArrayList<>();
+            // Existing allowlist entries (if any)
+            java.io.File allowlistFile = getResourcePath(context).resolve("allowlist.txt").toFile();
+            if (allowlistFile.exists()) {
+                java.io.BufferedReader reader = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(
+                                new java.io.FileInputStream(allowlistFile), "UTF-8"));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (!line.trim().isEmpty()) lines.add(line.trim());
+                }
+                reader.close();
+            }
+
+            // Add UIDs for captive portal login packages
+            String[] captivePackages = {
+                    "com.google.android.captiveportallogin",
+                    "com.android.captiveportallogin"
+            };
+            for (String pkg : captivePackages) {
+                try {
+                    int uid = context.getPackageManager()
+                            .getPackageUid(pkg, 0);
+                    if (!lines.contains(String.valueOf(uid))) {
+                        lines.add(String.valueOf(uid));
+                        Timber.d("Added captive portal UID %d (%s) to allowlist", uid, pkg);
+                    }
+                } catch (PackageManager.NameNotFoundException e) {
+                    // Package not installed, skip
+                }
+            }
+
+            // Write back
+            java.io.File dir = getResourcePath(context).toFile();
+            dir.mkdirs();
+            java.io.FileWriter writer = new java.io.FileWriter(
+                    new java.io.File(dir, "allowlist.txt"));
+            writer.write(String.join("\n", lines));
+            writer.close();
+        } catch (Exception e) {
+            Timber.w(e, "Failed to ensure captive portal allowlist");
+        }
+    }
+
+    /**
      * Start the web server, killing any stale instance first and waiting for
      * the port to be released before relaunching.
      */
@@ -203,6 +258,7 @@ public static org.json.JSONObject getStats() {
      *  3. 杀掉残留旧进程，等待端口释放；
      *  4. 以 root 身份（ShellUtils.runBundledExecutable）启动，
      *     传入 --bind/--http-port/--https-port 参数（来自偏好）。
+     *  5. 确保 captive portal login 包的 UID 在 allowlist 中。
      *
      * 注意：所有 Toast 必须通过 showToast() 切到主线程，
      * 否则在后台线程调用会抛 CalledFromWrongThreadException。
@@ -234,6 +290,9 @@ public static void startWebServer(Context context) {
             killBundledExecutable(WEB_SERVER_EXECUTABLE);
             try { Thread.sleep(600); } catch (InterruptedException ignored) {}
         }
+
+        // Ensure captive portal login UIDs are in allowlist.txt
+        ensureCaptivePortalAllowlist(context);
 
         String params = "--resources " + resourcePath.toAbsolutePath() +
                 " --debug --bind " + (isBindAll(context) ? "all" : "loop") +
@@ -668,7 +727,7 @@ private static String computeSubjectHashOld(Path certFile)
         return context.getFilesDir().toPath().resolve(WEB_SERVER_EXECUTABLE);
     }
 
-    // ── Private helpers ──────────────────────────────────────────
+    // ── Private helpers ──────────────────────
 
     private static void ensureStaticResources(Context context, Path target) {
         android.content.res.AssetManager am = context.getAssets();
