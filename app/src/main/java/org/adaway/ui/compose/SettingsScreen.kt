@@ -529,7 +529,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                         )
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             IconButton(onClick = {
-                                                context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                                (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                                                     .setPrimaryClip(android.content.ClipData.newPlainText("ADBlock CA Fingerprint", fingerprint))
                                                 Toast.makeText(context, "指纹已复制", Toast.LENGTH_SHORT).show()
                                             }) {
