@@ -12,6 +12,7 @@ package org.adaway.ui.compose
  */
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Public
@@ -210,11 +212,29 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                         else stringResource(R.string.compose_sync_hosts_subtitle),
                         onClick = { viewModel.syncHosts() },
                     )
-                    Text(
-                        stringResource(R.string.compose_legacy_removed),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    // Classic interface entry point
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { try { context.startActivity(Intent(context, org.adaway.ui.home.HomeActivity::class.java)) } catch (e: Exception) { Toast.makeText(context, "Failed to open classic interface", Toast.LENGTH_SHORT).show() } }
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Apps,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Column {
+                            Text(stringResource(R.string.compose_legacy_ui), style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                stringResource(R.string.compose_legacy_ui_subtitle),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -228,8 +248,8 @@ fun OverviewScreen(viewModel: StatsViewModel) {
  * 功能：
  *  - 启停开关（调用 WebServerUtils.start/stopWebServer）
  *  - 显示当前 HTTP/HTTPS 端口与累计统计摘要
- *  - “打开测试页”按钮（https://localhost:<port>/internal-test）
- *  - “设置”按钮（跳转 PrefsActivity 旧版设置页）
+ *  - "打开测试页"按钮（https://localhost:<port>/internal-test）
+ *  - "设置"按钮（跳转 PrefsActivity 旧版设置页）
  *
  * 设计意图：把用户最常用的 webserver 操作从设置页
  * 提升到首页，利用概览页空位，减少跳转层级。
