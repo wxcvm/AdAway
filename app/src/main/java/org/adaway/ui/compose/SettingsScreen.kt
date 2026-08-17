@@ -676,29 +676,31 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                                     .setPrimaryClip(android.content.ClipData.newPlainText("ADBlock CA Fingerprint", fingerprint))
                                                 Toast.makeText(context, "指纹已复制", Toast.LENGTH_SHORT).show()
                                             }) {
-                                                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy")
+                                                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy fingerprint")
                                             }
                                             IconButton(onClick = {
+                                                // Generate QR code for fingerprint sharing
                                                 val qrData = "ADBlock CA SHA-256 Fingerprint:\n$fingerprint"
-                                                val writer = QRCodeWriter()
-                                                val hints = java.util.EnumMap(EncodeHintType::class.java)
-                                                hints[EncodeHintType.ERROR_CORRECTION] = ErrorCorrectionLevel.M
-                                                val bitMatrix = writer.encode(qrData, BarcodeFormat.QR_CODE, 256, 256, hints)
-                                                val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+                                                val writer = com.google.zxing.qrcode.QRCodeWriter()
+                                                val hints = mapOf(com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M)
+                                                val bitMatrix = writer.encode(qrData, com.google.zxing.BarcodeFormat.QR_CODE, 256, 256, hints)
+                                                val bitmap = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
                                                 for (x in 0 until 256) {
                                                     for (y in 0 until 256) {
-                                                        bitmap.setPixel(x, y, if (bitMatrix[x, y]) 0xFF000000 else 0xFFFFFFFF)
+                                                        bitmap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
                                                     }
                                                 }
-                                                val uri = saveBitmapToCache(context, bitmap, "adblock_ca_qr.png")
+                                                // Share via system share sheet
+                                                val uri = saveBitmapToCache(context, bitmap, "adblock_ca_fingerprint.png")
                                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                                     type = "image/png"
                                                     putExtra(Intent.EXTRA_STREAM, uri)
+                                                    putExtra(Intent.EXTRA_TEXT, qrData)
                                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                                 }
-                                                context.startActivity(Intent.createChooser(shareIntent, "分享二维码"))
+                                                context.startActivity(Intent.createChooser(shareIntent, "分享证书指纹"))
                                             }) {
-                                                Icon(Icons.Outlined.QrCode, contentDescription = "QR Code")
+                                                Icon(Icons.Outlined.QrCode, contentDescription = "Share QR code")
                                             }
                                         }
                                     }
@@ -706,100 +708,44 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             }
                         }
                     }
-                }
-            }
-
-            // ── Block images settings ──
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                    Spacer(Modifier.height(4.dp))
+                    // 导出证书到 Download 目录（供其他设备/模块使用）
+                    OutlinedButton(
+                        onClick = { exportCertificate(context) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Save,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.compose_settings_cert_export))
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    // ── 自定义拦截占位图 ──
                     Text(
                         stringResource(R.string.compose_settings_block_image_title),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        stringResource(R.string.compose_settings_block_image_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    var blockImages by remember {
-                        mutableStateOf(org.adaway.util.WebServerUtils.isBlockImagesEnabled(context))
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_block_image_enable),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_block_image_enable_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = blockImages,
-                            onCheckedChange = { v ->
-                                blockImages = v
-                                org.adaway.util.WebServerUtils.setBlockImagesEnabled(context, v)
-                            },
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        stringResource(R.string.compose_settings_block_image_mode),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(4.dp))
-                    var blockMode by remember {
-                        mutableStateOf(org.adaway.util.WebServerUtils.getBlockImageMode(context))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(
-                            Triple(0, R.string.compose_settings_block_image_placeholder, 0),
-                            Triple(1, R.string.compose_settings_block_image_1x1, 1),
-                            Triple(2, R.string.compose_settings_block_image_custom, 2),
-                        ).forEach { (mode, labelRes, _) ->
-                            FilterChip(
-                                selected = blockMode == mode,
-                                onClick = {
-                                    blockMode = mode
-                                    org.adaway.util.WebServerUtils.setBlockImageMode(context, mode)
-                                },
-                                label = { Text(stringResource(labelRes)) },
-                            )
+                    // ActivityResult launcher for picking custom block image
+                    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+                        if (uri != null) {
+                            val success = org.adaway.util.WebServerUtils.setCustomBlockImage(context, uri)
+                            android.widget.Toast.makeText(
+                                context,
+                                if (success) R.string.pref_webserver_block_image_success
+                                else R.string.pref_webserver_block_image_failed,
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    // Custom block image URL input
-                    var customUrl by remember { mutableStateOf(org.adaway.util.WebServerUtils.getCustomBlockImageUrl(context)) }
-                    androidx.compose.material3.TextField(
-                        value = customUrl,
-                        onValueChange = { customUrl = it },
-                        label = { Text(stringResource(R.string.compose_settings_block_image_custom_url)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = androidx.compose.ui.text.input.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Url),
-                        keyboardActions = androidx.compose.ui.text.input.KeyboardActions(onDone = {
-                            org.adaway.util.WebServerUtils.setCustomBlockImageUrl(context, customUrl)
-                        }),
-                    )
-                    Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
+                        OutlinedButton(
                             onClick = {
-                                org.adaway.util.WebServerUtils.setCustomBlockImageUrl(context, "https://via.placeholder.com/1x1")
-                                customUrl = "https://via.placeholder.com/1x1"
-                                Toast.makeText(context, R.string.pref_webserver_block_image_choose, Toast.LENGTH_SHORT).show()
+                                pickImageLauncher.launch("image/*")
                             },
                             modifier = Modifier.weight(1f),
                         ) {
@@ -962,34 +908,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             )
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        stringResource(R.string.compose_settings_chart_range),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    var range by remember { mutableStateOf(chartRange(context)) }
-                    LaunchedEffect(Unit) { range = chartRange(context) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(
-                            Triple(0, R.string.compose_settings_chart_range_24h, 0),
-                            Triple(1, R.string.compose_settings_chart_range_7d, 1),
-                            Triple(2, R.string.compose_settings_chart_range_30d, 2),
-                            Triple(3, R.string.compose_settings_chart_range_all, 3),
-                        ).forEach { (r, labelRes, _) ->
-                            FilterChip(
-                                selected = range == r,
-                                onClick = {
-                                    range = r
-                                    setChartRange(context, r)
-                                },
-                                label = { Text(stringResource(labelRes)) },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    // Real-time toggle
+                    Spacer(Modifier.height(12.dp))
+                    // 实时推送开关（WebSocket）
                     var realtime by remember { mutableStateOf(isRealtimeEnabled(context)) }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -997,7 +917,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                stringResource(R.string.compose_settings_realtime_title),
+                                stringResource(R.string.compose_settings_realtime),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                             Text(
@@ -1011,13 +931,15 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             onCheckedChange = { v ->
                                 realtime = v
                                 setRealtimeEnabled(context, v)
+                                // 实际启停 WebSocket 连接
+                                if (v) viewModel.startRealtime() else viewModel.stopRealtime()
                             },
                         )
                     }
                 }
             }
 
-            // ── App monitoring (per-uid) ──
+            // ── Allowlist (bypass blocking) ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -1025,77 +947,196 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 ),
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_title),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_warning),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 默认白名单（系统门户登录，自动维护）
                     Text(
-                        stringResource(R.string.compose_settings_app_title),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        stringResource(R.string.compose_settings_app_hint),
-                        style = MaterialTheme.typography.bodySmall,
+                        stringResource(R.string.compose_settings_allowlist_default),
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(4.dp))
+                    defaultAllowlistUids(context).forEach { uid ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                appNameForUid(uid),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_uid, uid),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(8.dp))
-                    if (apps.isEmpty()) {
+                    // 用户放行的应用（可移除）
+                    Text(
+                        stringResource(R.string.compose_settings_allowlist_user),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val userUids = userAllowedUids(context)
+                    if (userUids.isEmpty()) {
                         Text(
-                            stringResource(R.string.compose_settings_app_empty),
-                            style = MaterialTheme.typography.bodyMedium,
+                            stringResource(R.string.compose_settings_allowlist_empty),
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            apps.forEach { app ->
-                                val monitored = isAppMonitored(context, app.uid)
-                                val allowed = isAppAllowed(context, app.uid)
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            appNameForUid(app.uid),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Text(
-                                            stringResource(
-                                                R.string.compose_settings_app_sub,
-                                                app.connections,
-                                                app.requests,
-                                                app.blocked,
-                                            ),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    // 放行开关：该应用流量完全绕过拦截
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Switch(
-                                            checked = allowed,
-                                            onCheckedChange = { v ->
-                                                setAppAllowed(context, app.uid, v)
-                                                refreshKey++
-                                            },
-                                        )
-                                        Text(
-                                            stringResource(R.string.compose_settings_app_allow),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (allowed) MaterialTheme.colorScheme.primary
-                                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    Spacer(Modifier.width(4.dp))
+                        userUids.forEach { uid ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    appNameForUid(uid),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    stringResource(R.string.compose_settings_allowlist_uid, uid),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                IconButton(onClick = {
+                                    setAppAllowed(context, uid, false)
+                                    refreshKey++
+                                }) {
+                                    Icon(
+                                        Icons.Outlined.RemoveCircle,
+                                        contentDescription = stringResource(R.string.compose_settings_allowlist_remove),
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── App monitoring ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Apps,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                stringResource(R.string.compose_settings_apps_title),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_apps_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (apps.isEmpty()) {
+                        Text(
+                            stringResource(R.string.compose_settings_apps_empty),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        // Re-read switch states after toggling (refreshKey changes)
+                        apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
+                            val monitored = remember(refreshKey, app.uid) {
+                                isAppMonitored(context, app.uid)
+                            }
+                            val allowed = remember(refreshKey, app.uid) {
+                                isAppAllowed(context, app.uid)
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        appNameForUid(app.uid),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        stringResource(
+                                            R.string.compose_settings_app_sub,
+                                            app.connections,
+                                            app.requests,
+                                            app.blocked,
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                // 放行开关：该应用流量完全绕过拦截
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Switch(
-                                        checked = monitored,
-                                        onCheckedChange = { newValue ->
-                                            setAppMonitored(context, app.uid, newValue)
+                                        checked = allowed,
+                                        onCheckedChange = { v ->
+                                            setAppAllowed(context, app.uid, v)
                                             refreshKey++
                                         },
                                     )
+                                    Text(
+                                        stringResource(R.string.compose_settings_app_allow),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (allowed) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
+                                Spacer(Modifier.width(4.dp))
+                                Switch(
+                                    checked = monitored,
+                                    onCheckedChange = { newValue ->
+                                        setAppMonitored(context, app.uid, newValue)
+                                        refreshKey++
+                                    },
+                                )
                             }
                         }
                     }
@@ -1128,7 +1169,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             pkgInfo?.versionName ?: "?",
                         ),
                         style = MaterialTheme.typography.bodyMedium,
-                    )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         stringResource(R.string.compose_settings_about_license),
@@ -1161,6 +1201,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                }
                 }
             }
         }
@@ -1325,11 +1366,4 @@ private fun saveBitmapToCache(context: Context, bitmap: Bitmap, filename: String
         "${context.packageName}.fileprovider",
         cacheFile
     )
-}
-
-private fun appNameForUid(uid: Int): String {
-    val pm = LocalContext.current.packageManager
-    val packages = pm.getPackagesForUid(uid)
-    return packages?.firstOrNull()?.let { pm.getApplicationLabel(pm.getApplicationInfo(it, 0)).toString() }
-        ?: "UID $uid"
 }
