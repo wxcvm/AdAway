@@ -676,31 +676,30 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                                     .setPrimaryClip(android.content.ClipData.newPlainText("ADBlock CA Fingerprint", fingerprint))
                                                 Toast.makeText(context, "指纹已复制", Toast.LENGTH_SHORT).show()
                                             }) {
-                                                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy fingerprint")
+                                                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy")
                                             }
                                             IconButton(onClick = {
-                                                // Generate QR code for fingerprint sharing
                                                 val qrData = "ADBlock CA SHA-256 Fingerprint:\n$fingerprint"
-                                                val writer = com.google.zxing.qrcode.QRCodeWriter()
-                                                val hints = mapOf(com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M)
-                                                val bitMatrix = writer.encode(qrData, com.google.zxing.BarcodeFormat.QR_CODE, 256, 256, hints)
-                                                val bitmap = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
+                                                val writer = QRCodeWriter()
+                                                val hints = mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)
+                                                val bitMatrix = writer.encode(qrData, BarcodeFormat.QR_CODE, 256, 256, hints)
+                                                val bitMap = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
                                                 for (x in 0 until 256) {
                                                     for (y in 0 until 256) {
-                                                        bitmap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+                                                        bitMap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
                                                     }
                                                 }
-                                                // Share via system share sheet
-                                                val uri = saveBitmapToCache(context, bitmap, "adblock_ca_fingerprint.png")
-                                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                    type = "image/png"
-                                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                                    putExtra(Intent.EXTRA_TEXT, qrData)
-                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                val uri = saveBitmapToCache(context, bitMap, "adblock_ca_fingerprint.png")
+                                                if (uri != null) {
+                                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                        type = "image/png"
+                                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                    }
+                                                    context.startActivity(Intent.createChooser(shareIntent, "Share QR Code"))
                                                 }
-                                                context.startActivity(Intent.createChooser(shareIntent, "分享证书指纹"))
                                             }) {
-                                                Icon(Icons.Outlined.QrCode, contentDescription = "Share QR code")
+                                                Icon(Icons.Outlined.QrCode, contentDescription = "QR Code")
                                             }
                                         }
                                     }
@@ -708,66 +707,18 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             }
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
-                    // 导出证书到 Download 目录（供其他设备/模块使用）
+                    // 导出 CA 证书
+                    Spacer(Modifier.height(12.dp))
                     OutlinedButton(
                         onClick = { exportCertificate(context) },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Icon(
-                            Icons.Outlined.Save,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.compose_settings_cert_export))
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    // ── 自定义拦截占位图 ──
-                    Text(
-                        stringResource(R.string.compose_settings_block_image_title),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    // ActivityResult launcher for picking custom block image
-                    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-                        if (uri != null) {
-                            val success = org.adaway.util.WebServerUtils.setCustomBlockImage(context, uri)
-                            android.widget.Toast.makeText(
-                                context,
-                                if (success) R.string.pref_webserver_block_image_success
-                                else R.string.pref_webserver_block_image_failed,
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                pickImageLauncher.launch("image/*")
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.compose_settings_block_image_choose))
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                // 恢复默认
-                                org.adaway.util.WebServerUtils.resetBlockImagesToDefault(context)
-                                android.widget.Toast.makeText(
-                                    context,
-                                    R.string.pref_webserver_block_image_reset_success,
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.compose_settings_block_image_reset))
-                        }
                     }
                 }
             }
+
+            // ── Logs settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -786,42 +737,37 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     )
                     Spacer(Modifier.height(8.dp))
                     var limit by remember { mutableStateOf(logLimit(context)) }
-                    // Sync from preferences on composition start
-                    LaunchedEffect(Unit) { limit = logLimit(context) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(100, 500, 1000, 2000).forEach { l ->
-                            FilterChip(
-                                selected = limit == l,
-                                onClick = {
-                                    limit = l
-                                    setLogLimit(context, l)
-                                },
-                                label = { Text(stringResource(R.string.compose_settings_logs_limit, l)) },
-                            )
-                        }
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            stringResource(R.string.compose_settings_logs_limit),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        androidx.compose.material3.TextField(
+                            value = limit.toString(),
+                            onValueChange = { s ->
+                                val v = s.toIntOrNull() ?: 500
+                                limit = v.coerceIn(100, 5000)
+                                setLogLimit(context, limit)
+                            },
+                            modifier = Modifier.width(120.dp),
+                            singleLine = true,
+                            keyboardOptions = androidx.compose.ui.text.input.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                            label = { Text("Limit") },
+                        )
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(R.string.compose_settings_logs_retention),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(8.dp))
                     var retention by remember { mutableStateOf(logRetentionHours(context)) }
-                    LaunchedEffect(Unit) { retention = logRetentionHours(context) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            Triple(0, R.string.compose_settings_logs_retention_forever, 0),
-                            Triple(24, R.string.compose_settings_logs_retention_1d, 24),
-                            Triple(168, R.string.compose_settings_logs_retention_7d, 168),
-                            Triple(720, R.string.compose_settings_logs_retention_30d, 720),
-                        ).forEach { (hours, labelRes, _) ->
+                            0 to R.string.compose_settings_logs_forever,
+                            24 to R.string.compose_settings_logs_1d,
+                            168 to R.string.compose_settings_logs_7d,
+                            720 to R.string.compose_settings_logs_30d,
+                        ).forEach { (hours, labelRes) ->
                             FilterChip(
                                 selected = retention == hours,
-                                onClick = {
-                                    retention = hours
-                                    setLogRetentionHours(context, hours)
-                                },
+                                onClick = { retention = hours; setLogRetentionHours(context, hours) },
                                 label = { Text(stringResource(labelRes)) },
                             )
                         }
@@ -829,7 +775,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // ── Statistics chart settings ──
+            // ── Charts settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -847,69 +793,59 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
-                    var refreshKey by remember { mutableStateOf(0) }
-                    val chartToggles = listOf(
-                        Triple("chart_lifetime", R.string.compose_settings_chart_lifetime, R.string.compose_settings_chart_lifetime_hint),
-                        Triple("chart_rate", R.string.compose_settings_chart_rate, R.string.compose_settings_chart_rate_hint),
-                        Triple("chart_donut", R.string.compose_settings_chart_donut, R.string.compose_settings_chart_donut_hint),
-                        Triple("chart_trend", R.string.compose_settings_chart_trend, R.string.compose_settings_chart_trend_hint),
-                        Triple("chart_conn", R.string.compose_settings_chart_conn, R.string.compose_settings_chart_conn_hint),
-                        Triple("chart_apps", R.string.compose_settings_chart_apps, R.string.compose_settings_chart_apps_hint),
-                        Triple("chart_certs", R.string.compose_settings_chart_certs, R.string.compose_settings_chart_certs_hint),
-                    )
-                    chartToggles.forEach { (key, labelRes, hintRes) ->
-                        val enabled = remember(refreshKey, key) { isChartEnabled(context, key) }
+                    // Toggle each chart
+                    listOf(
+                        "chart_donut" to R.string.compose_settings_charts_donut,
+                        "chart_trend" to R.string.compose_settings_charts_trend,
+                        "chart_bars" to R.string.compose_settings_charts_bars,
+                        "chart_apps" to R.string.compose_settings_charts_apps,
+                        "chart_certs" to R.string.compose_settings_charts_certs,
+                    ).forEach { (key, labelRes) ->
+                        var enabled by remember { mutableStateOf(isChartEnabled(context, key)) }
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(stringResource(labelRes), style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    stringResource(hintRes),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = enabled,
-                                onCheckedChange = { v ->
-                                    setChartEnabled(context, key, v)
-                                    refreshKey++
-                                },
-                            )
+                            Text(stringResource(labelRes), style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.weight(1f))
+                            Switch(checked = enabled, onCheckedChange = { v -> enabled = v; setChartEnabled(context, key, v) })
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        stringResource(R.string.compose_settings_chart_style),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(8.dp))
+                    // Bar chart style
                     var style by remember { mutableStateOf(chartStyle(context)) }
-                    // Sync from preferences on composition start
-                    LaunchedEffect(Unit) { style = chartStyle(context) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            R.string.compose_stats_style_bars to 0,
-                            R.string.compose_stats_style_stacked to 1,
-                            R.string.compose_stats_style_area to 2,
-                        ).forEach { (labelRes, s) ->
+                            0 to R.string.compose_settings_charts_style_side,
+                            1 to R.string.compose_settings_charts_style_stack,
+                            2 to R.string.compose_settings_charts_style_area,
+                        ).forEach { (s, labelRes) ->
                             FilterChip(
                                 selected = style == s,
-                                onClick = {
-                                    style = s
-                                    setChartStyle(context, s)
-                                },
+                                onClick = { style = s; setChartStyle(context, s) },
                                 label = { Text(stringResource(labelRes)) },
                             )
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    // 实时推送开关（WebSocket）
+                    Spacer(Modifier.height(8.dp))
+                    // Trend chart range
+                    var range by remember { mutableStateOf(chartRange(context)) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            0 to R.string.compose_settings_charts_range_24h,
+                            1 to R.string.compose_settings_charts_range_7d,
+                            2 to R.string.compose_settings_charts_range_30d,
+                            3 to R.string.compose_settings_charts_range_all,
+                        ).forEach { (r, labelRes) ->
+                            FilterChip(
+                                selected = range == r,
+                                onClick = { range = r; setChartRange(context, r) },
+                                label = { Text(stringResource(labelRes)) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // Realtime toggle
                     var realtime by remember { mutableStateOf(isRealtimeEnabled(context)) }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -917,7 +853,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                stringResource(R.string.compose_settings_realtime),
+                                stringResource(R.string.compose_settings_realtime_title),
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                             Text(
@@ -926,217 +862,90 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(
-                            checked = realtime,
-                            onCheckedChange = { v ->
-                                realtime = v
-                                setRealtimeEnabled(context, v)
-                                // 实际启停 WebSocket 连接
-                                if (v) viewModel.startRealtime() else viewModel.stopRealtime()
-                            },
-                        )
+                        Switch(checked = realtime, onCheckedChange = { v -> realtime = v; setRealtimeEnabled(context, v) })
                     }
                 }
             }
 
-            // ── Allowlist (bypass blocking) ──
+            // ── App monitoring (per-uid) ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
+                key = "apps_$refreshKey",
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.Warning,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                stringResource(R.string.compose_settings_allowlist_title),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_allowlist_warning),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    // 默认白名单（系统门户登录，自动维护）
                     Text(
-                        stringResource(R.string.compose_settings_allowlist_default),
-                        style = MaterialTheme.typography.labelMedium,
+                        stringResource(R.string.compose_settings_app_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_settings_app_hint),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.height(4.dp))
-                    defaultAllowlistUids(context).forEach { uid ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                appNameForUid(uid),
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_allowlist_uid, uid),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    // 用户放行的应用（可移除）
-                    Text(
-                        stringResource(R.string.compose_settings_allowlist_user),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    val userUids = userAllowedUids(context)
-                    if (userUids.isEmpty()) {
-                        Text(
-                            stringResource(R.string.compose_settings_allowlist_empty),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        userUids.forEach { uid ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    appNameForUid(uid),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    stringResource(R.string.compose_settings_allowlist_uid, uid),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                IconButton(onClick = {
-                                    setAppAllowed(context, uid, false)
-                                    refreshKey++
-                                }) {
-                                    Icon(
-                                        Icons.Outlined.RemoveCircle,
-                                        contentDescription = stringResource(R.string.compose_settings_allowlist_remove),
-                                        tint = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── App monitoring ──
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.Apps,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                stringResource(R.string.compose_settings_apps_title),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_apps_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
                     Spacer(Modifier.height(8.dp))
                     if (apps.isEmpty()) {
                         Text(
-                            stringResource(R.string.compose_settings_apps_empty),
-                            style = MaterialTheme.typography.bodySmall,
+                            stringResource(R.string.compose_settings_app_empty),
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        // Re-read switch states after toggling (refreshKey changes)
-                        apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
-                            val monitored = remember(refreshKey, app.uid) {
-                                isAppMonitored(context, app.uid)
-                            }
-                            val allowed = remember(refreshKey, app.uid) {
-                                isAppAllowed(context, app.uid)
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        appNameForUid(app.uid),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        stringResource(
-                                            R.string.compose_settings_app_sub,
-                                            app.connections,
-                                            app.requests,
-                                            app.blocked,
-                                        ),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                // 放行开关：该应用流量完全绕过拦截
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            apps.forEach { app ->
+                                val monitored = isAppMonitored(context, app.uid)
+                                val allowed = isAppAllowed(context, app.uid)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            appNameForUid(app.uid),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            stringResource(
+                                                R.string.compose_settings_app_sub,
+                                                app.connections,
+                                                app.requests,
+                                                app.blocked,
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    // 放行开关：该应用流量完全绕过拦截
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Switch(
+                                            checked = allowed,
+                                            onCheckedChange = { v ->
+                                                setAppAllowed(context, app.uid, v)
+                                                refreshKey++
+                                            },
+                                        )
+                                        Text(
+                                            stringResource(R.string.compose_settings_app_allow),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (allowed) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Spacer(Modifier.width(4.dp))
                                     Switch(
-                                        checked = allowed,
-                                        onCheckedChange = { v ->
-                                            setAppAllowed(context, app.uid, v)
+                                        checked = monitored,
+                                        onCheckedChange = { newValue ->
+                                            setAppMonitored(context, app.uid, newValue)
                                             refreshKey++
                                         },
                                     )
-                                    Text(
-                                        stringResource(R.string.compose_settings_app_allow),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (allowed) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
                                 }
-                                Spacer(Modifier.width(4.dp))
-                                Switch(
-                                    checked = monitored,
-                                    onCheckedChange = { newValue ->
-                                        setAppMonitored(context, app.uid, newValue)
-                                        refreshKey++
-                                    },
-                                )
                             }
                         }
                     }
@@ -1176,6 +985,32 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(12.dp))
+                    // Classic interface entry point
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                context.startActivity(Intent(context, org.adaway.ui.home.HomeActivity::class.java))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Failed to open classic interface", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Apps,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.compose_legacy_ui))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            stringResource(R.string.compose_legacy_ui_subtitle),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -1183,7 +1018,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
 }
 
 /* ── 备份 / 恢复 ──────────────────────────────────────────────── */
-
 /**
  * 导出 CA 证书到 Download/adblock-ca.crt，供其他设备/模块（如 Magisk 证书模块）使用。
  * Android 11+ scoped storage：通过 MediaStore 写入公共 Download 目录（无需存储权限）。
@@ -1223,23 +1057,14 @@ private fun exportCertificate(context: Context) {
  */
 private fun exportBackup(context: Context) {
     try {
-        val prefsNames = listOf(PREFS_GENERAL, PREFS_MONITOR, "compose_webserver")
-        val json = org.json.JSONObject()
-        prefsNames.forEach { name ->
-            val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-            val section = org.json.JSONObject()
-            prefs.all.forEach { (k, v) ->
-                when (v) {
-                    is Boolean -> section.put(k, v)
-                    is Int -> section.put(k, v)
-                    is Long -> section.put(k, v)
-                    is Float -> section.put(k, v)
-                    is String -> section.put(k, v)
-                    is java.util.Set<*> -> section.put(k, org.json.JSONArray(v.toList()))
-                }
-            }
-            json.put(name, section)
-        }
+        val prefs = context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+        val monitorPrefs = context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
+        val wsPrefs = context.getSharedPreferences("compose_webserver", Context.MODE_PRIVATE)
+        val json = org.json.JSONObject().apply {
+            put("general", JSONObject(prefs.all))
+            put("monitor", JSONObject(monitorPrefs.all))
+            put("webserver", JSONObject(wsPrefs.all))
+        }.toString(2)
         val resolver = context.contentResolver
         val values = android.content.ContentValues().apply {
             put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "adblock-backup.json")
@@ -1247,98 +1072,92 @@ private fun exportBackup(context: Context) {
             put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
         }
         val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        if (uri == null) {
-            Toast.makeText(context, "Backup failed: no MediaStore slot", Toast.LENGTH_LONG).show()
-            return
-        }
-        resolver.openOutputStream(uri)?.use { out ->
-            out.write(json.toString(2).toByteArray())
-        } ?: throw java.io.IOException("cannot open output stream")
-        Toast.makeText(context, "Backup saved: Download/adblock-backup.json", Toast.LENGTH_LONG).show()
+        if (uri == null) throw java.io.IOException("no MediaStore slot")
+        resolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+        Toast.makeText(context, "Backup exported: Download/adblock-backup.json", Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
         Timber.w(e, "Failed to export backup")
-        Toast.makeText(context, "Backup failed: ${e.message}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }
 
-/**
- * 导入备份：用文件选择器挑选 adblock-backup.json，
- * 解析后逐项写回偏好，完成后回调（重启应用使全部生效）。
- */
-private fun importBackup(
-    context: Context,
-    viewModel: StatsViewModel,
-    onDone: () -> Unit,
-) {
+/** 从 Download/adblock-backup.json 恢复所有偏好。 */
+private fun importBackup(context: Context, viewModel: StatsViewModel, onSuccess: () -> Unit) {
     try {
-        // 通过 MediaStore 查询 Download 中的 adblock-backup.json（scoped storage 兼容）
         val resolver = context.contentResolver
-        val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
-        var text: String? = null
-        resolver.query(
-            collection,
-            projection,
+        val cursor = resolver.query(
+            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(android.provider.MediaStore.MediaColumns._ID),
             "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?",
             arrayOf("adblock-backup.json"),
-            "${android.provider.MediaStore.MediaColumns.DATE_MODIFIED} DESC",
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(0)
-                val uri = android.content.ContentUris.withAppendedId(collection, id)
-                text = resolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-            }
-        }
-        if (text == null) {
-            Toast.makeText(context, "No backup file found in Downloads", Toast.LENGTH_LONG).show()
+            null
+        )
+        if (cursor == null || !cursor.moveToFirst()) {
+            Toast.makeText(context, "Backup file not found in Download", Toast.LENGTH_LONG).show()
             return
         }
-        val json = org.json.JSONObject(text)
-        val prefsNames = listOf(PREFS_GENERAL, PREFS_MONITOR, "compose_webserver")
-        prefsNames.forEach { name ->
-            val section = json.optJSONObject(name) ?: return@forEach
-            val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-            val editor = prefs.edit()
-            // 先清空再写入
-            prefs.all.keys.forEach { editor.remove(it) }
-            val it = section.keys()
-            while (it.hasNext()) {
-                val k = it.next()
-                val v = section.get(k)
-                when (v) {
-                    is Boolean -> editor.putBoolean(k, v)
-                    is Int -> editor.putInt(k, v)
-                    is Long -> editor.putLong(k, v)
-                    is Double -> editor.putInt(k, v.toInt())
-                    is String -> editor.putString(k, v)
-                    is org.json.JSONArray -> {
-                        val list = mutableListOf<String>()
-                        for (i in 0 until v.length()) list.add(v.getString(i))
-                        editor.putStringSet(k, list.toSet())
+        val id = cursor.getLong(0)
+        cursor.close()
+        val uri = android.content.ContentUris.withAppendedId(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+        val json = resolver.openInputStream(uri)?.use { it.readText() } ?: throw java.io.IOException("empty")
+        val obj = org.json.JSONObject(json)
+        obj.names()?.let { names ->
+            for (i in 0 until names.length()) {
+                val key = names.getString(i)
+                val subObj = obj.getJSONObject(key)
+                val targetPrefs = when (key) {
+                    "general" -> context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+                    "monitor" -> context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
+                    "webserver" -> context.getSharedPreferences("compose_webserver", Context.MODE_PRIVATE)
+                    else -> continue
+                }
+                targetPrefs.edit().clear().apply()
+                val subNames = subObj.names()
+                if (subNames != null) {
+                    for (j in 0 until subNames.length()) {
+                        val k = subNames.getString(j)
+                        val v = subObj.get(k)
+                        when (v) {
+                            is Boolean -> targetPrefs.edit().putBoolean(k, v).apply()
+                            is Int -> targetPrefs.edit().putInt(k, v).apply()
+                            is Long -> targetPrefs.edit().putLong(k, v).apply()
+                            is Float -> targetPrefs.edit().putFloat(k, v).apply()
+                            is String -> targetPrefs.edit().putString(k, v).apply()
+                            else -> {}
+                        }
                     }
                 }
             }
-            editor.apply()
         }
-        Toast.makeText(context, "Backup restored — restarting…", Toast.LENGTH_LONG).show()
-        onDone()
+        Toast.makeText(context, "Backup restored — restarting app", Toast.LENGTH_LONG).show()
+        onSuccess()
     } catch (e: Exception) {
         Timber.w(e, "Failed to import backup")
-        Toast.makeText(context, "Restore failed: ${e.message}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }
 
-/**
- * 保存 Bitmap 到缓存目录并返回 content:// URI 供分享使用。
- */
-private fun saveBitmapToCache(context: Context, bitmap: Bitmap, filename: String): Uri {
-    val cacheFile = File(context.cacheDir, filename)
-    FileOutputStream(cacheFile).use { out ->
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+/** 保存 bitmap 到缓存并返回 content:// URI（用于分享二维码）。 */
+private fun saveBitmapToCache(context: Context, bitmap: android.graphics.Bitmap, fileName: String): android.net.Uri? {
+    try {
+        val file = java.io.File(context.cacheDir, fileName)
+        java.io.FileOutputStream(file).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        return androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    } catch (e: Exception) {
+        Timber.w(e, "Failed to save bitmap to cache")
+        return null
     }
-    return androidx.core.content.FileProvider.getUriForFile(
-        context,
-        "${context.packageName}.fileprovider",
-        cacheFile
-    )
+}
+
+/** 解析 uid 对应的应用名（优先用统计里的名字，否则查包名）。 */
+private fun appNameForUid(uid: Int): String {
+    return try {
+        val pm = LocalContext.current.packageManager
+        val pkgs = pm.getPackagesForUid(uid)
+        if (pkgs != null && pkgs.isNotEmpty()) {
+            pm.getApplicationLabel(pm.getApplicationInfo(pkgs[0], 0)).toString()
+        } else "UID $uid"
+    } catch (e: Exception) {
+        "UID $uid"
+    }
 }
