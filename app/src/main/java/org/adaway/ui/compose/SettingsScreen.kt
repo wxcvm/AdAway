@@ -1169,6 +1169,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             pkgInfo?.versionName ?: "?",
                         ),
                         style = MaterialTheme.typography.bodyMedium,
+                    )
                     Spacer(Modifier.height(4.dp))
                     Text(
                         stringResource(R.string.compose_settings_about_license),
