@@ -88,22 +88,17 @@ jobs:
           IDS=$(curl -s -H "$HDR" "$API?per_page=100" | python3 -c "
           import sys, json
           try:
-          arts = json.load(sys.stdin).get('artifacts', [])
+              arts = json.load(sys.stdin).get('artifacts', [])
           except Exception:
-          arts = []
+              arts = []
           arts.sort(key=lambda a: a['created_at'], reverse=True)
           for a in arts[1:]:
-          print(a['id'])
+              print(a['id'])
           ")
           for id in $IDS; do
             curl -s -X DELETE -H "$HDR" "$API/$id" || true
           done
           echo "cleaned old artifact ids: $IDS"
-
-      # continue-on-error: the platform-side storage quota is recalculated
-      # every 6-12h; until then a fresh repo may still be rejected. Keep the
-      # artifact upload as best-effort so a transient quota rejection does not
-      # fail the whole pipeline.
       - name: Upload APK
         uses: actions/upload-artifact@v4
         continue-on-error: true
