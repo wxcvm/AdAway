@@ -66,25 +66,14 @@ public class AdAwayApplication extends Application {
                 android.os.Process.killProcess(android.os.Process.myPid());
             }
         });
-        // Light mode: when enabled, the web server only runs while the app
-        // is in the foreground (minimum process footprint). Stop it on
-        // background, restart it on foreground.
-        androidx.lifecycle.ProcessLifecycleOwner.get().getLifecycle().addObserver(
-                (androidx.lifecycle.LifecycleEventObserver) (owner, event) -> {
-                    if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
-                        if (org.adaway.ui.compose.SettingsScreenKt.isLightMode(getApplicationContext())) {
-                            Timber.d("Light mode: app backgrounded, stopping web server.");
-                            org.adaway.util.WebServerUtils.stopWebServer();
-                        }
-                    } else if (event == androidx.lifecycle.Lifecycle.Event.ON_START) {
-                        if (org.adaway.ui.compose.SettingsScreenKt.isLightMode(getApplicationContext())
-                                && PreferenceHelper.getWebServerEnabled(getApplicationContext())) {
-                            Timber.d("Light mode: app foregrounded, starting web server.");
-                            org.adaway.util.WebServerUtils.startWebServer(getApplicationContext());
-                        }
-                    }
-                });
+        // Light mode semantics (v2): the web server is a detached native
+        // process (setsid) that must keep running regardless of app
+        // foreground/background state. "Light mode" only means the app
+        // process does not need to stay resident after boot work is done
+        // (BootReceiver self-terminates). No lifecycle-driven start/stop
+        // of the web server is performed here anymore.
     }
+
 
     /**
      * Get the source model.
