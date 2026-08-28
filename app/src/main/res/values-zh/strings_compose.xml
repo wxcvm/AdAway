@@ -62,6 +62,8 @@
     <string name="compose_stats_uptime_days">运行时长</string>
     <string name="compose_stats_daily_peak">每日峰值拦截</string>
     <string name="compose_stats_active_apps">活跃应用</string>
+    <string name="compose_stats_active_apps_count">%1$d 个应用</string>
+    <string name="compose_stats_active_apps_count">%1$d 个应用</string>
     <string name="compose_stats_app_unknown">UID %1$d</string>
     <string name="compose_stats_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
     <string name="compose_stats_recent_certs">最近签发的证书</string>
@@ -220,7 +222,7 @@
     <string name="compose_rules_rule_redirect_hint">重定向目标（如 0.0.0.0）</string>
     <string name="compose_rules_delete_source_title">删除订阅源</string>
     <string name="compose_rules_delete_source_confirm">删除"%1$s"及其所有规则？此操作不可撤销。</string>
-    <string name="compose_rules_delete_source_hint">"%1$s"来自订阅源，下次同步后会恢复。请在下方的订阅源列表中禁用或移除该订阅源。</string>
+    <string name="compose_rules_delete_source_hint">“%1$s”来自订阅源，下次同步后会恢复。请在下方的订阅源列表中禁用或移除该订阅源。</string>
     <string name="compose_rules_ok">确定</string>
     <string name="compose_rules_source_url_hint">https://example.com/hosts.txt</string>
     <string name="compose_rules_add">添加</string>
