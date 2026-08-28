@@ -440,3 +440,5 @@ download-artifact@v8、action-gh-release@v3）会导致 CI 在解析 action 时�
 
 **修复：** 改为精确文件名 `find ... -maxdepth 1 -name 'app-release-unsigned.apk'`（AGP 的固定输出名），
 不再用子串排除。
+
+Trigger CI after all fixes (sign fix, retention-days 1, artifact quota cleared).
