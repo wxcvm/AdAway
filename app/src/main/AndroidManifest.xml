@@ -69,16 +69,6 @@
         android:theme="@style/Theme.AdAway"
         tools:ignore="GoogleAppIndexingWarning">
         <activity
-            android:name=".ui.home.HomeActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:theme="@style/Theme.AdAway.NoActionBar">
-            <!-- Launcher entry moved to the new Material 3 UI (MainActivity);
-                 HomeActivity is still reachable from the new UI via
-                 "Classic interface". -->
-        </activity>
-        <!-- New Material 3 Compose UI: now the main launcher entry -->
-        <activity
             android:name=".ui.compose.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
@@ -95,13 +85,13 @@
             android:name=".ui.welcome.WelcomeActivity"
             android:exported="false"
             android:label="@string/welcome_title"
-            android:parentActivityName=".ui.home.HomeActivity"
+            android:parentActivityName=".ui.compose.MainActivity"
             android:theme="@style/Theme.AdAway.NoActionBar.Red" />
         <activity
             android:name=".ui.hosts.HostsSourcesActivity"
             android:exported="false"
             android:label="@string/hosts_title"
-            android:parentActivityName=".ui.home.HomeActivity" />
+            android:parentActivityName=".ui.compose.MainActivity" />
         <activity
             android:name=".ui.source.SourceEditActivity"
             android:exported="false"
@@ -110,13 +100,13 @@
         <activity
             android:name=".ui.log.LogActivity"
             android:label="@string/shortcut_dns_requests"
-            android:parentActivityName=".ui.home.HomeActivity" />
+            android:parentActivityName=".ui.compose.MainActivity" />
         <activity
             android:name=".ui.lists.ListsActivity"
             android:exported="false"
             android:label="@string/lists_title"
             android:launchMode="singleTop"
-            android:parentActivityName=".ui.home.HomeActivity">
+            android:parentActivityName=".ui.compose.MainActivity">
             <meta-data
                 android:name="android.app.searchable"
                 android:resource="@xml/list_searchable" />
@@ -128,23 +118,23 @@
             android:name=".ui.help.HelpActivity"
             android:exported="false"
             android:label="@string/menu_help"
-            android:parentActivityName=".ui.home.HomeActivity" />
+            android:parentActivityName=".ui.compose.MainActivity" />
         <activity
             android:name=".ui.support.SupportActivity"
             android:exported="false"
             android:label="@string/support_title"
-            android:parentActivityName=".ui.home.HomeActivity"
+            android:parentActivityName=".ui.compose.MainActivity"
             android:theme="@style/Theme.AdAway.NoActionBar.Red" />
         <activity
             android:name=".ui.prefs.PrefsActivity"
             android:exported="false"
             android:label="@string/preferences_drawer_item"
-            android:parentActivityName=".ui.home.HomeActivity" />
+            android:parentActivityName=".ui.compose.MainActivity" />
         <activity
             android:name=".ui.update.UpdateActivity"
             android:exported="false"
             android:label="@string/update_title"
-            android:parentActivityName=".ui.home.HomeActivity"
+            android:parentActivityName=".ui.compose.MainActivity"
             android:theme="@style/Theme.AdAway.NoActionBar.Red" />
 
         <service
