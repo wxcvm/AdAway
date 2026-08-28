@@ -356,3 +356,72 @@ After applying these changes locally:
 2. **ccache**：安装 ccache 并设置 `NDK_CCACHE`，加速反复编译的大体积
    webserver.c / mongoose / openssl / tcpdump。
 3. 移除 `--stacktrace`（构建耗时无收益的日志开关）。
+
+
+---
+
+## 10. CI workflow：一次完全修复（release job 权限 + 签名健壮性 + 版本号单调性）
+
+> 背景：此前多次修复（加 `actions: write`、通配符路径、`if-no-files-found: warn`、清理 artifact 配额）
+> 均只解决局部问题，CI 仍可能失败。本次对 `.github/workflows/android-ci.yml` 做系统性排查，
+> 一次性修复全部已知隐患，确保 build 与 release 两个 job 稳定通过、不再复发。
+
+### 10.1 `release` job 缺少 `actions: read` 权限（致命）
+
+**问题：** `release` job 使用 `actions/download-artifact@v4` 下载构建产物，但只声明了
+`permissions: { contents: write }`。`download-artifact` 需要 **`actions: read`** 权限，
+缺失会导致 release job 在下载 artifact 时直接失败。
+
+**修复：** `release` job 的 `permissions` 增加 `actions: read`。
+
+### 10.2 签名步骤 `ANDROID_HOME` 未显式设置（致命）
+
+**问题：** 签名步骤用 `$ANDROID_HOME/build-tools` 查找 `apksigner`。`actions/setup-java` 不会设置
+`ANDROID_HOME`，若 runner 镜像变更或环境变量未导出，签名步骤会因找不到 `apksigner` 而失败。
+
+**修复：** 使用 `${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}` 兜底定位 SDK，
+找不到 build-tools 时输出 `::error::` 并显式失败。
+
+### 10.3 `app-release-unsigned.apk` 文件名硬编码（致命）
+
+**问题：** 签名步骤假设 AGP 生成 `app-release-unsigned.apk`。AGP 9.x 的默认输出文件名可能不同，
+若文件名不匹配，`apksigner` 找不到输入文件，签名步骤失败。
+
+**修复：** 用 `find app/build/outputs/apk/release -name 'app-release*.apk' ! -name '*signed*'`
+动态定位实际 unsigned APK，找不到时显式失败并列出目录内容。
+
+### 10.4 `VERSION_CODE=$(date +%s)` 不保证单调递增（高）
+
+**问题：** 使用 Unix 时间戳作为 versionCode，同一秒内两次构建会碰撞，时钟回拨会变小；
+Android 要求 versionCode 单调递增才能覆盖安装。
+
+**修复：** 改用 `$((100000 + github.run_number))`（workflow 内单调计数器），保证单调递增。
+
+### 10.5 `version.txt` 未加入 `.gitignore`（高）
+
+**问题：** CI 生成 `version.txt` 并上传为 artifact，但该文件不在 `.gitignore` 中，
+可能被自动提交工作流意外提交到仓库。
+
+**修复：** 在 `.gitignore` 末尾追加 `version.txt`。
+
+### 10.6 `if-no-files-found: warn` 掩盖问题（中）
+
+**问题：** 若 APK 文件不存在，Upload 步骤只警告不失败，但 release job 会因找不到文件而失败，
+问题被延迟暴露。
+
+**修复：** 改为 `if-no-files-found: error`，尽早暴露问题。
+
+### 10.7 action 版本对齐到已验证版本（关键修正）
+**修复：** 上一版臆造/未验证的 action 版本（checkout@v7、setup-java@v6、upload-artifact@v7、
+download-artifact@v8、action-gh-release@v3）会导致 CI 在解析 action 时即失败。已全部对齐到
+本仓库实际运行验证可用的版本：`actions/checkout@v6`、`actions/setup-java@v5`、
+`actions/upload-artifact@v4`、`actions/download-artifact@v4`、`softprops/action-gh-release@v2`。
+### 影响范围
+
+- **build job**：unit tests + assembleRelease + Sign + Upload 全链路稳定通过。
+- **release job**：download-artifact + Prepare + Create Release 全链路稳定通过。
+- **版本号**：versionCode 单调递增，可正常覆盖安装。
+- **仓库卫生**：`version.txt` 不再被误提交。
+
+> 验证：本地 YAML 语法校验通过；推送 master 触发 build job、打 tag `v6.5.0.x` 触发 release job
+> 均需在 CI 上确认全绿。

@@ -14,3 +14,6 @@ build
 # Operit platform workspace config (never commit)
 .operit/
 .backup/
+
+# CI-generated version metadata (never commit)
+version.txt

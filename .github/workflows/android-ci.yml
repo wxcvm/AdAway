@@ -5,7 +5,7 @@ on:
     branches:
       - master
     tags:
-      - 'v*' 
+      - 'v*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -41,7 +41,9 @@ jobs:
       # repeated ndk-build of the large webserver.c / mongoose / openssl.
       - name: Run tests & build release
         run: |
-          VERSION_CODE=$(date +%s)
+          # Monotonic versionCode: use run_number (per-workflow counter) instead
+          # of date +%s which can collide or regress.
+          VERSION_CODE=$((100000 + ${{ github.run_number }}))
           VERSION_NAME="6.5.0.${{ github.run_number }}"
           echo "Building $VERSION_NAME (versionCode $VERSION_CODE)"
           echo "$VERSION_NAME|$VERSION_CODE" > version.txt
@@ -50,13 +52,27 @@ jobs:
       - name: Sign release APK with release key
         run: |
           echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
-          BT=$(ls -d "$ANDROID_HOME/build-tools"/* | sort -V | tail -1)
+          # Locate apksigner robustly: prefer ANDROID_HOME, fall back to
+          # ANDROID_SDK_ROOT, and use the highest available build-tools.
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BT=$(ls -d "$SDK_ROOT/build-tools"/* 2>/dev/null | sort -V | tail -1)
+          if [ -z "$BT" ]; then
+            echo "::error::No Android build-tools found under $SDK_ROOT"
+            exit 1
+          fi
+          # Locate the unsigned APK robustly (AGP 9.x may name it differently).
+          UNSIGNED_APK=$(find app/build/outputs/apk/release -name 'app-release*.apk' ! -name '*signed*' | head -1)
+          if [ -z "$UNSIGNED_APK" ]; then
+            echo "::error::No unsigned release APK found"
+            find app/build/outputs/apk/release -type f
+            exit 1
+          fi
           "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" \
             --ks-pass "pass:${{ secrets.SIGNING_STORE_PASSWORD }}" \
             --ks-key-alias "${{ secrets.SIGNING_KEY_ALIAS }}" \
             --key-pass "pass:${{ secrets.SIGNING_KEY_PASSWORD }}" \
             --out app/build/outputs/apk/release/app-release-signed.apk \
-            app/build/outputs/apk/release/app-release-unsigned.apk
+            "$UNSIGNED_APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -65,9 +81,8 @@ jobs:
           path: |
             app/build/outputs/apk/release/*.apk
             version.txt
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
-
 
   release:
     name: Publish GitHub Release
@@ -76,6 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read   # REQUIRED for actions/download-artifact
 
     steps:
       - uses: actions/checkout@v6
