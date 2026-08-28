@@ -71,7 +71,7 @@ jobs:
 
               out = f'app/src/main/assets/{base}.webp'
 
-              im.save(out, 'WEBP', quality=85, method=6)
+              im.save(out, 'WEBP', quality=95, method=6)
 
               os.remove(p)
 
