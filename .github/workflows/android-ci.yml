@@ -39,6 +39,49 @@ jobs:
       # daemon + dependency resolution + Kotlin compile phases are shared
       # (one gradle startup instead of two), and ccache accelerates the
       # repeated ndk-build of the large webserver.c / mongoose / openssl.
+      - name: Compress oversized block images (assets -> webp)
+        run: |
+          pip3 install pillow -q --break-system-packages
+
+          python3 - <<'PYEOF'
+
+          import glob, os
+
+          from PIL import Image
+
+          for p in glob.glob('app/src/main/assets/img_*'):
+
+              if p.endswith('.webp'):
+
+                  continue
+
+              name = os.path.basename(p)
+
+              base = name.rsplit('.', 1)[0]
+
+              im = Image.open(p).convert('RGB')
+
+              w, h = im.size
+
+              scale = min(1.0, 800 / max(w, h))
+
+              if scale < 1.0:
+
+                  im = im.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+              out = f'app/src/main/assets/{base}.webp'
+
+              im.save(out, 'WEBP', quality=85, method=6)
+
+              os.remove(p)
+
+              print(f'{name} ({w}x{h}) -> {os.path.basename(out)} ({os.path.getsize(out)//1024}KB)')
+
+          print('block images compressed')
+
+          PYEOF
+
+
       - name: Run tests & build release
         run: |
           # Monotonic versionCode: use run_number (per-workflow counter) instead
