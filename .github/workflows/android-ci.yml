@@ -86,15 +86,15 @@ jobs:
           API="https://api.github.com/repos/${{ github.repository }}/actions/artifacts"
           HDR="Authorization: Bearer ${{ github.token }}"
           IDS=$(curl -s -H "$HDR" "$API?per_page=100" | python3 -c "
-import sys, json
-try:
-    arts = json.load(sys.stdin).get('artifacts', [])
-except Exception:
-    arts = []
-arts.sort(key=lambda a: a['created_at'], reverse=True)
-for a in arts[1:]:
-    print(a['id'])
-")
+          import sys, json
+          try:
+          arts = json.load(sys.stdin).get('artifacts', [])
+          except Exception:
+          arts = []
+          arts.sort(key=lambda a: a['created_at'], reverse=True)
+          for a in arts[1:]:
+          print(a['id'])
+          ")
           for id in $IDS; do
             curl -s -X DELETE -H "$HDR" "$API/$id" || true
           done
