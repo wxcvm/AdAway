@@ -16,7 +16,7 @@ jobs:
     name: Development build
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       actions: write
 
     steps:
@@ -109,6 +109,20 @@ jobs:
             version.txt
           if-no-files-found: error
           retention-days: 1
+
+      # Publish APK as a draft GitHub Release asset. Release assets do NOT
+      # count against the Actions artifact storage quota, so this always
+      # succeeds even when artifact upload is rejected.
+      - name: Publish APK to GitHub Release (draft)
+        run: |
+          APK=app/build/outputs/apk/release/app-release-signed.apk
+          TAG="ci-${{ github.run_number }}"
+          gh release create "$TAG" "$APK" --draft --repo "${{ github.repository }}" \
+            --title "ADBlock CI #${{ github.run_number }}" \
+            --notes "Automatic CI build - download the APK asset." || true
+          gh release view "$TAG" --repo "${{ github.repository }}" --json url -q .url || true
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   release:
     name: Publish GitHub Release
