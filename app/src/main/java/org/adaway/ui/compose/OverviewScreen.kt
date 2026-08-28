@@ -8,7 +8,7 @@ package org.adaway.ui.compose
  *  2. StatTile x3        拦截/放行/重定向 hosts 数量摘要
  *  3. WebServerCard      Web 服务器运行状态摘要
  *  4. WebServerControlCard Web 服务器开关/端口/测试入口（设置项移入概览）
- *  5. Quick actions      同步 hosts、打开旧版界面等快捷操作
+ *  5. Quick actions      同步 hosts 等快捷操作
  */
 
 import android.content.Intent
@@ -67,7 +67,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.adaway.R
-import org.adaway.ui.home.HomeActivity
 import org.adaway.ui.prefs.PrefsActivity
 import java.util.Locale
 
@@ -212,29 +211,6 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                         else stringResource(R.string.compose_sync_hosts_subtitle),
                         onClick = { viewModel.syncHosts() },
                     )
-                    // Classic interface entry point
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { try { context.startActivity(Intent(context, org.adaway.ui.home.HomeActivity::class.java)) } catch (e: Exception) { Toast.makeText(context, "Failed to open classic interface", Toast.LENGTH_SHORT).show() } }
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Outlined.Apps,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(16.dp))
-                        Column {
-                            Text(stringResource(R.string.compose_legacy_ui), style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                stringResource(R.string.compose_legacy_ui_subtitle),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
                 }
             }
         }
