@@ -1181,6 +1181,7 @@ private fun ActiveAppsCard(apps: List<AppStat>) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val monitoredApps = apps.filter { isAppMonitored(context, it.uid) }
     if (monitoredApps.isEmpty()) return
+    var expanded by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -1188,38 +1189,62 @@ private fun ActiveAppsCard(apps: List<AppStat>) {
         ),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                stringResource(R.string.compose_stats_active_apps),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-            monitoredApps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        appNameForUid(app.uid),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        stringResource(
-                            R.string.compose_stats_app_sub,
-                            app.connections,
-                            app.requests,
-                            app.blocked,
-                        ),
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+            ) {
+                Text(
+                    stringResource(R.string.compose_stats_active_apps),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    stringResource(R.string.compose_stats_active_apps_count, monitoredApps.size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    imageVector = if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess
+                    else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.animation.AnimatedVisibility(visible = expanded) {
+                Column {
+                    Spacer(Modifier.height(8.dp))
+                    monitoredApps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                appNameForUid(app.uid),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                stringResource(
+                                    R.string.compose_stats_app_sub,
+                                    app.connections,
+                                    app.requests,
+                                    app.blocked,
+                                ),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
         }
