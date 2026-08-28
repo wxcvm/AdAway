@@ -11,7 +11,7 @@ import androidx.viewpager2.widget.ViewPager2;
 
 import org.adaway.R;
 import org.adaway.databinding.WelcomeActivityBinding;
-import org.adaway.ui.home.HomeActivity;
+import org.adaway.ui.compose.MainActivity;
 
 import static org.adaway.ui.Animations.hideView;
 import static org.adaway.ui.Animations.showView;
@@ -149,7 +149,7 @@ public class WelcomeActivity extends AppCompatActivity implements WelcomeNavigab
     }
 
     private void startHomeActivity() {
-        startActivity(new Intent(this, HomeActivity.class));
+        startActivity(new Intent(this, MainActivity.class));
         finish();
     }
 }
