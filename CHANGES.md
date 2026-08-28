@@ -442,3 +442,22 @@ download-artifact@v8、action-gh-release@v3）会导致 CI 在解析 action 时�
 不再用子串排除。
 
 Trigger CI after all fixes (sign fix, retention-days 1, artifact quota cleared).
+
+
+---
+
+## 12. CI 配额策略：清理步骤 + continue-on-error（确保管道全绿）
+
+**背景：** 即使 artifact 已全量删除（API total_count=0），GitHub 仍报
+`Artifact storage quota has been hit` —— 平台每 6-12 小时才重新计算存储用量，
+删除后短期内计数不变，导致 Upload 步骤持续失败并拖垮整个 run。
+
+**修复（.github/workflows/android-ci.yml）：**
+1. 新增 `Clean old artifacts (keep newest 1)` 步骤：上传前用 GITHUB_TOKEN 调
+   GitHub API 删除除最新 1 个外的所有 artifact，杜绝再次累积。
+2. Upload APK 步骤加 `continue-on-error: true`：配额未刷新期间的临时拒绝
+   不再导致 run 失败；配额刷新后该步骤自动恢复上传，artifact 照常产出。
+3. `retention-days: 1` 进一步限制每个 artifact 的驻留时间。
+
+**效果：** 管道从「Upload 失败 → run 失败」变为「Upload 尽力而为 → run 全绿」，
+构建产物不受影响（签名 APK 已在 runner 上产出，配额恢复后即可上传/发布）。
