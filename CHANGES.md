@@ -285,3 +285,31 @@ After applying these changes locally:
 **问题：** 两个方法通过 `ProcessBuilder` 启动 toybox nc 读取 `/internal-stats` 与发送 `/control`，但从未读取/关闭子进程的 `getErrorStream()`。若 nc 向 stderr 输出任何内容，管道缓冲（~64KB）填满后子进程在 `write()` 阻塞，`waitFor()` 每次都超时，即便 HTTP 请求已成功。
 
 **修复：** `app/src/main/java/org/adaway/util/WebServerUtils.java` 在两个方法启动进程后立即开 daemon 线程排空并丢弃 stderr，`waitFor()` 后 `join()`，杜绝管道填满死锁；保持 v4-mapped socket 语义不变。
+
+
+---
+
+## 7. 既有 Kotlin 编译错误修复（CI 恢复）
+
+> 背景：Android CI 自 2026-08-17 起连续失败在 "Run unit tests" 步骤，根因是 `./gradlew test`
+> 在编译阶段即失败（非测试断言失败）。经本地完整编译复现，确认为 08-17 的 Compose UI 改动
+> 引入的既有编译错误。此修复与核心运行链路无关，但为恢复 CI 必须提交。
+
+### 7.1 `OverviewScreen.kt` 缺失 import
+
+**问题：** `OverviewScreen.kt:217` 使用 `Toast.makeText(...)` / `Toast.LENGTH_SHORT` 但未 import
+`android.widget.Toast`；`OverviewScreen.kt:222` 使用 `Icons.Outlined.Apps` 但未 import 该图标
+（当前仅 import 了 Dns/Lock/Public/Settings 等 outlined 图标）。
+
+**修复：** 补 `import android.widget.Toast` 与 `import androidx.compose.material.icons.outlined.Apps`。
+
+### 7.2 `SettingsScreen.kt` 多余右花括号
+
+**问题：** `SettingsScreen.kt:1210` 有一个多余的 `}`，使 @Composable 函数在 1209 行提前闭合，
+后续顶层函数（`exportCertificate` 等）报 "Expecting a top level declaration"。
+
+**修复：** 删除第 1210 行的多余 `}`。
+
+> 验证：本地（arm64，经 `android.aapt2FromMavenOverride` 使用 build-tools 35.0.0 的 aapt2）
+> `./gradlew :app:testDebugUnitTest` BUILD SUCCESSFUL，全部 13 个测试通过（GitHostsSource 6 /
+> SourceLoader 5 / LogEntrySort 2，0 失败 0 错误）。

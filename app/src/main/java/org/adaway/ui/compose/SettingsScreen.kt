@@ -1207,7 +1207,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
             }
         }
     }
-}
 
 /* ── 备份 / 恢复 ──────────────────────────────────────────────── */
 /**

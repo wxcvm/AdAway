@@ -248,8 +248,8 @@ fun OverviewScreen(viewModel: StatsViewModel) {
  * 功能：
  *  - 启停开关（调用 WebServerUtils.start/stopWebServer）
  *  - 显示当前 HTTP/HTTPS 端口与累计统计摘要
- *  - "打开测试页"按钮（https://localhost:<port>/internal-test）
- *  - "设置"按钮（跳转 PrefsActivity 旧版设置页）
+ *  - “打开测试页”按钮（https://localhost:<port>/internal-test）
+ *  - “设置”按钮（跳转 PrefsActivity 旧版设置页）
  *
  * 设计意图：把用户最常用的 webserver 操作从设置页
  * 提升到首页，利用概览页空位，减少跳转层级。
