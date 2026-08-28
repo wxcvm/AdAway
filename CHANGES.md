@@ -425,3 +425,18 @@ download-artifact@v8、action-gh-release@v3）会导致 CI 在解析 action 时�
 
 > 验证：本地 YAML 语法校验通过；推送 master 触发 build job、打 tag `v6.5.0.x` 触发 release job
 > 均需在 CI 上确认全绿。
+
+
+---
+
+## 11. CI 签名步骤最终修复：`! -name '*signed*'` 排除条件误伤 unsigned
+
+**现象：** 签名步骤报 `No unsigned release APK found`，导致 CI 失败（unit tests / build 均通过）。
+
+**根因：** 定位 unsigned APK 用了 `find ... -name 'app-release*.apk' ! -name '*signed*'`。
+`"unsigned"` 作为字符串包含子串 `"signed"`（u-**n-signed**），因此 `-name '*signed*'` 把
+`app-release-unsigned.apk` 一并排除，导致找不到文件而退出。日志确认该文件确实存在：
+`app/build/outputs/apk/release/app-release-unsigned.apk`。
+
+**修复：** 改为精确文件名 `find ... -maxdepth 1 -name 'app-release-unsigned.apk'`（AGP 的固定输出名），
+不再用子串排除。

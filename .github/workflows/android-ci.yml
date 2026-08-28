@@ -60,11 +60,14 @@ jobs:
             echo "::error::No Android build-tools found under $SDK_ROOT"
             exit 1
           fi
-          # Locate the unsigned APK robustly (AGP 9.x may name it differently).
-          UNSIGNED_APK=$(find app/build/outputs/apk/release -name 'app-release*.apk' ! -name '*signed*' | head -1)
+          # Locate the unsigned APK. NOTE: must match the exact filename, NOT
+          # "! -name '*signed*'" -- "unsigned" contains the substring "signed",
+          # so that exclusion wrongly dropped app-release-unsigned.apk and
+          # made this step fail with "No unsigned release APK found".
+          UNSIGNED_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name 'app-release-unsigned.apk' | head -1)
           if [ -z "$UNSIGNED_APK" ]; then
             echo "::error::No unsigned release APK found"
-            find app/build/outputs/apk/release -type f
+            find app/build/outputs/apk/release -maxdepth 1 -type f
             exit 1
           fi
           "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" \
