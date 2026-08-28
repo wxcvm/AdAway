@@ -59,10 +59,10 @@ import timber.log.Timber;
 public class BootReceiver extends BroadcastReceiver {
 
     /** Wait this long before the first attempt (ms). Gives magiskd time to start. */
-    private static final long INITIAL_DELAY_MS = 15_000L;
+    private static final long INITIAL_DELAY_MS = 10_000L;
 
     /** Wait this long between retry attempts (ms). */
-    private static final long RETRY_DELAY_MS = 20_000L;
+    private static final long RETRY_DELAY_MS = 15_000L;
 
     /** How many times to try starting the server (first attempt + retries). */
     private static final int MAX_ATTEMPTS = 3;
@@ -93,13 +93,6 @@ public class BootReceiver extends BroadcastReceiver {
             return;
         }
 
-        if (org.adaway.ui.compose.SettingsScreenKt.isLightMode(context)) {
-            // Light mode: the web server is only started when the user opens
-            // the app; do not keep it resident after boot.
-            Timber.d("BootReceiver: light mode enabled, skipping web server start.");
-            return;
-        }
-
         final PendingResult pendingResult = goAsync();
 
         new Thread(() -> {
@@ -118,29 +111,26 @@ public class BootReceiver extends BroadcastReceiver {
             }
         }, "boot-init").start();
     }
-
     /**
      * Tries to start the web server up to {@link #MAX_ATTEMPTS} times.
      *
-     * <p>The first attempt is preceded by {@link #INITIAL_DELAY_MS} to allow
-     * Magisk's root daemon to finish initialising. Subsequent attempts wait
-     * {@link #RETRY_DELAY_MS} between them. After each launch the receiver
-     * waits {@link #START_VERIFY_MS} and then checks whether the server
-     * process is actually running.
+     * <p>Unlike a blind fixed delay, each attempt first probes for a usable
+     * root shell (Magisk's magiskd may take a while to initialise after
+     * boot); as soon as root answers we start immediately. If root never
+     * becomes ready within the probe window the attempt is skipped instead
+     * of failing inside startWebServer().
      */
     private void startWebServerReliably(Context context) {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            if (attempt == 1) {
-                Timber.d("BootReceiver: waiting %d ms for Magisk root to be ready…",
-                        INITIAL_DELAY_MS);
-                sleep(INITIAL_DELAY_MS);
-            } else {
-                Timber.d("BootReceiver: retry %d/%d in %d ms…",
-                        attempt, MAX_ATTEMPTS, RETRY_DELAY_MS);
-                sleep(RETRY_DELAY_MS);
+            long probeMs = attempt == 1 ? INITIAL_DELAY_MS : RETRY_DELAY_MS;
+            Timber.d("BootReceiver: attempt %d/%d, probing for root (%d ms)…",
+                    attempt, MAX_ATTEMPTS, probeMs);
+            if (!waitForRootReady(probeMs)) {
+                Timber.w("BootReceiver: root not ready after %d ms (attempt %d).", probeMs, attempt);
+                continue;
             }
 
-            Timber.d("BootReceiver: starting web server (attempt %d/%d).",
+            Timber.d("BootReceiver: root ready, starting web server (attempt %d/%d).",
                     attempt, MAX_ATTEMPTS);
             WebServerUtils.startWebServer(context);
 
@@ -154,6 +144,31 @@ public class BootReceiver extends BroadcastReceiver {
         }
         Timber.e("BootReceiver: web server failed to start after %d attempts.", MAX_ATTEMPTS);
     }
+
+    /**
+     * Polls for a usable root shell until the timeout elapses.
+     *
+     * @return true as soon as {@code su -c true} exits successfully.
+     */
+    private static boolean waitForRootReady(long timeoutMs) {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                Process p = new ProcessBuilder("su", "-c", "true").start();
+                boolean ok = p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+                        && p.exitValue() == 0;
+                p.destroy();
+                if (ok) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+                // su binary missing / busy; keep polling
+            }
+            sleep(1_000L);
+        }
+        return false;
+    }
+
 
     private static void sleep(long ms) {
         try {
