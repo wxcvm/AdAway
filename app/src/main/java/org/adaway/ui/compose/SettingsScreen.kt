@@ -24,6 +24,7 @@ import android.os.Environment
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -722,50 +723,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         Spacer(Modifier.width(6.dp))
                         Text(stringResource(R.string.compose_settings_cert_export))
                     }
-                    Spacer(Modifier.height(12.dp))
-                    // ── 自定义拦截占位图 ──
-                    Text(
-                        stringResource(R.string.compose_settings_block_image_title),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    // ActivityResult launcher for picking custom block image
-                    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-                        if (uri != null) {
-                            val success = org.adaway.util.WebServerUtils.setCustomBlockImage(context, uri)
-                            android.widget.Toast.makeText(
-                                context,
-                                if (success) R.string.pref_webserver_block_image_success
-                                else R.string.pref_webserver_block_image_failed,
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                pickImageLauncher.launch("image/*")
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.compose_settings_block_image_choose))
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                // 恢复默认
-                                org.adaway.util.WebServerUtils.resetBlockImagesToDefault(context)
-                                android.widget.Toast.makeText(
-                                    context,
-                                    R.string.pref_webserver_block_image_reset_success,
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.compose_settings_block_image_reset))
-                        }
-                    }
                 }
             }
             Card(
@@ -1046,7 +1003,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // ── App monitoring ──
+            // ── App monitoring (可折叠) ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -1054,14 +1011,20 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 ),
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    var appsExpanded by remember { mutableStateOf(false) }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { appsExpanded = !appsExpanded },
+                    ) {
                         Icon(
                             Icons.Outlined.Apps,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
                         )
                         Spacer(Modifier.width(12.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 stringResource(R.string.compose_settings_apps_title),
                                 style = MaterialTheme.typography.titleMedium,
@@ -1072,23 +1035,30 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    if (apps.isEmpty()) {
-                        Text(
-                            stringResource(R.string.compose_settings_apps_empty),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Icon(
+                            imageVector = if (appsExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                            contentDescription = if (appsExpanded) "Collapse" else "Expand",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    } else {
-                        // Re-read switch states after toggling (refreshKey changes)
-                        apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
-                            val monitored = remember(refreshKey, app.uid) {
-                                isAppMonitored(context, app.uid)
-                            }
-                            val allowed = remember(refreshKey, app.uid) {
-                                isAppAllowed(context, app.uid)
-                            }
+                    }
+                    androidx.compose.animation.AnimatedVisibility(visible = appsExpanded) {
+                        Column {
+                            Spacer(Modifier.height(8.dp))
+                            if (apps.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.compose_settings_apps_empty),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                // Re-read switch states after toggling (refreshKey changes)
+                                apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
+                                    val monitored = remember(refreshKey, app.uid) {
+                                        isAppMonitored(context, app.uid)
+                                    }
+                                    val allowed = remember(refreshKey, app.uid) {
+                                        isAppAllowed(context, app.uid)
+                                    }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1139,10 +1109,11 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 )
                             }
                         }
+                        }
                     }
                 }
+                }
             }
-
             // ── About ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1163,12 +1134,21 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             null
                         }
                     }
+                    // 连点版本号 5 次解锁隐藏的开发者选项（拦截占位图设置）
+                    var aboutTaps by remember { mutableIntStateOf(0) }
+                    var hiddenUnlocked by remember { mutableStateOf(false) }
                     Text(
                         stringResource(
                             R.string.compose_settings_about_version,
                             pkgInfo?.versionName ?: "?",
                         ),
                         style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                aboutTaps++
+                                if (aboutTaps >= 5) hiddenUnlocked = true
+                            },
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -1176,37 +1156,56 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.height(12.dp))
-                    // Classic interface entry point
-                    OutlinedButton(
-                        onClick = {
-                            try {
-                                context.startActivity(Intent(context, org.adaway.ui.home.HomeActivity::class.java))
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Failed to open classic interface", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(
-                            Icons.Outlined.Apps,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.compose_legacy_ui))
-                        Spacer(Modifier.width(4.dp))
+                    // 隐藏的开发者选项：自定义拦截占位图（连点版本号解锁）
+                    if (hiddenUnlocked) {
+                        Spacer(Modifier.height(12.dp))
                         Text(
-                            stringResource(R.string.compose_legacy_ui_subtitle),
-                            style = MaterialTheme.typography.labelSmall,
+                            stringResource(R.string.compose_settings_block_image_title),
+                            style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(Modifier.height(4.dp))
+                        val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+                            if (uri != null) {
+                                val success = org.adaway.util.WebServerUtils.setCustomBlockImage(context, uri)
+                                android.widget.Toast.makeText(
+                                    context,
+                                    if (success) R.string.pref_webserver_block_image_success
+                                    else R.string.pref_webserver_block_image_failed,
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    pickImageLauncher.launch("image/*")
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(stringResource(R.string.compose_settings_block_image_choose))
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    // 恢复默认
+                                    org.adaway.util.WebServerUtils.resetBlockImagesToDefault(context)
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        R.string.pref_webserver_block_image_reset_success,
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(stringResource(R.string.compose_settings_block_image_reset))
+                            }
+                        }
                     }
-                }
                 }
             }
         }
     }
+}
 
 /* ── 备份 / 恢复 ──────────────────────────────────────────────── */
 /**
