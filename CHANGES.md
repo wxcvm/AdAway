@@ -253,3 +253,35 @@ After applying these changes locally:
  /  now query  (the table the generated hosts file is written from) instead of  (raw merged source data). This fixes two over-reporting cases: hosts excluded by the allow-list were previously still counted as blocked, and a host both blocked and redirected by different sources was counted in both categories.  keeps reading  (the allow-list is an exclusion rule; its source of truth is the list itself).
 
 > **Build note:** these upgrades were applied and reviewed statically in the Operit workspace but could not be compile-verified there (no Android SDK / NDK in the environment). Please run  on a machine with the Android SDK (or CI) to confirm.
+
+
+---
+
+## 6. 核心运行链路 Bug 修复（本次）
+
+> 范围：仅聚焦核心运行链路（webserver 原生服务 / hosts 应用 / root shell / tcpdump 日志 / 证书）。
+> 验证：静态修复 + 自检；原生 webserver.c 与整体编译需在含 Android SDK/NDK 的 CI 或真机验证。
+
+### 6.1 `TcpdumpUtils.clearLogFile()` 用应用进程截断 root 属主日志（权限不一致）
+
+**问题：** DNS 日志由 tcpdump 以 root 运行写入（见 `runBundledExecutable`）。`getLogs()` 已改为通过 root shell `cat` 读取（root 属主、700 权限的应用 cache 目录对应用进程不可写），但 `clearLogFile()` 仍用应用进程的 `FileOutputStream` 截断——在相同设备上会静默失败，"清除日志"看似成功实则无效，且与 `getLogs()` 行为不一致。
+
+**修复：** `app/src/main/java/org/adaway/model/root/TcpdumpUtils.java` 改用 root shell `: > <path>` 截断，失败时返回 `false` 并记录退出码。移除了不再使用的 `FileOutputStream` import，新增 `escapedString` static import。
+
+### 6.2 webserver SNI 缓存 `s_sni_pos` 有符号整型溢出（越界写）
+
+**问题：** `webserver/jni/webserver.c` 中 `s_sni_pos` 为 `signed int`，在每次 SNI 缓存 miss 时 `s_sni_pos++`，永不回绕。该服务是开机自启的常驻守护进程，持续为访问的广告域名签发证书数月后，计数器会越过 `INT_MAX` 翻转为负，随后 `pos = s_sni_pos % SNI_CACHE_SIZE` 得到负数索引 → 下一次 miss 时**数组越界写**。
+
+**修复：** 将 `s_sni_pos` 改为 `uint64_t` 单调计数（定义处加注释）。无符号 64 位实际不可溢出，取模恒非负，持久化逻辑 `min(count, SNI_CACHE_SIZE)` 语义不变；`sni_cache_load` 的强转同步改为 `(uint64_t)n`。
+
+### 6.3 `ShellUtils.runBundledExecutable()` 日志文件生命周期（丢诊断 + 无限累积）
+
+**问题：** 每次启动生成时间戳唯一日志 `/data/local/tmp/webserver_start_<ms>.log`，成功路径在进程仍持有 stdout/stderr fd 时立即 `rm -f`——进程后续崩溃的最终输出全部丢失（fd 指向已删除文件）；失败路径又每次遗留一个 .log，随开机/启停循环无限累积；时间戳命名也不便于查看"当前"日志。
+
+**修复：** `app/src/main/java/org/adaway/model/root/ShellUtils.java` 改用**固定路径** `/data/local/tmp/{executable}_start.log`，启动时由 `>` 重定向天然截断，成功/失败后均保留（不 unlink 运行中 fd），既不累积文件也不丢崩溃诊断。同步更新 `WebServerUtils.java` 与 `values/strings.xml` 中对旧 `webserver_start_*.log` 路径的提示文案。
+
+### 6.4 `WebServerUtils.getStats()/sendControlCommand()` 未排空子进程 stderr（潜在阻塞/句柄泄漏）
+
+**问题：** 两个方法通过 `ProcessBuilder` 启动 toybox nc 读取 `/internal-stats` 与发送 `/control`，但从未读取/关闭子进程的 `getErrorStream()`。若 nc 向 stderr 输出任何内容，管道缓冲（~64KB）填满后子进程在 `write()` 阻塞，`waitFor()` 每次都超时，即便 HTTP 请求已成功。
+
+**修复：** `app/src/main/java/org/adaway/util/WebServerUtils.java` 在两个方法启动进程后立即开 daemon 线程排空并丢弃 stderr，`waitFor()` 后 `join()`，杜绝管道填满死锁；保持 v4-mapped socket 语义不变。

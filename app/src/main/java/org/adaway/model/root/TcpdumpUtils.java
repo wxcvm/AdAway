@@ -25,7 +25,6 @@ import android.content.Context;
 import com.topjohnwu.superuser.Shell;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +35,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static com.topjohnwu.superuser.ShellUtils.escapedString;
 import static java.util.Collections.emptyList;
 import static org.adaway.model.root.ShellUtils.isBundledExecutableRunning;
 import static org.adaway.model.root.ShellUtils.killBundledExecutable;
@@ -179,13 +179,20 @@ class TcpdumpUtils {
         if (!file.exists()) {
             return true;
         }
-        // Truncate the file content
-        try (FileOutputStream outputStream = new FileOutputStream(file, false)) {
-            // Only truncate the file
-            outputStream.close();   // Useless but help lint
-        } catch (IOException exception) {
-            Timber.e(exception, "Error while truncating the tcpdump file!");
-            // Return failed to clear the log file
+        /*
+         * BUG FIX: the DNS log file is written by tcpdump running as root
+         * (see runBundledExecutable). On the same devices where getLogs()
+         * had to switch to reading via a root shell (root-owned file inside
+         * a 700-perm app cache dir is not writable by the app process), a
+         * plain FileOutputStream here was silently failing — so "Clear log"
+         * never actually cleared anything while still reporting success.
+         * Truncate it through the same root shell instead, keeping
+         * getLogs()/clearLogFile() symmetric.
+         */
+        Shell.Result result = Shell.cmd(": > " + escapedString(file.getAbsolutePath())).exec();
+        if (!result.isSuccess()) {
+            Timber.e("Failed to clear tcpdump log via root shell (exit code %d): %s",
+                    result.getCode(), mergeAllLines(result.getErr()));
             return false;
         }
         // Return successfully clear the log file

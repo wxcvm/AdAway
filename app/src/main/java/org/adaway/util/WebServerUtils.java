@@ -158,6 +158,22 @@ public static org.json.JSONObject getStats() {
                     "::ffff:127.0.0.1", String.valueOf(getStatsHttpPort()))
                     .redirectErrorStream(false)
                     .start();
+            /*
+             * BUG FIX: the child's stderr pipe was never read or closed. If
+             * toybox nc ever writes anything to stderr (e.g. a DNS/connect
+             * warning), the ~64KB pipe buffer fills, the child blocks on
+             * write() and waitFor() below times out on every call even though
+             * the HTTP request already succeeded. Drain it on a daemon thread
+             * so it can never deadlock the response read.
+             */
+            Thread errDrain = new Thread(() -> {
+                try (InputStream es = process.getErrorStream()) {
+                    byte[] eb = new byte[1024];
+                    while (es.read(eb) != -1) { /* discard */ }
+                } catch (IOException ignored) { }
+            });
+            errDrain.setDaemon(true);
+            errDrain.start();
             java.io.OutputStream out = process.getOutputStream();
             out.write(("GET /internal-stats HTTP/1.1\r\n" +
                     "Host: adaway\r\n" +
@@ -173,6 +189,7 @@ public static org.json.JSONObject getStats() {
                 process.destroy();
                 return null;
             }
+            try { errDrain.join(500); } catch (InterruptedException ignored) { }
             String response = body.toString("UTF-8");
             int headerEnd = response.indexOf("\r\n\r\n");
             String json = headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
@@ -308,7 +325,7 @@ public static void startWebServer(Context context) {
                 " --https-port " + getHttpsPort(context);
         boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
         if (!started) {
-            Timber.e("Webserver failed to start; check logs in /data/local/tmp/webserver_start_*.log for details.");
+            Timber.e("Webserver failed to start; check logs in /data/local/tmp/webserver_start.log for details.");
             showToast(context, R.string.pref_webserver_start_failed);
         } else {
             Timber.i("Webserver started successfully");
@@ -334,6 +351,22 @@ public static void startWebServer(Context context) {
                     "::ffff:127.0.0.1", String.valueOf(getStatsHttpPort()))
                     .redirectErrorStream(false)
                     .start();
+            /*
+             * BUG FIX: the child's stderr pipe was never read or closed. If
+             * toybox nc ever writes anything to stderr (e.g. a DNS/connect
+             * warning), the ~64KB pipe buffer fills, the child blocks on
+             * write() and waitFor() below times out on every call even though
+             * the HTTP request already succeeded. Drain it on a daemon thread
+             * so it can never deadlock the response read.
+             */
+            Thread errDrain = new Thread(() -> {
+                try (InputStream es = process.getErrorStream()) {
+                    byte[] eb = new byte[1024];
+                    while (es.read(eb) != -1) { /* discard */ }
+                } catch (IOException ignored) { }
+            });
+            errDrain.setDaemon(true);
+            errDrain.start();
             java.io.OutputStream out = process.getOutputStream();
             String body = "cmd=" + cmd;
             out.write(("POST /control HTTP/1.1\r\n" +
@@ -353,6 +386,7 @@ public static void startWebServer(Context context) {
                 process.destroy();
                 return null;
             }
+            try { errDrain.join(500); } catch (InterruptedException ignored) { }
             String response = respBody.toString("UTF-8");
             int headerEnd = response.indexOf("\r\n\r\n");
             return headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
@@ -774,7 +808,7 @@ private static String computeSubjectHashOld(Path certFile)
         return context.getFilesDir().toPath().resolve(WEB_SERVER_EXECUTABLE);
     }
 
-    // ── Private helpers ──────────────────────
+    // ── Private helpers ──────────────────────────────────────────
 
     private static void ensureStaticResources(Context context, Path target) {
         android.content.res.AssetManager am = context.getAssets();

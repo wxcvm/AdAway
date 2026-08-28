@@ -89,12 +89,28 @@ public final class ShellUtils {
             return false;
         }
         
-        // Use /data/local/tmp for logging instead of app filesDir to avoid permission issues
-        String logPath = "/data/local/tmp/webserver_start_" + System.currentTimeMillis() + ".log";
+        /*
+         * BUG FIX (log lifecycle): every launch used to create a brand-new
+         * timestamp-uniquified file (/data/local/tmp/webserver_start_<ms>.log),
+         * and the success path below then unlinked it while the process still
+         * held its stdout/stderr fd open on it. Three problems:
+         *   1. Success-path unlink raced the running process — if it crashed
+         *      later, its final output was already lost (fd open on a deleted
+         *      file), defeating the very diagnostics this log exists for.
+         *   2. The failure path left one orphan .log per launch behind in
+         *      /data/local/tmp, accumulating unbounded files over every boot
+         *      cycle / web-server toggle.
+         *   3. The timestamp name made it awkward to inspect "the" current log.
+         * Use ONE fixed path per executable ({executable}_start.log), truncate
+         * it on launch (the > redirect already does), keep it after BOTH
+         * success and failure so a later crash/start failure is always
+         * recoverable, and neither accumulate files nor unlink a live fd.
+         */
+        String logPath = "/data/local/tmp/" + executable + "_start.log";
 
-        // Start in background, redirect stdout/stderr to a log file
+        // Start in background, redirect stdout/stderr to the (fixed) log file
         String cmd = "LD_LIBRARY_PATH=" + nativeLibraryDir + " " + binPath + " " + parameters +
-                " > " + logPath + " 2>&1 &";
+                " > " + escapedString(logPath) + " 2>&1 &";
         
         Timber.d("Executing: %s", cmd);
         Shell.Result result = Shell.cmd(cmd).exec();
@@ -108,12 +124,11 @@ public final class ShellUtils {
         for (int i = 0; i < 10; i++) {
             if (isBundledExecutableRunning(executable)) {
                 Timber.i("Webserver process detected after %d attempts", i + 1);
-                // The process still holds its stdout/stderr open on this file;
-                // unlinking it now (rather than leaving it behind) prevents
-                // /data/local/tmp from accumulating one log file per launch
-                // (e.g. every boot or every time the web server is toggled)
-                // while the process keeps writing to it until it exits.
-                deleteLogFile(logPath);
+                // NOTE: do NOT unlink logPath here. The process still holds
+                // stdout/stderr open on it and writes there until it exits;
+                // removing the name while a live fd is open would discard any
+                // output from a later crash. The fixed path is truncated at the
+                // next launch anyway, so leaving it in place costs nothing.
                 return true;
             }
             try { Thread.sleep(200); } catch (InterruptedException ignored) {}

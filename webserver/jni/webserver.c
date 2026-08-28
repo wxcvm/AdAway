@@ -157,7 +157,16 @@ static int scan_block_images(const char *resource_dir,
 #define SNI_CERT_RENEW_MS ((uint64_t) SNI_CERT_VALIDITY_DAYS * 86400000ULL / 2)
 struct sni_entry { char hostname[256]; SSL_CTX *ctx; uint64_t issued_at; };
 static struct sni_entry s_sni_cache[SNI_CACHE_SIZE];
-static int              s_sni_pos = 0;
+/* BUG FIX (integer overflow): s_sni_pos used to be a plain signed int
+   incremented without bound (s_sni_pos++ on every SNI cache miss, even
+   after the ring wrapped). A boot-time daemon that keeps issuing
+   per-domain certs for months would eventually push this past INT_MAX,
+   at which point it wraps negative and `pos = s_sni_pos % SNI_CACHE_SIZE`
+   indexes the array with a negative offset — an out-of-bounds WRITE on
+   the next cache miss. Make it an unsigned 64-bit monotonic counter: it
+   can never overflow in practice, the modulo stays non-negative, and the
+   persistence logic (min(count, SNI_CACHE_SIZE)) is unchanged. */
+static uint64_t         s_sni_pos = 0;
 static uint64_t         s_sni_hits = 0;
 static uint64_t         s_sni_misses = 0;
 static pthread_mutex_t  s_sni_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -1206,7 +1215,7 @@ static void sni_cache_load(const char *resource_dir) {
             s_sni_cache[i].issued_at = f.entries[i].issued_at;
             s_sni_cache[i].ctx = NULL;  /* re-keyed lazily on next hit */
         }
-        s_sni_pos = (int)n;
+        s_sni_pos = (uint64_t)n;
         pthread_mutex_unlock(&s_sni_mutex);
         LOG_INFO("SNI cache loaded: %u hostnames", n);
     }
@@ -1963,6 +1972,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      * "allow" switches). A uid on the list has its traffic forwarded
      * as-is (200 OK with a tiny body) instead of being blocked, so
      * e.g. banking apps that need ads SDKs for auth still work.
+     *
+     * WebView renderers run under isolated uids (99000-99999) that are
+     * allocated per renderer instance; map them to their host app first
+     * so an "Allow"-ed app's WebView requests also pass through.
      */
     uid_t chk_uid = req_uid;
     if (uid_is_isolated(req_uid)) {
