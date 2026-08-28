@@ -85,7 +85,7 @@ jobs:
             app/build/outputs/apk/release/*.apk
             version.txt
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   release:
     name: Publish GitHub Release
