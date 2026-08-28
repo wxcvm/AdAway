@@ -329,3 +329,30 @@ After applying these changes locally:
 1. `build` job 增加 `permissions: { contents: read, actions: write }`（为 upload-artifact 提供写权限）。
 2. Upload APK 路径改为通配符 `app/build/outputs/apk/release/*.apk`，并加 `if-no-files-found: warn`，
    避免因单个文件缺失或命名差异导致整个步骤失败。
+
+
+---
+
+## 9. CI 修复 + 构建提速
+
+### 9.1 "Upload APK" 失败的真正根因：artifact 存储配额耗尽
+
+> 现象：unit tests / Build / Sign 均成功后，"Upload APK" 稳定失败（重跑亦复现），
+> 加 `actions: write` 权限、通配符路径、`if-no-files-found: warn` 均无效。
+
+**根因（从 CI 日志确认）：** `##[error]Failed to CreateArtifact: Artifact storage quota has been hit`
+——仓库累积了 152 个 release APK artifact（各 ~11MB），GitHub Actions 免费存储配额（约 1.5GB）已耗尽，
+导致所有 `upload-artifact` 一律失败。
+
+**处理：**
+1. 通过 GitHub API 批量删除历史 artifacts，仅保留最新 1 个（释放约 1.6GB）。
+2. workflow 的 Upload 步骤加 `retention-days: 7`，避免再次占满配额。
+
+### 9.2 构建提速
+
+原 CI 耗时：unit tests ~3m18s + assembleRelease ~6m20s，合计约 10 分钟。优化：
+1. **合并 Gradle 调用**：`Run unit tests` 与 `Build with Gradle` 合并为一次
+   `./gradlew test assembleRelease ...`，共享 daemon / 依赖解析 / Kotlin 编译，省一次启动。
+2. **ccache**：安装 ccache 并设置 `NDK_CCACHE`，加速反复编译的大体积
+   webserver.c / mongoose / openssl / tcpdump。
+3. 移除 `--stacktrace`（构建耗时无收益的日志开关）。

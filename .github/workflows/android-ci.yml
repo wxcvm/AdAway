@@ -29,16 +29,23 @@ jobs:
           java-version: 21
           cache: 'gradle'
 
-      - name: Run unit tests
-        run: ./gradlew test --stacktrace
+      - name: Install ccache (native builds)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ccache
+          echo "NDK_CCACHE=$(which ccache)" >> "$GITHUB_ENV"
 
-      - name: Build with Gradle
+      # Run unit tests and build release in a single Gradle invocation so the
+      # daemon + dependency resolution + Kotlin compile phases are shared
+      # (one gradle startup instead of two), and ccache accelerates the
+      # repeated ndk-build of the large webserver.c / mongoose / openssl.
+      - name: Run tests & build release
         run: |
           VERSION_CODE=$(date +%s)
           VERSION_NAME="6.5.0.${{ github.run_number }}"
           echo "Building $VERSION_NAME (versionCode $VERSION_CODE)"
           echo "$VERSION_NAME|$VERSION_CODE" > version.txt
-          ./gradlew assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME --stacktrace
+          ./gradlew test assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
 
       - name: Sign release APK with release key
         run: |
@@ -59,7 +66,8 @@ jobs:
             app/build/outputs/apk/release/*.apk
             version.txt
           if-no-files-found: warn
-        
+          retention-days: 7
+
 
   release:
     name: Publish GitHub Release
