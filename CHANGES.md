@@ -313,3 +313,19 @@ After applying these changes locally:
 > 验证：本地（arm64，经 `android.aapt2FromMavenOverride` 使用 build-tools 35.0.0 的 aapt2）
 > `./gradlew :app:testDebugUnitTest` BUILD SUCCESSFUL，全部 13 个测试通过（GitHostsSource 6 /
 > SourceLoader 5 / LogEntrySort 2，0 失败 0 错误）。
+
+
+---
+
+## 8. CI workflow：修复 "Upload APK" 稳定失败
+
+> 现象：核心运行链路修复 + Kotlin 编译修复后，CI 在 unit tests / Build / Sign 均成功后，
+> 稳定失败于 "Upload APK"（两次运行均复现，非偶发）。
+
+**根因：** `actions/upload-artifact@v4` 上传到 run 需要 `actions: write` 权限，但 `build` job
+未声明 `permissions`；且上传路径硬编码 `app-release-signed.apk`，容错性差。
+
+**修复：** `.github/workflows/android-ci.yml`
+1. `build` job 增加 `permissions: { contents: read, actions: write }`（为 upload-artifact 提供写权限）。
+2. Upload APK 路径改为通配符 `app/build/outputs/apk/release/*.apk`，并加 `if-no-files-found: warn`，
+   避免因单个文件缺失或命名差异导致整个步骤失败。
