@@ -416,6 +416,18 @@ fun refreshServerStats() {
         }
     }
 
+    /** Set a subscription's enabled state directly (source + its items). */
+    fun setSourceEnabled(id: Int, enabled: Boolean, onDone: () -> Unit) {
+        viewModelScope.launch {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val dao = database.hostsSourceDao()
+                dao.setSourceEnabled(id, enabled)
+                dao.setSourceItemsEnabled(id, enabled)
+            }
+            onDone()
+        }
+    }
+
     /**
      * 删除订阅源及其所有规则条目（source_id != 1 的订阅）。
      * 删除后重新同步 hosts 文件使变更生效。
@@ -531,7 +543,6 @@ fun refreshServerStats() {
                 withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val application = getApplication<org.adaway.AdAwayApplication>()
                     val sourceModel = application.getSourceModel()
-                    sourceModel.enableAllSources()
                     sourceModel.retrieveHostsSources()
                     adBlockModel.apply()
                 }
