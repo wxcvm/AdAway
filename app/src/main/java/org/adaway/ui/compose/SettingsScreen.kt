@@ -44,6 +44,9 @@ import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.List
+import androidx.compose.material.icons.outlined.Help
+import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.QrCode
 import androidx.compose.material.icons.outlined.RemoveCircle
@@ -83,6 +86,9 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import org.adaway.R
+import org.adaway.ui.help.HelpActivity
+import org.adaway.ui.log.LogActivity
+import org.adaway.ui.support.SupportActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -1156,6 +1162,37 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_legacy_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { context.startActivity(Intent(context, LogActivity::class.java)) }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.List, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.compose_settings_legacy_logs), style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { context.startActivity(Intent(context, HelpActivity::class.java)) }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Help, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.compose_settings_legacy_help), style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { context.startActivity(Intent(context, SupportActivity::class.java)) }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(12.dp))
+                        Text(stringResource(R.string.compose_settings_legacy_support), style = MaterialTheme.typography.bodyMedium)
+                    }
                     // 隐藏的开发者选项：自定义拦截占位图（连点版本号解锁）
                     if (hiddenUnlocked) {
                         Spacer(Modifier.height(12.dp))
