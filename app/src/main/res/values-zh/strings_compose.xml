@@ -63,7 +63,6 @@
     <string name="compose_stats_daily_peak">每日峰值拦截</string>
     <string name="compose_stats_active_apps">活跃应用</string>
     <string name="compose_stats_active_apps_count">%1$d 个应用</string>
-    <string name="compose_stats_active_apps_count">%1$d 个应用</string>
     <string name="compose_stats_app_unknown">UID %1$d</string>
     <string name="compose_stats_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
     <string name="compose_stats_recent_certs">最近签发的证书</string>
