@@ -202,6 +202,11 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         SourcesCard(
                             sources = sources,
                             onToggle = { source ->
+                                // Optimistic update: flip in-memory state now so the
+                                // Switch responds instantly and never appears to
+                                // jump to another row while DB updates.
+                                source.setEnabled(!source.isEnabled())
+                                sources = sources.toList()
                                 viewModel.toggleSource(source) { reloadSources(); viewModel.syncHosts() }
                             },
                             onAddClick = { showAddDialog = true },
@@ -246,6 +251,11 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         SourcesCard(
                             sources = sources,
                             onToggle = { source ->
+                                // Optimistic update: flip in-memory state now so the
+                                // Switch responds instantly and never appears to
+                                // jump to another row while DB updates.
+                                source.setEnabled(!source.isEnabled())
+                                sources = sources.toList()
                                 viewModel.toggleSource(source) { reloadSources(); viewModel.syncHosts() }
                             },
                             onAddClick = { showAddDialog = true },
@@ -445,6 +455,7 @@ private fun SourcesCard(
                 )
             } else {
                 sources.forEach { source ->
+                    androidx.compose.runtime.key(source.id) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -476,6 +487,7 @@ private fun SourcesCard(
                                 contentDescription = stringResource(R.string.compose_rules_delete_source),
                                 tint = MaterialTheme.colorScheme.error,
                             )
+                        }
                         }
                     }
                 }
