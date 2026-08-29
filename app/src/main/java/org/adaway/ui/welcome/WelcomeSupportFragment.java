@@ -2,10 +2,10 @@ package org.adaway.ui.welcome;
 
 import static android.view.View.INVISIBLE;
 import static android.view.View.VISIBLE;
-import static org.adaway.ui.support.SupportActivity.SPONSORSHIP_LINK;
-import static org.adaway.ui.support.SupportActivity.SUPPORT_LINK;
-import static org.adaway.ui.support.SupportActivity.animateHeart;
-import static org.adaway.ui.support.SupportActivity.bindLink;
+import static org.adaway.util.SupportUtils.SPONSORSHIP_LINK;
+import static org.adaway.util.SupportUtils.SUPPORT_LINK;
+import static org.adaway.util.SupportUtils.animateHeart;
+import static org.adaway.util.SupportUtils.bindLink;
 
 import android.content.Context;
 import android.os.Bundle;
