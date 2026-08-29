@@ -209,6 +209,8 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
         if (org.adaway.ui.compose.isRealtimeEnabled(app)) {
             startRealtime()
         }
+        // Pause background stats collection while app is backgrounded.
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
     }
 
     /**
@@ -234,6 +236,26 @@ private fun startPolling() {
      * JSON 快照，替代/补充 10s 轮询。连接失败时自动回退轮询。
      */
     private var wsJob: Job? = null
+    private val lifecycleObserver = object : androidx.lifecycle.LifecycleEventObserver {
+        override fun onStateChanged(
+            source: androidx.lifecycle.LifecycleOwner,
+            event: androidx.lifecycle.Lifecycle.Event,
+        ) {
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    startPolling()
+                    val app = getApplication<org.adaway.AdAwayApplication>()
+                    if (org.adaway.ui.compose.isRealtimeEnabled(app)) startRealtime()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    pollingJob?.cancel()
+                    wsJob?.cancel()
+                    wsJob = null
+                }
+                else -> {}
+            }
+        }
+    }
 
     fun startRealtime() {
         if (wsJob?.isActive == true) return
@@ -246,6 +268,10 @@ private fun startPolling() {
                 .build()
             try {
                 val ws = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
+                    override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
+                        // Real-time push active: stop the 10s polling to save CPU.
+                        pollingJob?.cancel()
+                    }
                     override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
                         try {
                             _serverStats.value = ServerStats.fromJson(org.json.JSONObject(text))
@@ -254,11 +280,15 @@ private fun startPolling() {
                         }
                     }
 
+                    override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
+                        startPolling()
+                    }
                     override fun onFailure(
                         webSocket: okhttp3.WebSocket,
                         t: Throwable,
                         response: okhttp3.Response?,
                     ) {
+                        startPolling()
                         Timber.w(t, "WebSocket failed — falling back to polling")
                     }
                 })
@@ -374,8 +404,13 @@ fun refreshServerStats() {
         viewModelScope.launch {
             withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val dao = database.hostsSourceDao()
-                dao.setSourceEnabled(source.id, !source.isEnabled())
-                dao.setSourceItemsEnabled(source.id, !source.isEnabled())
+                // Re-read from DB so the toggle always flips the persisted
+                // value, not a possibly-stale in-memory snapshot (which made
+                // toggling one source look like it flipped another).
+                val fresh = dao.getById(source.id).orElse(null) ?: return@withContext
+                val enabled = !fresh.isEnabled()
+                dao.setSourceEnabled(source.id, enabled)
+                dao.setSourceItemsEnabled(source.id, enabled)
             }
             onDone()
         }
