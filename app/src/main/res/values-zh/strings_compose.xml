@@ -99,6 +99,10 @@
     <string name="compose_settings_logs_retention_7d">7 天</string>
     <string name="compose_settings_logs_retention_30d">30 天</string>
     <string name="compose_settings_about_license">开源项目（GPLv3）——基于 ADBlock 的分支，新增 per-app 统计、SNI 拦截与 Material 3 界面。</string>
+    <string name="compose_settings_legacy_title">经典功能</string>
+    <string name="compose_settings_legacy_logs">DNS请求日志</string>
+    <string name="compose_settings_legacy_help">帮助</string>
+    <string name="compose_settings_legacy_support">支持</string>
     <string name="compose_settings_data_title">数据管理</string>
     <string name="compose_settings_data_hint">清除统计数据和历史</string>
     <string name="compose_settings_clear_stats">清除所有统计</string>
