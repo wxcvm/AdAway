@@ -1259,6 +1259,7 @@ private fun ActiveAppsCard(apps: List<AppStat>) {
  * 动态签发的叶子证书列表（域名 + 时间）。
  */
 private fun RecentCertsCard(hosts: List<TlsHost>) {
+    var expanded by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -1266,18 +1267,35 @@ private fun RecentCertsCard(hosts: List<TlsHost>) {
         ),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                stringResource(R.string.compose_stats_recent_certs),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                stringResource(R.string.compose_stats_certs_hint),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-            hosts.take(10).forEach { host ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+            ) {
+                Text(
+                    stringResource(R.string.compose_stats_recent_certs),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    stringResource(R.string.compose_stats_certs_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    imageVector = if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess
+                    else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.animation.AnimatedVisibility(visible = expanded) {
+                Column {
+                    Spacer(Modifier.height(8.dp))
+                    hosts.take(10).forEach { host ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1298,6 +1316,7 @@ private fun RecentCertsCard(hosts: List<TlsHost>) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
                 }
             }
         }
