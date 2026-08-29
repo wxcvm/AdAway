@@ -1000,16 +1000,16 @@ private static String computeSubjectHashOld(Path certFile)
     }
 
     /**
-     * Replace all 7 block-placeholder images (img_00.webp .. img_06.webp,
+     * Replace only the primary block-placeholder image (img_00.webp,
      * served by the native web server in place of blocked ads) with a
      * single image the user picked.
      * <p>
      * Decodes whatever format was picked (JPEG/PNG/etc.) and re-encodes it
      * as WEBP before writing, since that's the only format the native
      * server's MIME-type mapping (and file extension it looks for) knows
-     * about. Every configured slot gets the same image - the server
-     * picks one at random per request purely for visual variety, not
-     * because they're meant to differ in content.
+     * about. Only the first slot is replaced so the remaining default
+     * placeholders keep their visual variety - the server picks one
+     * image at random per request.
      *
      * @return true if the image was decoded and written successfully.
      */
@@ -1033,11 +1033,12 @@ private static String computeSubjectHashOld(Path certFile)
         try {
             if (!Files.isDirectory(resourceDir)) Files.createDirectories(resourceDir);
             java.util.List<Path> slots = listBlockImageSlots(resourceDir);
-            if (slots.isEmpty()) slots = java.util.Collections.singletonList(resourceDir.resolve("img_00.webp"));
-            for (Path out : slots) {
-                try (OutputStream os = Files.newOutputStream(out)) {
-                    bitmap.compress(format, 90, os);
-                }
+            // Only replace the primary slot so the other default
+            // placeholders keep their visual variety (the native server
+            // picks one image at random per request).
+            Path out = slots.isEmpty() ? resourceDir.resolve("img_00.webp") : slots.get(0);
+            try (OutputStream os = Files.newOutputStream(out)) {
+                bitmap.compress(format, 90, os);
             }
             return true;
         } catch (IOException e) {
