@@ -106,10 +106,6 @@
     <string name="compose_settings_logs_retention_7d">7 days</string>
     <string name="compose_settings_logs_retention_30d">30 days</string>
     <string name="compose_settings_about_license">Open source (GPLv3) — ADBlock fork with per-app stats, SNI interception and a Material 3 UI.</string>
-    <string name="compose_settings_legacy_title">Classic features</string>
-    <string name="compose_settings_legacy_logs">DNS request log</string>
-    <string name="compose_settings_legacy_help">Help</string>
-    <string name="compose_settings_legacy_support">Support</string>
     <string name="compose_settings_data_title">Data</string>
     <string name="compose_settings_data_hint">Clear statistics and history</string>
     <string name="compose_settings_clear_stats">Clear all stats</string>
