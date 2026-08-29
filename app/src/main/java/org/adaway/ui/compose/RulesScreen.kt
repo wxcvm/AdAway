@@ -201,13 +201,15 @@ fun RulesScreen(viewModel: StatsViewModel) {
                     item(key = "sources") {
                         SourcesCard(
                             sources = sources,
-                            onToggle = { source ->
+                            onToggle = { source, checked ->
                                 // Optimistic update: flip in-memory state now so the
                                 // Switch responds instantly and never appears to
                                 // jump to another row while DB updates.
-                                source.setEnabled(!source.isEnabled())
+                                // Optimistic update using the Switch's target state,
+                                // then persist it directly (no toggle race).
+                                source.setEnabled(checked)
                                 sources = sources.toList()
-                                viewModel.toggleSource(source) { reloadSources(); viewModel.syncHosts() }
+                                viewModel.setSourceEnabled(source.id, checked) { reloadSources(); viewModel.syncHosts() }
                             },
                             onAddClick = { showAddDialog = true },
                             onDelete = { source ->
@@ -250,13 +252,15 @@ fun RulesScreen(viewModel: StatsViewModel) {
                     item(key = "sources") {
                         SourcesCard(
                             sources = sources,
-                            onToggle = { source ->
+                            onToggle = { source, checked ->
                                 // Optimistic update: flip in-memory state now so the
                                 // Switch responds instantly and never appears to
                                 // jump to another row while DB updates.
-                                source.setEnabled(!source.isEnabled())
+                                // Optimistic update using the Switch's target state,
+                                // then persist it directly (no toggle race).
+                                source.setEnabled(checked)
                                 sources = sources.toList()
-                                viewModel.toggleSource(source) { reloadSources(); viewModel.syncHosts() }
+                                viewModel.setSourceEnabled(source.id, checked) { reloadSources(); viewModel.syncHosts() }
                             },
                             onAddClick = { showAddDialog = true },
                             onDelete = { source ->
@@ -412,7 +416,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
  */
 private fun SourcesCard(
     sources: List<org.adaway.db.entity.HostsSource>,
-    onToggle: (org.adaway.db.entity.HostsSource) -> Unit,
+    onToggle: (org.adaway.db.entity.HostsSource, Boolean) -> Unit,
     onAddClick: () -> Unit,
     onDelete: (org.adaway.db.entity.HostsSource) -> Unit,
 ) {
@@ -477,7 +481,7 @@ private fun SourcesCard(
                         }
                         Switch(
                             checked = source.isEnabled(),
-                            onCheckedChange = { onToggle(source) },
+                            onCheckedChange = { checked -> onToggle(source, checked) },
                         )
                         Spacer(Modifier.width(4.dp))
                         // 删除订阅源（确认对话框在 RulesScreen 弹出）
