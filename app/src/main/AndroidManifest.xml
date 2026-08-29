@@ -98,10 +98,6 @@
             android:label="@string/source_edit_title"
             android:parentActivityName=".ui.hosts.HostsSourcesActivity" />
         <activity
-            android:name=".ui.log.LogActivity"
-            android:label="@string/shortcut_dns_requests"
-            android:parentActivityName=".ui.compose.MainActivity" />
-        <activity
             android:name=".ui.lists.ListsActivity"
             android:exported="false"
             android:label="@string/lists_title"
@@ -114,17 +110,6 @@
                 <action android:name="android.intent.action.SEARCH" />
             </intent-filter>
         </activity>
-        <activity
-            android:name=".ui.help.HelpActivity"
-            android:exported="false"
-            android:label="@string/menu_help"
-            android:parentActivityName=".ui.compose.MainActivity" />
-        <activity
-            android:name=".ui.support.SupportActivity"
-            android:exported="false"
-            android:label="@string/support_title"
-            android:parentActivityName=".ui.compose.MainActivity"
-            android:theme="@style/Theme.AdAway.NoActionBar.Red" />
         <activity
             android:name=".ui.prefs.PrefsActivity"
             android:exported="false"
