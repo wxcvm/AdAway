@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Link
@@ -127,6 +128,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
                 topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_rules_title)) },
+                actions = { IconButton(onClick = { viewModel.syncHosts() }) { Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.compose_sync_hosts)) } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
@@ -200,7 +202,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         SourcesCard(
                             sources = sources,
                             onToggle = { source ->
-                                viewModel.toggleSource(source) { reloadSources() }
+                                viewModel.toggleSource(source) { reloadSources(); viewModel.syncHosts() }
                             },
                             onAddClick = { showAddDialog = true },
                             onDelete = { source ->
@@ -244,7 +246,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         SourcesCard(
                             sources = sources,
                             onToggle = { source ->
-                                viewModel.toggleSource(source) { reloadSources() }
+                                viewModel.toggleSource(source) { reloadSources(); viewModel.syncHosts() }
                             },
                             onAddClick = { showAddDialog = true },
                             onDelete = { source ->
