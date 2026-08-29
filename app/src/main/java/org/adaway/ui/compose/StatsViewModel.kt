@@ -196,6 +196,26 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     val serverStats: StateFlow<ServerStats?> = _serverStats
 
     private var pollingJob: Job? = null
+    private val lifecycleObserver = object : androidx.lifecycle.LifecycleEventObserver {
+        override fun onStateChanged(
+            source: androidx.lifecycle.LifecycleOwner,
+            event: androidx.lifecycle.Lifecycle.Event,
+        ) {
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    startPolling()
+                    val app = getApplication<org.adaway.AdAwayApplication>()
+                    if (org.adaway.ui.compose.isRealtimeEnabled(app)) startRealtime()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    pollingJob?.cancel()
+                    wsJob?.cancel()
+                    wsJob = null
+                }
+                else -> {}
+            }
+        }
+    }
 
     /** True when the web server executable is running. */
     val webServerRunning: Boolean
@@ -236,26 +256,6 @@ private fun startPolling() {
      * JSON 快照，替代/补充 10s 轮询。连接失败时自动回退轮询。
      */
     private var wsJob: Job? = null
-    private val lifecycleObserver = object : androidx.lifecycle.LifecycleEventObserver {
-        override fun onStateChanged(
-            source: androidx.lifecycle.LifecycleOwner,
-            event: androidx.lifecycle.Lifecycle.Event,
-        ) {
-            when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_START -> {
-                    startPolling()
-                    val app = getApplication<org.adaway.AdAwayApplication>()
-                    if (org.adaway.ui.compose.isRealtimeEnabled(app)) startRealtime()
-                }
-                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
-                    pollingJob?.cancel()
-                    wsJob?.cancel()
-                    wsJob = null
-                }
-                else -> {}
-            }
-        }
-    }
 
     fun startRealtime() {
         if (wsJob?.isActive == true) return
