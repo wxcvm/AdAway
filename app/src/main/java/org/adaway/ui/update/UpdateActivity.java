@@ -3,7 +3,7 @@ package org.adaway.ui.update;
 import static android.view.View.GONE;
 import static android.view.View.INVISIBLE;
 import static android.view.View.VISIBLE;
-import static org.adaway.ui.support.SupportActivity.bindLink;
+import static org.adaway.util.SupportUtils.bindLink;
 
 import android.net.Uri;
 import android.os.Bundle;
