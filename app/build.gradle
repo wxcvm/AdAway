@@ -1,9 +1,5 @@
 plugins {
     id 'com.android.application'
-    // NOTE: AGP 9.0+ has built-in Kotlin support; applying
-    // org.jetbrains.kotlin.android is rejected. Only the Compose
-    // compiler plugin is applied explicitly.
-    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
@@ -11,26 +7,22 @@ boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
         project.hasProperty('signingKeyAlias') &&
         project.hasProperty('signingKeyPassword')
 
+repositories {
+    maven {
+        url 'https://jitpack.io'
+    }
+}
+
 android {
-    compileSdk 36
-    ndkVersion '28.1.13356709'
+    compileSdk 34
+    ndkVersion '27.2.12479018'
     namespace 'org.adaway'
 
     defaultConfig {
-        applicationId 'com.wxcvm.Adaway'
-        minSdk 30
-        targetSdk 35
-        ndk {
-            abiFilters "arm64-v8a"
-        }
-        // Version overrides: CI passes -PversionCode / -PversionName so
-        // every build gets a fresh, increasing version (see
-        // .github/workflows/android-ci.yml). Falls back to the static
-        // values in gradle/libs.versions.toml for local builds.
-        def vc = project.findProperty("versionCode")?.toString()?.toInteger()
-        def vn = project.findProperty("versionName")?.toString()
-        versionCode vc ?: (libs.versions.appCode.get() as int)
-        versionName vn ?: libs.versions.appName.get()
+        minSdk 26
+        targetSdk 33
+        versionCode libs.versions.appCode.get() as int
+        versionName libs.versions.appName.get()
 
         javaCompileOptions {
             annotationProcessorOptions {
@@ -44,14 +36,6 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    /*
-     * To sign release build, create file gradle.properties in ~/.gradle/ with this content:
-     *
-     * signingStoreLocation=/home/key.store
-     * signingStorePassword=xxx
-     * signingKeyAlias=alias
-     * signingKeyPassword=xxx
-     */
     if (keyStoreDefined) {
         println "Found signature properties in gradle.properties. Build will be signed."
 
@@ -75,38 +59,24 @@ android {
 
     buildFeatures {
         viewBinding true
-        compose true
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
-    }
-
-    packaging {
+    packagingOptions {
         jniLibs {
             useLegacyPackaging = true
         }
     }
 
     buildTypes {
-//        debug {
-//            shrinkResources false
-//            minifyEnabled false
-//            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-//        }
         release {
             minifyEnabled true
             shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
 
     lint {
         disable 'MissingTranslation'
-        abortOnError false        // do not block release builds on lint errors
-        checkReleaseBuilds false  // skip lintVitalRelease (faster builds)
     }
 }
 
@@ -120,8 +90,6 @@ dependencies {
     implementation 'androidx.cardview:cardview:1.0.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.fragment:fragment:1.8.1'
-    // "fragment-ktx" is not used but was added to fix the following dependency error:
-    // Duplicate class androidx.lifecycle.ViewModelLazy found in modules lifecycle-viewmodel-2.5.0-runtime (androidx.lifecycle:lifecycle-viewmodel:2.5.0) and lifecycle-viewmodel-ktx-2.3.1-runtime
     implementation 'androidx.fragment:fragment-ktx:1.8.1'
     implementation 'androidx.paging:paging-runtime:3.3.0'
     implementation 'androidx.preference:preference:1.2.1'
@@ -131,7 +99,7 @@ dependencies {
     annotationProcessor 'androidx.room:room-compiler:2.6.1'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     implementation 'androidx.work:work-runtime:2.8.1'
-    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'com.google.android.material:material:1.9.0'
 
     // Collections related
     implementation libs.guava
@@ -139,12 +107,10 @@ dependencies {
     implementation libs.okhttp3.okhttp
     // Logging related
     implementation libs.timber
-    // QR Code
-    implementation libs.zxing.core
     if (keyStoreDefined) {
         implementation project(':sentrystub')
     } else {
-        implementation platform('io.sentry:sentry-bom:8.52.0')
+        implementation platform('io.sentry:sentry-bom:7.8.0')
         implementation('io.sentry:sentry-android')
         implementation('io.sentry:sentry-android-fragment')
         implementation('io.sentry:sentry-android-timber')
@@ -152,20 +118,6 @@ dependencies {
 
     // Root related
     implementation libs.libsu
-
-    // Jetpack Compose (new Material 3 UI)
-    implementation platform(libs.androidx.compose.bom)
-    implementation libs.androidx.compose.ui
-    implementation libs.androidx.compose.ui.graphics
-    implementation libs.androidx.compose.ui.tooling.preview
-    implementation libs.androidx.compose.material3
-    implementation libs.androidx.compose.material.icons.extended
-    implementation libs.androidx.activity.compose
-    implementation libs.androidx.navigation.compose
-    implementation libs.androidx.lifecycle.viewmodel.compose
-    implementation libs.androidx.lifecycle.runtime.compose
-    implementation libs.androidx.lifecycle.process
-    debugImplementation libs.androidx.compose.ui.tooling
 
     // Test related
     testImplementation libs.junit
