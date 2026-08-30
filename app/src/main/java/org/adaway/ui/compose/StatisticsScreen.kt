@@ -311,12 +311,14 @@ private fun KpiCardRow(stats: ServerStats) {
                 modifier = Modifier.size(96.dp),
                 contentAlignment = Alignment.Center,
             ) {
+                val arcBg = MaterialTheme.colorScheme.surfaceVariant
+                val arcFg = MaterialTheme.colorScheme.primary
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val stroke = 12.dp.toPx()
                     val inset = stroke / 2
                     val arcSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
                     drawArc(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        color = arcBg,
                         startAngle = -90f,
                         sweepAngle = 360f,
                         useCenter = false,
@@ -325,7 +327,7 @@ private fun KpiCardRow(stats: ServerStats) {
                         style = Stroke(width = stroke, cap = StrokeCap.Round),
                     )
                     drawArc(
-                        color = MaterialTheme.colorScheme.primary,
+                        color = arcFg,
                         startAngle = -90f,
                         sweepAngle = (rate / 100.0 * 360.0).toFloat().coerceIn(0f, 360f),
                         useCenter = false,
@@ -724,8 +726,6 @@ private fun DetailRow(label: String, value: Any) {
 }
 
 /** Map an Android uid to its (first) package label; fall back to "UID n". */
-@Composable
-
 /** 拦截域名排行 Top 卡：由 recentTls (uid, host) 按域名聚合，取出现最多的域名。 */
 @Composable
 private fun TopHostsCard(hosts: List<TlsHost>) {
@@ -746,6 +746,8 @@ private fun TopHostsCard(hosts: List<TlsHost>) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(8.dp))
+            val barBg = MaterialTheme.colorScheme.surfaceVariant
+            val barFg = MaterialTheme.colorScheme.primary
             top.forEachIndexed { index, (host, count) ->
                 Row(
                     modifier = Modifier
@@ -772,12 +774,12 @@ private fun TopHostsCard(hosts: List<TlsHost>) {
                         // 占比条（Canvas 绘制，避免额外 import）
                         Canvas(modifier = Modifier.fillMaxWidth().height(4.dp)) {
                             drawRoundRect(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                color = barBg,
                                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
                             )
                             val fraction = (count.toFloat() / maxCount).coerceIn(0f, 1f)
                             drawRoundRect(
-                                color = MaterialTheme.colorScheme.primary,
+                                color = barFg,
                                 size = androidx.compose.ui.geometry.Size(size.width * fraction, size.height),
                                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
                             )
@@ -805,6 +807,7 @@ private fun TopHostsCard(hosts: List<TlsHost>) {
     }
 }
 
+@Composable
 internal fun appNameForUid(uid: Int): String {
     if (uid <= 0) return stringResource(R.string.compose_stats_app_unknown, uid)
     val context = androidx.compose.ui.platform.LocalContext.current
