@@ -187,6 +187,53 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                 }
             }
 
+            // 统计状态横幅：更新时间 + 状态（hosts 统计不依赖 webserver）
+            val updatedAt by viewModel.statsUpdatedAt.collectAsStateWithLifecycle()
+            val statsErr by viewModel.statsError.collectAsStateWithLifecycle()
+            val statsTime = remember(updatedAt) {
+                if (updatedAt > 0L) {
+                    java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date(updatedAt))
+                } else null
+            }
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = if (statsErr == null && statsTime != null) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            stringResource(R.string.compose_stats_status_title),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            when {
+                                statsTime != null && statsErr == null ->
+                                    stringResource(R.string.compose_stats_status_ok, statsTime)
+                                statsTime != null ->
+                                    stringResource(R.string.compose_stats_status_stale, statsTime)
+                                else -> stringResource(R.string.compose_stats_status_waiting)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
             // ── KPI 卡片行（参考 AdGuard Home：数值 + 迷你趋势线）──
             if (serverStats != null) {
                 KpiCardRow(stats = serverStats!!)
