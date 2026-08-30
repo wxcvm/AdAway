@@ -33,7 +33,7 @@
     <string name="compose_ws_control_images">占位图</string>
     <string name="compose_ws_control_certs">证书</string>
     <string name="compose_ws_control_test">打开测试页面</string>
-    <string name="compose_ws_control_install_cert">安装证书</string>
+    <string name="compose_ws_control_log_title">启动日志（失败原因）</string>
     <string name="compose_ws_control_cert_days">剩余 %1$d 天</string>
     <string name="compose_legacy_ui">经典界面</string>
     <string name="compose_legacy_ui_subtitle">打开旧版界面</string>
