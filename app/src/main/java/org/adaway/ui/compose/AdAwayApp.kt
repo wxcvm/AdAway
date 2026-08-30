@@ -14,7 +14,6 @@ package org.adaway.ui.compose
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.outlined.DonutLarge
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
@@ -46,7 +45,6 @@ object Destinations {
     const val OVERVIEW = "overview"
     const val STATS = "stats"
     const val RULES = "rules"
-    const val LOGS = "logs"
     const val SETTINGS = "settings"
 }
 
@@ -60,7 +58,6 @@ private val destinations = listOf(
     Destination(Destinations.OVERVIEW, R.string.compose_nav_overview, Icons.Filled.Home),
     Destination(Destinations.STATS, R.string.compose_nav_stats, Icons.Outlined.DonutLarge),
     Destination(Destinations.RULES, R.string.compose_nav_rules, Icons.Outlined.Shield),
-    Destination(Destinations.LOGS, R.string.compose_nav_logs, Icons.Filled.List),
     Destination(Destinations.SETTINGS, R.string.compose_nav_settings, Icons.Outlined.Settings),
 )
 
@@ -108,9 +105,6 @@ fun AdAwayApp() {
             }
             composable(Destinations.RULES) {
                 RulesScreen(viewModel)
-            }
-            composable(Destinations.LOGS) {
-                LogsScreen(viewModel)
             }
             composable(Destinations.SETTINGS) {
                 SettingsScreen(viewModel)
