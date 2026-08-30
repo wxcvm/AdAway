@@ -232,4 +232,14 @@
     <string name="compose_stats_kpi_connections">Connections</string>
     <string name="compose_stats_top_hosts">Top domains</string>
     <string name="compose_stats_top_hosts_more">+%1$d more</string>
+    <string name="compose_settings_update_app_startup">Check for updates at startup</string>
+    <string name="compose_settings_update_app_startup_hint">Check on every app launch</string>
+    <string name="compose_settings_update_app_daily">Daily update check</string>
+    <string name="compose_settings_update_app_daily_hint">Periodically check for app updates</string>
+    <string name="compose_settings_update_beta">Include beta releases</string>
+    <string name="compose_settings_update_beta_hint">Also install beta versions</string>
+    <string name="compose_settings_update_hosts">Daily hosts update check</string>
+    <string name="compose_settings_update_hosts_hint">Refresh hosts rules from sources</string>
+    <string name="compose_settings_update_wifi">Updates on Wi-Fi only</string>
+    <string name="compose_settings_update_wifi_hint">Avoid mobile data usage</string>
 </resources>
