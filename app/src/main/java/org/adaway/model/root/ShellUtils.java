@@ -38,7 +38,9 @@ public final class ShellUtils {
             // Use the [l]ib bracket trick: the pgrep command line itself
             // (run via su -> sh -c) would otherwise match and report a
             // false positive forever (isWebServerRunning() always true).
-            Shell.Result r = Shell.cmd("pgrep -f '[' + EXECUTABLE_PREFIX.substring(0,1) + ']' + EXECUTABLE_PREFIX.substring(1) + executable + EXECUTABLE_SUFFIX + "' >/dev/null 2>&1").exec();
+            String pattern = "[" + EXECUTABLE_PREFIX.substring(0, 1) + "]"
+                    + EXECUTABLE_PREFIX.substring(1) + executable + EXECUTABLE_SUFFIX;
+            Shell.Result r = Shell.cmd("pgrep -f '" + pattern + "' >/dev/null 2>&1").exec();
             if (r.isSuccess()) return true;
         } catch (Exception ignored) {}
         // Fallback to ps + guarded grep to avoid matching the grep process itself
