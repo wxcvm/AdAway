@@ -165,6 +165,23 @@ public static org.json.JSONObject getStats() {
             org.json.JSONObject stats = fetchStatsViaNc(a[0], a[1], a[2]);
             if (stats != null) return stats;
         }
+        // 终极兜底：OkHttp 直接拉取（与探活同栈，进程存活则必可达）
+        try {
+            OkHttpClient client = new OkHttpClient.Builder()
+                    .proxy(java.net.Proxy.NO_PROXY)
+                    .connectTimeout(3, TimeUnit.SECONDS)
+                    .readTimeout(3, TimeUnit.SECONDS)
+                    .build();
+            try (Response r = client.newCall(
+                    new Request.Builder().url("http://127.0.0.1:" + getStatsHttpPort() + "/internal-stats").build()
+            ).execute()) {
+                if (r.isSuccessful() && r.body() != null) {
+                    return new org.json.JSONObject(r.body().string());
+                }
+            }
+        } catch (Exception e) {
+            Timber.w(e, "Failed to fetch web server stats (OkHttp)");
+        }
         return null;
     }
     /** 通过 nc 拉取一次 /internal-stats（指定二进制与地址）。 */
@@ -488,24 +505,10 @@ public static void startWebServer(Context context) {
      * 不依赖 OS TLS 握手，避免网络安全配置差异导致的误报。
      */
 public static int getWebServerState(Context context) {
+        // 运行判定：进程检测（多策略）或探活任一通过；HTTP 探活失败不再影响证书基于的运行判定
         if (!isWebServerRunning() && !isWebServerReachable(context)) return R.string.pref_webserver_state_not_running;
 
-        OkHttpClient client = new OkHttpClient.Builder()
-                .proxy(java.net.Proxy.NO_PROXY)
-                .connectTimeout(3, TimeUnit.SECONDS)
-                .readTimeout(3, TimeUnit.SECONDS)
-                .build();
-
-        try {
-            try (Response r = client.newCall(
-                    new Request.Builder().url("http://127.0.0.1:" + getHttpPort(context) + "/internal-test").build()
-            ).execute()) {
-                if (!r.isSuccessful()) return R.string.pref_webserver_state_not_running;
-            }
-        } catch (IOException e) {
-            return R.string.pref_webserver_state_not_running;
-        }
-
+// Check if certificate has changed since last check
         // Check if certificate has changed since last check
         String currentHash = computeCertHash(context);
         SharedPreferences prefs = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE);
