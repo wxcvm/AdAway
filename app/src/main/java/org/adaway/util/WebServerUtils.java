@@ -153,7 +153,13 @@ public class WebServerUtils {
      */
 public static org.json.JSONObject getStats() {
         // 优先 v4-mapped（ColorOS 保留 app uid），执行查找、地址回退，确保多数 ROM 可达
+        // 实测踩坑：部分 ROM 会残留 DNAT 规则劫持 127.0.0.1:80（本机曾遇到
+        // 127.0.0.1:80 -> 127.0.0.1:12121 而 12121 无监听，导致 v4 直连
+        // Connection refused）。IPv6 loopback [::1] 不受该规则影响，优先尝试。
         String[][] attempts = {
+            {"/system/bin/toybox", "nc", "::1"},
+            {"/system/bin/nc", "::1"},
+            {"nc", "::1"},
             {"/system/bin/toybox", "nc", "::ffff:127.0.0.1"},
             {"/system/bin/toybox", "nc", "127.0.0.1"},
             {"/system/bin/nc", "::ffff:127.0.0.1"},
@@ -172,11 +178,13 @@ public static org.json.JSONObject getStats() {
                     .connectTimeout(3, TimeUnit.SECONDS)
                     .readTimeout(3, TimeUnit.SECONDS)
                     .build();
-            try (Response r = client.newCall(
-                    new Request.Builder().url("http://127.0.0.1:" + getStatsHttpPort() + "/internal-stats").build()
-            ).execute()) {
-                if (r.isSuccessful() && r.body() != null) {
-                    return new org.json.JSONObject(r.body().string());
+            for (String host : new String[]{"[::1]", "127.0.0.1"}) {
+                try (Response r = client.newCall(
+                        new Request.Builder().url("http://" + host + ":" + getStatsHttpPort() + "/internal-stats").build()
+                ).execute()) {
+                    if (r.isSuccessful() && r.body() != null) {
+                        return new org.json.JSONObject(r.body().string());
+                    }
                 }
             }
         } catch (Exception e) {
@@ -375,7 +383,7 @@ public static void startWebServer(Context context) {
         try {
             Process process = new ProcessBuilder(
                     "/system/bin/toybox", "nc", "-w", "3",
-                    "::ffff:127.0.0.1", String.valueOf(getStatsHttpPort()))
+                    "::1", String.valueOf(getStatsHttpPort()))
                     .redirectErrorStream(false)
                     .start();
             /*
@@ -468,21 +476,27 @@ public static void startWebServer(Context context) {
                 .readTimeout(3, TimeUnit.SECONDS)
                 .build();
         try {
-            try (Response r = client.newCall(
-                    new Request.Builder().url("http://127.0.0.1:" + getHttpPort(context) + "/internal-test").build()
-            ).execute()) {
-                if (r.isSuccessful()) return true;
+            for (String host : new String[]{"[::1]", "127.0.0.1"}) {
+                try (Response r = client.newCall(
+                        new Request.Builder().url("http://" + host + ":" + getHttpPort(context) + "/internal-test").build()
+                ).execute()) {
+                    if (r.isSuccessful()) return true;
+                }
             }
         } catch (IOException ignored) {}
-        try {
-            try (Response r = client.newCall(
-                    new Request.Builder().url(getTestUrl(context)).build()
-            ).execute()) {
-                return r.isSuccessful();
-            }
-        } catch (IOException e) {
-            return false;
+        for (String host : new String[]{"[::1]", "localhost"}) {
+            try {
+                int port = getHttpsPort(context);
+                String url = port == 443 ? "https://" + host + "/internal-test"
+                        : "https://" + host + ":" + port + "/internal-test";
+                try (Response r = client.newCall(
+                        new Request.Builder().url(url).build()
+                ).execute()) {
+                    if (r.isSuccessful()) return true;
+                }
+            } catch (IOException ignored) {}
         }
+        return false;
     }
     public static boolean isWebServerRunning() {
         return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
