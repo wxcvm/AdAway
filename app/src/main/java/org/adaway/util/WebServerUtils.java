@@ -460,7 +460,7 @@ public static int getWebServerState(Context context) {
 
         try {
             try (Response r = client.newCall(
-                    new Request.Builder().url("http://127.0.0.1/internal-test").build()
+                    new Request.Builder().url("http://127.0.0.1:" + getHttpPort(context) + "/internal-test").build()
             ).execute()) {
                 if (!r.isSuccessful()) return R.string.pref_webserver_state_not_running;
             }
