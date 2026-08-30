@@ -814,6 +814,198 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
 
+            // ── 调试（崩溃日志 / 遥测）──
+            // old-pref sharing (Constants.PREFS_NAME)
+            val legacyPrefs = context.getSharedPreferences(org.adaway.util.Constants.PREFS_NAME, Context.MODE_PRIVATE)
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_debug_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_settings_debug_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // 旧版偏好键共享：使用 Constants.PREFS_NAME（preferences），与 PreferenceHelper/ApplicationLog 联动
+                    var debugLog by remember { mutableStateOf(legacyPrefs.getBoolean("debugEnabled", false)) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_debug_log),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_debug_log_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = debugLog,
+                            onCheckedChange = { v ->
+                                debugLog = v
+                                legacyPrefs.edit().putBoolean("debugEnabled", v).apply()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    var telemetry by remember { mutableStateOf(legacyPrefs.getBoolean("enableTelemetry", false)) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_debug_telemetry),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_debug_telemetry_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = telemetry,
+                            onCheckedChange = { v ->
+                                telemetry = v
+                                legacyPrefs.edit().putBoolean("enableTelemetry", v).apply()
+                                org.adaway.util.log.SentryLog.setEnabled(context.applicationContext as android.app.Application, v)
+                            },
+                        )
+                    }
+                }
+            }
+
+            // ── 更多设置（IPv6 / 自动更新 / 关于）──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_more_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    var ipv6Enabled by remember { mutableStateOf(legacyPrefs.getBoolean("enableIpv6", false)) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_ipv6),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_ipv6_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = ipv6Enabled,
+                            onCheckedChange = { v ->
+                                ipv6Enabled = v
+                                legacyPrefs.edit().putBoolean("enableIpv6", v).apply()
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 自动更新设置入口（复用旧版设置页）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                context.startActivity(Intent(context, org.adaway.ui.prefs.PrefsActivity::class.java))
+                            }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(16.dp))
+                        Column {
+                            Text(
+                                stringResource(R.string.compose_settings_update_entry),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_update_entry_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    // 关于：GitHub / 问题反馈
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/wxcvm/AdAway")))
+                            }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Public, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(16.dp))
+                        Text(
+                            stringResource(R.string.compose_settings_about_repo),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/wxcvm/AdAway/issues")))
+                            }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(16.dp))
+                        Text(
+                            stringResource(R.string.compose_settings_about_issues),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    // 版本
+                    val versionName = remember {
+                        try {
+                            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
+                        } catch (e: Exception) {
+                            "unknown"
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.Apps, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(16.dp))
+                        Text(
+                            stringResource(R.string.compose_settings_version, versionName),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+
             // ── Allowlist (bypass blocking) ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
