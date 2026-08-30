@@ -95,6 +95,15 @@ fun OverviewScreen(viewModel: StatsViewModel) {
             org.adaway.util.WebServerUtils.getWebServerState(context)
         }
     }
+    // 启动失败原因：未运行时读取 root 启动日志尾部（仅一次，避免重复 root 调用）
+    var startLog by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(wsEnabled) {
+        startLog = if (!wsEnabled) {
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                org.adaway.model.root.ShellUtils.readBundledExecutableStartLog("webserver").ifBlank { null }
+            }
+        } else null
+    }
 
     Scaffold(
                 topBar = {
@@ -170,6 +179,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 httpPort = org.adaway.util.WebServerUtils.getHttpPort(context),
                 httpsPort = org.adaway.util.WebServerUtils.getHttpsPort(context),
                 certStateRes = certStateRes,
+                startLog = startLog,
                 onToggle = { enable ->
                     if (enable) {
                         org.adaway.util.WebServerUtils.startWebServer(context)
@@ -184,9 +194,6 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                     } catch (e: Exception) {
                         // no browser available; ignore
                     }
-                },
-                onInstallCert = {
-                    org.adaway.util.WebServerUtils.installUserCertificate(context)
                 },
             )
 
@@ -236,9 +243,9 @@ private fun WebServerControlCard(
     httpPort: Int,
     httpsPort: Int,
     @androidx.annotation.StringRes certStateRes: Int,
+    startLog: String?,
     onToggle: (Boolean) -> Unit,
     onTest: () -> Unit,
-    onInstallCert: () -> Unit,
 ) {
     val context = LocalContext.current
     val certInstalled = certStateRes == R.string.pref_webserver_state_running_and_installed ||
@@ -322,13 +329,7 @@ private fun WebServerControlCard(
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (certNeedsAction) {
-                    TextButton(onClick = onInstallCert) {
-                        Icon(Icons.Outlined.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.compose_ws_control_install_cert))
-                    }
-                }
+
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -339,6 +340,25 @@ private fun WebServerControlCard(
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.compose_ws_control_test))
                 }
+            }
+            // 启动失败原因透出：展示 root 启动日志尾部
+            if (!enabled && !startLog.isNullOrBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.compose_ws_control_log_title),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    startLog!!,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 10,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
         }
     }
