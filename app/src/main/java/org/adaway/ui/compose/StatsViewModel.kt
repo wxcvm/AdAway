@@ -269,8 +269,10 @@ private fun startPolling() {
             try {
                 val ws = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
                     override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
-                        // Real-time push active: stop the 10s polling to save CPU.
-                        pollingJob?.cancel()
+                        // NOTE: the native server only pushes after blocking events;
+                        // with no traffic the WS stays silent and stats would freeze
+                        // at null forever. Keep the 10s polling as a safety net
+                        // (cheap nc probe); WS messages simply update faster.
                     }
                     override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
                         try {
