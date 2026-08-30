@@ -5,7 +5,6 @@
     <!-- 导航 -->
     <string name="compose_nav_overview">概览</string>
     <string name="compose_nav_stats">统计</string>
-    <string name="compose_nav_logs">日志</string>
     <string name="compose_nav_rules">规则</string>
     <string name="compose_nav_settings">设置</string>
 
@@ -73,9 +72,6 @@
     <string name="compose_settings_apps_empty">暂未检测到应用——浏览网页后应用会显示在这里。</string>
     <string name="compose_settings_app_allow">放行</string>
     <string name="compose_settings_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
-    <string name="compose_settings_logs_title">日志</string>
-    <string name="compose_settings_logs_hint">日志页最多显示的条数</string>
-    <string name="compose_settings_logs_limit">%1$d</string>
     <string name="compose_settings_charts_title">统计图表</string>
     <string name="compose_settings_charts_hint">选择要显示的图表和卡片</string>
     <string name="compose_settings_chart_donut">按类型拦截环形图</string>
@@ -93,11 +89,6 @@
     <string name="compose_settings_theme_system">跟随系统</string>
     <string name="compose_settings_theme_light">浅色</string>
     <string name="compose_settings_theme_dark">深色</string>
-    <string name="compose_settings_logs_retention">日志保留时间</string>
-    <string name="compose_settings_logs_retention_forever">永久</string>
-    <string name="compose_settings_logs_retention_1d">1 天</string>
-    <string name="compose_settings_logs_retention_7d">7 天</string>
-    <string name="compose_settings_logs_retention_30d">30 天</string>
     <string name="compose_settings_about_license">开源项目（GPLv3）——基于 ADBlock 的分支，新增 per-app 统计、SNI 拦截与 Material 3 界面。</string>
     <string name="compose_settings_data_title">数据管理</string>
     <string name="compose_settings_data_hint">清除统计数据和历史</string>
@@ -177,27 +168,9 @@
     <string name="compose_stats_lifetime_certs">证书</string>
 
     <!-- 日志 -->
-    <string name="compose_logs_title">日志</string>
-    <string name="compose_logs_recording">● 正在记录DNS查询</string>
-    <string name="compose_logs_paused">○ 记录已暂停</string>
-    <string name="compose_logs_entries">%1$d 条记录</string>
-    <string name="compose_logs_empty_recording">暂无DNS查询记录</string>
-    <string name="compose_logs_empty_recording_hint">浏览网页后，查询记录将显示在这里。</string>
-    <string name="compose_logs_empty_paused">记录已暂停</string>
-    <string name="compose_logs_empty_paused_hint">点击顶部的播放按钮开始记录。</string>
-    <string name="compose_logs_start">开始记录</string>
-    <string name="compose_logs_pause">暂停记录</string>
-    <string name="compose_logs_clear">清空日志</string>
-    <string name="compose_logs_filter_all">全部</string>
     <string name="compose_logs_filter_blocked">已拦截</string>
     <string name="compose_logs_filter_allowed">已允许</string>
     <string name="compose_logs_filter_redirected">已重定向</string>
-    <string name="compose_logs_filter_unknown">未知</string>
-    <string name="compose_logs_empty_filtered">没有符合该筛选条件的记录</string>
-    <string name="compose_logs_action_hint">将此域名加入手动规则列表：</string>
-    <string name="compose_logs_action_block">加入黑名单（拦截）</string>
-    <string name="compose_logs_action_allow">加入白名单（放行）</string>
-    <string name="compose_logs_action_cancel">取消</string>
 
     <!-- 规则 -->
     <string name="compose_rules_title">规则</string>
