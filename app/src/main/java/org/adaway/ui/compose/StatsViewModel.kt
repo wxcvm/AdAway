@@ -332,10 +332,7 @@ fun refreshServerStats() {
         }
     }
 
-            }
-            onResult(logs)
-        }
-    }
+    
 
     /**
      * Load user-defined rule entries (source_id == 1: manual whitelist,
