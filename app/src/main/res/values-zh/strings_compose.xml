@@ -215,4 +215,7 @@
     <string name="compose_rules_cancel">取消</string>
     <string name="compose_rules_source_size">%1$d 条</string>
     <string name="compose_rules_sources_empty">暂无订阅，添加一个即可开始拦截。</string>
+    <string name="compose_stats_kpi_connections">连接数</string>
+    <string name="compose_stats_top_hosts">拦截域名排行</string>
+    <string name="compose_stats_top_hosts_more">还有 %1$d 个</string>
 </resources>
