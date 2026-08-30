@@ -33,19 +33,31 @@ public final class ShellUtils {
     }
 
     public static boolean isBundledExecutableRunning(String executable) {
+        // Bracket trick: '[l]ib<exe>_exec.so' never matches its own command
+        // line (the su -> sh -c wrapper would otherwise report a false
+        // positive and isWebServerRunning() would be always true even when
+        // the web server is dead). Strategy chain, any hit => true:
+        //   1. pgrep -f            fast path (busybox/toybox)
+        //   2. ps -A -o ARGS=      full cmdline (no 15-char comm truncation)
+        //   3. grep /proc cmdline  most reliable last resort
+        String name = EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
+        String pattern = "[" + name.substring(0, 1) + "]" + name.substring(1);
+        // 1) pgrep
         try {
-            // Prefer pgrep (less parsing) when available.
-            // Use the [l]ib bracket trick: the pgrep command line itself
-            // (run via su -> sh -c) would otherwise match and report a
-            // false positive forever (isWebServerRunning() always true).
-            String pattern = "[" + EXECUTABLE_PREFIX.substring(0, 1) + "]"
-                    + EXECUTABLE_PREFIX.substring(1) + executable + EXECUTABLE_SUFFIX;
             Shell.Result r = Shell.cmd("pgrep -f '" + pattern + "' >/dev/null 2>&1").exec();
             if (r.isSuccess()) return true;
         } catch (Exception ignored) {}
-        // Fallback to ps + guarded grep to avoid matching the grep process itself
-        String grepCmd = "ps -A 2>/dev/null | grep -E \"[l]ib" + executable + "_exec\\.so\" >/dev/null 2>&1";
-        return Shell.cmd(grepCmd).exec().isSuccess();
+        // 2) ps with full ARGS column (avoids comm truncation at 15 chars)
+        try {
+            Shell.Result r = Shell.cmd("ps -A -o ARGS= 2>/dev/null | grep -E '" + pattern + "' >/dev/null 2>&1").exec();
+            if (r.isSuccess()) return true;
+        } catch (Exception ignored) {}
+        // 3) /proc scan: match the executable name in any process cmdline
+        try {
+            Shell.Result r = Shell.cmd("grep -alE '" + pattern + "' /proc/[0-9]*/cmdline >/dev/null 2>&1").exec();
+            if (r.isSuccess()) return true;
+        } catch (Exception ignored) {}
+        return false;
     }
 
     /**
@@ -218,6 +230,22 @@ public final class ShellUtils {
     public static void killBundledExecutable(String executable) {
         // Try pkill/pkill -f then killall as fallback; ignore errors
         Shell.cmd("pkill -f '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' || killall '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' || true").exec();
+    }
+    /**
+     * Read the last lines of the bundled executable launch log (written by
+     * the root shell during runBundledExecutable). The file is root-owned,
+     * so it must be read through a root shell; returns an empty string when
+     * the log is unavailable or empty.
+     */
+    public static String readBundledExecutableStartLog(String executable) {
+        try {
+            String logPath = "/data/local/tmp/" + executable + "_start.log";
+            Shell.Result r = Shell.cmd("tail -n 30 " + escapedString(logPath) + " 2>/dev/null").exec();
+            if (r.isSuccess() && r.getOut() != null && !r.getOut().isEmpty()) {
+                return mergeAllLines(r.getOut());
+            }
+        } catch (Exception ignored) {}
+        return "";
     }
 
 
