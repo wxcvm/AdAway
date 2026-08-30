@@ -228,4 +228,8 @@
     <string name="compose_settings_update_hosts_hint">从规则源刷新 hosts 规则</string>
     <string name="compose_settings_update_wifi">仅 Wi-Fi 更新</string>
     <string name="compose_settings_update_wifi_hint">避免消耗移动数据</string>
+    <string name="compose_stats_status_title">统计状态</string>
+    <string name="compose_stats_status_ok">正常 · 更新于 %1$s</string>
+    <string name="compose_stats_status_stale">最后更新 %1$s（可能已过期）</string>
+    <string name="compose_stats_status_waiting">规则统计不受影响 · 等待 web 服务器数据</string>
 </resources>
