@@ -229,4 +229,7 @@
     <string name="compose_rules_cancel">Cancel</string>
     <string name="compose_rules_source_size">%1$d items</string>
     <string name="compose_rules_sources_empty">No subscriptions yet — add one to start blocking.</string>
+    <string name="compose_stats_kpi_connections">Connections</string>
+    <string name="compose_stats_top_hosts">Top domains</string>
+    <string name="compose_stats_top_hosts_more">+%1$d more</string>
 </resources>
