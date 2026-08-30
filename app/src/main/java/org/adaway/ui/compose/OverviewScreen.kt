@@ -86,6 +86,13 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     var wsEnabled by remember {
         mutableStateOf(org.adaway.util.WebServerUtils.isWebServerRunning())
     }
+    // 进程检测可能假阴性：探活成功即视为运行中（后台线程，避免主线程网络）
+    LaunchedEffect(Unit) {
+        val reachable = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            org.adaway.util.WebServerUtils.isWebServerReachable(context)
+        }
+        if (reachable) wsEnabled = true
+    }
     // 证书状态：getWebServerState() 内部含 OkHttp HTTP 探活，
     // 禁止在主线程调用（否则 NetworkOnMainThreadException 崩溃），
     // 因此放到 LaunchedEffect 后台线程获取。
