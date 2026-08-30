@@ -5,7 +5,6 @@
     <!-- Navigation -->
     <string name="compose_nav_overview">Overview</string>
     <string name="compose_nav_stats">Statistics</string>
-    <string name="compose_nav_logs">Logs</string>
     <string name="compose_nav_rules">Rules</string>
     <string name="compose_nav_settings">Settings</string>
 
@@ -80,9 +79,6 @@
     <string name="compose_settings_allowlist_uid">UID %1$d</string>
     <string name="compose_settings_allowlist_remove">Remove from allowlist</string>
     <string name="compose_settings_app_sub">%1$d conn · %2$d req · %3$d blocked</string>
-    <string name="compose_settings_logs_title">Logs</string>
-    <string name="compose_settings_logs_hint">Maximum entries shown in the Logs screen</string>
-    <string name="compose_settings_logs_limit">%1$d</string>
     <string name="compose_settings_charts_title">Statistics charts</string>
     <string name="compose_settings_charts_hint">Choose which charts and cards are shown</string>
     <string name="compose_settings_chart_donut">Blocked-by-type donut</string>
@@ -100,11 +96,6 @@
     <string name="compose_settings_theme_system">System</string>
     <string name="compose_settings_theme_light">Light</string>
     <string name="compose_settings_theme_dark">Dark</string>
-    <string name="compose_settings_logs_retention">Keep logs for</string>
-    <string name="compose_settings_logs_retention_forever">Forever</string>
-    <string name="compose_settings_logs_retention_1d">1 day</string>
-    <string name="compose_settings_logs_retention_7d">7 days</string>
-    <string name="compose_settings_logs_retention_30d">30 days</string>
     <string name="compose_settings_about_license">Open source (GPLv3) — ADBlock fork with per-app stats, SNI interception and a Material 3 UI.</string>
     <string name="compose_settings_data_title">Data</string>
     <string name="compose_settings_data_hint">Clear statistics and history</string>
@@ -191,27 +182,9 @@
     <string name="compose_stats_lifetime_certs">Certs</string>
 
     <!-- Logs -->
-    <string name="compose_logs_title">Logs</string>
-    <string name="compose_logs_recording">● Recording DNS queries</string>
-    <string name="compose_logs_paused">○ Recording paused</string>
-    <string name="compose_logs_entries">%1$d entries</string>
-    <string name="compose_logs_empty_recording">No DNS queries captured yet</string>
-    <string name="compose_logs_empty_recording_hint">Browse the web and queries will appear here.</string>
-    <string name="compose_logs_empty_paused">Recording is paused</string>
-    <string name="compose_logs_empty_paused_hint">Tap play in the top bar to start capturing.</string>
-    <string name="compose_logs_start">Start recording</string>
-    <string name="compose_logs_pause">Pause recording</string>
-    <string name="compose_logs_clear">Clear logs</string>
-    <string name="compose_logs_filter_all">All</string>
     <string name="compose_logs_filter_blocked">Blocked</string>
     <string name="compose_logs_filter_allowed">Allowed</string>
     <string name="compose_logs_filter_redirected">Redirected</string>
-    <string name="compose_logs_filter_unknown">unknown</string>
-    <string name="compose_logs_empty_filtered">No entries match this filter</string>
-    <string name="compose_logs_action_hint">Add this host to a manual rule list:</string>
-    <string name="compose_logs_action_block">Block (blacklist)</string>
-    <string name="compose_logs_action_allow">Allow (whitelist)</string>
-    <string name="compose_logs_action_cancel">Cancel</string>
 
     <!-- Rules -->
     <string name="compose_rules_title">Rules</string>
