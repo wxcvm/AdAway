@@ -52,7 +52,7 @@ public class WebServerUtils {
      * per-app statistics rely on to identify the requesting app.
      */
     public static final String STATS_URL = "http://[::ffff:127.0.0.1]/internal-stats";
-    private static final String WEB_SERVER_EXECUTABLE = "webserver";
+    public static final String WEB_SERVER_EXECUTABLE = "webserver";
     private static final String CA_CERT_FILE = "localhost-2410.crt";
     private static final String CA_KEY_FILE  = "localhost-2410.key";
     private static final String PREFS_WS = "compose_webserver";
@@ -137,114 +137,10 @@ public class WebServerUtils {
      * preserved in /proc/net/tcp6).
      */
     @androidx.annotation.Nullable
-    /**
-     * 拉取 webserver 统计快照（/internal-stats）并解析为 JSON。
-     *
-     * 实现要点（历史踩坑记录）：
-     *  1. 必须使用 toybox nc 子进程而非 Java Socket：
-     *     Java 会把 v4-mapped 地址折叠回纯 IPv4，导致 /proc/net/tcp
-     *     中 uid 被 ColorOS 内核清零，per-app 统计失效。
-     *  2. 目标地址为 ::ffff:127.0.0.1（v4-mapped），子进程继承
-     *     app uid，内核在 tcp6 表中保留真实 uid。
-     *  3. 响应体可能超过 4KB（history+daily+apps），使用 ByteArrayOutputStream
-     *     累积读取，避免截断导致 JSON 解析失败。
-     *
-     * @return 解析后的 JSONObject；webserver 未运行或响应不可解析时返回 null。
-     */
-public static org.json.JSONObject getStats() {
-        // 优先 v4-mapped（ColorOS 保留 app uid），执行查找、地址回退，确保多数 ROM 可达
-        // 实测踩坑：部分 ROM 会残留 DNAT 规则劫持 127.0.0.1:80（本机曾遇到
-        // 127.0.0.1:80 -> 127.0.0.1:12121 而 12121 无监听，导致 v4 直连
-        // Connection refused）。IPv6 loopback [::1] 不受该规则影响，优先尝试。
-        String[][] attempts = {
-            {"/system/bin/toybox", "nc", "::1"},
-            {"/system/bin/nc", "::1"},
-            {"nc", "::1"},
-            {"/system/bin/toybox", "nc", "::ffff:127.0.0.1"},
-            {"/system/bin/toybox", "nc", "127.0.0.1"},
-            {"/system/bin/nc", "::ffff:127.0.0.1"},
-            {"/system/bin/nc", "127.0.0.1"},
-            {"nc", "::ffff:127.0.0.1"},
-            {"nc", "127.0.0.1"},
-        };
-        for (String[] a : attempts) {
-            org.json.JSONObject stats = fetchStatsViaNc(a[0], a[1], a[2]);
-            if (stats != null) return stats;
-        }
-        // 终极兜底：OkHttp 直接拉取（与探活同栈，进程存活则必可达）
-        try {
-            OkHttpClient client = new OkHttpClient.Builder()
-                    .proxy(java.net.Proxy.NO_PROXY)
-                    .connectTimeout(3, TimeUnit.SECONDS)
-                    .readTimeout(3, TimeUnit.SECONDS)
-                    .build();
-            for (String host : new String[]{"[::1]", "127.0.0.1"}) {
-                try (Response r = client.newCall(
-                        new Request.Builder().url("http://" + host + ":" + getStatsHttpPort() + "/internal-stats").build()
-                ).execute()) {
-                    if (r.isSuccessful() && r.body() != null) {
-                        return new org.json.JSONObject(r.body().string());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Timber.w(e, "Failed to fetch web server stats (OkHttp)");
-        }
-        return null;
+    /** 统计快照委托：实现见 WebServerStats（IPv6 loopback 优先，规避 DNAT 劫持）。 */
+    public static org.json.JSONObject getStats() {
+        return WebServerStats.getStats();
     }
-    /** 通过 nc 拉取一次 /internal-stats（指定二进制与地址）。 */
-    private static org.json.JSONObject fetchStatsViaNc(String cmd0, String cmd1, String host) {
-        try {
-            Process process = new ProcessBuilder(
-                    cmd0, cmd1, "-w", "3",
-                    host, String.valueOf(getStatsHttpPort()))
-                    .redirectErrorStream(false)
-                    .start();
-            Thread errDrain = new Thread(() -> {
-                try (InputStream es = process.getErrorStream()) {
-                    byte[] eb = new byte[1024];
-                    while (es.read(eb) != -1) { /* discard */ }
-                } catch (IOException ignored) { }
-            });
-            errDrain.setDaemon(true);
-            errDrain.start();
-            java.io.OutputStream out = process.getOutputStream();
-            out.write(("GET /internal-stats HTTP/1.1\r\n" +
-                    "Host: adaway\r\n" +
-                    "Connection: close\r\n\r\n").getBytes("UTF-8"));
-            out.close();
-            java.io.InputStream in = process.getInputStream();
-            java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = in.read(buf)) > 0) body.write(buf, 0, n);
-            in.close();
-            if (!process.waitFor(4000, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                process.destroy();
-                return null;
-            }
-            try { errDrain.join(500); } catch (InterruptedException ignored) { }
-            String response = body.toString("UTF-8");
-            int headerEnd = response.indexOf("\r\n\r\n");
-            String json = headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
-            return new org.json.JSONObject(json);
-        } catch (Exception e) {
-            Timber.w(e, "Failed to fetch web server stats (nc %s)", host);
-            return null;
-        }
-    }
-
-
-    /**
-     * BUG FIX: Toast.show() must run on the main thread. startWebServer()
-     * is invoked from RootModel.syncPreferences(), which runs on a
-     * background disk-IO executor every time the app is opened (if the
-     * user has the web server preference enabled). Calling Toast.show()
-     * directly there throws an uncaught
-     * android.view.ViewRootImpl$CalledFromWrongThreadException, crashing
-     * the app on every launch. Route all toasts in this file through the
-     * main looper instead.
-     */
     private static void showToast(Context context, @StringRes int resId) {
         new android.os.Handler(android.os.Looper.getMainLooper())
                 .post(() -> Toast.makeText(context, resId, Toast.LENGTH_LONG).show());
@@ -379,127 +275,28 @@ public static void startWebServer(Context context) {
      * @return response body string, or null on failure
      */
     @androidx.annotation.Nullable
+    /** 控制命令委托：实现见 WebServerControl（nc + ::1，与统计同栈）。 */
     private static String sendControlCommand(String cmd) {
-        try {
-            Process process = new ProcessBuilder(
-                    "/system/bin/toybox", "nc", "-w", "3",
-                    "::1", String.valueOf(getStatsHttpPort()))
-                    .redirectErrorStream(false)
-                    .start();
-            /*
-             * BUG FIX: the child's stderr pipe was never read or closed. If
-             * toybox nc ever writes anything to stderr (e.g. a DNS/connect
-             * warning), the ~64KB pipe buffer fills, the child blocks on
-             * write() and waitFor() below times out on every call even though
-             * the HTTP request already succeeded. Drain it on a daemon thread
-             * so it can never deadlock the response read.
-             */
-            Thread errDrain = new Thread(() -> {
-                try (InputStream es = process.getErrorStream()) {
-                    byte[] eb = new byte[1024];
-                    while (es.read(eb) != -1) { /* discard */ }
-                } catch (IOException ignored) { }
-            });
-            errDrain.setDaemon(true);
-            errDrain.start();
-            java.io.OutputStream out = process.getOutputStream();
-            String body = "cmd=" + cmd;
-            out.write(("POST /control HTTP/1.1\r\n" +
-                    "Host: adaway\r\n" +
-                    "Content-Type: application/x-www-form-urlencoded\r\n" +
-                    "Content-Length: " + body.length() + "\r\n" +
-                    "Connection: close\r\n\r\n" +
-                    body).getBytes("UTF-8"));
-            out.close();
-            java.io.InputStream in = process.getInputStream();
-            java.io.ByteArrayOutputStream respBody = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = in.read(buf)) > 0) respBody.write(buf, 0, n);
-            in.close();
-            if (!process.waitFor(4000, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                process.destroy();
-                return null;
-            }
-            try { errDrain.join(500); } catch (InterruptedException ignored) { }
-            String response = respBody.toString("UTF-8");
-            int headerEnd = response.indexOf("\r\n\r\n");
-            return headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
-        } catch (Exception e) {
-            Timber.w(e, "Failed to send control command: %s", cmd);
-            return null;
-        }
+        return WebServerControl.sendControlCommand(cmd);
     }
-
-    /**
-     * Reload block-placeholder images from the resource directory.
-     * Call after user picks a custom image or resets to defaults.
-     *
-     * @return true if server acknowledged the reload
-     */
-    public static boolean reloadImages() {
-        String resp = sendControlCommand("reload_images");
-        return resp != null && resp.startsWith("OK:");
-    }
-
-    /**
-     * Force-flush all statistics to disk (stats.dat, hist.dat, sni_cache.dat, apps.dat).
-     * Call before app exit or when user wants guaranteed persistence.
-     *
-     * @return true if server acknowledged the flush
-     */
-    public static boolean flushStats() {
-        String resp = sendControlCommand("flush_stats");
-        return resp != null && resp.startsWith("OK:");
-    }
-
-    /**
-     * Gracefully shut down the web server process.
-     * The server will finish current requests and exit cleanly.
-     *
-     * @return true if server acknowledged the shutdown
-     */
-    public static boolean shutdown() {
-        String resp = sendControlCommand("shutdown");
-        return resp != null && resp.startsWith("OK:");
-    }
-
+    /** @see WebServerControl#reloadImages() */
+    public static boolean reloadImages() { return WebServerControl.reloadImages(); }
+    /** @see WebServerControl#flushStats() */
+    public static boolean flushStats() { return WebServerControl.flushStats(); }
+    /** @see WebServerControl#shutdown() */
+    public static boolean shutdown() { return WebServerControl.shutdown(); }
     /**
      * 权威运行判定：OkHttp HTTP 探活（3s 超时）。
      * 进程检测（pgrep/ps，见 ShellUtils）在部分 ROM 会因 toybox 差异
      * 假阴性，而探活能真实反映服务可达性——两者结合使用。
      */
+    /** 探活委托：实现见 WebServerState（双栈，IPv6 loopback 优先）。 */
     public static boolean isWebServerReachable(Context context) {
-        OkHttpClient client = new OkHttpClient.Builder()
-                .proxy(java.net.Proxy.NO_PROXY)
-                .connectTimeout(3, TimeUnit.SECONDS)
-                .readTimeout(3, TimeUnit.SECONDS)
-                .build();
-        try {
-            for (String host : new String[]{"[::1]", "127.0.0.1"}) {
-                try (Response r = client.newCall(
-                        new Request.Builder().url("http://" + host + ":" + getHttpPort(context) + "/internal-test").build()
-                ).execute()) {
-                    if (r.isSuccessful()) return true;
-                }
-            }
-        } catch (IOException ignored) {}
-        for (String host : new String[]{"[::1]", "localhost"}) {
-            try {
-                int port = getHttpsPort(context);
-                String url = port == 443 ? "https://" + host + "/internal-test"
-                        : "https://" + host + ":" + port + "/internal-test";
-                try (Response r = client.newCall(
-                        new Request.Builder().url(url).build()
-                ).execute()) {
-                    if (r.isSuccessful()) return true;
-                }
-            } catch (IOException ignored) {}
-        }
-        return false;
+        return WebServerState.isWebServerReachable(context);
     }
+    /** 进程检测委托。 */
     public static boolean isWebServerRunning() {
-        return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
+        return WebServerState.isWebServerRunning();
     }
 
     @StringRes
