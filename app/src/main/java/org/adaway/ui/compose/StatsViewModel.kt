@@ -330,14 +330,6 @@ fun refreshServerStats() {
         }
     }
 
-    /**
-     * Load DNS log entries with their block-list type on a background
-     * thread (Room forbids main-thread queries), then invoke [onResult].
-     */
-    fun refreshLogEntries(onResult: (List<Pair<String, ListType?>>) -> Unit) {
-        viewModelScope.launch {
-            val logs = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                adBlockModel.getLogs().map { host -> host to hostEntryDao.getTypeOfHost(host) }
             }
             onResult(logs)
         }
