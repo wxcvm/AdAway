@@ -152,18 +152,26 @@ public class WebServerUtils {
      * @return 解析后的 JSONObject；webserver 未运行或响应不可解析时返回 null。
      */
 public static org.json.JSONObject getStats() {
-        // 优先 v4-mapped（ColorOS 保留 app uid），失败回退纯 IPv4（兼容性兜底）
-        org.json.JSONObject stats = fetchStatsViaNc("::ffff:127.0.0.1");
-        if (stats == null) {
-            stats = fetchStatsViaNc("127.0.0.1");
+        // 优先 v4-mapped（ColorOS 保留 app uid），执行查找、地址回退，确保多数 ROM 可达
+        String[][] attempts = {
+            {"/system/bin/toybox", "nc", "::ffff:127.0.0.1"},
+            {"/system/bin/toybox", "nc", "127.0.0.1"},
+            {"/system/bin/nc", "::ffff:127.0.0.1"},
+            {"/system/bin/nc", "127.0.0.1"},
+            {"nc", "::ffff:127.0.0.1"},
+            {"nc", "127.0.0.1"},
+        };
+        for (String[] a : attempts) {
+            org.json.JSONObject stats = fetchStatsViaNc(a[0], a[1], a[2]);
+            if (stats != null) return stats;
         }
-        return stats;
+        return null;
     }
-    /** 通过 toybox nc 拉取一次 /internal-stats。 */
-    private static org.json.JSONObject fetchStatsViaNc(String host) {
+    /** 通过 nc 拉取一次 /internal-stats（指定二进制与地址）。 */
+    private static org.json.JSONObject fetchStatsViaNc(String cmd0, String cmd1, String host) {
         try {
             Process process = new ProcessBuilder(
-                    "/system/bin/toybox", "nc", "-w", "3",
+                    cmd0, cmd1, "-w", "3",
                     host, String.valueOf(getStatsHttpPort()))
                     .redirectErrorStream(false)
                     .start();
@@ -445,6 +453,13 @@ public static void startWebServer(Context context) {
         try {
             try (Response r = client.newCall(
                     new Request.Builder().url("http://127.0.0.1:" + getHttpPort(context) + "/internal-test").build()
+            ).execute()) {
+                if (r.isSuccessful()) return true;
+            }
+        } catch (IOException ignored) {}
+        try {
+            try (Response r = client.newCall(
+                    new Request.Builder().url(getTestUrl(context)).build()
             ).execute()) {
                 return r.isSuccessful();
             }
