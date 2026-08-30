@@ -194,6 +194,9 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     // Web server statistics (polled)
     private val _serverStats = MutableStateFlow<ServerStats?>(null)
     val serverStats: StateFlow<ServerStats?> = _serverStats
+    // 统计获取状态：更新时间戳与错误标记（供 UI 状态横幅展示）
+    val statsUpdatedAt = MutableStateFlow<Long>(0L)
+    val statsError = MutableStateFlow<String?>(null)
 
     private var pollingJob: Job? = null
     private val lifecycleObserver = object : androidx.lifecycle.LifecycleEventObserver {
@@ -322,12 +325,21 @@ fun refreshServerStats() {
         viewModelScope.launch {
             try {
                 // OkHttp request must not run on the main dispatcher
-                _serverStats.value = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val stats = withContext(kotlinx.coroutines.Dispatchers.IO) {
                     ServerStats.fromJson(WebServerUtils.getStats())
+                }
+                if (stats != null) {
+                    _serverStats.value = stats
+                    statsUpdatedAt.value = System.currentTimeMillis()
+                    statsError.value = null
+                } else {
+                    _serverStats.value = null
+                    statsError.value = "unreachable"
                 }
             } catch (e: Exception) {
                 Timber.w(e, "Failed to refresh server stats")
                 _serverStats.value = null
+                statsError.value = "error"
             }
         }
     }
