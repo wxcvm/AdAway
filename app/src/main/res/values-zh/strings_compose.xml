@@ -218,4 +218,14 @@
     <string name="compose_stats_kpi_connections">连接数</string>
     <string name="compose_stats_top_hosts">拦截域名排行</string>
     <string name="compose_stats_top_hosts_more">还有 %1$d 个</string>
+    <string name="compose_settings_update_app_startup">启动时检查更新</string>
+    <string name="compose_settings_update_app_startup_hint">每次打开应用时检查</string>
+    <string name="compose_settings_update_app_daily">每日检查更新</string>
+    <string name="compose_settings_update_app_daily_hint">定期检查应用更新</string>
+    <string name="compose_settings_update_beta">包含测试版</string>
+    <string name="compose_settings_update_beta_hint">同时安装测试版本</string>
+    <string name="compose_settings_update_hosts">每日检查规则更新</string>
+    <string name="compose_settings_update_hosts_hint">从规则源刷新 hosts 规则</string>
+    <string name="compose_settings_update_wifi">仅 Wi-Fi 更新</string>
+    <string name="compose_settings_update_wifi_hint">避免消耗移动数据</string>
 </resources>
