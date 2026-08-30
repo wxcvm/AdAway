@@ -185,16 +185,6 @@ internal fun userAllowedUids(context: Context): List<Int> {
 
 /* ── General settings (logs + chart options) ──────────────────── */
 
-/** Max log entries shown in the Logs screen. Default 500. */
-internal fun logLimit(context: Context): Int {
-    return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-        .getInt("log_limit", 500)
-}
-
-internal fun setLogLimit(context: Context, limit: Int) {
-    context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-        .edit().putInt("log_limit", limit).apply()
-}
 
 /** Whether a statistics card is enabled. Keys: chart_donut, chart_trend,
  *  chart_bars, chart_apps, chart_certs. All default true. */
@@ -267,17 +257,6 @@ internal fun setLightMode(context: Context, enabled: Boolean) {
         .edit().putBoolean("light_mode", enabled).apply()
 }
 
-/* ── Log retention: 0 = forever, else hours ────────────────────── */
-
-internal fun logRetentionHours(context: Context): Int {
-    return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-        .getInt("log_retention", 0)
-}
-
-internal fun setLogRetentionHours(context: Context, hours: Int) {
-    context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-        .edit().putInt("log_retention", hours).apply()
-}
 
 /**
  * Settings screen: lets the user choose which detected apps are tracked
@@ -725,67 +704,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     }
                 }
             }
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        stringResource(R.string.compose_settings_logs_title),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        stringResource(R.string.compose_settings_logs_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    var limit by remember { mutableStateOf(logLimit(context)) }
-                    // Sync from preferences on composition start
-                    LaunchedEffect(Unit) { limit = logLimit(context) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(100, 500, 1000, 2000).forEach { l ->
-                            FilterChip(
-                                selected = limit == l,
-                                onClick = {
-                                    limit = l
-                                    setLogLimit(context, l)
-                                },
-                                label = { Text(stringResource(R.string.compose_settings_logs_limit, l)) },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(R.string.compose_settings_logs_retention),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    var retention by remember { mutableStateOf(logRetentionHours(context)) }
-                    LaunchedEffect(Unit) { retention = logRetentionHours(context) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(
-                            Triple(0, R.string.compose_settings_logs_retention_forever, 0),
-                            Triple(24, R.string.compose_settings_logs_retention_1d, 24),
-                            Triple(168, R.string.compose_settings_logs_retention_7d, 168),
-                            Triple(720, R.string.compose_settings_logs_retention_30d, 720),
-                        ).forEach { (hours, labelRes, _) ->
-                            FilterChip(
-                                selected = retention == hours,
-                                onClick = {
-                                    retention = hours
-                                    setLogRetentionHours(context, hours)
-                                },
-                                label = { Text(stringResource(labelRes)) },
-                            )
-                        }
-                    }
-                }
-            }
-
             // ── Statistics chart settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
