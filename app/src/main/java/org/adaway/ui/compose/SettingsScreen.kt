@@ -93,6 +93,39 @@ import java.io.File
 import java.io.FileOutputStream
 
 private const val PREFS_MONITOR = "compose_app_monitor"
+/** 旧版偏好键共享的开关行（自动更新等）：简化旧版 PrefsActivity 页面的写法。 */
+@Composable
+private fun UpdateSwitchRow(
+    prefs: android.content.SharedPreferences,
+    key: String,
+    def: Boolean,
+    title: String,
+    hint: String,
+) {
+    var checked by remember { mutableStateOf(prefs.getBoolean(key, def)) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                hint,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = { v ->
+                checked = v
+                prefs.edit().putBoolean(key, v).apply()
+            },
+        )
+    }
+}
 private const val PREFS_GENERAL = "compose_general"
 
 /** Whether stats should track uid. Default true. */
@@ -930,30 +963,42 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         )
                     }
                     Spacer(Modifier.height(8.dp))
-                    // 自动更新设置入口（复用旧版设置页）
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                context.startActivity(Intent(context, org.adaway.ui.prefs.PrefsActivity::class.java))
-                            }
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Outlined.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(16.dp))
-                        Column {
-                            Text(
-                                stringResource(R.string.compose_settings_update_entry),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_update_entry_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    // 自动更新（旧键共享，直接生效）
+                    UpdateSwitchRow(
+                        prefs = legacyPrefs,
+                        key = "updateCheckAppStartup",
+                        def = true,
+                        title = stringResource(R.string.compose_settings_update_app_startup),
+                        hint = stringResource(R.string.compose_settings_update_app_startup_hint),
+                    )
+                    UpdateSwitchRow(
+                        prefs = legacyPrefs,
+                        key = "updateCheckAppDaily",
+                        def = true,
+                        title = stringResource(R.string.compose_settings_update_app_daily),
+                        hint = stringResource(R.string.compose_settings_update_app_daily_hint),
+                    )
+                    UpdateSwitchRow(
+                        prefs = legacyPrefs,
+                        key = "includeBetaReleases",
+                        def = false,
+                        title = stringResource(R.string.compose_settings_update_beta),
+                        hint = stringResource(R.string.compose_settings_update_beta_hint),
+                    )
+                    UpdateSwitchRow(
+                        prefs = legacyPrefs,
+                        key = "updateCheckHostsDaily",
+                        def = true,
+                        title = stringResource(R.string.compose_settings_update_hosts),
+                        hint = stringResource(R.string.compose_settings_update_hosts_hint),
+                    )
+                    UpdateSwitchRow(
+                        prefs = legacyPrefs,
+                        key = "updateOnlyOnWifi",
+                        def = false,
+                        title = stringResource(R.string.compose_settings_update_wifi),
+                        hint = stringResource(R.string.compose_settings_update_wifi_hint),
+                    )
                     // 关于：GitHub / 问题反馈
                     Row(
                         modifier = Modifier
