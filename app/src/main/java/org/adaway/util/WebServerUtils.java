@@ -152,20 +152,21 @@ public class WebServerUtils {
      * @return 解析后的 JSONObject；webserver 未运行或响应不可解析时返回 null。
      */
 public static org.json.JSONObject getStats() {
+        // 优先 v4-mapped（ColorOS 保留 app uid），失败回退纯 IPv4（兼容性兜底）
+        org.json.JSONObject stats = fetchStatsViaNc("::ffff:127.0.0.1");
+        if (stats == null) {
+            stats = fetchStatsViaNc("127.0.0.1");
+        }
+        return stats;
+    }
+    /** 通过 toybox nc 拉取一次 /internal-stats。 */
+    private static org.json.JSONObject fetchStatsViaNc(String host) {
         try {
             Process process = new ProcessBuilder(
                     "/system/bin/toybox", "nc", "-w", "3",
-                    "::ffff:127.0.0.1", String.valueOf(getStatsHttpPort()))
+                    host, String.valueOf(getStatsHttpPort()))
                     .redirectErrorStream(false)
                     .start();
-            /*
-             * BUG FIX: the child's stderr pipe was never read or closed. If
-             * toybox nc ever writes anything to stderr (e.g. a DNS/connect
-             * warning), the ~64KB pipe buffer fills, the child blocks on
-             * write() and waitFor() below times out on every call even though
-             * the HTTP request already succeeded. Drain it on a daemon thread
-             * so it can never deadlock the response read.
-             */
             Thread errDrain = new Thread(() -> {
                 try (InputStream es = process.getErrorStream()) {
                     byte[] eb = new byte[1024];
@@ -195,10 +196,11 @@ public static org.json.JSONObject getStats() {
             String json = headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
             return new org.json.JSONObject(json);
         } catch (Exception e) {
-            Timber.w(e, "Failed to fetch web server stats (nc)");
+            Timber.w(e, "Failed to fetch web server stats (nc %s)", host);
             return null;
         }
     }
+
 
     /**
      * BUG FIX: Toast.show() must run on the main thread. startWebServer()
@@ -429,6 +431,27 @@ public static void startWebServer(Context context) {
         return resp != null && resp.startsWith("OK:");
     }
 
+    /**
+     * 权威运行判定：OkHttp HTTP 探活（3s 超时）。
+     * 进程检测（pgrep/ps，见 ShellUtils）在部分 ROM 会因 toybox 差异
+     * 假阴性，而探活能真实反映服务可达性——两者结合使用。
+     */
+    public static boolean isWebServerReachable(Context context) {
+        OkHttpClient client = new OkHttpClient.Builder()
+                .proxy(java.net.Proxy.NO_PROXY)
+                .connectTimeout(3, TimeUnit.SECONDS)
+                .readTimeout(3, TimeUnit.SECONDS)
+                .build();
+        try {
+            try (Response r = client.newCall(
+                    new Request.Builder().url("http://127.0.0.1:" + getHttpPort(context) + "/internal-test").build()
+            ).execute()) {
+                return r.isSuccessful();
+            }
+        } catch (IOException e) {
+            return false;
+        }
+    }
     public static boolean isWebServerRunning() {
         return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
     }
@@ -450,7 +473,7 @@ public static void startWebServer(Context context) {
      * 不依赖 OS TLS 握手，避免网络安全配置差异导致的误报。
      */
 public static int getWebServerState(Context context) {
-        if (!isWebServerRunning()) return R.string.pref_webserver_state_not_running;
+        if (!isWebServerRunning() && !isWebServerReachable(context)) return R.string.pref_webserver_state_not_running;
 
         OkHttpClient client = new OkHttpClient.Builder()
                 .proxy(java.net.Proxy.NO_PROXY)
