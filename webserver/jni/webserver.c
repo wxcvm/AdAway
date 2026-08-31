@@ -956,6 +956,10 @@ static int make_cert(const char  *hostname,
         char san[288];
         if (san_override) {
             snprintf(san, sizeof(san), "%s", san_override);
+        } else if (mg_strcmp(cmd, mg_str("reload_config")) == 0) {
+            load_block_cfg(s->resource_dir);
+            mg_http_reply(c, 200, "Content-Type: text/plain
+", "OK: block config reloaded");
         } else {
             snprintf(san, sizeof(san), "DNS:%s", hostname);
         }
@@ -1318,6 +1322,16 @@ static inline int atomic_load(int *ptr) {
     return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
 }
 
+/* Blocked-reply policy config: <resources>/block_config.json, hot-reloaded via /control cmd=reload_config. Keys: reply_images/scripts/styles/fonts/media/structures/api/telemetry/config/ws_sse (0/1, default 1). */
+static bool cfg_images=true, cfg_scripts=true, cfg_styles=true, cfg_fonts=true, cfg_media=true;
+static bool cfg_struct=true, cfg_api=true, cfg_tele=true, cfg_conf=true, cfg_ws=true;
+static bool jbool(const char*s,const char*k,bool d){char p[64];snprintf(p,sizeof(p),""%s"",k);const char*q=strstr(s,p);if(!q)return d;q+=strlen(p);while(*q&&*q!=':')q++;if(*q!=':')return d;q++;while(*q==' '||*q=='	'||*q=='
+'||*q=='
+')q++;if(*q=='0')return false;if(*q=='1')return true;return d;}
+static void load_block_cfg(const char*dir){char path[512];snprintf(path,sizeof(path),"%s/block_config.json",dir);FILE*f=fopen(path,"r");if(!f){cfg_images=true;cfg_scripts=true;cfg_styles=true;cfg_fonts=true;cfg_media=true;cfg_struct=true;cfg_api=true;cfg_tele=true;cfg_conf=true;cfg_ws=true;return;}char b[2048];size_t n=fread(b,1,sizeof(b)-1,f);b[n]=0;fclose(f);cfg_images=jbool(b,"reply_images",true);cfg_scripts=jbool(b,"reply_scripts",true);cfg_styles=jbool(b,"reply_styles",true);cfg_fonts=jbool(b,"reply_fonts",true);cfg_media=jbool(b,"reply_media",true);cfg_struct=jbool(b,"reply_structures",true);cfg_api=jbool(b,"reply_api",true);cfg_tele=jbool(b,"reply_telemetry",true);cfg_conf=jbool(b,"reply_config",true);cfg_ws=jbool(b,"reply_ws_sse",true);}
+static bool deny_quick(uint64_t*c,struct mg_connection*co){(*c)++;mg_http_reply(co,204,"Access-Control-Allow-Origin: *
+Cache-Control: no-store
+","");return true;}
 /* ── Blocked-request classification ───────────────────────────── */
 /*
  * Classify a blocked request by its URI and reply with the most
@@ -1352,6 +1366,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_ends_with_ci(u, ".webp") || uri_ends_with_ci(u, ".avif") ||
         uri_ends_with_ci(u, ".svg") || uri_ends_with_ci(u, ".ico") ||
         uri_ends_with_ci(u, ".bmp")) {
+        if (!cfg_images) return deny_quick(&s_stats.blocked_images, c);
         return false;
     }
 
@@ -1360,6 +1375,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        re-requesting it after the first time (saves battery/bandwidth
        on every page load). */
     if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
+        if (!cfg_scripts) return deny_quick(&s_stats.blocked_scripts, c);
         s_stats.blocked_scripts++;
         mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
                               CORS_HDR
@@ -1369,6 +1385,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Stylesheets: empty CSS, HTTP 200. Cached like JS above. */
     if (uri_ends_with_ci(u, ".css")) {
+        if (!cfg_styles) return deny_quick(&s_stats.blocked_styles, c);
         s_stats.blocked_styles++;
         mg_http_reply(c, 200, "Content-Type: text/css\r\n"
                               CORS_HDR
@@ -1380,6 +1397,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
         uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
         uri_ends_with_ci(u, ".eot")) {
+        if (!cfg_fonts) return deny_quick(&s_stats.blocked_fonts, c);
         s_stats.blocked_fonts++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -1400,6 +1418,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_ends_with_ci(u, ".ts") || uri_ends_with_ci(u, ".m3u8") ||
         uri_ends_with_ci(u, ".mpd") || uri_ends_with_ci(u, ".flv") ||
         uri_ends_with_ci(u, ".mov") || uri_ends_with_ci(u, ".wav")) {
+        if (!cfg_media) return deny_quick(&s_stats.blocked_media, c);
         s_stats.blocked_media++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -1411,6 +1430,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".xml") || uri_ends_with_ci(u, ".txt") ||
         uri_ends_with_ci(u, ".map") || uri_ends_with_ci(u, ".wasm") ||
         uri_ends_with_ci(u, ".webmanifest") || uri_ends_with_ci(u, ".jsonp")) {
+        if (!cfg_struct) return deny_quick(&s_stats.blocked_other, c);
         s_stats.blocked_other++;
         mg_http_reply(c, 200, "Content-Type: application/octet-stream\r\n"
                               CORS_HDR
@@ -1425,6 +1445,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/stratum") || uri_contains_ci(u, "/worker") ||
         uri_contains_ci(u, "/mining") || uri_contains_ci(u, "/hashrate") ||
         uri_contains_ci(u, "/pool")) {
+        if (!cfg_struct) return deny_quick(&s_stats.blocked_crypto, c);
         s_stats.blocked_crypto++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -1433,6 +1454,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/click") || uri_contains_ci(u, "/track") ||
         uri_contains_ci(u, "/pixel") || uri_contains_ci(u, "/beacon") ||
         uri_contains_ci(u, "/impression")) {
+        if (!cfg_tele) return deny_quick(&s_stats.blocked_clickbait, c);
         s_stats.blocked_clickbait++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -1443,6 +1465,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        gateway. Decline politely with 204 instead of serving an image. */
     struct mg_str *upgrade = mg_http_get_header(hm, "Upgrade");
     if (upgrade != NULL && mg_strcasecmp(*upgrade, mg_str("websocket")) == 0) {
+        if (!cfg_ws) return deny_quick(&s_stats.blocked_ws_sse, c);
         s_stats.blocked_ws_sse++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -1453,6 +1476,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        clean "closed" stream (204) rather than a corrupt body. */
     struct mg_str *accept_hdr = mg_http_get_header(hm, "Accept");
     if (accept_hdr != NULL && uri_contains_ci(*accept_hdr, "text/event-stream")) {
+        if (!cfg_ws) return deny_quick(&s_stats.blocked_ws_sse, c);
         s_stats.blocked_ws_sse++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: no-cache\r\n", "");
@@ -1472,6 +1496,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return false;  /* image request without extension → placeholder image */
         }
         if (mg_strcasecmp(*dest, mg_str("script")) == 0) {
+            if (!cfg_scripts) return deny_quick(&s_stats.blocked_scripts, c);
             s_stats.blocked_scripts++;
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
                                   CORS_HDR
@@ -1479,6 +1504,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("style")) == 0) {
+            if (!cfg_styles) return deny_quick(&s_stats.blocked_styles, c);
             s_stats.blocked_styles++;
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
                                   CORS_HDR
@@ -1486,6 +1512,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("font")) == 0) {
+            if (!cfg_fonts) return deny_quick(&s_stats.blocked_fonts, c);
             s_stats.blocked_fonts++;
             mg_http_reply(c, 204, CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
@@ -1500,6 +1527,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/ad") || uri_contains_ci(u, "/ads") ||
         uri_contains_ci(u, "/banner") || uri_contains_ci(u, "/feed") ||
         uri_contains_ci(u, "/recommend")) {
+        if (!cfg_api) return deny_quick(&s_stats.blocked_api, c);
         s_stats.blocked_api++;
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
                               CORS_HDR
@@ -1511,6 +1539,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/track") || uri_contains_ci(u, "/event") ||
         uri_contains_ci(u, "/log") || uri_contains_ci(u, "/collect") ||
         uri_contains_ci(u, "/pixel")) {
+        if (!cfg_tele) return deny_quick(&s_stats.blocked_telemetry, c);
         s_stats.blocked_telemetry++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -1532,6 +1561,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/wlan/userip") || uri_contains_ci(u, "/wlan/ac_portal") ||
         uri_contains_ci(u, "/wlan/login") || uri_contains_ci(u, "/portal/") ||
         uri_contains_ci(u, "/eportal/") || uri_contains_ci(u, "/cmcc/")) {
+        if (!cfg_tele) return deny_quick(&s_stats.blocked_heartbeat, c);
         s_stats.blocked_heartbeat++;
         mg_http_reply(c, 204, CORS_HDR
                       "Cache-Control: public, max-age=86400\r\n", "");
@@ -1540,6 +1570,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Config endpoints: empty JSON, HTTP 200. */
     if (uri_contains_ci(u, "/config") || uri_contains_ci(u, "/settings")) {
+        if (!cfg_conf) return deny_quick(&s_stats.blocked_config, c);
         s_stats.blocked_config++;
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
                               CORS_HDR
@@ -1559,12 +1590,14 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return false;  /* image request → placeholder image */
         }
         if (uri_contains_ci(*accept, "text/css")) {
+            if (!cfg_styles) return deny_quick(&s_stats.blocked_styles, c);
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
                                   CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
             return true;
         }
         if (uri_contains_ci(*accept, "application/javascript") ||
+            if (!cfg_scripts) return deny_quick(&s_stats.blocked_scripts, c);
             uri_contains_ci(*accept, "text/javascript")) {
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
                                   CORS_HDR
@@ -2271,7 +2304,8 @@ int main(int argc, char *argv[]) {
     if (s.debug) mg_log_set(MG_LL_DEBUG);
 
     s_stats.start_time_ms = mg_millis();
-    load_stats(&s);  /* lifetime counters survive restarts */
+    load_stats(&s);
+    load_block_cfg(s.resource_dir);  /* lifetime counters survive restarts */
     load_hist(&s);   /* chart buckets survive restarts (reboot-proof) */
     sni_cache_load(s.resource_dir);  /* SNI cert cache survives restarts */
     apps_load(s.resource_dir);       /* per-app stats survive restarts */
