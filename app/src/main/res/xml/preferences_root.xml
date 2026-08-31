@@ -61,6 +61,30 @@
             app:persistent="false"
             app:summary="@string/pref_webserver_stats_summary"
             app:title="@string/pref_webserver_stats" />
+        <PreferenceCategory
+            app:key="@string/pref_block_reply_category_key"
+            app:summary="@string/pref_block_reply_summary"
+            app:title="@string/pref_block_reply_title">
+            <ListPreference
+                app:defaultValue="@string/pref_block_reply_mode_default"
+                app:entries="@array/pref_block_reply_modes"
+                app:entryValues="@array/pref_block_reply_mode_values"
+                app:key="@string/pref_block_reply_mode_key"
+                app:title="@string/pref_block_reply_mode" />
+            <PreferenceScreen
+                app:key="@string/pref_block_reply_advanced_key"
+                app:title="@string/pref_block_reply_advanced">
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_images_key" app:summary="@string/pref_block_reply_images_summary" app:title="@string/pref_block_reply_images" />
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_scripts_key" app:summary="@string/pref_block_reply_scripts_summary" app:title="@string/pref_block_reply_scripts" />
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_styles_key" app:summary="@string/pref_block_reply_styles_summary" app:title="@string/pref_block_reply_styles" />
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_fonts_key" app:summary="@string/pref_block_reply_fonts_summary" app:title="@string/pref_block_reply_fonts" />
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_media_key" app:summary="@string/pref_block_reply_media_summary" app:title="@string/pref_block_reply_media" />
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_api_key" app:summary="@string/pref_block_reply_api_summary" app:title="@string/pref_block_reply_api" />
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_telemetry_key" app:summary="@string/pref_block_reply_telemetry_summary" app:title="@string/pref_block_reply_telemetry" />
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_structures_key" app:summary="@string/pref_block_reply_structures_summary" app:title="@string/pref_block_reply_structures" />
+                <SwitchPreferenceCompat app:defaultValue="true" app:key="@string/pref_block_reply_ws_sse_key" app:summary="@string/pref_block_reply_ws_sse_summary" app:title="@string/pref_block_reply_ws_sse" />
+            </PreferenceScreen>
+        </PreferenceCategory>
     </PreferenceCategory>
 
 </PreferenceScreen>
