@@ -223,6 +223,7 @@ public static void startWebServer(Context context) {
         Timber.d("Starting web server…");
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
+        applyBlockReplyConfig(context);
 
         // Verify binary exists and is executable (using java.io.File for better compatibility)
         File nativeLibDir = new File(context.getApplicationInfo().nativeLibraryDir);
@@ -654,6 +655,52 @@ private static String computeSubjectHashOld(Path certFile)
         } catch (IOException e) {
             Timber.w(e, "Failed to copy certificate.");
         }
+    }
+
+    // ── Block-reply policy（拦截响应策略，字段与 webserver.c 的 block_config.json 一致）──
+    public static final String PREFS_BLOCK_REPLY_PREFIX = "block_reply_";
+
+    private static boolean blockReplyEnabled(Context context, String type) {
+        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + type, true);
+    }
+
+    /**
+     * 将拦截响应策略写入资源目录 block_config.json 并热重载（服务器未启动时无害，下次启动读取）。
+     */
+    public static void applyBlockReplyConfig(Context context) {
+        try {
+            Path dir = getResourcePath(context);
+            if (!Files.isDirectory(dir)) {
+                Files.createDirectories(dir);
+            }
+            StringBuilder sb = new StringBuilder("{
+");
+            appendBlockReplyField(sb, "reply_images", blockReplyEnabled(context, "images"));
+            appendBlockReplyField(sb, "reply_scripts", blockReplyEnabled(context, "scripts"));
+            appendBlockReplyField(sb, "reply_styles", blockReplyEnabled(context, "styles"));
+            appendBlockReplyField(sb, "reply_fonts", blockReplyEnabled(context, "fonts"));
+            appendBlockReplyField(sb, "reply_media", blockReplyEnabled(context, "media"));
+            appendBlockReplyField(sb, "reply_structures", blockReplyEnabled(context, "structures"));
+            appendBlockReplyField(sb, "reply_api", blockReplyEnabled(context, "api"));
+            appendBlockReplyField(sb, "reply_telemetry", blockReplyEnabled(context, "telemetry"));
+            appendBlockReplyField(sb, "reply_config", blockReplyEnabled(context, "config"));
+            appendBlockReplyField(sb, "reply_ws_sse", blockReplyEnabled(context, "ws_sse"));
+            sb.append("}
+");
+            Files.write(dir.resolve("block_config.json"), sb.toString().getBytes("UTF-8"));
+            WebServerControl.sendControlCommand("reload_config");
+        } catch (Exception e) {
+            Timber.w(e, "Failed to write block_config.json");
+        }
+    }
+
+    private static void appendBlockReplyField(StringBuilder sb, String key, boolean value) {
+        if (sb.charAt(sb.length() - 1) != 0x7b) {
+            sb.append(",
+");
+        }
+        sb.append("  "").append(key).append("": ").append(value ? 1 : 0);
     }
 
     public static Path getResourcePath(Context context) {
