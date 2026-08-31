@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="pref_block_reply_modes">
+        <item>智能无感（完整模拟）</item>
+        <item>严格阻断（裸 204）</item>
+        <item>自定义（使用下方开关）</item>
+    </string-array>
+    <string-array name="pref_block_reply_mode_values">
+        <item>smart</item>
+        <item>strict</item>
+        <item>custom</item>
+    </string-array>
+</resources>
