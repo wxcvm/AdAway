@@ -56,6 +56,7 @@ public class WebServerUtils {
     private static final String CA_CERT_FILE = "localhost-2410.crt";
     private static final String CA_KEY_FILE  = "localhost-2410.key";
     private static final String PREFS_WS = "compose_webserver";
+    public static final String PREFS_BLOCK_REPLY_PREFIX = "block_reply_";
 
     /**
      * Captive portal login packages that must always stay in the allowlist
@@ -657,16 +658,15 @@ private static String computeSubjectHashOld(Path certFile)
         }
     }
 
-    // ── Block-reply policy（拦截响应策略，字段与 webserver.c 的 block_config.json 一致）──
-    public static final String PREFS_BLOCK_REPLY_PREFIX = "block_reply_";
-
     private static boolean blockReplyEnabled(Context context, String type) {
         return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
                 .getBoolean(PREFS_BLOCK_REPLY_PREFIX + type, true);
     }
 
     /**
-     * 将拦截响应策略写入资源目录 block_config.json 并热重载（服务器未启动时无害，下次启动读取）。
+     * Write the block-reply policy to block_config.json and hot-reload it.
+     * Harmless when the server is not running (read on next start).
+     * Values are emitted with explicit char codes (no backslash escapes).
      */
     public static void applyBlockReplyConfig(Context context) {
         try {
@@ -674,8 +674,8 @@ private static String computeSubjectHashOld(Path certFile)
             if (!Files.isDirectory(dir)) {
                 Files.createDirectories(dir);
             }
-            StringBuilder sb = new StringBuilder("{
-");
+            StringBuilder sb = new StringBuilder();
+            sb.append((char) 0x7b).append((char) 0x0a);
             appendBlockReplyField(sb, "reply_images", blockReplyEnabled(context, "images"));
             appendBlockReplyField(sb, "reply_scripts", blockReplyEnabled(context, "scripts"));
             appendBlockReplyField(sb, "reply_styles", blockReplyEnabled(context, "styles"));
@@ -686,8 +686,7 @@ private static String computeSubjectHashOld(Path certFile)
             appendBlockReplyField(sb, "reply_telemetry", blockReplyEnabled(context, "telemetry"));
             appendBlockReplyField(sb, "reply_config", blockReplyEnabled(context, "config"));
             appendBlockReplyField(sb, "reply_ws_sse", blockReplyEnabled(context, "ws_sse"));
-            sb.append("}
-");
+            sb.append((char) 0x7d).append((char) 0x0a);
             Files.write(dir.resolve("block_config.json"), sb.toString().getBytes("UTF-8"));
             WebServerControl.sendControlCommand("reload_config");
         } catch (Exception e) {
@@ -697,12 +696,12 @@ private static String computeSubjectHashOld(Path certFile)
 
     private static void appendBlockReplyField(StringBuilder sb, String key, boolean value) {
         if (sb.charAt(sb.length() - 1) != 0x7b) {
-            sb.append(",
-");
+            sb.append((char) 0x2c).append((char) 0x0a);
         }
-        sb.append("  "").append(key).append("": ").append(value ? 1 : 0);
+        sb.append((char) 0x20).append((char) 0x20).append((char) 0x22)
+          .append(key).append((char) 0x22).append((char) 0x3a).append((char) 0x20)
+          .append(value ? 1 : 0);
     }
-
     public static Path getResourcePath(Context context) {
         return context.getFilesDir().toPath().resolve(WEB_SERVER_EXECUTABLE);
     }
