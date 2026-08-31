@@ -34,6 +34,7 @@
     <string name="compose_ws_control_certs">Certs</string>
     <string name="compose_ws_control_test">Open test page</string>
     <string name="compose_ws_control_log_title">Startup log (failure reason)</string>
+    <string name="compose_ws_control_log_title">Startup log (failure reason)</string>
     <string name="compose_ws_control_cert_days">%1$d days left</string>
     <string name="compose_legacy_ui">Classic interface</string>
     <string name="compose_legacy_ui_subtitle">Open the previous Java interface</string>
