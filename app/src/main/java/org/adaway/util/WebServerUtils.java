@@ -659,7 +659,7 @@ private static String computeSubjectHashOld(Path certFile)
     }
 
     private static boolean blockReplyEnabled(Context context, String type) {
-        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(PREFS_BLOCK_REPLY_PREFIX + type, true);
     }
 
