@@ -88,6 +88,7 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         bindWebServerCertificate();
         bindWebServerBlockImage();
         bindWebServerStats();
+        bindBlockReplyPolicy();
         // Update current state
         updateWebServerState();
         // Register as listener
@@ -119,6 +120,11 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         // Intentionally left without special handling: the only entry that
         // used to live here (webserverIcon) was removed - see
         // PreferenceHelper.getWebServerIcon() removal for why.
+        if (key != null && key.startsWith("block_reply_")) {
+            final Context ctx = requireContext();
+            AppExecutors.getInstance().diskIO().execute(() ->
+                    org.adaway.util.WebServerUtils.applyBlockReplyConfig(ctx));
+        }
     }
 
     private void registerForOpenHostActivity() {
@@ -409,7 +415,52 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
      * server's /internal-stats snapshot off the main thread (OkHttp
      * blocks on network I/O) and show it in a dialog.
      */
-    private void bindWebServerStats() {
+    private void bindBlockReplyPolicy() {
+        Context context = requireContext();
+        androidx.preference.PreferenceCategory category = findPreference(
+                getString(R.string.pref_block_reply_category_key));
+        if (category == null) return;
+        boolean unlocked = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(getString(R.string.pref_advanced_features_unlocked_key), false);
+        category.setVisible(unlocked);
+        androidx.preference.ListPreference modePref = (androidx.preference.ListPreference)
+                findPreference(getString(R.string.pref_block_reply_mode_key));
+        if (modePref == null) return;
+        modePref.setOnPreferenceChangeListener((preference, newValue) -> {
+            String mode = String.valueOf(newValue);
+            boolean[] flags;
+            if ("smart".equals(mode)) {
+                flags = new boolean[]{true, true, true, true, true, true, true, true, true, true};
+            } else if ("strict".equals(mode)) {
+                flags = new boolean[]{false, false, false, false, false, false, false, false, false, false};
+            } else {
+                return true;  // custom: 由下方开关决定
+            }
+            String[] keys = {
+                    getString(R.string.pref_block_reply_images_key),
+                    getString(R.string.pref_block_reply_scripts_key),
+                    getString(R.string.pref_block_reply_styles_key),
+                    getString(R.string.pref_block_reply_fonts_key),
+                    getString(R.string.pref_block_reply_media_key),
+                    getString(R.string.pref_block_reply_api_key),
+                    getString(R.string.pref_block_reply_telemetry_key),
+                    getString(R.string.pref_block_reply_structures_key),
+                    getString(R.string.pref_block_reply_ws_sse_key)
+            };
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            for (int i = 0; i < keys.length; i++) {
+                editor.putBoolean(keys[i], flags[i]);
+                SwitchPreferenceCompat sp = findPreference(keys[i]);
+                if (sp != null) sp.setChecked(flags[i]);
+            }
+            editor.apply();
+            AppExecutors.getInstance().diskIO().execute(() ->
+                    org.adaway.util.WebServerUtils.applyBlockReplyConfig(context));
+            return true;
+        });
+    }
+        private void bindWebServerStats() {
         Preference statsPref = findPreference(getString(R.string.pref_webserver_stats_key));
         assert statsPref != null : PREFERENCE_NOT_FOUND;
         statsPref.setOnPreferenceClickListener(preference -> {
