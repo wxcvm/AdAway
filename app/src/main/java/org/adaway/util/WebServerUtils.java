@@ -695,7 +695,7 @@ private static String computeSubjectHashOld(Path certFile)
     }
 
     private static void appendBlockReplyField(StringBuilder sb, String key, boolean value) {
-        if (sb.charAt(sb.length() - 1) != 0x7b) {
+        if (sb.length() > 2) {  // fields after the opening brace + newline need a comma
             sb.append((char) 0x2c).append((char) 0x0a);
         }
         sb.append((char) 0x20).append((char) 0x20).append((char) 0x22)
