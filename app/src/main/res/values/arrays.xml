@@ -2,8 +2,8 @@
 <resources>
     <string-array name="pref_block_reply_modes">
         <item>Smart (full simulation)</item>
-        <item>Strict (bare 204)</item>
-        <item>Custom (per-type switches below)</item>
+        <item>Strict blocking (bare 204)</item>
+        <item>Custom (use switches below)</item>
     </string-array>
     <string-array name="pref_block_reply_mode_values">
         <item>smart</item>
