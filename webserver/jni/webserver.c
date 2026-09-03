@@ -16,6 +16,25 @@
 #include <openssl/x509v3.h>
 #include <openssl/ec.h>
 #include <openssl/pem.h>
+
+/*
+ * Compatibility shim: Google's "com.android.ndk.thirdparty:openssl" AAR
+ * (OpenSSL 1.1.1q build) does not export the deprecated
+ * SSL_CTX_callback_ctrl() symbol that mongoose.c (MG_TLS_OPENSSL backend)
+ * references -- on-device this caused:
+ *   CANNOT LINK EXECUTABLE ... "cannot locate symbol SSL_CTX_callback_ctrl"
+ * when the binary was launched directly from the app's native lib dir.
+ * This is exactly what OpenSSL itself implements it as: a thin wrapper
+ * over SSL_CTX_ctrl(). Providing our own definition keeps the same ABI
+ * and removes the missing-symbol dependency on the system/NDK libssl.
+ * The return type is long to match SSL_CTX_ctrl(); mongoose only checks
+ * for zero (failure), so the semantics are preserved.
+ */
+#if defined(MG_TLS_OPENSSL)
+long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
+    return SSL_CTX_ctrl(ctx, cmd, 0, (void *) fp);
+}
+#endif
 #include <openssl/bio.h>
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
