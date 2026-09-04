@@ -437,7 +437,7 @@ bool win32_autostart_installed(void) {
 #define IDC_RESTART   1105
 #define IDC_FLUSH     1106
 
-static const wchar_t *g_title = L"ADBlock Web Server - Dashboard";
+static const wchar_t *g_title = L"ADBlock Web Server v" ADBLOCK_APP_VERSION L" - Dashboard";
 
 static void fmt_num(wchar_t *dst, size_t n, long long v) {
     if (v >= 1000000) swprintf(dst, n, L"%.1fM", (double)v / 1000000.0);
