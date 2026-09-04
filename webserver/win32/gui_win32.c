@@ -163,6 +163,21 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->valid = 1;
 }
 
+/* Block reply policy toggles: label, block_config.json key, control id. */
+struct policy_item { const wchar_t *label; const char *key; int id; };
+static const struct policy_item g_policy[] = {
+    { L"Images",     "reply_images",       IDC_POL0 + 0 },
+    { L"Scripts",    "reply_scripts",      IDC_POL0 + 1 },
+    { L"Styles",     "reply_styles",       IDC_POL0 + 2 },
+    { L"Fonts",      "reply_fonts",        IDC_POL0 + 3 },
+    { L"Media",      "reply_media",        IDC_POL0 + 4 },
+    { L"Structures", "reply_structures",   IDC_POL0 + 5 },
+    { L"API",        "reply_api",          IDC_POL0 + 6 },
+    { L"Telemetry",  "reply_telemetry",    IDC_POL0 + 7 },
+    { L"Config",     "reply_config",       IDC_POL0 + 8 },
+    { L"WS / SSE",   "reply_ws_sse",       IDC_POL0 + 9 },
+};
+#define POLICY_COUNT ((int)(sizeof(g_policy) / sizeof(g_policy[0])))
 /* ── settings persistence (webserver.ini next to the exe) ─────── */
 static void ini_file_path(char *out, size_t n) {
     char exe[MAX_PATH];
@@ -420,22 +435,6 @@ bool win32_autostart_installed(void) {
 #define IDC_RESTART   1105
 #define IDC_FLUSH     1106
 #define IDC_POL0      1110
-
-/* Block reply policy toggles: label, block_config.json key, control id. */
-struct policy_item { const wchar_t *label; const char *key; int id; };
-static const struct policy_item g_policy[] = {
-    { L"Images",     "reply_images",       IDC_POL0 + 0 },
-    { L"Scripts",    "reply_scripts",      IDC_POL0 + 1 },
-    { L"Styles",     "reply_styles",       IDC_POL0 + 2 },
-    { L"Fonts",      "reply_fonts",        IDC_POL0 + 3 },
-    { L"Media",      "reply_media",        IDC_POL0 + 4 },
-    { L"Structures", "reply_structures",   IDC_POL0 + 5 },
-    { L"API",        "reply_api",          IDC_POL0 + 6 },
-    { L"Telemetry",  "reply_telemetry",    IDC_POL0 + 7 },
-    { L"Config",     "reply_config",       IDC_POL0 + 8 },
-    { L"WS / SSE",   "reply_ws_sse",       IDC_POL0 + 9 },
-};
-#define POLICY_COUNT ((int)(sizeof(g_policy) / sizeof(g_policy[0])))
 
 static const wchar_t *g_title = L"ADBlock Web Server - Dashboard";
 
