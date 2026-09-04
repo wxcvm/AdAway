@@ -80,7 +80,7 @@ jobs:
         shell: pwsh
         run: |
           $res = (Resolve-Path "webserver\win32\dist\resources").Path
-          $proc = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res,"--http-port","18080","--https-port","18443") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server.log" -RedirectStandardError "server.err"
+          $proc = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res,"--http-port","18080","--https-port","18443","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server.log" -RedirectStandardError "server.err"
           Start-Sleep -Seconds 7
           if ($proc.HasExited) {
             Write-Output ("SERVER EXITED with code " + $proc.ExitCode)
@@ -95,7 +95,10 @@ jobs:
             Write-Output "internal-stats HTTP $($stats.StatusCode): $($stats.Content.Substring(0, [Math]::Min(180, $stats.Content.Length)))"
             $test = Invoke-WebRequest -Uri "http://127.0.0.1:18080/internal-test" -UseBasicParsing -TimeoutSec 10
             Write-Output "internal-test HTTP $($test.StatusCode)"
-            if ($stats.StatusCode -ne 200 -or $test.StatusCode -ne 200) { throw "smoke test failed" }
+            if (-not (Test-Path "webserver\win32\dist\resources\localhost-2410.crt")) { throw "CA certificate not generated" }
+            $https = Invoke-WebRequest -Uri "https://127.0.0.1:18443/internal-test" -SkipCertificateCheck -UseBasicParsing -TimeoutSec 10
+            Write-Output "https internal-test HTTP $($https.StatusCode)"
+            if ($stats.StatusCode -ne 200 -or $test.StatusCode -ne 200 -or $https.StatusCode -ne 200) { throw "smoke test failed" }
           } catch {
             Write-Output "SMOKE TEST ERROR: $($_.Exception.Message)"
             Write-Output "---- stdout tail ----"
@@ -109,7 +112,7 @@ jobs:
           # Phase 2 - double-click simulation: no --resources (defaults to
           # the "resources" folder next to the exe, auto-created), only
           # explicit free ports so the test never collides with the first one.
-          $p2 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--http-port","18081","--https-port","18444") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server2.log" -RedirectStandardError "server2.err"
+          $p2 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--http-port","18081","--https-port","18444","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server2.log" -RedirectStandardError "server2.err"
           Start-Sleep -Seconds 7
           try {
             if ($p2.HasExited) {
@@ -130,6 +133,30 @@ jobs:
             Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
 
+      - name: Autostart registry test
+        shell: pwsh
+        run: |
+          & "webserver\win32\dist\webserver.exe" --resources "webserver\win32\dist\resources" --http-port 18082 --https-port 18445 --no-gui --install-autostart
+          $run = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction SilentlyContinue
+          if (-not $run) { throw "autostart key not found after install" }
+          Write-Output ("autostart installed: " + $run)
+          & "webserver\win32\dist\webserver.exe" --resources "webserver\win32\dist\resources" --http-port 18082 --https-port 18445 --no-gui --uninstall-autostart
+          $run2 = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction SilentlyContinue
+          if ($run2) { throw "autostart key still present after uninstall" }
+          Write-Output "autostart uninstalled OK"
+
+      - name: Code-sign webserver.exe (when signing secrets are configured)
+        shell: msys2 {0}
+        if: ${{ secrets.WINDOWS_CERT_PFX_B64 != '' }}
+        run: |
+          pacman -S --noconfirm --needed mingw-w64-x86_64-osslsigncode
+          printf '%s' '${{ secrets.WINDOWS_CERT_PFX_B64 }}' | base64 -d > "$RUNNER_TEMP/cert.pfx"
+          osslsigncode sign -pkcs12 "$RUNNER_TEMP/cert.pfx" -pass '${{ secrets.WINDOWS_CERT_PASSWORD }}' -h sha256 ^
+            -n "ADBlock Web Server" -i "https://github.com/wxcvm/AdAway" ^
+            -in webserver/win32/dist/webserver.exe -out webserver/win32/dist/webserver.signed.exe
+          mv webserver/win32/dist/webserver.signed.exe webserver/win32/dist/webserver.exe
+          osslsigncode verify webserver/win32/dist/webserver.exe && echo "signed OK"
+
       - name: Package zip
         shell: bash
         run: |
@@ -147,14 +174,14 @@ jobs:
       - name: Create GitHub Release (draft)
         shell: bash
         run: |
-          TAG="win11-webserver-v1.1"
+          TAG="win11-webserver-v1.2"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
             echo "uploaded to existing release"
           else
             gh release create "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" \
               --title "ADBlock Web Server - Windows 11 (x64)" \
-              --notes "Standalone Windows 11 x64 build of the ADBlock web server (HTTP/HTTPS block-placeholder serving, SNI certs, statistics). Double-click start.bat - defaults: http://localhost:8080, https://localhost:8443, resources auto-created next to the exe. See README.txt." || true
+              --notes "ADBlock Web Server for Windows 11 (x64) v1.2: native dashboard window (live KPIs + hourly/daily charts, certificate trust + Start with Windows toggle), HTTP/HTTPS block-placeholder serving, SNI certs. Double-click start.bat. Defaults: http://localhost:8080, https://localhost:8443, resources auto-created next to the exe." || true
           fi
         env:
           GH_TOKEN: ${{ github.token }}
