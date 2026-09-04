@@ -2492,7 +2492,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 }
 
 #ifndef ADBLOCK_APP_VERSION
-#define ADBLOCK_APP_VERSION "1.8.0"
+#define ADBLOCK_APP_VERSION "1.9.0"
 #endif
 
 /* ── main ─────────────────────────────────────────────────────── */
@@ -2681,6 +2681,31 @@ int main(int argc, char *argv[]) {
         ipv6_ok = false;
     }
 
+    /* Extra ad-block monitoring: the hosts-file redirect targets ports
+       80 (HTTP) and 443 (HTTPS). Always try to monitor them in addition
+       to the configured ports. Binding them needs Administrator on
+       Windows (or the port must be free); failures are only warnings -
+       the configured ports keep working. */
+    {
+        char u[128];
+        if (s.http_port != 80) {
+            snprintf(u, sizeof(u), "http://127.0.0.1:80");
+            if (!mg_http_listen(&mgr, u, fn, &s))
+                LOG_WARN("Monitoring http://127.0.0.1:80 failed (admin needed or port in use).");
+            snprintf(u, sizeof(u), "http://[::1]:80");
+            if (!mg_http_listen(&mgr, u, fn, &s))
+                LOG_WARN("Monitoring http://[::1]:80 failed (admin needed or port in use).");
+        }
+        if (s.https_port != 443) {
+            snprintf(u, sizeof(u), "https://127.0.0.1:443");
+            if (!mg_http_listen(&mgr, u, fn, &s))
+                LOG_WARN("Monitoring https://127.0.0.1:443 failed (admin needed or port in use).");
+            snprintf(u, sizeof(u), "https://[::1]:443");
+            if (!mg_http_listen(&mgr, u, fn, &s))
+                LOG_WARN("Monitoring https://[::1]:443 failed (admin needed or port in use).");
+        }
+    }
+
     load_block_cfg(s.resource_dir);
     setup_signal_handler();
 
@@ -2721,6 +2746,16 @@ int main(int argc, char *argv[]) {
         s_sig_num = 1;   /* stop the poll loop */
         pthread_join(srv_thread, NULL);
         LOG_INFO("Server shut down (exit code %d).", rc);
+#ifdef _WIN32
+        if (win32_restart_requested()) {
+            LOG_INFO("Restart requested - relaunching with the new settings...");
+            wchar_t exeW[MAX_PATH], argsW[2048];
+            if (GetModuleFileNameW(NULL, exeW, MAX_PATH) > 0) {
+                swprintf(argsW, 2048, L"--resources \"%hs\"", s.resource_dir);
+                ShellExecuteW(NULL, L"open", exeW, argsW, NULL, SW_SHOWNORMAL);
+            }
+        }
+#endif
         return 0;
     }
 #endif
