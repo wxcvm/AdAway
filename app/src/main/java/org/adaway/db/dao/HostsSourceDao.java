@@ -5,6 +5,7 @@ import androidx.room.Dao;
 import androidx.room.Delete;
 import androidx.room.Insert;
 import androidx.room.Query;
+import androidx.room.Transaction;
 import androidx.room.Update;
 
 import org.adaway.db.entity.HostsSource;
@@ -34,6 +35,7 @@ public interface HostsSourceDao {
     @Query("SELECT * FROM hosts_sources WHERE enabled = 1 AND id != 1 ORDER BY url ASC")
     List<HostsSource> getEnabled();
 
+    @Transaction
     default void toggleEnabled(HostsSource source) {
         int id = source.getId();
         boolean enabled = !source.isEnabled();

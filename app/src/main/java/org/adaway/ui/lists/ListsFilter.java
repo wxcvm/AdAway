@@ -22,8 +22,11 @@ public class ListsFilter {
 
     public ListsFilter(boolean sourcesIncluded, String query) {
         this.sourcesIncluded = sourcesIncluded;
-        this.query = query;
-        this.sqlQuery = convertToLikeQuery(query);
+        // BUG FIX: a malformed ACTION_SEARCH intent can deliver a null
+        // query (see ListsActivity.handleQuery), which would NPE in
+        // convertToLikeQuery(). Treat it as an empty filter.
+        this.query = query == null ? "" : query;
+        this.sqlQuery = convertToLikeQuery(this.query);
     }
 
     private static String convertToLikeQuery(String query) {

@@ -166,14 +166,14 @@ public class WebServerUtils {
             // Existing allowlist entries (if any)
             java.io.File allowlistFile = getResourcePath(context).resolve("allowlist.txt").toFile();
             if (allowlistFile.exists()) {
-                java.io.BufferedReader reader = new java.io.BufferedReader(
+                try (java.io.BufferedReader reader = new java.io.BufferedReader(
                         new java.io.InputStreamReader(
-                                new java.io.FileInputStream(allowlistFile), "UTF-8"));
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (!line.trim().isEmpty()) lines.add(line.trim());
+                                new java.io.FileInputStream(allowlistFile), "UTF-8"))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        if (!line.trim().isEmpty()) lines.add(line.trim());
+                    }
                 }
-                reader.close();
             }
 
             // Add UIDs for captive portal login packages
@@ -193,10 +193,10 @@ public class WebServerUtils {
             // Write back
             java.io.File dir = getResourcePath(context).toFile();
             dir.mkdirs();
-            java.io.FileWriter writer = new java.io.FileWriter(
-                    new java.io.File(dir, "allowlist.txt"));
-            writer.write(String.join("\n", lines));
-            writer.close();
+            try (java.io.FileWriter writer = new java.io.FileWriter(
+                    new java.io.File(dir, "allowlist.txt"))) {
+                writer.write(String.join("\n", lines));
+            }
         } catch (Exception e) {
             Timber.w(e, "Failed to ensure captive portal allowlist");
         }
