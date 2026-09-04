@@ -7,6 +7,7 @@ struct adblock_gui_args {
     int http_port;
     int https_port;
     bool bind_all;              /* listen on all interfaces */
+    const char *startup_warning;/* non-null when the server could not bind */
 };
 
 /* Run the native dashboard window (blocks until the window is closed).
