@@ -11,6 +11,8 @@
  * Windows-only: this file is not part of the Android build.
  */
 #define _WIN32_WINNT 0x0601
+#define UNICODE
+#define _UNICODE
 #include <winsock2.h>
 #include <windows.h>
 #include <shellapi.h>
@@ -208,7 +210,8 @@ static int cert_trusted(const char *cert_path) {
     size_t derlen = 0;
     unsigned char *der = pem_to_der(cert_path, &derlen);
     if (!der) return 0;
-    CERT_CONTEXT *ours = CertCreateCertificateContext(X509_ASN_ENCODING, der, (DWORD)derlen);
+    PCERT_CONTEXT ours = (PCERT_CONTEXT)CertCreateCertificateContext(
+        X509_ASN_ENCODING, der, (DWORD)derlen);
     int found = 0;
     if (ours) {
         int tries = 0;
@@ -219,7 +222,8 @@ static int cert_trusted(const char *cert_path) {
             if (h) {
                 PCCERT_CONTEXT ctx = NULL;
                 while ((ctx = CertEnumCertificatesInStore(h, ctx)) != NULL) {
-                    if (CertCompareCertificate(X509_ASN_ENCODING, ours, ctx)) {
+                    if (CertCompareCertificate(X509_ASN_ENCODING,
+                            (PCERT_CONTEXT)ours, (PCERT_CONTEXT)ctx)) {
                         found = 1;
                         break;
                     }
@@ -239,7 +243,8 @@ static int cert_trust_set(const char *cert_path, int enable) {
     unsigned char *der = pem_to_der(cert_path, &derlen);
     if (!der) return -1;
     int rc = -1;
-    CERT_CONTEXT *ours = CertCreateCertificateContext(X509_ASN_ENCODING, der, (DWORD)derlen);
+    PCERT_CONTEXT ours = (PCERT_CONTEXT)CertCreateCertificateContext(
+        X509_ASN_ENCODING, der, (DWORD)derlen);
     if (ours) {
         HCERTSTORE h = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
             CERT_SYSTEM_STORE_CURRENT_USER, L"Root");
@@ -250,7 +255,8 @@ static int cert_trust_set(const char *cert_path, int enable) {
             } else {
                 PCCERT_CONTEXT ctx = NULL;
                 while ((ctx = CertEnumCertificatesInStore(h, ctx)) != NULL) {
-                    if (CertCompareCertificate(X509_ASN_ENCODING, ours, ctx)) {
+                    if (CertCompareCertificate(X509_ASN_ENCODING,
+                            (PCERT_CONTEXT)ours, (PCERT_CONTEXT)ctx)) {
                         PCCERT_CONTEXT dup = CertDuplicateCertificateContext(ctx);
                         if (dup && CertDeleteCertificateFromStore(dup)) rc = 0;
                         if (dup) CertFreeCertificateContext(dup);
