@@ -596,6 +596,69 @@ static void draw_statusbar(HDC hdc, HWND hwnd) {
     DeleteObject(f);
 }
 
+/* ── system tray icon ──────────────────────────────────────────── */
+#define WM_APP_TRAY (WM_USER + 1)
+#define WM_APP_EXIT (WM_USER + 2)
+
+static NOTIFYICONDATAW g_nid;
+static bool g_tray_initialized = false;
+
+static void tray_add(HWND hwnd) {
+    memset(&g_nid, 0, sizeof(g_nid));
+    g_nid.cbSize = sizeof(g_nid);
+    g_nid.hWnd = hwnd;
+    g_nid.uID = 1;
+    g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    g_nid.uCallbackMessage = WM_APP_TRAY;
+    g_nid.hIcon = LoadIconW(NULL, IDI_APPLICATION);
+    swprintf(g_nid.szTip, 128, L"ADBlock Web Server - http://localhost:%d", g_http_port);
+    Shell_NotifyIconW(NIM_ADD, &g_nid);
+    g_tray_initialized = true;
+    /* first-run balloon */
+    g_nid.uFlags |= NIF_INFO;
+    wcscpy(g_nid.szInfoTitle, L"ADBlock Web Server");
+    wcscpy(g_nid.szInfo, L"Running - double-click this icon to reopen the window.");
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+}
+
+static void tray_remove(void) {
+    if (g_tray_initialized) {
+        Shell_NotifyIconW(NIM_DELETE, &g_nid);
+        g_tray_initialized = false;
+    }
+}
+
+static void tray_menu(HWND hwnd) {
+    HMENU m = CreatePopupMenu();
+    AppendMenuW(m, MF_STRING | MF_ENABLED, 3001, L"Open Dashboard");
+    AppendMenuW(m, MF_STRING | MF_ENABLED, 3002, L"Start with Windows");
+    AppendMenuW(m, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(m, MF_STRING | MF_ENABLED, 3003, L"Exit");
+    POINT pt;
+    GetCursorPos(&pt);
+    SetForegroundWindow(hwnd);
+    int cmd = (int)TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, hwnd, NULL);
+    DestroyMenu(m);
+    if (cmd == 3001) {
+        ShowWindow(hwnd, SW_SHOW);
+        SetForegroundWindow(hwnd);
+    } else if (cmd == 3002) {
+        HWND chk = GetDlgItem(hwnd, IDM_AUTOSTART);
+        bool on = SendMessageW(chk, BM_GETCHECK, 0, 0) != BST_CHECKED;
+        char ccmd[2048], exe[MAX_PATH];
+        GetModuleFileNameA(NULL, exe, sizeof(exe));
+        snprintf(ccmd, sizeof(ccmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --no-gui",
+                 exe, g_res, g_http_port, g_https_port);
+        win32_autostart_set(on, ccmd);
+        SendMessageW(chk, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
+        swprintf(g_status, 4096, L"autostart %s", on ? L"enabled" : L"disabled");
+        InvalidateRect(hwnd, NULL, FALSE);
+    } else if (cmd == 3003) {
+        PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
+    }
+}
+
 static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE: {
@@ -649,6 +712,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_SETCHECK,
                          pol[i] ? BST_CHECKED : BST_UNCHECKED, 0);
         for (int i = 0; i < s_ctrl_count; i++) ShowWindow(s_ctrls[i], SW_HIDE);
+        tray_add(hwnd);
         SetTimer(hwnd, 1, 2000, NULL);
         swprintf(g_status, 4096, L"polling http://127.0.0.1:%d/internal-stats ...", g_http_port);
         return 0;
@@ -699,7 +763,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 swprintf(g_status, 4096, L"autostart %s", on ? L"enabled" : L"disabled");
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id == IDM_EXIT) {
-                PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
             } else if (id == IDC_SAVE || id == IDC_RESTART) {
                 wchar_t wt[32];
                 int hp = 0, sp = 0;
@@ -871,11 +935,25 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         EndPaint(hwnd, &ps);
         return 0;
     }
-    case WM_CLOSE:
+    case WM_APP_TRAY:
+        if (lp == WM_RBUTTONUP) {
+            tray_menu(hwnd);
+        } else if (lp == WM_LBUTTONUP || lp == WM_LBUTTONDBLCLK) {
+            ShowWindow(hwnd, SW_SHOW);
+            SetForegroundWindow(hwnd);
+        }
+        return 0;
+    case WM_APP_EXIT:
+        tray_remove();
         DestroyWindow(hwnd);
+        return 0;
+    case WM_CLOSE:
+        /* minimize to tray; double-click the tray icon to reopen */
+        ShowWindow(hwnd, SW_HIDE);
         return 0;
     case WM_DESTROY:
         KillTimer(hwnd, 1);
+        tray_remove();
         PostQuitMessage(0);
         return 0;
     default:
