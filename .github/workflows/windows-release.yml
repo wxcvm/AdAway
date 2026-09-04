@@ -147,12 +147,18 @@ jobs:
 
       - name: Code-sign webserver.exe (when signing secrets are configured)
         shell: msys2 {0}
-        if: ${{ secrets.WINDOWS_CERT_PFX_B64 != '' }}
+        env:
+          SIGN_CERT_B64: ${{ secrets.WINDOWS_CERT_PFX_B64 }}
+          SIGN_CERT_PASS: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
+          if [ -z "$SIGN_CERT_B64" ]; then
+            echo "no signing certificate configured - skipping sign"
+            exit 0
+          fi
           pacman -S --noconfirm --needed mingw-w64-x86_64-osslsigncode
-          printf '%s' '${{ secrets.WINDOWS_CERT_PFX_B64 }}' | base64 -d > "$RUNNER_TEMP/cert.pfx"
-          osslsigncode sign -pkcs12 "$RUNNER_TEMP/cert.pfx" -pass '${{ secrets.WINDOWS_CERT_PASSWORD }}' -h sha256 ^
-            -n "ADBlock Web Server" -i "https://github.com/wxcvm/AdAway" ^
+          echo "$SIGN_CERT_B64" | base64 -d > "$RUNNER_TEMP/cert.pfx"
+          osslsigncode sign -pkcs12 "$RUNNER_TEMP/cert.pfx" -pass "$SIGN_CERT_PASS" -h sha256 \
+            -n "ADBlock Web Server" -i "https://github.com/wxcvm/AdAway" \
             -in webserver/win32/dist/webserver.exe -out webserver/win32/dist/webserver.signed.exe
           mv webserver/win32/dist/webserver.signed.exe webserver/win32/dist/webserver.exe
           osslsigncode verify webserver/win32/dist/webserver.exe && echo "signed OK"
