@@ -2603,6 +2603,7 @@ int main(int argc, char *argv[]) {
         args.http_port = s.http_port;
         args.https_port = s.https_port;
         args.bind_all = s.bind_all;
+        args.startup_warning = NULL;
         LOG_INFO("A web server is already running on port %d - dashboard only mode.", s.http_port);
         int rc = adblock_gui_run(&args);
         if (rc != 0)
@@ -2633,13 +2634,26 @@ int main(int argc, char *argv[]) {
     snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);
     snprintf(https_url6, sizeof(https_url6), "https://%s:%d", v6, s.https_port);
 
-    if (!mg_http_listen(&mgr, http_url, fn, &s)) {
-        LOG_FATAL("HTTP bind failed (%s).", http_url);
-        mg_mgr_free(&mgr); return EXIT_FAILURE;
+    char startup_warning[512] = {0};
+    bool http_ok = mg_http_listen(&mgr, http_url, fn, &s);
+    if (!http_ok) {
+        LOG_FATAL("HTTP bind failed (%s): the port is probably already in use.", http_url);
+        snprintf(startup_warning, sizeof(startup_warning),
+                 "Port %d is already in use - the server could not bind. "
+                 "Showing the dashboard anyway; close other instances or "
+                 "change the port in Settings (Apply & Restart).", s.http_port);
+#ifdef _WIN32
+        if (s.no_gui) {
+            mg_mgr_free(&mgr);
+            return EXIT_FAILURE;
+        }
+#else
+        mg_mgr_free(&mgr);
+        return EXIT_FAILURE;
+#endif
     }
     if (!mg_http_listen(&mgr, https_url, fn, &s)) {
-        LOG_FATAL("HTTPS bind failed (%s).", https_url);
-        mg_mgr_free(&mgr); return EXIT_FAILURE;
+        LOG_WARN("HTTPS bind failed (%s) - continuing without HTTPS.", https_url);
     }
     /*
      * IPv6 loopback listeners (::1) - optional. Devices with IPv6
@@ -2673,6 +2687,7 @@ int main(int argc, char *argv[]) {
         args.http_port = s.http_port;
         args.https_port = s.https_port;
         args.bind_all = s.bind_all;
+        args.startup_warning = startup_warning[0] ? startup_warning : NULL;
         struct server_thread_arg targ;
         targ.mgr = &mgr;
         targ.s = &s;
