@@ -34,6 +34,7 @@
 #define PATH_MAX 4096
 #endif
 #include "win32_dirent.h"   /* opendir/readdir/closedir/rewinddir shim */
+#include "gui_win32.h"      /* native dashboard + autostart (Windows) */
 /* mingw-w64 has no POSIX uid_t (it only defines pid_t). */
 typedef unsigned int uid_t;
 #define ANDROID_LOG_FATAL 0
@@ -273,6 +274,8 @@ struct settings {
     bool              bind_all;   /* listen on all interfaces */
     int               http_port;  /* HTTP listen port (default 80) */
     int               https_port; /* HTTPS listen port (default 443) */
+    bool              no_gui;     /* Windows: skip the dashboard window */
+    int               autostart;  /* Windows: 1=install, 2=uninstall Run key */
     int               block_image_count;
     char              block_images[BLOCK_IMAGE_MAX_COUNT][BLOCK_IMAGE_NAME_MAX];
 };
@@ -2436,6 +2439,12 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--https-port") == 0 && i < argc-1) {
             s.https_port = atoi(argv[++i]);
             LOG_INFO("HTTPS port: %d", s.https_port);
+        } else if (strcmp(argv[i], "--no-gui") == 0) {
+            s.no_gui = true;
+        } else if (strcmp(argv[i], "--install-autostart") == 0) {
+            s.autostart = 1;
+        } else if (strcmp(argv[i], "--uninstall-autostart") == 0) {
+            s.autostart = 2;
         }
     }
 
@@ -2474,6 +2483,8 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 }
 
 /* ── main ─────────────────────────────────────────────────────── */
+static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s);
+
 int main(int argc, char *argv[]) {
 #ifndef _WIN32
     setsid();   /* no-op on Windows: there is no controlling session */
@@ -2501,6 +2512,26 @@ int main(int argc, char *argv[]) {
         LOG_FATAL("Bad parameters.");
         return EXIT_FAILURE;
     }
+
+#ifdef _WIN32
+    /* One-shot autostart registration (GUI toggle / CI) - do it before
+       binding so the command never needs a port to be free. */
+    if (s.autostart != 0) {
+        char exe[MAX_PATH];
+        if (GetModuleFileNameA(NULL, exe, sizeof(exe)) == 0) {
+            LOG_FATAL("Cannot resolve executable path.");
+            return EXIT_FAILURE;
+        }
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --no-gui",
+                 exe, s.resource_dir, s.http_port, s.https_port);
+        bool enable = (s.autostart == 1);
+        int rc = win32_autostart_set(enable, cmd);
+        LOG_INFO("Autostart %s %s.", enable ? "enabled" : "disabled", rc == 0 ? "OK" : "FAILED");
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+#endif
+
     if (s.debug) mg_log_set(MG_LL_DEBUG);
 
     s_stats.start_time_ms = mg_millis();
@@ -2549,19 +2580,52 @@ int main(int argc, char *argv[]) {
 
     load_block_cfg(s.resource_dir);
     setup_signal_handler();
-    LOG_INFO("ADBlock webserver ready — arm64, Mongoose " MG_VERSION
+
+    LOG_INFO("ADBlock webserver ready — Mongoose " MG_VERSION
         ", SNI cert issuance enabled, IPv6 loopback %s.",
         ipv6_ok ? "on" : "off");
 
-    while (s_sig_num == 0) mg_mgr_poll(&mgr, 1000);
-    save_stats(&s);
-    save_hist(&s);   /* final flush of chart buckets on exit */
-    sni_cache_save(s.resource_dir);  /* persist SNI cache (max hit rate) */
-    apps_save(s.resource_dir);       /* persist per-app stats on exit */
+#ifdef _WIN32
+    if (!s.no_gui) {
+        /* Native dashboard: the server runs on a worker thread and the
+           main thread hosts the dashboard window. */
+        struct adblock_gui_args args;
+        args.resource_dir = s.resource_dir;
+        args.http_port = s.http_port;
+        args.https_port = s.https_port;
+        struct server_thread_arg targ;
+        targ.mgr = &mgr;
+        targ.s = &s;
+        pthread_t srv_thread;
+        if (pthread_create(&srv_thread, NULL, server_thread_main, &targ) != 0) {
+            LOG_FATAL("Failed to start server thread.");
+            mg_mgr_free(&mgr);
+            return EXIT_FAILURE;
+        }
+        LOG_INFO("Dashboard opened — close the window to shut down.");
+        int rc = adblock_gui_run(&args);
+        s_sig_num = 1;   /* stop the poll loop */
+        pthread_join(srv_thread, NULL);
+        LOG_INFO("Server shut down (exit code %d).", rc);
+        return 0;
+    }
+#endif
+    return server_loop_and_cleanup(&mgr, &s);
+}
+
+/* Run the mongoose poll loop until a stop signal, then persist + free.
+   Used directly by the Android/headless builds and from a worker thread
+   when the Windows dashboard window is shown. */
+static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
+    while (s_sig_num == 0) mg_mgr_poll(mgr, 1000);
+    save_stats(s);
+    save_hist(s);   /* final flush of chart buckets on exit */
+    sni_cache_save(s->resource_dir);  /* persist SNI cache (max hit rate) */
+    apps_save(s->resource_dir);       /* persist per-app stats on exit */
     LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);
-    mg_mgr_free(&mgr);
+    mg_mgr_free(mgr);
 
     /* Free SNI cache.
        BUG FIX: take the mutex before freeing so no concurrent
@@ -2575,12 +2639,22 @@ int main(int argc, char *argv[]) {
     pthread_mutex_destroy(&s_sni_mutex);
 
     /* Free CA in-memory objects */
-    if (s.ca.cert) X509_free(s.ca.cert);
-    if (s.ca.key)  EVP_PKEY_free(s.ca.key);
+    if (s->ca.cert) X509_free(s->ca.cert);
+    if (s->ca.key)  EVP_PKEY_free(s->ca.key);
 
-    free((void *)s.tls_opts.cert.buf);
-    free((void *)s.tls_opts.key.buf);
+    free((void *)s->tls_opts.cert.buf);
+    free((void *)s->tls_opts.key.buf);
 
     LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
     return EXIT_SUCCESS;
 }
+
+#ifdef _WIN32
+struct server_thread_arg { struct mg_mgr *mgr; struct settings *s; };
+static void *server_thread_main(void *p) {
+    struct server_thread_arg *a = (struct server_thread_arg *)p;
+    server_loop_and_cleanup(a->mgr, a->s);
+    return NULL;
+}
+#endif
+
