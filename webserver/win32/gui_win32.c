@@ -445,26 +445,61 @@ static void fmt_num(wchar_t *dst, size_t n, long long v) {
     else swprintf(dst, n, L"%lld", v);
 }
 
+/* Modern flat palette */
+#define C_BG       RGB(245, 247, 250)
+#define C_CARD     RGB(255, 255, 255)
+#define C_BORDER   RGB(226, 232, 240)
+#define C_TEXT     RGB(30, 41, 59)
+#define C_MUTED    RGB(100, 116, 139)
+#define C_BLUE     RGB(59, 130, 246)
+#define C_BLUE_SOFT RGB(219, 234, 254)
+#define C_RED      RGB(239, 68, 68)
+#define C_RED_SOFT RGB(254, 226, 226)
+#define C_GREEN    RGB(34, 197, 94)
+#define C_ACCENT   RGB(37, 99, 235)
+
+static void rounded_card(HDC hdc, int x, int y, int w, int h, int radius,
+                         COLORREF fill, COLORREF border) {
+    HRGN rgn = CreateRoundRectRgn(x, y, x + w, y + h, radius * 2, radius * 2);
+    HBRUSH b = CreateSolidBrush(fill);
+    int saved = SaveDC(hdc);
+    SelectClipRgn(hdc, rgn);
+    RECT rc = {x, y, x + w, y + h};
+    FillRect(hdc, &rc, b);
+    SelectClipRgn(hdc, NULL);
+    RestoreDC(hdc, saved);
+    DeleteObject(b);
+    DeleteObject(rgn);
+    HPEN pen = CreatePen(PS_SOLID, 1, border);
+    HGDIOBJ op = SelectObject(hdc, pen);
+    HGDIOBJ ob = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    RoundRect(hdc, x, y, x + w, y + h, radius * 2, radius * 2);
+    SelectObject(hdc, op);
+    SelectObject(hdc, ob);
+    DeleteObject(pen);
+}
+
 static void draw_kpi(HDC hdc, int x, int y, int w, int h,
-                     const wchar_t *label, const wchar_t *value) {
-    RECT r = {x, y, x + w, y + h};
-    HBRUSH bg = CreateSolidBrush(RGB(245, 247, 250));
-    FillRect(hdc, &r, bg);
-    DeleteObject(bg);
-    FrameRect(hdc, &r, GetSysColorBrush(COLOR_BTNSHADOW));
-    HFONT vf = CreateFontW(26, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                     const wchar_t *label, const wchar_t *value,
+                     COLORREF accent) {
+    rounded_card(hdc, x, y, w, h, 12, C_CARD, C_BORDER);
+    HBRUSH ab = CreateSolidBrush(accent);
+    RECT chip = {x + 16, y + 16, x + 26, y + 26};
+    FillRect(hdc, &chip, ab);
+    DeleteObject(ab);
+    HFONT vf = CreateFontW(23, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
         DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-    HFONT lf = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+    HFONT lf = CreateFontW(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
         DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, RGB(33, 150, 243));
+    SetTextColor(hdc, C_TEXT);
     HFONT old = (HFONT)SelectObject(hdc, vf);
-    TextOutW(hdc, x + 12, y + 8, value, (int)wcslen(value));
-    SetTextColor(hdc, RGB(96, 110, 130));
+    TextOutW(hdc, x + 16, y + 12, value, (int)wcslen(value));
+    SetTextColor(hdc, C_MUTED);
     SelectObject(hdc, lf);
-    TextOutW(hdc, x + 12, y + 40, label, (int)wcslen(label));
+    TextOutW(hdc, x + 16, y + 42, label, (int)wcslen(label));
     SelectObject(hdc, old);
     DeleteObject(vf);
     DeleteObject(lf);
@@ -472,22 +507,22 @@ static void draw_kpi(HDC hdc, int x, int y, int w, int h,
 
 static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
                        const struct histogram *h, int count) {
-    FillRect(hdc, &panel, GetSysColorBrush(COLOR_WINDOW));
-    FrameRect(hdc, &panel, GetSysColorBrush(COLOR_BTNSHADOW));
-    HFONT tf = CreateFontW(17, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    rounded_card(hdc, panel.left, panel.top,
+                 panel.right - panel.left, panel.bottom - panel.top, 12, C_CARD, C_BORDER);
+    HFONT tf = CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
         DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, RGB(60, 70, 90));
+    SetTextColor(hdc, C_TEXT);
     HFONT old = (HFONT)SelectObject(hdc, tf);
-    TextOutW(hdc, panel.left + 10, panel.top + 6, title, (int)wcslen(title));
+    TextOutW(hdc, panel.left + 16, panel.top + 12, title, (int)wcslen(title));
     SelectObject(hdc, old);
     DeleteObject(tf);
 
-    RECT area = {panel.left + 14, panel.top + 34, panel.right - 8, panel.bottom - 22};
+    RECT area = {panel.left + 20, panel.top + 42, panel.right - 14, panel.bottom - 20};
     if (count <= 0 || area.right - area.left < 10 || area.bottom - area.top < 10) {
-        SetTextColor(hdc, RGB(150, 150, 150));
-        TextOutW(hdc, area.left + 6, area.top + 10, L"no data yet", 11);
+        SetTextColor(hdc, C_MUTED);
+        TextOutW(hdc, area.left + 4, area.top + 12, L"no data yet", 11);
         return;
     }
     long long maxv = 1;
@@ -495,45 +530,68 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
         if (h[i].requests > maxv) maxv = h[i].requests;
         if (h[i].blocked > maxv) maxv = h[i].blocked;
     }
-    wchar_t maxbuf[64];
-    swprintf(maxbuf, 64, L"%lld", maxv);
-    SetTextColor(hdc, RGB(150, 150, 150));
-    TextOutW(hdc, area.left - 2, area.top - 2, maxbuf, (int)wcslen(maxbuf));
-    SetTextColor(hdc, RGB(150, 150, 150));
-    TextOutW(hdc, area.left - 2, area.bottom - 4, L"0", 1);
+    /* soft horizontal grid */
+    HPEN gp = CreatePen(PS_SOLID, 1, RGB(235, 238, 243));
+    HGDIOBJ gop = SelectObject(hdc, gp);
+    for (int g = 0; g <= 3; g++) {
+        int gy = area.top + (int)((double)(area.bottom - area.top) * g / 3.0);
+        MoveToEx(hdc, area.left, gy, NULL);
+        LineTo(hdc, area.right, gy);
+    }
+    SelectObject(hdc, gop);
+    DeleteObject(gp);
+
+    wchar_t numbuf[64];
+    HFONT lf = CreateFontW(11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+    SelectObject(hdc, lf);
+    SetTextColor(hdc, C_MUTED);
+    swprintf(numbuf, 64, L"%lld", maxv);
+    TextOutW(hdc, area.left, area.top - 16, numbuf, (int)wcslen(numbuf));
+    TextOutW(hdc, area.left, area.bottom + 3, L"0", 1);
+    SelectObject(hdc, old);
+    DeleteObject(lf);
 
     int slotw = (area.right - area.left) / count;
-    if (slotw < 2) slotw = 2;
-    HBRUSH blue = CreateSolidBrush(RGB(33, 150, 243));
-    HBRUSH red = CreateSolidBrush(RGB(244, 67, 54));
+    if (slotw < 4) slotw = 4;
+    HBRUSH blue = CreateSolidBrush(C_BLUE);
+    HBRUSH red = CreateSolidBrush(C_RED);
+    HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+    int chart_h = area.bottom - area.top;
     for (int i = 0; i < count; i++) {
-        int chart_h = area.bottom - area.top;
         int bh1 = (int)((double)chart_h * (double)h[i].requests / (double)maxv);
         int bh2 = (int)((double)chart_h * (double)h[i].blocked / (double)maxv);
-        RECT rb = {area.left + i * slotw, area.bottom - bh1,
-                   area.left + i * slotw + (slotw * 2) / 5, area.bottom};
-        if (bh1 > 0) FillRect(hdc, &rb, blue);
-        RECT rr = {area.left + i * slotw + (slotw * 3) / 5, area.bottom - bh2,
-                   area.left + i * slotw + slotw, area.bottom};
-        if (bh2 > 0) FillRect(hdc, &rr, red);
+        int bx = area.left + i * slotw;
+        if (bh1 > 1) {
+            SelectObject(hdc, blue);
+            RoundRect(hdc, bx + 1, area.bottom - bh1,
+                      bx + (int)(slotw * 0.38), area.bottom, 5, 5);
+        }
+        if (bh2 > 1) {
+            SelectObject(hdc, red);
+            RoundRect(hdc, bx + (int)(slotw * 0.55), area.bottom - bh2,
+                      bx + slotw - 1, area.bottom, 5, 5);
+        }
     }
+    SelectObject(hdc, op);
     DeleteObject(blue);
     DeleteObject(red);
 }
 
 static void draw_legend(HDC hdc, int x, int y) {
-    HBRUSH b = CreateSolidBrush(RGB(33, 150, 243));
-    RECT rb = {x, y + 2, x + 12, y + 10};
+    HBRUSH b = CreateSolidBrush(C_BLUE);
+    RECT rb = {x, y + 4, x + 8, y + 12};
     FillRect(hdc, &rb, b);
     DeleteObject(b);
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, RGB(80, 90, 105));
-    TextOutW(hdc, x + 18, y, L"requests", 8);
-    HBRUSH r = CreateSolidBrush(RGB(244, 67, 54));
-    RECT rr = {x + 110, y + 2, x + 122, y + 10};
+    SetTextColor(hdc, C_MUTED);
+    TextOutW(hdc, x + 14, y, L"requests", 8);
+    HBRUSH r = CreateSolidBrush(C_RED);
+    RECT rr = {x + 110, y + 4, x + 118, y + 12};
     FillRect(hdc, &rr, r);
     DeleteObject(r);
-    TextOutW(hdc, x + 128, y, L"blocked", 7);
+    TextOutW(hdc, x + 124, y, L"blocked", 7);
 }
 
 static struct snapshot *g_sn = NULL;
@@ -551,10 +609,13 @@ static int s_ctrl_count = 0;
 static void draw_statusbar(HDC hdc, HWND hwnd) {
     (void)hwnd;
     RECT strip = {0, 578, 1000, 620};
-    HBRUSH bg = CreateSolidBrush(RGB(238, 241, 245));
-    FillRect(hdc, &strip, bg);
-    DeleteObject(bg);
-    FrameRect(hdc, &strip, GetSysColorBrush(COLOR_BTNSHADOW));
+    FillRect(hdc, &strip, GetSysColorBrush(COLOR_WINDOW));
+    HPEN tp = CreatePen(PS_SOLID, 1, C_BORDER);
+    HGDIOBJ tpold = SelectObject(hdc, tp);
+    MoveToEx(hdc, 0, 578, NULL);
+    LineTo(hdc, 1000, 578);
+    SelectObject(hdc, tpold);
+    DeleteObject(tp);
 
     HFONT f = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
@@ -813,8 +874,8 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONUP: {
         int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
         int new_tab = -1;
-        if (x >= 16 && x <= 130 && y >= 12 && y <= 44) new_tab = 0;
-        else if (x >= 140 && x <= 254 && y >= 12 && y <= 44) new_tab = 1;
+        if (x >= 16 && x <= 150 && y >= 56 && y <= 90) new_tab = 0;
+        else if (x >= 160 && x <= 294 && y >= 56 && y <= 90) new_tab = 1;
         if (new_tab >= 0 && new_tab != g_tab) {
             g_tab = new_tab;
             for (int i = 0; i < s_ctrl_count; i++)
@@ -830,34 +891,53 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         GetClientRect(hwnd, &rc);
         FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
 
-        HFONT tf = CreateFontW(26, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        /* Header */
+        HFONT tf = CreateFontW(22, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
             DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
         SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(25, 40, 70));
+        SetTextColor(hdc, C_TEXT);
         HFONT old = (HFONT)SelectObject(hdc, tf);
-        TextOutW(hdc, 20, 14, g_title, (int)wcslen(g_title));
-        SelectObject(hdc, old);
-        DeleteObject(tf);
+        TextOutW(hdc, 20, 18, g_title, (int)wcslen(g_title));
 
-        /* Tab strip */
-        HBRUSH activeB = CreateSolidBrush(RGB(205, 232, 255));
-        HBRUSH idleB = CreateSolidBrush(RGB(232, 234, 237));
-        RECT rt1 = {16, 12, 130, 44};
-        RECT rt2 = {140, 12, 254, 44};
-        FillRect(hdc, &rt1, g_tab == 0 ? activeB : idleB);
-        FillRect(hdc, &rt2, g_tab == 1 ? activeB : idleB);
-        DeleteObject(activeB);
-        DeleteObject(idleB);
-        HFONT tabf = CreateFontW(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-            DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-        SelectObject(hdc, tabf);
-        SetTextColor(hdc, RGB(25, 40, 70));
-        TextOutW(hdc, 34, 18, L"Statistics", 10);
-        TextOutW(hdc, 158, 18, L"Settings", 8);
-        SelectObject(hdc, old);
-        DeleteObject(tabf);
+        /* running status chip */
+        {
+            bool up = (g_sn != NULL && g_sn->valid);
+            HBRUSH dotb = CreateSolidBrush(up ? C_GREEN : C_RED);
+            HGDIOBJ oldbrush = SelectObject(hdc, dotb);
+            HGDIOBJ oldpen = SelectObject(hdc, GetStockObject(NULL_PEN));
+            Ellipse(hdc, 876, 24, 892, 40);
+            SelectObject(hdc, oldbrush);
+            SelectObject(hdc, oldpen);
+            DeleteObject(dotb);
+            HFONT cf = CreateFontW(13, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            SelectObject(hdc, cf);
+            SetTextColor(hdc, up ? RGB(22, 163, 74) : RGB(190, 70, 70));
+            TextOutW(hdc, 898, 26, up ? L"RUNNING" : L"WAITING", up ? 7 : 7);
+            SelectObject(hdc, old);
+            DeleteObject(cf);
+        }
+
+        /* Tabs (pills) */
+        for (int t = 0; t < 2; t++) {
+            bool active = (g_tab == t);
+            int tx = t == 0 ? 16 : 160;
+            rounded_card(hdc, tx, 56, 134, 34, 16,
+                         active ? C_BLUE_SOFT : RGB(238, 241, 245),
+                         active ? C_BORDER : RGB(226, 229, 234));
+            HFONT tabf = CreateFontW(14, 0, 0, 0, active ? FW_SEMIBOLD : FW_NORMAL,
+                FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            SelectObject(hdc, tabf);
+            SetTextColor(hdc, active ? C_ACCENT : C_MUTED);
+            const wchar_t *name = t == 0 ? L"Statistics" : L"Settings";
+            TextOutW(hdc, tx + 26, 68, name, (int)wcslen(name));
+            SelectObject(hdc, old);
+            DeleteObject(tabf);
+        }
 
         if (g_tab == 1) {
             /* Settings page: the child controls draw themselves; only
@@ -866,10 +946,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                 DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
             SelectObject(hdc, shf);
-            SetTextColor(hdc, RGB(60, 70, 90));
-            TextOutW(hdc, 36, 66, L"Server", 6);
-            TextOutW(hdc, 36, 232, L"Block reply policy (applies immediately)", 38);
-            TextOutW(hdc, 36, 400, L"Certificate & maintenance", 24);
+            SetTextColor(hdc, C_TEXT);
+            TextOutW(hdc, 36, 106, L"Server", 6);
+            TextOutW(hdc, 36, 236, L"Block reply policy (applies immediately)", 38);
+            TextOutW(hdc, 36, 402, L"Certificate & maintenance", 24);
             SelectObject(hdc, old);
             DeleteObject(shf);
             HFONT lf = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
@@ -890,28 +970,28 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             for (int i = 0; i < sn->hist_count; i++) blk += sn->hist[i].blocked;
         }
         fmt_num(val, 64, req);
-        draw_kpi(hdc, 20, 78, 155, 64, L"Requests", val);
+        draw_kpi(hdc, 20, 102, 155, 64, L"Requests", val, C_BLUE);
         fmt_num(val, 64, blk);
-        draw_kpi(hdc, 187, 78, 155, 64, L"Blocked", val);
+        draw_kpi(hdc, 187, 102, 155, 64, L"Blocked", val, C_RED);
         long long rate = (sn && sn->valid) ? (long long)(sn->block_rate * 100.0) : 0;
         swprintf(val, 64, L"%lld%%", rate);
-        draw_kpi(hdc, 354, 78, 155, 64, L"Block rate", val);
+        draw_kpi(hdc, 354, 102, 155, 64, L"Block rate", val, C_ACCENT);
         fmt_num(val, 64, sn && sn->valid ? sn->total_connections : 0);
-        draw_kpi(hdc, 521, 78, 155, 64, L"Connections", val);
+        draw_kpi(hdc, 521, 102, 155, 64, L"Connections", val, C_GREEN);
         fmt_num(val, 64, sn && sn->valid ? sn->sni_certs_issued : 0);
-        draw_kpi(hdc, 688, 78, 155, 64, L"SNI certs", val);
+        draw_kpi(hdc, 688, 102, 155, 64, L"SNI certs", val, C_ACCENT);
         long long up = sn && sn->valid ? sn->uptime_seconds : 0;
         swprintf(val, 64, L"%lldh %lldm", up / 3600, (up % 3600) / 60);
-        draw_kpi(hdc, 855, 78, 125, 64, L"Uptime", val);
+        draw_kpi(hdc, 855, 102, 125, 64, L"Uptime", val, RGB(139, 92, 246));
 
-        RECT ph = {20, 158, 490, 410};
+        RECT ph = {20, 178, 490, 430};
         draw_chart(hdc, ph, L"Hourly (last 24h)",
                    sn ? sn->hist : NULL, sn ? sn->hist_count : 0);
-        RECT pd = {510, 158, 980, 410};
+        RECT pd = {510, 178, 980, 430};
         draw_chart(hdc, pd, L"Daily (last 30d)",
                    sn ? sn->daily : NULL, sn ? sn->daily_count : 0);
-        draw_legend(hdc, 40, 388);
-        draw_legend(hdc, 530, 388);
+        draw_legend(hdc, 40, 402);
+        draw_legend(hdc, 530, 402);
 
         char cert_path[1024];
         snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
@@ -926,11 +1006,11 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             swprintf(txt, 256, L"Certificate: valid for %lld days more", days);
         else
             swprintf(txt, 256, L"Certificate: unavailable (check resources folder)");
-        SetTextColor(hdc, ok ? RGB(20, 120, 60) : RGB(190, 70, 70));
-        TextOutW(hdc, 20, 418, txt, (int)wcslen(txt));
+        SetTextColor(hdc, ok ? RGB(22, 163, 74) : RGB(190, 70, 70));
+        TextOutW(hdc, 20, 444, txt, (int)wcslen(txt));
         swprintf(val, 64, L"trusted: %s", trusted ? L"YES" : L"NO");
-        SetTextColor(hdc, trusted ? RGB(20, 120, 60) : RGB(190, 70, 70));
-        TextOutW(hdc, 550, 418, val, (int)wcslen(val));
+        SetTextColor(hdc, trusted ? RGB(22, 163, 74) : RGB(190, 70, 70));
+        TextOutW(hdc, 496, 444, val, (int)wcslen(val));
         SelectObject(hdc, old);
         DeleteObject(lf);
         draw_statusbar(hdc, hwnd);
