@@ -78,10 +78,8 @@ jobs:
       - name: Smoke test (start server, fetch stats + test page)
         shell: pwsh
         run: |
-          $proc = Start-Process -FilePath "webserver\win32\dist\webserver.exe" ^
-            -ArgumentList "--resources","webserver\win32\dist\resources","--http-port","18080","--https-port","18443" ^
-            -PassThru -WorkingDirectory "webserver\win32\dist"
-          Start-Sleep -Seconds 5
+          $proc = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources","webserver\win32\dist\resources","--http-port","18080","--https-port","18443") -PassThru -WorkingDirectory "webserver\win32\dist"
+          Start-Sleep -Seconds 6
           try {
             $stats = Invoke-WebRequest -Uri "http://127.0.0.1:18080/internal-stats" -UseBasicParsing -TimeoutSec 10
             Write-Output "internal-stats HTTP $($stats.StatusCode): $($stats.Content.Substring(0, [Math]::Min(180, $stats.Content.Length)))"
