@@ -275,6 +275,7 @@ struct settings {
     int               http_port;  /* HTTP listen port (default 80) */
     int               https_port; /* HTTPS listen port (default 443) */
     bool              no_gui;     /* Windows: skip the dashboard window */
+    bool              minimized;  /* Windows: GUI started to tray (autostart) */
     int               autostart;  /* Windows: 1=install, 2=uninstall Run key */
     bool              cli_bind_set;      /* --bind given on the command line */
     bool              cli_http_port_set; /* --http-port given */
@@ -2447,6 +2448,8 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             LOG_INFO("HTTPS port: %d", s.https_port);
         } else if (strcmp(argv[i], "--no-gui") == 0) {
             s.no_gui = true;
+        } else if (strcmp(argv[i], "--minimized") == 0) {
+            s.minimized = true;
         } else if (strcmp(argv[i], "--install-autostart") == 0) {
             s.autostart = 1;
         } else if (strcmp(argv[i], "--uninstall-autostart") == 0) {
@@ -2489,7 +2492,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 }
 
 #ifndef ADBLOCK_APP_VERSION
-#define ADBLOCK_APP_VERSION "1.6.0"
+#define ADBLOCK_APP_VERSION "1.7.0"
 #endif
 
 /* ── main ─────────────────────────────────────────────────────── */
@@ -2570,11 +2573,13 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
         char cmd[2048];
-        snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --no-gui",
+        snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --minimized",
                  exe, s.resource_dir, s.http_port, s.https_port);
         bool enable = (s.autostart == 1);
         int rc = win32_autostart_set(enable, cmd);
-        LOG_INFO("Autostart %s %s.", enable ? "enabled" : "disabled", rc == 0 ? "OK" : "FAILED");
+        LOG_INFO("Autostart %s %s (entry=%s).", enable ? "enabled" : "disabled",
+                 rc == 0 ? "OK" : "FAILED",
+                 win32_autostart_installed() ? "installed" : "absent");
         return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 #endif
@@ -2607,6 +2612,7 @@ int main(int argc, char *argv[]) {
         args.http_port = s.http_port;
         args.https_port = s.https_port;
         args.bind_all = s.bind_all;
+        args.start_minimized = s.minimized;
         args.startup_warning = NULL;
         LOG_INFO("A web server is already running on port %d - dashboard only mode.", s.http_port);
         int rc = adblock_gui_run(&args);
@@ -2691,6 +2697,7 @@ int main(int argc, char *argv[]) {
         args.http_port = s.http_port;
         args.https_port = s.https_port;
         args.bind_all = s.bind_all;
+        args.start_minimized = s.minimized;
         args.startup_warning = startup_warning[0] ? startup_warning : NULL;
         struct server_thread_arg targ;
         targ.mgr = &mgr;
