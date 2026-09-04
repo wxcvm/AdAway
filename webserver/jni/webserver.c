@@ -6,7 +6,6 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/socket.h>   /* socket inode introspection for per-app stats */
 #include <stdint.h>       /* intptr_t (conn_uid) */
 #include <pthread.h>
 
@@ -22,10 +21,12 @@
  * simply fail and are handled as "not found".
  */
 #ifdef __ANDROID__
+#include <sys/socket.h>
 #include <android/log.h>
 #include <linux/limits.h>
 #define LOG_LOGCAT(prio, fmt, ...) __android_log_print(prio, THIS_FILE, fmt, ##__VA_ARGS__)
 #elif defined(_WIN32)
+#include <winsock2.h>   /* before windows.h; base for mongoose sockets */
 #include <limits.h>
 #include <stdbool.h>
 #ifndef PATH_MAX
@@ -37,7 +38,11 @@
 #define ANDROID_LOG_INFO  2
 #define ANDROID_LOG_DEBUG 3
 #define LOG_LOGCAT(prio, fmt, ...) do { } while (0)
+/* mingw-w64 has no POSIX strcasecmp/strncasecmp. */
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
 #else
+#include <sys/socket.h>
 #include <limits.h>
 #ifndef PATH_MAX
 #define PATH_MAX 4096
