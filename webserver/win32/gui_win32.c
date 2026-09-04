@@ -163,6 +163,8 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->valid = 1;
 }
 
+#define IDC_POL0      1110
+
 /* Block reply policy toggles: label, block_config.json key, control id. */
 struct policy_item { const wchar_t *label; const char *key; int id; };
 static const struct policy_item g_policy[] = {
@@ -434,7 +436,6 @@ bool win32_autostart_installed(void) {
 #define IDC_SAVE      1104
 #define IDC_RESTART   1105
 #define IDC_FLUSH     1106
-#define IDC_POL0      1110
 
 static const wchar_t *g_title = L"ADBlock Web Server - Dashboard";
 
