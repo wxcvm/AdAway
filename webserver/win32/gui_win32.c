@@ -163,6 +163,100 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->valid = 1;
 }
 
+/* ── settings persistence (webserver.ini next to the exe) ─────── */
+static void ini_file_path(char *out, size_t n) {
+    char exe[MAX_PATH];
+    if (GetModuleFileNameA(NULL, exe, sizeof(exe)) <= 0) {
+        snprintf(out, n, "webserver.ini");
+        return;
+    }
+    char *slash = strrchr(exe, '\\');
+    if (slash) *slash = '\0';
+    snprintf(out, n, "%s\\webserver.ini", exe);
+}
+
+static void ini_save(int http_port, int https_port, bool bind_all) {
+    char path[1024];
+    ini_file_path(path, sizeof(path));
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "http_port=%d\n", http_port);
+    fprintf(f, "https_port=%d\n", https_port);
+    fprintf(f, "bind_all=%d\n", bind_all ? 1 : 0);
+    fclose(f);
+}
+
+/* ── block_config.json read/write (applied via /control reload_config) ── */
+static bool policy_get(const char *dir, const char *key, bool def) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/block_config.json", dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return def;
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = '\0';
+    fclose(f);
+    char pat[96];
+    int pl = snprintf(pat, sizeof(pat), "\"%s\":", key);
+    if (pl <= 0 || (size_t)pl >= sizeof(pat)) return def;
+    const char *p = strstr(buf, pat);
+    if (!p) return def;
+    p += pl;
+    while (*p == ' ') p++;
+    return strncmp(p, "true", 4) == 0;
+}
+
+static void policy_read(const char *dir, bool *vals) {
+    for (int i = 0; i < POLICY_COUNT; i++)
+        vals[i] = policy_get(dir, g_policy[i].key, true);
+}
+
+static void policy_save(const char *dir, const bool *vals) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/block_config.json", dir);
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "{\n");
+    for (int i = 0; i < POLICY_COUNT; i++)
+        fprintf(f, "  \"%s\": %s%s\n", g_policy[i].key,
+                vals[i] ? "true" : "false", i + 1 < POLICY_COUNT ? "," : "");
+    fprintf(f, "}\n");
+    fclose(f);
+}
+
+/* POST /control (cmd=reload_config | flush_stats | shutdown) */
+static void control_post(int port, const char *cmd, wchar_t *status, size_t statusn) {
+    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) {
+        wchar_t w[16];
+        utf8_to_wide(cmd, w, 16);
+        if (statusn) swprintf(status, statusn, L"control %ls: socket failed", w);
+        return;
+    }
+    SOCKADDR_IN addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((u_short)port);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    int ok = -1;
+    if (connect(s, (SOCKADDR *)&addr, sizeof(addr)) == 0) {
+        char body[64];
+        int bl = snprintf(body, sizeof(body), "cmd=%s", cmd);
+        char req[512];
+        int rl = snprintf(req, sizeof(req),
+            "POST /control HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+            "Content-Type: application/x-www-form-urlencoded\r\n"
+            "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+            bl, body);
+        if (rl > 0 && send(s, req, rl, 0) == rl) ok = 0;
+    }
+    closesocket(s);
+    wchar_t w[16];
+    utf8_to_wide(cmd, w, 16);
+    if (statusn) swprintf(status, statusn, L"control %ls: %s",
+                          w, ok == 0 ? L"OK" : L"failed");
+}
+
 /* ── certificate helpers ────────────────────────────────────────── */
 
 static X509 *load_pem_cert(const char *cert_path) {
@@ -319,6 +413,29 @@ bool win32_autostart_installed(void) {
 #define IDM_TEST     1003
 #define IDM_AUTOSTART 1004
 #define IDM_EXIT     1005
+#define IDC_HTTP_EDIT 1101
+#define IDC_HTTPS_EDIT 1102
+#define IDC_BIND_CHK  1103
+#define IDC_SAVE      1104
+#define IDC_RESTART   1105
+#define IDC_FLUSH     1106
+#define IDC_POL0      1110
+
+/* Block reply policy toggles: label, block_config.json key, control id. */
+struct policy_item { const wchar_t *label; const char *key; int id; };
+static const struct policy_item g_policy[] = {
+    { L"Images",     "reply_images",       IDC_POL0 + 0 },
+    { L"Scripts",    "reply_scripts",      IDC_POL0 + 1 },
+    { L"Styles",     "reply_styles",       IDC_POL0 + 2 },
+    { L"Fonts",      "reply_fonts",        IDC_POL0 + 3 },
+    { L"Media",      "reply_media",        IDC_POL0 + 4 },
+    { L"Structures", "reply_structures",   IDC_POL0 + 5 },
+    { L"API",        "reply_api",          IDC_POL0 + 6 },
+    { L"Telemetry",  "reply_telemetry",    IDC_POL0 + 7 },
+    { L"Config",     "reply_config",       IDC_POL0 + 8 },
+    { L"WS / SSE",   "reply_ws_sse",       IDC_POL0 + 9 },
+};
+#define POLICY_COUNT ((int)(sizeof(g_policy) / sizeof(g_policy[0])))
 
 static const wchar_t *g_title = L"ADBlock Web Server - Dashboard";
 
@@ -419,13 +536,17 @@ static void draw_legend(HDC hdc, int x, int y) {
     TextOutW(hdc, x + 128, y, L"blocked", 7);
 }
 
-static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
-    static struct snapshot *g_sn = NULL;
-    static char g_res[512] = {0};
-    static int g_http_port = 8080;
-    static int g_https_port = 8443;
-    static wchar_t g_status[4096] = L"";
+static struct snapshot *g_sn = NULL;
+static char g_res[512] = {0};
+static int g_http_port = 8080;
+static int g_https_port = 8443;
+static bool g_bind_all = false;
+static int g_tab = 0;               /* 0 = statistics, 1 = settings */
+static wchar_t g_status[4096] = L"";
+static HWND s_ctrls[64];
+static int s_ctrl_count = 0;
 
+static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE: {
         const struct adblock_gui_args *args =
@@ -433,25 +554,51 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         snprintf(g_res, sizeof(g_res), "%s", args->resource_dir);
         g_http_port = args->http_port;
         g_https_port = args->https_port;
+        g_bind_all = args->bind_all;
+        g_tab = 0;
         g_sn = (struct snapshot *)calloc(1, sizeof(struct snapshot));
         HINSTANCE hinst = GetModuleHandleW(NULL);
-        int x = 20, y = 442, w = 118, h = 30;
-        CreateWindowExW(0, L"BUTTON", L"Trust CA",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, x, y, w, h, hwnd, (HMENU)IDM_TRUST, hinst, 0);
-        x += w + 12;
-        CreateWindowExW(0, L"BUTTON", L"Remove CA",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, x, y, 128, h, hwnd, (HMENU)IDM_UNTRUST, hinst, 0);
-        x += 128 + 12;
-        CreateWindowExW(0, L"BUTTON", L"Open Test Page",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, x, y, 150, h, hwnd, (HMENU)IDM_TEST, hinst, 0);
-        x += 150 + 12;
-        HWND chk = CreateWindowExW(0, L"BUTTON", L"Start with Windows",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, x, y + 2, 200, 26, hwnd,
-            (HMENU)IDM_AUTOSTART, hinst, 0);
-        SendMessageW(chk, BM_SETCHECK, win32_autostart_installed() ? BST_CHECKED : BST_UNCHECKED, 0);
-        x += 200 + 90;
-        CreateWindowExW(0, L"BUTTON", L"Exit",
-            WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 862, y, 118, h, hwnd, (HMENU)IDM_EXIT, hinst, 0);
+        s_ctrl_count = 0;
+        struct { const wchar_t *cls, *text; int style; int x, y, w, h; int id; } ctl[] = {
+            { L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, 130, 94, 90, 26, IDC_HTTP_EDIT },
+            { L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, 345, 94, 90, 26, IDC_HTTPS_EDIT },
+            { L"BUTTON", L"Listen on all interfaces (LAN)", BS_AUTOCHECKBOX, 36, 130, 260, 26, IDC_BIND_CHK },
+            { L"BUTTON", L"Save settings", BS_PUSHBUTTON, 36, 168, 130, 28, IDC_SAVE },
+            { L"BUTTON", L"Apply & Restart", BS_PUSHBUTTON, 176, 168, 140, 28, IDC_RESTART },
+            { L"BUTTON", L"Trust CA", BS_PUSHBUTTON, 36, 432, 110, 30, IDM_TRUST },
+            { L"BUTTON", L"Remove CA", BS_PUSHBUTTON, 156, 432, 110, 30, IDM_UNTRUST },
+            { L"BUTTON", L"Open Test Page", BS_PUSHBUTTON, 276, 432, 140, 30, IDM_TEST },
+            { L"BUTTON", L"Flush stats", BS_PUSHBUTTON, 426, 432, 110, 30, IDC_FLUSH },
+            { L"BUTTON", L"Start with Windows", BS_AUTOCHECKBOX, 546, 434, 190, 26, IDM_AUTOSTART },
+            { L"BUTTON", L"Exit", BS_PUSHBUTTON, 866, 432, 110, 30, IDM_EXIT },
+        };
+        for (int i = 0; i < (int)(sizeof(ctl) / sizeof(ctl[0])); i++) {
+            s_ctrls[s_ctrl_count++] = CreateWindowExW(0, ctl[i].cls, ctl[i].text,
+                WS_CHILD | ctl[i].style, ctl[i].x, ctl[i].y, ctl[i].w, ctl[i].h,
+                hwnd, (HMENU)(INT_PTR)ctl[i].id, hinst, NULL);
+        }
+        for (int i = 0; i < POLICY_COUNT; i++) {
+            int cx = (i % 2 == 0) ? 36 : 260;
+            int cy = 248 + (i / 2) * 28;
+            s_ctrls[s_ctrl_count++] = CreateWindowExW(0, L"BUTTON", g_policy[i].label,
+                WS_CHILD | BS_AUTOCHECKBOX, cx, cy, 200, 24, hwnd,
+                (HMENU)(INT_PTR)g_policy[i].id, hinst, NULL);
+        }
+        wchar_t tmp[32];
+        swprintf(tmp, 32, L"%d", g_http_port);
+        SetWindowTextW(GetDlgItem(hwnd, IDC_HTTP_EDIT), tmp);
+        swprintf(tmp, 32, L"%d", g_https_port);
+        SetWindowTextW(GetDlgItem(hwnd, IDC_HTTPS_EDIT), tmp);
+        SendMessageW(GetDlgItem(hwnd, IDC_BIND_CHK), BM_SETCHECK,
+                     g_bind_all ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(GetDlgItem(hwnd, IDM_AUTOSTART), BM_SETCHECK,
+                     win32_autostart_installed() ? BST_CHECKED : BST_UNCHECKED, 0);
+        bool pol[POLICY_COUNT];
+        policy_read(g_res, pol);
+        for (int i = 0; i < POLICY_COUNT; i++)
+            SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_SETCHECK,
+                         pol[i] ? BST_CHECKED : BST_UNCHECKED, 0);
+        for (int i = 0; i < s_ctrl_count; i++) ShowWindow(s_ctrls[i], SW_HIDE);
         SetTimer(hwnd, 1, 2000, NULL);
         swprintf(g_status, 4096, L"polling http://127.0.0.1:%d/internal-stats ...", g_http_port);
         return 0;
@@ -488,11 +635,67 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --no-gui",
                          exe, g_res, g_http_port, g_https_port);
                 win32_autostart_set(on, cmd);
+                swprintf(g_status, 4096, L"autostart %s", on ? L"enabled" : L"disabled");
+                InvalidateRect(hwnd, NULL, FALSE);
             } else if (id == IDM_EXIT) {
                 PostMessageW(hwnd, WM_CLOSE, 0, 0);
+            } else if (id == IDC_SAVE || id == IDC_RESTART) {
+                wchar_t wt[32];
+                int hp = 0, sp = 0;
+                GetWindowTextW(GetDlgItem(hwnd, IDC_HTTP_EDIT), wt, 32); hp = _wtoi(wt);
+                GetWindowTextW(GetDlgItem(hwnd, IDC_HTTPS_EDIT), wt, 32); sp = _wtoi(wt);
+                if (hp < 1 || hp > 65535 || sp < 1 || sp > 65535) {
+                    MessageBoxW(hwnd, L"Ports must be between 1 and 65535.",
+                                L"Settings", MB_OK | MB_ICONWARNING);
+                } else {
+                    bool bind = SendMessageW(GetDlgItem(hwnd, IDC_BIND_CHK),
+                                             BM_GETCHECK, 0, 0) == BST_CHECKED;
+                    ini_save(hp, sp, bind);
+                    g_http_port = hp; g_https_port = sp; g_bind_all = bind;
+                    if (id == IDC_RESTART) {
+                        wchar_t exeW[MAX_PATH], resW[1024], argsW[2048];
+                        GetModuleFileNameW(NULL, exeW, MAX_PATH);
+                        utf8_to_wide(g_res, resW, 1024);
+                        swprintf(argsW, 2048, L"--resources \"%ls\"", resW);
+                        ShellExecuteW(NULL, L"open", exeW, argsW, NULL, SW_SHOWNORMAL);
+                        PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                    } else {
+                        swprintf(g_status, 4096,
+                                 L"settings saved - click Apply & Restart (or restart the server) to apply");
+                        InvalidateRect(hwnd, NULL, FALSE);
+                    }
+                }
+            } else if (id == IDC_FLUSH) {
+                wchar_t st[128];
+                control_post(g_http_port, "flush_stats", st, 128);
+                swprintf(g_status, 4096, L"%ls", st);
+                InvalidateRect(hwnd, NULL, FALSE);
+            } else if (id >= IDC_POL0 && id < IDC_POL0 + POLICY_COUNT) {
+                bool vals[POLICY_COUNT];
+                for (int i = 0; i < POLICY_COUNT; i++)
+                    vals[i] = SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i),
+                                           BM_GETCHECK, 0, 0) == BST_CHECKED;
+                policy_save(g_res, vals);
+                wchar_t st[128];
+                control_post(g_http_port, "reload_config", st, 128);
+                swprintf(g_status, 4096, L"%ls", st);
+                InvalidateRect(hwnd, NULL, FALSE);
             }
         }
         return 0;
+    case WM_LBUTTONUP: {
+        int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
+        int new_tab = -1;
+        if (x >= 16 && x <= 130 && y >= 12 && y <= 44) new_tab = 0;
+        else if (x >= 140 && x <= 254 && y >= 12 && y <= 44) new_tab = 1;
+        if (new_tab >= 0 && new_tab != g_tab) {
+            g_tab = new_tab;
+            for (int i = 0; i < s_ctrl_count; i++)
+                ShowWindow(s_ctrls[i], g_tab == 1 ? SW_SHOW : SW_HIDE);
+            InvalidateRect(hwnd, NULL, TRUE);
+        }
+        return 0;
+    }
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
@@ -509,6 +712,53 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         TextOutW(hdc, 20, 14, g_title, (int)wcslen(g_title));
         SelectObject(hdc, old);
         DeleteObject(tf);
+
+        /* Tab strip */
+        HBRUSH activeB = CreateSolidBrush(RGB(205, 232, 255));
+        HBRUSH idleB = CreateSolidBrush(RGB(232, 234, 237));
+        RECT rt1 = {16, 12, 130, 44};
+        RECT rt2 = {140, 12, 254, 44};
+        FillRect(hdc, &rt1, g_tab == 0 ? activeB : idleB);
+        FillRect(hdc, &rt2, g_tab == 1 ? activeB : idleB);
+        DeleteObject(activeB);
+        DeleteObject(idleB);
+        HFONT tabf = CreateFontW(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+            DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        SelectObject(hdc, tabf);
+        SetTextColor(hdc, RGB(25, 40, 70));
+        TextOutW(hdc, 34, 18, L"Statistics", 10);
+        TextOutW(hdc, 158, 18, L"Settings", 8);
+        SelectObject(hdc, old);
+        DeleteObject(tabf);
+
+        if (g_tab == 1) {
+            /* Settings page: the child controls draw themselves; only
+               paint the section headers and the status line here. */
+            HFONT shf = CreateFontW(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            SelectObject(hdc, shf);
+            SetTextColor(hdc, RGB(60, 70, 90));
+            TextOutW(hdc, 36, 66, L"Server", 6);
+            TextOutW(hdc, 36, 232, L"Block reply policy (applies immediately)", 38);
+            TextOutW(hdc, 36, 400, L"Certificate & maintenance", 24);
+            SelectObject(hdc, old);
+            DeleteObject(shf);
+            HFONT lf = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            SelectObject(hdc, lf);
+            SetTextColor(hdc, RGB(120, 130, 145));
+            TextOutW(hdc, 36, 500, g_status, (int)wcslen(g_status));
+            SetTextColor(hdc, RGB(150, 150, 150));
+            TextOutW(hdc, 36, 560,
+                L"Ports and bind mode are saved to webserver.ini next to the exe.", 66);
+            SelectObject(hdc, old);
+            DeleteObject(lf);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
 
         const struct snapshot *sn = g_sn;
         wchar_t val[64], txt[256];
