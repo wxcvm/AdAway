@@ -138,12 +138,15 @@ jobs:
         run: |
           $res2 = (Resolve-Path "webserver\win32\dist\resources").Path
           & "webserver\win32\dist\webserver.exe" --resources $res2 --http-port 18082 --https-port 18445 --no-gui --install-autostart
-          $run = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction SilentlyContinue
-          if (-not $run) { throw "autostart key not found after install" }
-          Write-Output ("autostart installed: " + $run)
+          $exists1 = $false
+          try { $null = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction Stop; $exists1 = $true } catch { $exists1 = $false }
+          if (-not $exists1) { throw "autostart key not found after install" }
+          $run = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction SilentlyContinue
+          Write-Output ("autostart installed: " + $run.ADBlockWebServer)
           & "webserver\win32\dist\webserver.exe" --resources $res2 --http-port 18082 --https-port 18445 --no-gui --uninstall-autostart
-          $run2 = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction SilentlyContinue
-          if ($run2) { throw "autostart key still present after uninstall" }
+          $exists2 = $false
+          try { $null = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction Stop; $exists2 = $true } catch { $exists2 = $false }
+          if ($exists2) { throw "autostart key still present after uninstall" }
           Write-Output "autostart uninstalled OK"
 
       - name: Code-sign webserver.exe (when signing secrets are configured)
