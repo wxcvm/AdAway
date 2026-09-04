@@ -206,6 +206,16 @@ static unsigned char *pem_to_der(const char *cert_path, size_t *derlen) {
     return der;
 }
 
+/* Compare two certificate contexts by SHA-1 thumbprint - avoids the
+   const-qualification mismatch of CertCompareCertificate with mingw. */
+static int same_cert(PCCERT_CONTEXT a, PCCERT_CONTEXT b) {
+    BYTE ha[64], hb[64];
+    DWORD la = sizeof(ha), lb = sizeof(hb);
+    if (!CertGetCertificateContextProperty(a, CERT_SHA1_HASH_PROP_ID, ha, &la)) return 0;
+    if (!CertGetCertificateContextProperty(b, CERT_SHA1_HASH_PROP_ID, hb, &lb)) return 0;
+    return la == lb && memcmp(ha, hb, la) == 0;
+}
+
 static int cert_trusted(const char *cert_path) {
     size_t derlen = 0;
     unsigned char *der = pem_to_der(cert_path, &derlen);
@@ -222,8 +232,7 @@ static int cert_trusted(const char *cert_path) {
             if (h) {
                 PCCERT_CONTEXT ctx = NULL;
                 while ((ctx = CertEnumCertificatesInStore(h, ctx)) != NULL) {
-                    if (CertCompareCertificate(X509_ASN_ENCODING,
-                            (PCERT_CONTEXT)ours, (PCERT_CONTEXT)ctx)) {
+                    if (same_cert((PCCERT_CONTEXT)ours, ctx)) {
                         found = 1;
                         break;
                     }
@@ -255,8 +264,7 @@ static int cert_trust_set(const char *cert_path, int enable) {
             } else {
                 PCCERT_CONTEXT ctx = NULL;
                 while ((ctx = CertEnumCertificatesInStore(h, ctx)) != NULL) {
-                    if (CertCompareCertificate(X509_ASN_ENCODING,
-                            (PCERT_CONTEXT)ours, (PCERT_CONTEXT)ctx)) {
+                    if (same_cert((PCCERT_CONTEXT)ours, ctx)) {
                         PCCERT_CONTEXT dup = CertDuplicateCertificateContext(ctx);
                         if (dup && CertDeleteCertificateFromStore(dup)) rc = 0;
                         if (dup) CertFreeCertificateContext(dup);
