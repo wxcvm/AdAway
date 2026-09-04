@@ -33,6 +33,8 @@
 #define PATH_MAX 4096
 #endif
 #include "win32_dirent.h"   /* opendir/readdir/closedir/rewinddir shim */
+/* mingw-w64 has no POSIX uid_t (it only defines pid_t). */
+typedef unsigned int uid_t;
 #define ANDROID_LOG_FATAL 0
 #define ANDROID_LOG_WARN  1
 #define ANDROID_LOG_INFO  2
