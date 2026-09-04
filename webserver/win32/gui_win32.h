@@ -6,6 +6,7 @@ struct adblock_gui_args {
     const char *resource_dir;   /* folder holding localhost-2410.crt/.key */
     int http_port;
     int https_port;
+    bool bind_all;              /* listen on all interfaces */
 };
 
 /* Run the native dashboard window (blocks until the window is closed).
