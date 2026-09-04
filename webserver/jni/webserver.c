@@ -2573,6 +2573,41 @@ int main(int argc, char *argv[]) {
         LOG_INFO("Autostart %s %s.", enable ? "enabled" : "disabled", rc == 0 ? "OK" : "FAILED");
         return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
+
+    /* If a server instance is already listening on the HTTP port (a
+       previous launch, autostart, ...) do not bind again - open only the
+       dashboard and poll the running instance, instead of silently
+       exiting. */
+    bool server_already_running = false;
+#ifdef _WIN32
+    {
+        SOCKET probe = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (probe != INVALID_SOCKET) {
+            SOCKADDR_IN a;
+            memset(&a, 0, sizeof(a));
+            a.sin_family = AF_INET;
+            a.sin_port = htons((u_short)s.http_port);
+            a.sin_addr.s_addr = inet_addr("127.0.0.1");
+            server_already_running = (connect(probe, (SOCKADDR *)&a, sizeof(a)) == 0);
+            closesocket(probe);
+        }
+    }
+    if (server_already_running) {
+        if (s.no_gui) {
+            LOG_INFO("Web server already running on port %d - nothing to do.", s.http_port);
+            return EXIT_SUCCESS;
+        }
+        struct adblock_gui_args args;
+        args.resource_dir = s.resource_dir;
+        args.http_port = s.http_port;
+        args.https_port = s.https_port;
+        args.bind_all = s.bind_all;
+        LOG_INFO("A web server is already running on port %d - dashboard only mode.", s.http_port);
+        int rc = adblock_gui_run(&args);
+        if (rc != 0)
+            LOG_FATAL("Dashboard window could not be created (exit code %d).", rc);
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
 #endif
 
     if (s.debug) mg_log_set(MG_LL_DEBUG);
@@ -2648,6 +2683,14 @@ int main(int argc, char *argv[]) {
         }
         LOG_INFO("Dashboard opened — close the window to shut down.");
         int rc = adblock_gui_run(&args);
+        if (rc != 0) {
+            /* Window creation failed (rare): keep the server running
+               headless instead of dying silently. */
+            LOG_FATAL("Dashboard window failed to start (exit code %d) - running headless. Press Ctrl+C to stop.", rc);
+            while (s_sig_num == 0) Sleep(500);
+            pthread_join(srv_thread, NULL);
+            return 0;
+        }
         s_sig_num = 1;   /* stop the poll loop */
         pthread_join(srv_thread, NULL);
         LOG_INFO("Server shut down (exit code %d).", rc);
