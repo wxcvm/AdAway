@@ -2485,6 +2485,15 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 /* ── main ─────────────────────────────────────────────────────── */
 static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s);
 
+#ifdef _WIN32
+struct server_thread_arg { struct mg_mgr *mgr; struct settings *s; };
+static void *server_thread_main(void *p) {
+    struct server_thread_arg *a = (struct server_thread_arg *)p;
+    server_loop_and_cleanup(a->mgr, a->s);
+    return NULL;
+}
+#endif
+
 int main(int argc, char *argv[]) {
 #ifndef _WIN32
     setsid();   /* no-op on Windows: there is no controlling session */
@@ -2648,13 +2657,4 @@ static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
     LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
     return EXIT_SUCCESS;
 }
-
-#ifdef _WIN32
-struct server_thread_arg { struct mg_mgr *mgr; struct settings *s; };
-static void *server_thread_main(void *p) {
-    struct server_thread_arg *a = (struct server_thread_arg *)p;
-    server_loop_and_cleanup(a->mgr, a->s);
-    return NULL;
-}
-#endif
 
