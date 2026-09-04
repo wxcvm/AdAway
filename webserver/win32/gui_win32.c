@@ -465,6 +465,7 @@ static char g_res[512] = {0};
 static int g_http_port = 8080;
 static int g_https_port = 8443;
 static bool g_bind_all = false;
+static bool g_start_minimized = false;
 static int g_tab = 0;               /* 0 = statistics, 1 = settings */
 static wchar_t g_status[4096] = L"";
 static HWND s_ctrls[64];
@@ -882,6 +883,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_http_port = args->http_port;
         g_https_port = args->https_port;
         g_bind_all = args->bind_all;
+        g_start_minimized = args->start_minimized;
         g_tab = 0;
         g_scale = GetDpiForWindow(hwnd) / 96.0;
         g_sn = (struct snapshot *)calloc(1, sizeof(struct snapshot));
@@ -1002,7 +1004,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         utf8_to_wide(g_res, resW, 1024);
                         swprintf(argsW, 2048, L"--resources \"%ls\"", resW);
                         ShellExecuteW(NULL, L"open", exeW, argsW, NULL, SW_SHOWNORMAL);
-                        PostMessageW(hwnd, WM_CLOSE, 0, 0);
+                        PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
                     } else {
                         swprintf(g_status, 4096,
                                  L"设置已保存 - 点击\"保存并重启\"应用新端口绑定");
@@ -1156,7 +1158,7 @@ int adblock_gui_run(const struct adblock_gui_args *args) {
             WSACleanup();
             return -1;
         }
-        ShowWindow(hwnd, SW_SHOW);
+        ShowWindow(hwnd, g_start_minimized ? SW_HIDE : SW_SHOW);
         UpdateWindow(hwnd);
         MSG msg;
         while (GetMessageW(&msg, NULL, 0, 0) > 0) {
