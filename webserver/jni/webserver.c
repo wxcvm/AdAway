@@ -2488,6 +2488,10 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
     return s;
 }
 
+#ifndef ADBLOCK_APP_VERSION
+#define ADBLOCK_APP_VERSION "1.4.2"
+#endif
+
 /* ── main ─────────────────────────────────────────────────────── */
 static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s);
 
@@ -2674,7 +2678,7 @@ int main(int argc, char *argv[]) {
     load_block_cfg(s.resource_dir);
     setup_signal_handler();
 
-    LOG_INFO("ADBlock webserver ready — Mongoose " MG_VERSION
+    LOG_INFO("ADBlock Web Server v" ADBLOCK_APP_VERSION " ready — Mongoose " MG_VERSION
         ", SNI cert issuance enabled, IPv6 loopback %s.",
         ipv6_ok ? "on" : "off");
 
