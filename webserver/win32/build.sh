@@ -14,7 +14,7 @@ windres "$HERE/app.rc" -O coff -o "$HERE/app_res.o"
 
 echo "==> Compiling webserver.exe ..."
 gcc \
-  -std=c11 -O2 -Wall \
+  -std=c11 -O2 -Wall -mwindows \
   -D MG_ENABLE_IPV6 -DMG_TLS=MG_TLS_OPENSSL \
   -I"$HERE" \
   -I"$MINGW_PREFIX/include" \
