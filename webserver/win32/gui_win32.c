@@ -28,6 +28,11 @@
 
 #include "gui_win32.h"
 
+/* --- restart coordination (old instance stops server, then relaunches) --- */
+static bool g_restart_requested = false;
+void win32_notify_restart(void) { g_restart_requested = true; }
+bool win32_restart_requested(void) { return g_restart_requested; }
+
 /* ── scale helpers (all layout is in 96-DPI logical units) ─────── */
 static double g_scale = 1.0;
 #define S(v) ((int)((double)(v) * g_scale))
@@ -1032,11 +1037,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     ini_save(hp, sp, bind);
                     g_http_port = hp; g_https_port = sp; g_bind_all = bind;
                     if (id == IDC_RESTART) {
-                        wchar_t exeW[MAX_PATH], resW[1024], argsW[2048];
-                        GetModuleFileNameW(NULL, exeW, MAX_PATH);
-                        utf8_to_wide(g_res, resW, 1024);
-                        swprintf(argsW, 2048, L"--resources \"%ls\"", resW);
-                        ShellExecuteW(NULL, L"open", exeW, argsW, NULL, SW_SHOWNORMAL);
+                        /* Save first; the old instance stops the server and
+                           the main process relaunches a fresh instance. */
+                        win32_notify_restart();
                         PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
                     } else {
                         swprintf(g_status, 4096,
@@ -1054,11 +1057,18 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
         }
         return 0;
+    case WM_ERASEBKGND:
+        return 1;   /* handled in WM_PAINT - no erase flicker */
     case WM_PAINT: {
         PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
+        HDC real = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
+        int cw = rc.right - rc.left, chh = rc.bottom - rc.top;
+        HDC mem = CreateCompatibleDC(real);
+        HBITMAP bmp = CreateCompatibleBitmap(real, cw, chh);
+        HGDIOBJ oldbmp = SelectObject(mem, bmp);
+        HDC hdc = mem;
         FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
 
         /* content background */
@@ -1088,6 +1098,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SelectObject(hdc, old);
             DeleteObject(shf);
             draw_statusbar(hdc);
+            BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
+            SelectObject(mem, oldbmp);
+            DeleteObject(bmp);
+            DeleteDC(mem);
             EndPaint(hwnd, &ps);
             return 0;
         }
@@ -1160,6 +1174,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DeleteObject(lf);
 
         draw_statusbar(hdc);
+        BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
+        SelectObject(mem, oldbmp);
+        DeleteObject(bmp);
+        DeleteDC(mem);
         EndPaint(hwnd, &ps);
         return 0;
     }
