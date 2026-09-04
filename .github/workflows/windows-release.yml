@@ -202,14 +202,14 @@ jobs:
       - name: Create GitHub Release (draft)
         shell: bash
         run: |
-          TAG="win11-webserver-v1.4.1"
+          TAG="win11-webserver-v1.4.2"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
             echo "uploaded to existing release"
           else
             gh release create "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" \
               --title "ADBlock Web Server - Windows 11 (x64)" \
-              --notes "ADBlock Web Server for Windows 11 (x64) v1.4.1: the dashboard window ALWAYS opens - even when the HTTP port is already in use the window shows the conflict instead of exiting silently. System tray icon (double-click reopens, right-click menu), Statistics + Settings tabs, live KPIs & charts, block reply policy toggles, certificate trust, Start with Windows. Double-click start.bat." || true
+              --notes "ADBlock Web Server for Windows 11 (x64) v1.4.2: version shown in title & console (verify: console must say ADBlock Web Server v1.4.2, NOT arm64). Window always opens; tray icon; Statistics+Settings tabs.  the dashboard window ALWAYS opens - even when the HTTP port is already in use the window shows the conflict instead of exiting silently. System tray icon (double-click reopens, right-click menu), Statistics + Settings tabs, live KPIs & charts, block reply policy toggles, certificate trust, Start with Windows. Double-click start.bat." || true
           fi
         env:
           GH_TOKEN: ${{ github.token }}
