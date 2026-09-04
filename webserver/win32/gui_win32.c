@@ -13,6 +13,7 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <shellapi.h>
+#include <iphlpapi.h>
 #include <wincrypt.h>
 
 #include <stdio.h>
@@ -290,22 +291,50 @@ static X509 *load_pem_cert(const char *cert_path) {
     return x;
 }
 
+/* days left; -100001 = file missing, -100002 = unreadable/bad cert */
 static long long cert_days_left(const char *cert_path) {
-    X509 *x = load_pem_cert(cert_path);
-    if (!x) return -100000;
+    FILE *f = fopen(cert_path, "rb");
+    if (!f) return -100001;
+    X509 *x = PEM_read_X509(f, NULL, NULL, NULL);
+    fclose(f);
+    if (!x) return -100002;
     const ASN1_TIME *na = X509_get0_notAfter(x);
-    if (!na) { X509_free(x); return -100000; }
-    int y, mo, d, h, mi, s;
-    if (sscanf((const char *)na->data, "%4d%2d%2d%2d%2d%2d", &y, &mo, &d, &h, &mi, &s) != 6) {
-        X509_free(x);
-        return -100000;
-    }
+    if (!na) { X509_free(x); return -100002; }
     struct tm tm = {0};
-    tm.tm_year = y - 1900; tm.tm_mon = mo - 1; tm.tm_mday = d;
-    tm.tm_hour = h; tm.tm_min = mi; tm.tm_sec = s;
+    if (ASN1_TIME_to_tm(na, &tm) != 1) { X509_free(x); return -100002; }
     long long expiry = (long long)mktime(&tm);
     X509_free(x);
     return (expiry - (long long)time(NULL)) / 86400LL;
+}
+
+/* First non-loopback IPv4 (for LAN access hints); returns 0 on success. */
+static int first_lan_ip(char *out, size_t n) {
+    ULONG buflen = 0;
+    if (GetAdaptersAddresses(AF_INET,
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+            NULL, NULL, &buflen) != ERROR_BUFFER_OVERFLOW || buflen == 0) return -1;
+    PIP_ADAPTER_ADDRESSES buf = (PIP_ADAPTER_ADDRESSES)malloc(buflen);
+    if (!buf) return -1;
+    ULONG rc = GetAdaptersAddresses(AF_INET,
+            GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
+            NULL, buf, &buflen);
+    if (rc != NO_ERROR) { free(buf); return -1; }
+    for (PIP_ADAPTER_ADDRESSES a = buf; a; a = a->Next) {
+        if (a->OperStatus != IfOperStatusUp) continue;
+        for (PIP_ADAPTER_UNICAST_ADDRESS u = a->FirstUnicastAddress; u; u = u->Next) {
+            SOCKADDR_IN *sin = (SOCKADDR_IN *)u->Address.lpSockaddr;
+            if (sin->sin_family == AF_INET &&
+                sin->sin_addr.s_addr != htonl(INADDR_LOOPBACK) &&
+                sin->sin_addr.s_addr != htonl(INADDR_ANY)) {
+                strncpy(out, inet_ntoa(sin->sin_addr), n - 1);
+                out[n - 1] = '\0';
+                free(buf);
+                return 0;
+            }
+        }
+    }
+    free(buf);
+    return -1;
 }
 
 /* DER of the PEM cert (malloc'd; caller frees). */
@@ -645,12 +674,16 @@ static void draw_statusbar(HDC hdc) {
     char cert_path[1024];
     snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
     long long days = cert_days_left(cert_path);
-    wchar_t cert[160];
-    if (days > 0 && days < 100000)
-        swprintf(cert, 160, L"CA 证书剩余 %lld 天 · %s", days,
+    wchar_t cert[200];
+    if (days > 0 && days < 200000)
+        swprintf(cert, 200, L"CA 证书剩余 %lld 天 · %s", days,
                  cert_trusted(cert_path) ? L"已信任" : L"未信任");
+    else if (days == -100001)
+        swprintf(cert, 200, L"CA 证书文件缺失: %hs", cert_path);
+    else if (days == -100002)
+        swprintf(cert, 200, L"CA 证书解析失败: %hs", cert_path);
     else
-        swprintf(cert, 160, L"CA 证书不可用");
+        swprintf(cert, 200, L"CA 证书已过期 - 删除 %hs 后重启", cert_path);
     SetTextColor(hdc, C_MUTED);
     TextOutW(hdc, S(430), S(643), cert, (int)wcslen(cert));
 
@@ -1042,6 +1075,14 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, C_TEXT);
             TextOutW(hdc, S(210), S(20), L"服务器", 3);
+            {
+                HFONT hf = mfont(12, FW_NORMAL);
+                SelectObject(hdc, hf);
+                SetTextColor(hdc, C_MUTED);
+                TextOutW(hdc, S(210), S(44), L"本机访问：http://localhost:%d · 勾选\"监听所有网卡\"并重启后可从局域网访问", g_http_port);
+                SelectObject(hdc, old);
+                DeleteObject(hf);
+            }
             TextOutW(hdc, S(210), S(176), L"拦截策略（保存后立即生效）", 12);
             TextOutW(hdc, S(210), S(372), L"证书与维护", 5);
             SelectObject(hdc, old);
@@ -1086,17 +1127,35 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         char cert_path[1024];
         snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
         long long days = cert_days_left(cert_path);
-        int ok = days > 0 && days < 100000;
         int trusted = cert_trusted(cert_path);
         HFONT lf = mfont(13, FW_NORMAL);
         HFONT old2 = (HFONT)SelectObject(hdc, lf);
-        if (ok)
+        if (days > 0 && days < 200000)
             swprintf(txt, 256, L"证书：剩余 %lld 天 · %s", days,
-                     trusted ? L"已在 Windows 受信任根中，浏览器绿色锁" : L"未信任（点击左侧\"设置\"→ 信任 CA）");
+                     trusted ? L"已在受信任根中（浏览器绿色锁）" : L"未信任 - 左侧\"设置\"→\"信任 CA\"");
+        else if (days == -100001)
+            swprintf(txt, 256, L"证书文件缺失：%hs（首次运行时会自动生成）", cert_path);
+        else if (days == -100002)
+            swprintf(txt, 256, L"证书文件解析失败：%hs", cert_path);
         else
-            swprintf(txt, 256, L"证书：不可用（请检查 resources 目录）");
-        SetTextColor(hdc, ok ? C_GREEN_TXT : RGB(190, 70, 70));
+            swprintf(txt, 256, L"证书已过期 - 请删除 %hs 后重启", cert_path);
+        SetTextColor(hdc, days > 0 && days < 200000 ? C_GREEN_TXT : RGB(190, 70, 70));
         TextOutW(hdc, S(210), S(444), txt, (int)wcslen(txt));
+        {
+            wchar_t hint[300];
+            if (g_bind_all) {
+                char lan[64] = "";
+                if (first_lan_ip(lan, sizeof(lan)) == 0)
+                    swprintf(hint, 300, L"访问地址：本机 http://localhost:%d  ·  局域网 http://%hs:%d",
+                             g_http_port, lan, g_http_port);
+                else
+                    swprintf(hint, 300, L"访问地址：本机 http://localhost:%d", g_http_port);
+            } else {
+                swprintf(hint, 300, L"访问地址：http://localhost:%d（其他设备：设置→\"监听所有网卡\"）", g_http_port);
+            }
+            SetTextColor(hdc, C_MUTED);
+            TextOutW(hdc, S(210), S(470), hint, (int)wcslen(hint));
+        }
         SelectObject(hdc, old2);
         DeleteObject(lf);
 
