@@ -136,11 +136,12 @@ jobs:
       - name: Autostart registry test
         shell: pwsh
         run: |
-          & "webserver\win32\dist\webserver.exe" --resources "webserver\win32\dist\resources" --http-port 18082 --https-port 18445 --no-gui --install-autostart
+          $res2 = (Resolve-Path "webserver\win32\dist\resources").Path
+          & "webserver\win32\dist\webserver.exe" --resources $res2 --http-port 18082 --https-port 18445 --no-gui --install-autostart
           $run = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction SilentlyContinue
           if (-not $run) { throw "autostart key not found after install" }
           Write-Output ("autostart installed: " + $run)
-          & "webserver\win32\dist\webserver.exe" --resources "webserver\win32\dist\resources" --http-port 18082 --https-port 18445 --no-gui --uninstall-autostart
+          & "webserver\win32\dist\webserver.exe" --resources $res2 --http-port 18082 --https-port 18445 --no-gui --uninstall-autostart
           $run2 = Get-ItemPropertyValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction SilentlyContinue
           if ($run2) { throw "autostart key still present after uninstall" }
           Write-Output "autostart uninstalled OK"
