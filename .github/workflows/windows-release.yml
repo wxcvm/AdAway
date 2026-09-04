@@ -1,0 +1,123 @@
+name: Windows 11 webserver release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - 'webserver/**'
+      - 'app/src/main/assets/**'
+      - '.github/workflows/windows-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up MSYS2 (mingw64 + OpenSSL)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-pkg-config
+
+      - name: Prepare resources (convert block placeholder images to webp)
+        shell: bash
+        run: |
+          pip3 install --quiet pillow || python -m pip install --quiet pillow
+          python3 - <<'PYEOF'
+          import glob, os
+          from PIL import Image
+          for p in glob.glob('app/src/main/assets/img_*'):
+              if p.endswith('.webp'):
+                  continue
+              name = os.path.basename(p)
+              base = name.rsplit('.', 1)[0]
+              im = Image.open(p).convert('RGB')
+              w, h = im.size
+              scale = min(1.0, 800 / max(w, h))
+              if scale < 1.0:
+                  im = im.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+              out = f'app/src/main/assets/{base}.webp'
+              im.save(out, 'WEBP', quality=95, method=6)
+              os.remove(p)
+              print(f'{name} ({w}x{h}) -> {out}')
+          print('block images converted')
+          PYEOF
+          mkdir -p resources
+          cp app/src/main/assets/img_*.webp resources/ || true
+          cp app/src/main/assets/test.html resources/
+          python3 - <<'PYEOF'
+          from PIL import Image, ImageDraw
+          img = Image.new('RGB', (300, 120), (25, 118, 210))
+          d = ImageDraw.Draw(img)
+          d.rectangle([8, 8, 292, 112], outline='white', width=4)
+          d.text((36, 48), 'ADBlock', fill='white')
+          img.save('resources/icon.png')
+          PYEOF
+          echo "resources:" && ls -la resources
+
+      - name: Build webserver.exe (mingw64 + OpenSSL)
+        shell: msys2 {0}
+        run: |
+          chmod +x webserver/win32/build.sh
+          ./webserver/win32/build.sh
+          cp -r resources webserver/win32/dist/resources
+          cp webserver/win32/README.txt webserver/win32/dist/README.txt
+
+      - name: Smoke test (start server, fetch stats + test page)
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "webserver\win32\dist\webserver.exe" ^
+            -ArgumentList "--resources","webserver\win32\dist\resources","--http-port","18080","--https-port","18443" ^
+            -PassThru -WorkingDirectory "webserver\win32\dist"
+          Start-Sleep -Seconds 5
+          try {
+            $stats = Invoke-WebRequest -Uri "http://127.0.0.1:18080/internal-stats" -UseBasicParsing -TimeoutSec 10
+            Write-Output "internal-stats HTTP $($stats.StatusCode): $($stats.Content.Substring(0, [Math]::Min(180, $stats.Content.Length)))"
+            $test = Invoke-WebRequest -Uri "http://127.0.0.1:18080/internal-test" -UseBasicParsing -TimeoutSec 10
+            Write-Output "internal-test HTTP $($test.StatusCode)"
+            if ($stats.StatusCode -ne 200 -or $test.StatusCode -ne 200) { throw "smoke test failed" }
+          } catch {
+            Write-Output "SMOKE TEST ERROR: $($_.Exception.Message)"
+            throw
+          } finally {
+            Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Package zip
+        shell: bash
+        run: |
+          cd webserver/win32/dist
+          powershell -NoProfile -Command "Compress-Archive -Path .\* -DestinationPath '$GITHUB_WORKSPACE\adblock-webserver-win64.zip' -Force"
+          ls -la "$GITHUB_WORKSPACE/adblock-webserver-win64.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adblock-webserver-win64
+          path: adblock-webserver-win64.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release (draft)
+        shell: bash
+        run: |
+          TAG="win11-webserver-v1.0"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
+            echo "uploaded to existing release"
+          else
+            gh release create "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --draft \
+              --title "ADBlock Web Server - Windows 11 (x64)" \
+              --notes "Standalone Windows 11 x64 build of the ADBlock web server (HTTP/HTTPS block-placeholder serving, SNI certs, statistics). Extract and run webserver.exe with --resources resources; see README.txt." || true
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

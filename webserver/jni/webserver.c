@@ -3,14 +3,52 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <android/log.h>
 #include <errno.h>
+#include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/socket.h>   /* SO_PEERCRED / struct ucred for per-app stats */
+#include <sys/socket.h>   /* socket inode introspection for per-app stats */
 #include <stdint.h>       /* intptr_t (conn_uid) */
-#include <dirent.h>
-#include <linux/limits.h>
 #include <pthread.h>
+
+/*
+ * Portability shims.
+ *
+ * Android (NDK build) provides android/log.h + linux/limits.h and a logcat
+ * backend. The Windows build provides win32_dirent.h (opendir/readdir/
+ * closedir/rewinddir via FindFirstFile) and PATH_MAX, and degrades logcat
+ * to a no-op (the LOG_* macros still write to stderr/stdout, which is what
+ * a console/daemon needs). Per-app stats intentionally degrade to
+ * "unknown" (uid -1) on Windows: the /proc/net/tcp and /proc/<pid> lookups
+ * simply fail and are handled as "not found".
+ */
+#ifdef __ANDROID__
+#include <android/log.h>
+#include <linux/limits.h>
+#define LOG_LOGCAT(prio, fmt, ...) __android_log_print(prio, THIS_FILE, fmt, ##__VA_ARGS__)
+#elif defined(_WIN32)
+#include <limits.h>
+#include <stdbool.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#include "win32_dirent.h"   /* opendir/readdir/closedir/rewinddir shim */
+#define ANDROID_LOG_FATAL 0
+#define ANDROID_LOG_WARN  1
+#define ANDROID_LOG_INFO  2
+#define ANDROID_LOG_DEBUG 3
+#define LOG_LOGCAT(prio, fmt, ...) do { } while (0)
+#else
+#include <limits.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#include <dirent.h>
+#define ANDROID_LOG_FATAL 0
+#define ANDROID_LOG_WARN  1
+#define ANDROID_LOG_INFO  2
+#define ANDROID_LOG_DEBUG 3
+#define LOG_LOGCAT(prio, fmt, ...) do { } while (0)
+#endif
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -64,15 +102,15 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
    went wrong. Log to both destinations for anything that matters for
    diagnosing a failed/successful startup. */
 #define LOG_FATAL(fmt, ...) do { \
-    __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, fmt, ##__VA_ARGS__); \
+    LOG_LOGCAT(ANDROID_LOG_FATAL, fmt, ##__VA_ARGS__); \
     fprintf(stderr, "[FATAL] " fmt "\n", ##__VA_ARGS__); fflush(stderr); \
 } while (0)
 #define LOG_WARN(fmt, ...) do { \
-    __android_log_print(ANDROID_LOG_WARN, THIS_FILE, fmt, ##__VA_ARGS__); \
+    LOG_LOGCAT(ANDROID_LOG_WARN, fmt, ##__VA_ARGS__); \
     fprintf(stderr, "[WARN] " fmt "\n", ##__VA_ARGS__); fflush(stderr); \
 } while (0)
 #define LOG_INFO(fmt, ...) do { \
-    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, fmt, ##__VA_ARGS__); \
+    LOG_LOGCAT(ANDROID_LOG_INFO, fmt, ##__VA_ARGS__); \
     fprintf(stdout, "[INFO] " fmt "\n", ##__VA_ARGS__); fflush(stdout); \
 } while (0)
 
@@ -880,12 +918,18 @@ static void app_record_tls_host(uid_t uid, const char *host) {
 static volatile sig_atomic_t s_sig_num = 0;
 static void signal_handler(int n) { s_sig_num = n; }
 static void setup_signal_handler(void) {
+#ifdef _WIN32
+    /* Windows CRT signal(): SIGINT/SIGTERM only (no SIGPIPE/SIGHUP). */
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+#else
     struct sigaction sa; memset(&sa, 0, sizeof(sa));
     sa.sa_handler = SIG_IGN; sigaction(SIGPIPE, &sa, NULL);
     sa.sa_handler = signal_handler;
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGHUP,  &sa, NULL);
+#endif
 }
 
 /* ── OOM killer ───────────────────────────────────────────────── */
@@ -898,7 +942,7 @@ static void oom_adjust_setup(void) {
     if (OOM_ADJ_NOKILL < cur) {
         rewind(fp);
         if (fprintf(fp, "%d\n", OOM_ADJ_NOKILL) > 0)
-            __android_log_print(ANDROID_LOG_INFO, THIS_FILE,
+            LOG_LOGCAT(ANDROID_LOG_INFO,
                 "OOM score: %ld → %d", cur, OOM_ADJ_NOKILL);
     }
     fclose(fp);
@@ -1321,7 +1365,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
     pthread_mutex_unlock(&s_sni_mutex);
 
     SSL_set_SSL_CTX(ssl, ctx);
-    __android_log_print(ANDROID_LOG_DEBUG, THIS_FILE,
+    LOG_LOGCAT(ANDROID_LOG_DEBUG,
         "SNI: issued cert for %s (cache[%d])", host, pos);
     return SSL_TLSEXT_ERR_OK;
 }
@@ -2362,7 +2406,9 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 
 /* ── main ─────────────────────────────────────────────────────── */
 int main(int argc, char *argv[]) {
-    setsid();
+#ifndef _WIN32
+    setsid();   /* no-op on Windows: there is no controlling session */
+#endif
     /* NOTE: do NOT redirect stdin/stdout/stderr to /dev/null here even
        though setsid() detaches us from the controlling terminal.
        ShellUtils.runBundledExecutable() launches this binary with
@@ -2466,6 +2512,6 @@ int main(int argc, char *argv[]) {
     free((void *)s.tls_opts.cert.buf);
     free((void *)s.tls_opts.key.buf);
 
-    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, "Clean shutdown.");
+    LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
     return EXIT_SUCCESS;
 }
