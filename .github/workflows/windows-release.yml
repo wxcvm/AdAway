@@ -106,6 +106,29 @@ jobs:
           } finally {
             Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
+          # Phase 2 - double-click simulation: no --resources (defaults to
+          # the "resources" folder next to the exe, auto-created), only
+          # explicit free ports so the test never collides with the first one.
+          $p2 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--http-port","18081","--https-port","18444") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server2.log" -RedirectStandardError "server2.err"
+          Start-Sleep -Seconds 7
+          try {
+            if ($p2.HasExited) {
+              Write-Output ("NO-ARGS SERVER EXITED with code " + $p2.ExitCode)
+              Get-Content "server2.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
+              Get-Content "server2.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
+              throw "no-args webserver exited"
+            }
+            $s2 = Invoke-WebRequest -Uri "http://127.0.0.1:18081/internal-stats" -UseBasicParsing -TimeoutSec 10
+            Write-Output ("no-args mode internal-stats HTTP " + $s2.StatusCode)
+            if ($s2.StatusCode -ne 200) { throw "no-args smoke test failed" }
+          } catch {
+            Write-Output ("NO-ARGS SMOKE TEST ERROR: " + $_.Exception.Message)
+            Get-Content "server2.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
+            Get-Content "server2.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
+            throw
+          } finally {
+            Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Package zip
         shell: bash
