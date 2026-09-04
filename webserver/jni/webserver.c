@@ -27,6 +27,7 @@
 #define LOG_LOGCAT(prio, fmt, ...) __android_log_print(prio, THIS_FILE, fmt, ##__VA_ARGS__)
 #elif defined(_WIN32)
 #include <winsock2.h>   /* before windows.h; base for mongoose sockets */
+#include <direct.h>     /* _mkdir */
 #include <limits.h>
 #include <stdbool.h>
 #ifndef PATH_MAX
@@ -2345,56 +2346,85 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 }
 
 /* ── CLI parsing ──────────────────────────────────────────────── */
+/*
+ * Prepare the resource directory (CA, localhost leaf cert, block
+ * images, paths). Creates the directory when it does not exist, so a
+ * plain double-click works out of the box, and logs a clear reason
+ * when the directory cannot be used. Returns true on success.
+ */
+static bool setup_resources_dir(struct settings *s, const char *rpath) {
+    LOG_INFO("Resources dir: %s", rpath);
+
+    struct stat st;
+    if (stat(rpath, &st) != 0 || (st.st_mode & S_IFDIR) == 0) {
+        LOG_INFO("Resources dir '%s' not present — creating it…", rpath);
+#ifdef _WIN32
+        if (_mkdir(rpath) != 0) {
+#else
+        if (mkdir(rpath, 0755) != 0) {
+#endif
+            LOG_FATAL("Cannot create resources dir '%s' (errno %d). "
+                      "Run: webserver --resources <writable directory>", rpath, errno);
+            return false;
+        }
+    }
+
+    char cert_path[PATH_MAX], key_path[PATH_MAX];
+    snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", rpath);
+    snprintf(key_path,  sizeof(key_path),  "%s/localhost-2410.key", rpath);
+
+    /* Generate CA cert on first use */
+    bool missing = (access(cert_path, F_OK) != 0 || access(key_path, F_OK) != 0);
+    LOG_INFO("CA cert missing=%d (cert=%s key=%s)", missing, cert_path, key_path);
+    if (missing) {
+        LOG_INFO("Generating root CA…");
+        if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
+            LOG_FATAL("CA generation failed (dir '%s'): make sure the directory is writable", rpath);
+            return false;
+        }
+        LOG_INFO("Root CA generated OK");
+    }
+
+    /* Load CA into memory for SNI signing */
+    if (load_ca(cert_path, key_path, &s->ca) != EXIT_SUCCESS) {
+        LOG_FATAL("Failed to load CA");
+        return false;
+    }
+
+    /* Cert rotation: regenerate when the CA nears expiry (30d). */
+    if (maybe_rotate_ca(cert_path, key_path, &s->ca)) {
+        LOG_INFO("CA rotated — app will prompt to reinstall");
+    }
+    LOG_INFO("CA loaded OK");
+
+    /* TLS opts for the localhost listener: a leaf cert issued
+       specifically for "localhost"/127.0.0.1, not the raw CA
+       cert (see make_localhost_leaf() for why). */
+    if (make_localhost_leaf(&s->ca, &s->tls_opts) != EXIT_SUCCESS) {
+        LOG_FATAL("Failed to issue localhost leaf cert");
+        return false;
+    }
+    LOG_INFO("localhost leaf cert issued OK");
+    snprintf(s->resource_dir, sizeof(s->resource_dir), "%s", rpath);
+    snprintf(s->test_path,    sizeof(s->test_path),    "%s/test.html", rpath);
+    s->block_image_count = scan_block_images(rpath, s->block_images);
+    s->init = true;
+    return true;
+}
+
 static struct settings parse_cli_parameters(int argc, char *argv[]) {
     struct settings s = {0};
-    s.http_port = 80;
-    s.https_port = 443;
+    /* Double-click friendly defaults (unprivileged ports; the Android
+       app always passes --http-port/--https-port explicitly). */
+    s.http_port = 8080;
+    s.https_port = 8443;
     s.bind_all = false;
+    const char *rpath = NULL;
+    char resolved[PATH_MAX];
+    memset(resolved, 0, sizeof(resolved));
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--resources") == 0 && i < argc-1) {
-            const char *rpath = argv[++i];
-            LOG_INFO("Resources dir: %s", rpath);
-
-            char cert_path[PATH_MAX], key_path[PATH_MAX];
-            snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", rpath);
-            snprintf(key_path,  sizeof(key_path),  "%s/localhost-2410.key", rpath);
-
-            /* Generate CA cert on first use */
-            bool missing = (access(cert_path, F_OK) != 0 || access(key_path, F_OK) != 0);
-            LOG_INFO("CA cert missing=%d (cert=%s key=%s)", missing, cert_path, key_path);
-            if (missing) {
-                LOG_INFO("Generating root CA…");
-                if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
-                    LOG_FATAL("CA generation failed");
-                    return s;
-                }
-                LOG_INFO("Root CA generated OK");
-            }
-
-            /* Load CA into memory for SNI signing */
-            if (load_ca(cert_path, key_path, &s.ca) != EXIT_SUCCESS) {
-                LOG_FATAL("Failed to load CA");
-                return s;
-            }
-
-            /* Cert rotation: regenerate when the CA nears expiry (30d). */
-            if (maybe_rotate_ca(cert_path, key_path, &s.ca)) {
-                LOG_INFO("CA rotated — app will prompt to reinstall");
-            }
-            LOG_INFO("CA loaded OK");
-
-            /* TLS opts for the localhost listener: a leaf cert issued
-               specifically for "localhost"/127.0.0.1, not the raw CA
-               cert (see make_localhost_leaf() for why). */
-            if (make_localhost_leaf(&s.ca, &s.tls_opts) != EXIT_SUCCESS) {
-                LOG_FATAL("Failed to issue localhost leaf cert");
-                return s;
-            }
-            LOG_INFO("localhost leaf cert issued OK");
-            snprintf(s.resource_dir, sizeof(s.resource_dir), "%s", rpath);
-            snprintf(s.test_path,    sizeof(s.test_path),    "%s/test.html", rpath);
-            s.block_image_count = scan_block_images(rpath, s.block_images);
-            s.init = true;
+            rpath = argv[++i];
         } else if (strcmp(argv[i], "--debug") == 0) {
             s.debug = true;
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
@@ -2408,6 +2438,38 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             LOG_INFO("HTTPS port: %d", s.https_port);
         }
     }
+
+    /* Default / path-resolution: a plain double-click must work, so
+       fall back to a 'resources' folder next to the executable and
+       resolve relative --resources paths against the exe directory. */
+    char default_dir[PATH_MAX];
+    memset(default_dir, 0, sizeof(default_dir));
+#ifdef _WIN32
+    {
+        char exe_path[PATH_MAX];
+        memset(exe_path, 0, sizeof(exe_path));
+        if (GetModuleFileNameA(NULL, exe_path, (DWORD)sizeof(exe_path) - 1) > 0) {
+            char *slash = strrchr(exe_path, '\\');
+            if (slash) *slash = '\0';
+            if (rpath != NULL && rpath[0] != '\\' && rpath[0] != '/' && strchr(rpath, ':') == NULL) {
+                /* relative --resources: resolve against the exe dir */
+                snprintf(resolved, sizeof(resolved), "%s\\%s", exe_path, rpath);
+                rpath = resolved;
+            } else if (rpath == NULL) {
+                snprintf(default_dir, sizeof(default_dir), "%s\\resources", exe_path);
+                rpath = default_dir;
+                LOG_INFO("No --resources given — using %s", rpath);
+            }
+        }
+    }
+#endif
+    if (rpath == NULL) {
+        snprintf(default_dir, sizeof(default_dir), "resources");
+        rpath = default_dir;
+        LOG_INFO("No --resources given — using %s", rpath);
+    }
+
+    setup_resources_dir(&s, rpath);
     return s;
 }
 
