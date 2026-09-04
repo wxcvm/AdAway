@@ -536,6 +536,56 @@ static void draw_legend(HDC hdc, int x, int y) {
     TextOutW(hdc, x + 128, y, L"blocked", 7);
 }
 
+/* Bottom status bar (shown on both tab pages) - server state, ports,
+   certificate status, last message and the poll time. */
+static void draw_statusbar(HDC hdc, HWND hwnd) {
+    (void)hwnd;
+    RECT strip = {0, 578, 1000, 620};
+    HBRUSH bg = CreateSolidBrush(RGB(238, 241, 245));
+    FillRect(hdc, &strip, bg);
+    DeleteObject(bg);
+    FrameRect(hdc, &strip, GetSysColorBrush(COLOR_BTNSHADOW));
+
+    HFONT f = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+    HFONT oldf = (HFONT)SelectObject(hdc, f);
+    SetBkMode(hdc, TRANSPARENT);
+
+    bool up = (g_sn != NULL && g_sn->valid);
+    wchar_t main[256];
+    swprintf(main, 256, L"%s   http://localhost:%d  |  https://localhost:%d",
+             up ? L"SERVER RUNNING" : L"SERVER WAITING",
+             g_http_port, g_https_port);
+    SetTextColor(hdc, up ? RGB(20, 120, 60) : RGB(190, 70, 70));
+    TextOutW(hdc, 16, 582, main, (int)wcslen(main));
+
+    char cert_path[1024];
+    snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
+    long long days = cert_days_left(cert_path);
+    wchar_t cert[160];
+    if (days > 0 && days < 100000)
+        swprintf(cert, 160, L"CA: %lld days left  |  %s", days,
+                 cert_trusted(cert_path) ? L"trusted" : L"NOT trusted");
+    else
+        swprintf(cert, 160, L"CA: not available");
+    SetTextColor(hdc, days > 0 && days < 100000 ? RGB(60, 90, 120) : RGB(190, 70, 70));
+    TextOutW(hdc, 470, 582, cert, (int)wcslen(cert));
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t tm[64];
+    swprintf(tm, 64, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
+    SetTextColor(hdc, RGB(140, 140, 140));
+    TextOutW(hdc, 930, 582, tm, (int)wcslen(tm));
+
+    SetTextColor(hdc, RGB(120, 130, 145));
+    TextOutW(hdc, 16, 600, g_status, (int)wcslen(g_status));
+
+    SelectObject(hdc, oldf);
+    DeleteObject(f);
+}
+
 static struct snapshot *g_sn = NULL;
 static char g_res[512] = {0};
 static int g_http_port = 8080;
@@ -604,7 +654,18 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_TIMER:
-        if (g_sn) snapshot_fetch(g_http_port, g_sn);
+        if (g_sn) {
+            snapshot_fetch(g_http_port, g_sn);
+            if (g_sn->valid) {
+                SYSTEMTIME st;
+                GetLocalTime(&st);
+                swprintf(g_status, 4096,
+                         L"live  -  updated %02d:%02d:%02d from http://127.0.0.1:%d/internal-stats",
+                         st.wHour, st.wMinute, st.wSecond, g_http_port);
+            } else {
+                swprintf(g_status, 4096, L"server not reachable yet - waiting for the first stats reply...");
+            }
+        }
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     case WM_COMMAND:
@@ -748,14 +809,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             HFONT lf = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                 DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-            SelectObject(hdc, lf);
-            SetTextColor(hdc, RGB(120, 130, 145));
-            TextOutW(hdc, 36, 500, g_status, (int)wcslen(g_status));
-            SetTextColor(hdc, RGB(150, 150, 150));
-            TextOutW(hdc, 36, 560,
-                L"Ports and bind mode are saved to webserver.ini next to the exe.", 66);
             SelectObject(hdc, old);
             DeleteObject(lf);
+            draw_statusbar(hdc, hwnd);
             EndPaint(hwnd, &ps);
             return 0;
         }
@@ -809,10 +865,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         swprintf(val, 64, L"trusted: %s", trusted ? L"YES" : L"NO");
         SetTextColor(hdc, trusted ? RGB(20, 120, 60) : RGB(190, 70, 70));
         TextOutW(hdc, 550, 418, val, (int)wcslen(val));
-        SetTextColor(hdc, RGB(120, 130, 145));
-        TextOutW(hdc, 20, 560, g_status, (int)wcslen(g_status));
         SelectObject(hdc, old);
         DeleteObject(lf);
+        draw_statusbar(hdc, hwnd);
         EndPaint(hwnd, &ps);
         return 0;
     }
