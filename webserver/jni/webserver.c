@@ -276,6 +276,9 @@ struct settings {
     int               https_port; /* HTTPS listen port (default 443) */
     bool              no_gui;     /* Windows: skip the dashboard window */
     int               autostart;  /* Windows: 1=install, 2=uninstall Run key */
+    bool              cli_bind_set;      /* --bind given on the command line */
+    bool              cli_http_port_set; /* --http-port given */
+    bool              cli_https_port_set;/* --https-port given */
     int               block_image_count;
     char              block_images[BLOCK_IMAGE_MAX_COUNT][BLOCK_IMAGE_NAME_MAX];
 };
@@ -2432,12 +2435,15 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             s.debug = true;
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
             s.bind_all = strcmp(argv[++i], "all") == 0;
+            s.cli_bind_set = true;
             LOG_INFO("Bind mode: %s", s.bind_all ? "all interfaces" : "loopback");
         } else if (strcmp(argv[i], "--http-port") == 0 && i < argc-1) {
             s.http_port = atoi(argv[++i]);
+            s.cli_http_port_set = true;
             LOG_INFO("HTTP port: %d", s.http_port);
         } else if (strcmp(argv[i], "--https-port") == 0 && i < argc-1) {
             s.https_port = atoi(argv[++i]);
+            s.cli_https_port_set = true;
             LOG_INFO("HTTPS port: %d", s.https_port);
         } else if (strcmp(argv[i], "--no-gui") == 0) {
             s.no_gui = true;
@@ -2523,6 +2529,34 @@ int main(int argc, char *argv[]) {
     }
 
 #ifdef _WIN32
+    /* Settings persistence: webserver.ini next to the exe (written by
+       the dashboard settings page); command-line flags still win. */
+    {
+        char exe[MAX_PATH];
+        if (GetModuleFileNameA(NULL, exe, sizeof(exe)) > 0) {
+            char *slash = strrchr(exe, '\\');
+            if (slash) *slash = '\0';
+            char path[MAX_PATH + 32];
+            snprintf(path, sizeof(path), "%s\\webserver.ini", exe);
+            FILE *f = fopen(path, "r");
+            if (f) {
+                char line[128];
+                while (fgets(line, sizeof(line), f)) {
+                    int v;
+                    if (sscanf(line, "http_port=%d", &v) == 1 && !s.cli_http_port_set)
+                        s.http_port = v;
+                    else if (sscanf(line, "https_port=%d", &v) == 1 && !s.cli_https_port_set)
+                        s.https_port = v;
+                    else if (sscanf(line, "bind_all=%d", &v) == 1 && !s.cli_bind_set)
+                        s.bind_all = (v != 0);
+                }
+                fclose(f);
+                LOG_INFO("Loaded webserver.ini settings (ports %d/%d, bind_all=%d).",
+                         s.http_port, s.https_port, s.bind_all ? 1 : 0);
+            }
+        }
+    }
+
     /* One-shot autostart registration (GUI toggle / CI) - do it before
        binding so the command never needs a port to be free. */
     if (s.autostart != 0) {
@@ -2602,6 +2636,7 @@ int main(int argc, char *argv[]) {
         args.resource_dir = s.resource_dir;
         args.http_port = s.http_port;
         args.https_port = s.https_port;
+        args.bind_all = s.bind_all;
         struct server_thread_arg targ;
         targ.mgr = &mgr;
         targ.s = &s;
