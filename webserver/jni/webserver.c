@@ -2573,6 +2573,7 @@ int main(int argc, char *argv[]) {
         LOG_INFO("Autostart %s %s.", enable ? "enabled" : "disabled", rc == 0 ? "OK" : "FAILED");
         return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
+#endif
 
     /* If a server instance is already listening on the HTTP port (a
        previous launch, autostart, ...) do not bind again - open only the
