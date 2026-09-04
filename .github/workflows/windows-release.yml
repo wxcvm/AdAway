@@ -78,7 +78,8 @@ jobs:
       - name: Smoke test (start server, fetch stats + test page)
         shell: pwsh
         run: |
-          $proc = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources","webserver\win32\dist\resources","--http-port","18080","--https-port","18443") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server.log" -RedirectStandardError "server.err"
+          $res = (Resolve-Path "webserver\win32\dist\resources").Path
+          $proc = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res,"--http-port","18080","--https-port","18443") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server.log" -RedirectStandardError "server.err"
           Start-Sleep -Seconds 7
           if ($proc.HasExited) {
             Write-Output ("SERVER EXITED with code " + $proc.ExitCode)
