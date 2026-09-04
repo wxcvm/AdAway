@@ -20,13 +20,13 @@ struct dirent {
     long d_ino;              /* not meaningful on Windows */
 };
 
-struct DIR {
+typedef struct DIR {
     HANDLE hFind;
     WIN32_FIND_DATAA ffd;
     struct dirent de;
     int first;
     char pattern[MAX_PATH + 8];
-};
+} DIR;
 
 static inline DIR *opendir(const char *name) {
     DIR *d = (DIR *) calloc(1, sizeof(DIR));
