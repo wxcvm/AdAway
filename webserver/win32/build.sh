@@ -9,6 +9,9 @@ cd "$HERE/.."   # repo/webserver
 OUT="$HERE/dist"
 rm -rf "$OUT"; mkdir -p "$OUT"
 
+echo "==> Embedding Win11 visual-style manifest ..."
+windres "$HERE/app.rc" -O coff -o "$HERE/app_res.o"
+
 echo "==> Compiling webserver.exe ..."
 gcc \
   -std=c11 -O2 -Wall \
@@ -16,7 +19,7 @@ gcc \
   -I"$HERE" \
   -I"$MINGW_PREFIX/include" \
   -o "$OUT/webserver.exe" \
-  jni/webserver.c jni/mongoose/mongoose.c "$HERE/gui_win32.c" \
+  jni/webserver.c jni/mongoose/mongoose.c "$HERE/gui_win32.c" "$HERE/app_res.o" \
   -L"$MINGW_PREFIX/lib" \
   -lssl -lcrypto -lws2_32 -lwinmm -lpthread \
   -lgdi32 -luser32 -lshell32 -ladvapi32 -lcrypt32
