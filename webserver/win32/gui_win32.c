@@ -668,6 +668,8 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_http_port = args->http_port;
         g_https_port = args->https_port;
         g_bind_all = args->bind_all;
+        if (args->startup_warning != NULL && args->startup_warning[0] != '\0')
+            swprintf(g_status, 4096, L"%hs", args->startup_warning);
         g_tab = 0;
         g_sn = (struct snapshot *)calloc(1, sizeof(struct snapshot));
         HINSTANCE hinst = GetModuleHandleW(NULL);
