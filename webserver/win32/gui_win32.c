@@ -536,6 +536,16 @@ static void draw_legend(HDC hdc, int x, int y) {
     TextOutW(hdc, x + 128, y, L"blocked", 7);
 }
 
+static struct snapshot *g_sn = NULL;
+static char g_res[512] = {0};
+static int g_http_port = 8080;
+static int g_https_port = 8443;
+static bool g_bind_all = false;
+static int g_tab = 0;               /* 0 = statistics, 1 = settings */
+static wchar_t g_status[4096] = L"";
+static HWND s_ctrls[64];
+static int s_ctrl_count = 0;
+
 /* Bottom status bar (shown on both tab pages) - server state, ports,
    certificate status, last message and the poll time. */
 static void draw_statusbar(HDC hdc, HWND hwnd) {
@@ -585,16 +595,6 @@ static void draw_statusbar(HDC hdc, HWND hwnd) {
     SelectObject(hdc, oldf);
     DeleteObject(f);
 }
-
-static struct snapshot *g_sn = NULL;
-static char g_res[512] = {0};
-static int g_http_port = 8080;
-static int g_https_port = 8443;
-static bool g_bind_all = false;
-static int g_tab = 0;               /* 0 = statistics, 1 = settings */
-static wchar_t g_status[4096] = L"";
-static HWND s_ctrls[64];
-static int s_ctrl_count = 0;
 
 static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
