@@ -133,6 +133,30 @@ jobs:
             Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
 
+      - name: GUI mode smoke test (process must stay alive and serve)
+        shell: pwsh
+        run: |
+          $p3 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res,"--http-port","18083","--https-port","18446") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server3.log" -RedirectStandardError "server3.err"
+          Start-Sleep -Seconds 8
+          try {
+            if ($p3.HasExited) {
+              Write-Output ("GUI SERVER EXITED with code " + $p3.ExitCode)
+              Get-Content "server3.log" -ErrorAction SilentlyContinue | Select-Object -Last 20
+              Get-Content "server3.err" -ErrorAction SilentlyContinue | Select-Object -Last 20
+              throw "gui-mode server exited"
+            }
+            $s3 = Invoke-WebRequest -Uri "http://127.0.0.1:18083/internal-stats" -UseBasicParsing -TimeoutSec 10
+            Write-Output ("gui-mode internal-stats HTTP " + $s3.StatusCode)
+            if ($s3.StatusCode -ne 200) { throw "gui-mode smoke test failed" }
+          } catch {
+            Write-Output ("GUI MODE SMOKE TEST ERROR: " + $_.Exception.Message)
+            Get-Content "server3.log" -ErrorAction SilentlyContinue | Select-Object -Last 20
+            Get-Content "server3.err" -ErrorAction SilentlyContinue | Select-Object -Last 20
+            throw
+          } finally {
+            Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Autostart registry test
         shell: pwsh
         run: |
@@ -184,14 +208,14 @@ jobs:
       - name: Create GitHub Release (draft)
         shell: bash
         run: |
-          TAG="win11-webserver-v1.3.1"
+          TAG="win11-webserver-v1.4"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
             echo "uploaded to existing release"
           else
             gh release create "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" \
               --title "ADBlock Web Server - Windows 11 (x64)" \
-              --notes "ADBlock Web Server for Windows 11 (x64) v1.3: native dashboard window with Statistics + Settings tabs - live KPIs & hourly/daily charts, server ports & bind mode (webserver.ini), block reply policy toggles (hot-applied via /control), flush stats, certificate trust (Trust CA) and Start with Windows. Double-click start.bat. Defaults: http://localhost:8080, https://localhost:8443." || true
+              --notes "ADBlock Web Server for Windows 11 (x64) v1.4: system tray icon (double-click reopens, right-click menu: Open Dashboard / Start with Windows / Exit), dashboard-only mode when the server is already running (no silent exit), Statistics + Settings tabs with live KPIs & hourly/daily charts, server ports & bind mode, block reply policy toggles (hot-applied), flush stats, certificate trust (Trust CA). Double-click start.bat. Defaults: http://localhost:8080, https://localhost:8443." || true
           fi
         env:
           GH_TOKEN: ${{ github.token }}
