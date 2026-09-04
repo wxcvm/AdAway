@@ -2489,7 +2489,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 }
 
 #ifndef ADBLOCK_APP_VERSION
-#define ADBLOCK_APP_VERSION "1.4.2"
+#define ADBLOCK_APP_VERSION "1.5.0"
 #endif
 
 /* ── main ─────────────────────────────────────────────────────── */
