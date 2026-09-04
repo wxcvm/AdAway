@@ -1,16 +1,13 @@
+
 /*
  * gui_win32.c - native Windows 11 dashboard for the ADBlock web server.
- *
- * The server itself runs as a daemon with a local REST API
- * (/internal-stats). This module hosts a small Win32 dashboard window in
- * the main process: it polls the stats API, draws live KPIs and hourly /
- * daily bar charts, shows the localhost certificate status (and can
- * install/remove it from the user's Trusted Root store) and exposes a
- * "Start with Windows" toggle (HKCU Run key). No web page is required.
- *
  * Windows-only: this file is not part of the Android build.
+ *
+ * UI: AdGuard-style - dark sidebar navigation + light content area,
+ * rounded cards, flat modern palette, DPI-aware (PerMonitorV2) and
+ * fully Chinese labels (Microsoft YaHei UI).
  */
-#define _WIN32_WINNT 0x0601
+#define _WIN32_WINNT 0x0A00   /* PerMonitorV2 / GetDpiForWindow */
 #define UNICODE
 #define _UNICODE
 #include <winsock2.h>
@@ -30,7 +27,15 @@
 
 #include "gui_win32.h"
 
-/* ── small helpers ─────────────────────────────────────────────── */
+/* ── scale helpers (all layout is in 96-DPI logical units) ─────── */
+static double g_scale = 1.0;
+#define S(v) ((int)((double)(v) * g_scale))
+
+static HFONT mfont(int size, int weight) {
+    return CreateFontW(S(size), 0, 0, 0, weight, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+        DEFAULT_PITCH | FF_SWISS, L"Microsoft YaHei UI");
+}
 
 static void utf8_to_wide(const char *src, wchar_t *dst, size_t n) {
     if (n == 0) return;
@@ -168,18 +173,19 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
 /* Block reply policy toggles: label, block_config.json key, control id. */
 struct policy_item { const wchar_t *label; const char *key; int id; };
 static const struct policy_item g_policy[] = {
-    { L"Images",     "reply_images",       IDC_POL0 + 0 },
-    { L"Scripts",    "reply_scripts",      IDC_POL0 + 1 },
-    { L"Styles",     "reply_styles",       IDC_POL0 + 2 },
-    { L"Fonts",      "reply_fonts",        IDC_POL0 + 3 },
-    { L"Media",      "reply_media",        IDC_POL0 + 4 },
-    { L"Structures", "reply_structures",   IDC_POL0 + 5 },
-    { L"API",        "reply_api",          IDC_POL0 + 6 },
-    { L"Telemetry",  "reply_telemetry",    IDC_POL0 + 7 },
-    { L"Config",     "reply_config",       IDC_POL0 + 8 },
-    { L"WS / SSE",   "reply_ws_sse",       IDC_POL0 + 9 },
+    { L"图片",       "reply_images",     IDC_POL0 + 0 },
+    { L"脚本",       "reply_scripts",    IDC_POL0 + 1 },
+    { L"样式表",     "reply_styles",     IDC_POL0 + 2 },
+    { L"字体",       "reply_fonts",      IDC_POL0 + 3 },
+    { L"媒体/音频",  "reply_media",      IDC_POL0 + 4 },
+    { L"页面结构",   "reply_structures", IDC_POL0 + 5 },
+    { L"API 请求",   "reply_api",        IDC_POL0 + 6 },
+    { L"遥测/统计",  "reply_telemetry",  IDC_POL0 + 7 },
+    { L"配置文件",   "reply_config",     IDC_POL0 + 8 },
+    { L"WebSocket",  "reply_ws_sse",     IDC_POL0 + 9 },
 };
 #define POLICY_COUNT ((int)(sizeof(g_policy) / sizeof(g_policy[0])))
+
 /* ── settings persistence (webserver.ini next to the exe) ─────── */
 static void ini_file_path(char *out, size_t n) {
     char exe[MAX_PATH];
@@ -247,7 +253,7 @@ static void control_post(int port, const char *cmd, wchar_t *status, size_t stat
     if (s == INVALID_SOCKET) {
         wchar_t w[16];
         utf8_to_wide(cmd, w, 16);
-        if (statusn) swprintf(status, statusn, L"control %ls: socket failed", w);
+        if (statusn) swprintf(status, statusn, L"控制命令 %ls: 连接失败", w);
         return;
     }
     SOCKADDR_IN addr;
@@ -270,8 +276,8 @@ static void control_post(int port, const char *cmd, wchar_t *status, size_t stat
     closesocket(s);
     wchar_t w[16];
     utf8_to_wide(cmd, w, 16);
-    if (statusn) swprintf(status, statusn, L"control %ls: %s",
-                          w, ok == 0 ? L"OK" : L"failed");
+    if (statusn) swprintf(status, statusn, L"控制命令 %ls: %s",
+                          w, ok == 0 ? L"成功" : L"失败");
 }
 
 /* ── certificate helpers ────────────────────────────────────────── */
@@ -317,8 +323,6 @@ static unsigned char *pem_to_der(const char *cert_path, size_t *derlen) {
     return der;
 }
 
-/* Compare two certificate contexts by SHA-1 thumbprint - avoids the
-   const-qualification mismatch of CertCompareCertificate with mingw. */
 static int same_cert(PCCERT_CONTEXT a, PCCERT_CONTEXT b) {
     BYTE ha[64], hb[64];
     DWORD la = sizeof(ha), lb = sizeof(hb);
@@ -437,162 +441,24 @@ bool win32_autostart_installed(void) {
 #define IDC_RESTART   1105
 #define IDC_FLUSH     1106
 
-static const wchar_t *g_title = L"ADBlock Web Server v" ADBLOCK_APP_VERSION L" - Dashboard";
+/* AdGuard-inspired palette */
+#define C_SIDEBAR    RGB(30, 37, 55)
+#define C_NAV_ACTIVE RGB(42, 54, 84)
+#define C_NAV_TEXT   RGB(147, 163, 190)
+#define C_CONTENT_BG RGB(243, 245, 248)
+#define C_CARD       RGB(255, 255, 255)
+#define C_BORDER     RGB(229, 232, 238)
+#define C_TEXT       RGB(31, 41, 55)
+#define C_MUTED      RGB(100, 116, 139)
+#define C_ACCENT     RGB(59, 130, 246)
+#define C_BLUE_SOFT  RGB(219, 234, 254)
+#define C_BLUE       RGB(59, 130, 246)
+#define C_RED        RGB(239, 68, 68)
+#define C_GREEN      RGB(34, 197, 94)
+#define C_GREEN_TXT  RGB(22, 163, 74)
+#define C_GRIDLINE   RGB(237, 240, 244)
 
-static void fmt_num(wchar_t *dst, size_t n, long long v) {
-    if (v >= 1000000) swprintf(dst, n, L"%.1fM", (double)v / 1000000.0);
-    else if (v >= 1000) swprintf(dst, n, L"%.1fK", (double)v / 1000.0);
-    else swprintf(dst, n, L"%lld", v);
-}
-
-/* Modern flat palette */
-#define C_BG       RGB(245, 247, 250)
-#define C_CARD     RGB(255, 255, 255)
-#define C_BORDER   RGB(226, 232, 240)
-#define C_TEXT     RGB(30, 41, 59)
-#define C_MUTED    RGB(100, 116, 139)
-#define C_BLUE     RGB(59, 130, 246)
-#define C_BLUE_SOFT RGB(219, 234, 254)
-#define C_RED      RGB(239, 68, 68)
-#define C_RED_SOFT RGB(254, 226, 226)
-#define C_GREEN    RGB(34, 197, 94)
-#define C_ACCENT   RGB(37, 99, 235)
-
-static void rounded_card(HDC hdc, int x, int y, int w, int h, int radius,
-                         COLORREF fill, COLORREF border) {
-    HRGN rgn = CreateRoundRectRgn(x, y, x + w, y + h, radius * 2, radius * 2);
-    HBRUSH b = CreateSolidBrush(fill);
-    int saved = SaveDC(hdc);
-    SelectClipRgn(hdc, rgn);
-    RECT rc = {x, y, x + w, y + h};
-    FillRect(hdc, &rc, b);
-    SelectClipRgn(hdc, NULL);
-    RestoreDC(hdc, saved);
-    DeleteObject(b);
-    DeleteObject(rgn);
-    HPEN pen = CreatePen(PS_SOLID, 1, border);
-    HGDIOBJ op = SelectObject(hdc, pen);
-    HGDIOBJ ob = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    RoundRect(hdc, x, y, x + w, y + h, radius * 2, radius * 2);
-    SelectObject(hdc, op);
-    SelectObject(hdc, ob);
-    DeleteObject(pen);
-}
-
-static void draw_kpi(HDC hdc, int x, int y, int w, int h,
-                     const wchar_t *label, const wchar_t *value,
-                     COLORREF accent) {
-    rounded_card(hdc, x, y, w, h, 12, C_CARD, C_BORDER);
-    HBRUSH ab = CreateSolidBrush(accent);
-    RECT chip = {x + 16, y + 16, x + 26, y + 26};
-    FillRect(hdc, &chip, ab);
-    DeleteObject(ab);
-    HFONT vf = CreateFontW(23, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-    HFONT lf = CreateFontW(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, C_TEXT);
-    HFONT old = (HFONT)SelectObject(hdc, vf);
-    TextOutW(hdc, x + 16, y + 12, value, (int)wcslen(value));
-    SetTextColor(hdc, C_MUTED);
-    SelectObject(hdc, lf);
-    TextOutW(hdc, x + 16, y + 42, label, (int)wcslen(label));
-    SelectObject(hdc, old);
-    DeleteObject(vf);
-    DeleteObject(lf);
-}
-
-static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
-                       const struct histogram *h, int count) {
-    rounded_card(hdc, panel.left, panel.top,
-                 panel.right - panel.left, panel.bottom - panel.top, 12, C_CARD, C_BORDER);
-    HFONT tf = CreateFontW(15, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, C_TEXT);
-    HFONT old = (HFONT)SelectObject(hdc, tf);
-    TextOutW(hdc, panel.left + 16, panel.top + 12, title, (int)wcslen(title));
-    SelectObject(hdc, old);
-    DeleteObject(tf);
-
-    RECT area = {panel.left + 20, panel.top + 42, panel.right - 14, panel.bottom - 20};
-    if (count <= 0 || area.right - area.left < 10 || area.bottom - area.top < 10) {
-        SetTextColor(hdc, C_MUTED);
-        TextOutW(hdc, area.left + 4, area.top + 12, L"no data yet", 11);
-        return;
-    }
-    long long maxv = 1;
-    for (int i = 0; i < count; i++) {
-        if (h[i].requests > maxv) maxv = h[i].requests;
-        if (h[i].blocked > maxv) maxv = h[i].blocked;
-    }
-    /* soft horizontal grid */
-    HPEN gp = CreatePen(PS_SOLID, 1, RGB(235, 238, 243));
-    HGDIOBJ gop = SelectObject(hdc, gp);
-    for (int g = 0; g <= 3; g++) {
-        int gy = area.top + (int)((double)(area.bottom - area.top) * g / 3.0);
-        MoveToEx(hdc, area.left, gy, NULL);
-        LineTo(hdc, area.right, gy);
-    }
-    SelectObject(hdc, gop);
-    DeleteObject(gp);
-
-    wchar_t numbuf[64];
-    HFONT lf = CreateFontW(11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-    SelectObject(hdc, lf);
-    SetTextColor(hdc, C_MUTED);
-    swprintf(numbuf, 64, L"%lld", maxv);
-    TextOutW(hdc, area.left, area.top - 16, numbuf, (int)wcslen(numbuf));
-    TextOutW(hdc, area.left, area.bottom + 3, L"0", 1);
-    SelectObject(hdc, old);
-    DeleteObject(lf);
-
-    int slotw = (area.right - area.left) / count;
-    if (slotw < 4) slotw = 4;
-    HBRUSH blue = CreateSolidBrush(C_BLUE);
-    HBRUSH red = CreateSolidBrush(C_RED);
-    HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
-    int chart_h = area.bottom - area.top;
-    for (int i = 0; i < count; i++) {
-        int bh1 = (int)((double)chart_h * (double)h[i].requests / (double)maxv);
-        int bh2 = (int)((double)chart_h * (double)h[i].blocked / (double)maxv);
-        int bx = area.left + i * slotw;
-        if (bh1 > 1) {
-            SelectObject(hdc, blue);
-            RoundRect(hdc, bx + 1, area.bottom - bh1,
-                      bx + (int)(slotw * 0.38), area.bottom, 5, 5);
-        }
-        if (bh2 > 1) {
-            SelectObject(hdc, red);
-            RoundRect(hdc, bx + (int)(slotw * 0.55), area.bottom - bh2,
-                      bx + slotw - 1, area.bottom, 5, 5);
-        }
-    }
-    SelectObject(hdc, op);
-    DeleteObject(blue);
-    DeleteObject(red);
-}
-
-static void draw_legend(HDC hdc, int x, int y) {
-    HBRUSH b = CreateSolidBrush(C_BLUE);
-    RECT rb = {x, y + 4, x + 8, y + 12};
-    FillRect(hdc, &rb, b);
-    DeleteObject(b);
-    SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, C_MUTED);
-    TextOutW(hdc, x + 14, y, L"requests", 8);
-    HBRUSH r = CreateSolidBrush(C_RED);
-    RECT rr = {x + 110, y + 4, x + 118, y + 12};
-    FillRect(hdc, &rr, r);
-    DeleteObject(r);
-    TextOutW(hdc, x + 124, y, L"blocked", 7);
-}
+static const wchar_t *g_title = L"ADBlock 拦截服务器 v" ADBLOCK_APP_VERSION;
 
 static struct snapshot *g_sn = NULL;
 static char g_res[512] = {0};
@@ -603,58 +469,286 @@ static int g_tab = 0;               /* 0 = statistics, 1 = settings */
 static wchar_t g_status[4096] = L"";
 static HWND s_ctrls[64];
 static int s_ctrl_count = 0;
+static HFONT g_ctl_font = NULL;
 
-/* Bottom status bar (shown on both tab pages) - server state, ports,
-   certificate status, last message and the poll time. */
-static void draw_statusbar(HDC hdc, HWND hwnd) {
-    (void)hwnd;
-    RECT strip = {0, 578, 1000, 620};
+/* rounded card */
+static void rounded_card(HDC hdc, int x, int y, int w, int h, int radius,
+                         COLORREF fill, COLORREF border) {
+    int X = S(x), Y = S(y), W = S(w), H = S(h), R = S(radius);
+    HRGN rgn = CreateRoundRectRgn(X, Y, X + W, Y + H, R * 2, R * 2);
+    HBRUSH b = CreateSolidBrush(fill);
+    int saved = SaveDC(hdc);
+    SelectClipRgn(hdc, rgn);
+    RECT rc = {X, Y, X + W, Y + H};
+    FillRect(hdc, &rc, b);
+    SelectClipRgn(hdc, NULL);
+    RestoreDC(hdc, saved);
+    DeleteObject(b);
+    DeleteObject(rgn);
+    HPEN pen = CreatePen(PS_SOLID, 1, border);
+    HGDIOBJ op = SelectObject(hdc, pen);
+    HGDIOBJ ob = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    RoundRect(hdc, X, Y, X + W, Y + H, R * 2, R * 2);
+    SelectObject(hdc, op);
+    SelectObject(hdc, ob);
+    DeleteObject(pen);
+}
+
+static void fmt_num(wchar_t *dst, size_t n, long long v) {
+    if (v >= 1000000) swprintf(dst, n, L"%.1fM", (double)v / 1000000.0);
+    else if (v >= 1000) swprintf(dst, n, L"%.1fK", (double)v / 1000.0);
+    else swprintf(dst, n, L"%lld", v);
+}
+
+static void draw_kpi(HDC hdc, int x, int y, int w, int h,
+                     const wchar_t *label, const wchar_t *value,
+                     COLORREF accent) {
+    rounded_card(hdc, x, y, w, h, 12, C_CARD, C_BORDER);
+    HBRUSH ab = CreateSolidBrush(accent);
+    HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+    HGDIOBJ ob = SelectObject(hdc, ab);
+    Ellipse(hdc, S(x + 14), S(y + 14), S(x + 26), S(y + 26));
+    SelectObject(hdc, op);
+    SelectObject(hdc, ob);
+    DeleteObject(ab);
+    HFONT vf = mfont(21, FW_SEMIBOLD);
+    HFONT lf = mfont(12, FW_NORMAL);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, C_TEXT);
+    HFONT old = (HFONT)SelectObject(hdc, vf);
+    TextOutW(hdc, S(x + 16), S(y + 10), value, (int)wcslen(value));
+    SetTextColor(hdc, C_MUTED);
+    SelectObject(hdc, lf);
+    TextOutW(hdc, S(x + 16), S(y + 40), label, (int)wcslen(label));
+    SelectObject(hdc, old);
+    DeleteObject(vf);
+    DeleteObject(lf);
+}
+
+static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
+                       const struct histogram *h, int count) {
+    rounded_card(hdc, panel.left, panel.top,
+                 panel.right - panel.left, panel.bottom - panel.top, 12, C_CARD, C_BORDER);
+    HFONT tf = mfont(14, FW_SEMIBOLD);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, C_TEXT);
+    HFONT old = (HFONT)SelectObject(hdc, tf);
+    TextOutW(hdc, S(panel.left + 16), S(panel.top + 12), title, (int)wcslen(title));
+    SelectObject(hdc, old);
+    DeleteObject(tf);
+
+    int ax = panel.left + 20, ay = panel.top + 42;
+    int aw = panel.right - panel.left - 34, ah = panel.bottom - panel.top - 62;
+    if (count <= 0 || aw < 10 || ah < 10) {
+        SetTextColor(hdc, C_MUTED);
+        TextOutW(hdc, S(ax + 4), S(ay + 12), L"暂无数据", 4);
+        return;
+    }
+    long long maxv = 1;
+    for (int i = 0; i < count; i++) {
+        if (h[i].requests > maxv) maxv = h[i].requests;
+        if (h[i].blocked > maxv) maxv = h[i].blocked;
+    }
+    HPEN gp = CreatePen(PS_SOLID, 1, C_GRIDLINE);
+    HGDIOBJ gop = SelectObject(hdc, gp);
+    for (int g = 0; g <= 3; g++) {
+        int gy = S(ay) + (int)((double)(S(ah)) * g / 3.0);
+        MoveToEx(hdc, S(ax), gy, NULL);
+        LineTo(hdc, S(ax) + S(aw), gy);
+    }
+    SelectObject(hdc, gop);
+    DeleteObject(gp);
+
+    wchar_t numbuf[64];
+    HFONT lf = mfont(11, FW_NORMAL);
+    SelectObject(hdc, lf);
+    SetTextColor(hdc, C_MUTED);
+    swprintf(numbuf, 64, L"%lld", maxv);
+    TextOutW(hdc, S(ax), S(ay) - S(18), numbuf, (int)wcslen(numbuf));
+    TextOutW(hdc, S(ax), S(ay) + S(ah) + S(4), L"0", 1);
+    SelectObject(hdc, old);
+    DeleteObject(lf);
+
+    int slotw = aw / count;
+    if (slotw < 4) slotw = 4;
+    HBRUSH blue = CreateSolidBrush(C_BLUE);
+    HBRUSH red = CreateSolidBrush(C_RED);
+    HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+    for (int i = 0; i < count; i++) {
+        int bh1 = (int)((double)ah * (double)h[i].requests / (double)maxv);
+        int bh2 = (int)((double)ah * (double)h[i].blocked / (double)maxv);
+        int bx = ax + i * slotw;
+        if (bh1 > 1) {
+            SelectObject(hdc, blue);
+            RoundRect(hdc, S(bx + 1), S(ay + ah) - S(bh1),
+                      S(bx + (int)(slotw * 0.38)), S(ay + ah), S(5), S(5));
+        }
+        if (bh2 > 1) {
+            SelectObject(hdc, red);
+            RoundRect(hdc, S(bx + (int)(slotw * 0.55)), S(ay + ah) - S(bh2),
+                      S(bx + slotw - 1), S(ay + ah), S(5), S(5));
+        }
+    }
+    SelectObject(hdc, op);
+    DeleteObject(blue);
+    DeleteObject(red);
+}
+
+static void draw_legend(HDC hdc, int x, int y) {
+    HBRUSH b = CreateSolidBrush(C_BLUE);
+    HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+    HGDIOBJ ob = SelectObject(hdc, b);
+    Ellipse(hdc, S(x), S(y + 3), S(x + 8), S(y + 11));
+    SelectObject(hdc, op);
+    SelectObject(hdc, ob);
+    DeleteObject(b);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, C_MUTED);
+    TextOutW(hdc, S(x + 14), S(y), L"请求", 2);
+    HBRUSH r = CreateSolidBrush(C_RED);
+    ob = SelectObject(hdc, r);
+    Ellipse(hdc, S(x + 76), S(y + 3), S(x + 84), S(y + 11));
+    SelectObject(hdc, ob);
+    DeleteObject(r);
+    TextOutW(hdc, S(x + 90), S(y), L"拦截", 2);
+}
+
+static void draw_statusbar(HDC hdc) {
+    RECT strip = {0, 630, 1000, 678};
     FillRect(hdc, &strip, GetSysColorBrush(COLOR_WINDOW));
     HPEN tp = CreatePen(PS_SOLID, 1, C_BORDER);
     HGDIOBJ tpold = SelectObject(hdc, tp);
-    MoveToEx(hdc, 0, 578, NULL);
-    LineTo(hdc, 1000, 578);
+    MoveToEx(hdc, 0, S(630), NULL);
+    LineTo(hdc, S(1000), S(630));
     SelectObject(hdc, tpold);
     DeleteObject(tp);
 
-    HFONT f = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-        DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-    HFONT oldf = (HFONT)SelectObject(hdc, f);
-    SetBkMode(hdc, TRANSPARENT);
-
     bool up = (g_sn != NULL && g_sn->valid);
+    HBRUSH dotb = CreateSolidBrush(up ? C_GREEN : C_RED);
+    HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+    HGDIOBJ ob = SelectObject(hdc, dotb);
+    Ellipse(hdc, S(16), S(647), S(28), S(659));
+    SelectObject(hdc, op);
+    SelectObject(hdc, ob);
+    DeleteObject(dotb);
+
+    HFONT f = mfont(12, FW_NORMAL);
+    HFONT old = (HFONT)SelectObject(hdc, f);
+    SetBkMode(hdc, TRANSPARENT);
     wchar_t main[256];
-    swprintf(main, 256, L"%s   http://localhost:%d  |  https://localhost:%d",
-             up ? L"SERVER RUNNING" : L"SERVER WAITING",
+    swprintf(main, 256, L"服务器运行中 · http://localhost:%d  |  https://localhost:%d",
              g_http_port, g_https_port);
-    SetTextColor(hdc, up ? RGB(20, 120, 60) : RGB(190, 70, 70));
-    TextOutW(hdc, 16, 582, main, (int)wcslen(main));
+    SetTextColor(hdc, up ? C_GREEN_TXT : RGB(190, 70, 70));
+    TextOutW(hdc, S(40), S(643), main, (int)wcslen(main));
 
     char cert_path[1024];
     snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
     long long days = cert_days_left(cert_path);
     wchar_t cert[160];
     if (days > 0 && days < 100000)
-        swprintf(cert, 160, L"CA: %lld days left  |  %s", days,
-                 cert_trusted(cert_path) ? L"trusted" : L"NOT trusted");
+        swprintf(cert, 160, L"CA 证书剩余 %lld 天 · %s", days,
+                 cert_trusted(cert_path) ? L"已信任" : L"未信任");
     else
-        swprintf(cert, 160, L"CA: not available");
-    SetTextColor(hdc, days > 0 && days < 100000 ? RGB(60, 90, 120) : RGB(190, 70, 70));
-    TextOutW(hdc, 470, 582, cert, (int)wcslen(cert));
+        swprintf(cert, 160, L"CA 证书不可用");
+    SetTextColor(hdc, C_MUTED);
+    TextOutW(hdc, S(430), S(643), cert, (int)wcslen(cert));
 
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t tm[64];
     swprintf(tm, 64, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
-    SetTextColor(hdc, RGB(140, 140, 140));
-    TextOutW(hdc, 930, 582, tm, (int)wcslen(tm));
+    SetTextColor(hdc, RGB(148, 163, 184));
+    TextOutW(hdc, S(920), S(643), tm, (int)wcslen(tm));
 
-    SetTextColor(hdc, RGB(120, 130, 145));
-    TextOutW(hdc, 16, 600, g_status, (int)wcslen(g_status));
+    SetTextColor(hdc, C_MUTED);
+    TextOutW(hdc, S(16), S(661), g_status, (int)wcslen(g_status));
 
-    SelectObject(hdc, oldf);
+    SelectObject(hdc, old);
     DeleteObject(f);
+}
+
+/* sidebar nav hit areas (logical units; callers pass physical coords) */
+static bool nav_hit(int x, int y, int which) {
+    int top = which == 0 ? 96 : 148;
+    return x >= S(16) && x <= S(176) && y >= S(top) && y <= S(top + 40);
+}
+
+static void draw_sidebar(HDC hdc) {
+    RECT sb = {0, 0, 190, 680};
+    HBRUSH bg = CreateSolidBrush(C_SIDEBAR);
+    FillRect(hdc, &sb, bg);
+    DeleteObject(bg);
+
+    HFONT lf = mfont(17, FW_SEMIBOLD);
+    HFONT sf = mfont(11, FW_NORMAL);
+    HFONT old = (HFONT)SelectObject(hdc, lf);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(255, 255, 255));
+    TextOutW(hdc, S(22), S(24), L"ADBlock", 7);
+    SelectObject(hdc, sf);
+    SetTextColor(hdc, RGB(143, 163, 192));
+    wchar_t ver[64];
+    swprintf(ver, 64, L"拦截服务器 v" ADBLOCK_APP_VERSION);
+    TextOutW(hdc, S(22), S(48), ver, (int)wcslen(ver));
+    SelectObject(hdc, old);
+    DeleteObject(lf);
+    DeleteObject(sf);
+
+    /* nav items */
+    for (int t = 0; t < 2; t++) {
+        int ny = t == 0 ? 96 : 148;
+        bool active = (g_tab == t);
+        rounded_card(hdc, 16, ny, 160, 40, 10,
+                     active ? C_NAV_ACTIVE : C_SIDEBAR,
+                     active ? C_NAV_ACTIVE : C_SIDEBAR);
+        if (active) {
+            HBRUSH ab = CreateSolidBrush(C_ACCENT);
+            RECT bar = {S(16), S(ny + 10), S(20), S(ny + 30)};
+            FillRect(hdc, &bar, ab);
+            DeleteObject(ab);
+        }
+        /* icon: bars (statistics) / sliders (settings) */
+        if (t == 0) {
+            HBRUSH ib = CreateSolidBrush(active ? C_ACCENT : C_NAV_TEXT);
+            HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+            HGDIOBJ ob = SelectObject(hdc, ib);
+            RoundRect(hdc, S(34), S(ny + 14), S(40), S(ny + 30), S(3), S(3));
+            RoundRect(hdc, S(43), S(ny + 8),  S(49), S(ny + 30), S(3), S(3));
+            RoundRect(hdc, S(52), S(ny + 20), S(58), S(ny + 30), S(3), S(3));
+            SelectObject(hdc, op);
+            SelectObject(hdc, ob);
+            DeleteObject(ib);
+        } else {
+            HPEN ip = CreatePen(PS_SOLID, S(2), active ? C_ACCENT : C_NAV_TEXT);
+            HGDIOBJ op = SelectObject(hdc, ip);
+            HGDIOBJ ob2 = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            for (int k = 0; k < 3; k++) {
+                int ly = S(ny + 12 + k * 7);
+                MoveToEx(hdc, S(34), ly, NULL);
+                LineTo(hdc, S(58), ly);
+                Ellipse(hdc, S(40 + k * 6) - S(2), ly - S(2),
+                        S(40 + k * 6) + S(2), ly + S(2));
+            }
+            SelectObject(hdc, ob2);
+            SelectObject(hdc, op);
+            DeleteObject(ip);
+        }
+        HFONT nf = mfont(14, active ? FW_SEMIBOLD : FW_NORMAL);
+        SelectObject(hdc, nf);
+        SetTextColor(hdc, active ? RGB(255, 255, 255) : C_NAV_TEXT);
+        TextOutW(hdc, S(70), S(ny + 10), t == 0 ? L"统计" : L"设置", 2);
+        SelectObject(hdc, old);
+        DeleteObject(nf);
+    }
+
+    /* exit at sidebar bottom */
+    rounded_card(hdc, 16, 576, 160, 40, 10, C_SIDEBAR, C_SIDEBAR);
+    HFONT xf = mfont(13, FW_NORMAL);
+    SelectObject(hdc, xf);
+    SetTextColor(hdc, C_NAV_TEXT);
+    TextOutW(hdc, S(70), S(586), L"退出", 2);
+    SelectObject(hdc, old);
+    DeleteObject(xf);
 }
 
 /* ── system tray icon ──────────────────────────────────────────── */
@@ -672,13 +766,12 @@ static void tray_add(HWND hwnd) {
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     g_nid.uCallbackMessage = WM_APP_TRAY;
     g_nid.hIcon = LoadIconW(NULL, IDI_APPLICATION);
-    swprintf(g_nid.szTip, 128, L"ADBlock Web Server - http://localhost:%d", g_http_port);
+    swprintf(g_nid.szTip, 128, L"ADBlock 拦截服务器 - http://localhost:%d", g_http_port);
     Shell_NotifyIconW(NIM_ADD, &g_nid);
     g_tray_initialized = true;
-    /* first-run balloon */
     g_nid.uFlags |= NIF_INFO;
-    wcscpy(g_nid.szInfoTitle, L"ADBlock Web Server");
-    wcscpy(g_nid.szInfo, L"Running - double-click this icon to reopen the window.");
+    wcscpy(g_nid.szInfoTitle, L"ADBlock 拦截服务器");
+    wcscpy(g_nid.szInfo, L"运行中 - 双击此图标可重新打开窗口。");
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
 }
@@ -692,10 +785,10 @@ static void tray_remove(void) {
 
 static void tray_menu(HWND hwnd) {
     HMENU m = CreatePopupMenu();
-    AppendMenuW(m, MF_STRING | MF_ENABLED, 3001, L"Open Dashboard");
-    AppendMenuW(m, MF_STRING | MF_ENABLED, 3002, L"Start with Windows");
+    AppendMenuW(m, MF_STRING | MF_ENABLED, 3001, L"打开仪表盘");
+    AppendMenuW(m, MF_STRING | MF_ENABLED, 3002, L"开机自启动");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(m, MF_STRING | MF_ENABLED, 3003, L"Exit");
+    AppendMenuW(m, MF_STRING | MF_ENABLED, 3003, L"退出");
     POINT pt;
     GetCursorPos(&pt);
     SetForegroundWindow(hwnd);
@@ -713,15 +806,75 @@ static void tray_menu(HWND hwnd) {
                  exe, g_res, g_http_port, g_https_port);
         win32_autostart_set(on, ccmd);
         SendMessageW(chk, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
-        swprintf(g_status, 4096, L"autostart %s", on ? L"enabled" : L"disabled");
+        swprintf(g_status, 4096, L"开机自启动已%s", on ? L"启用" : L"关闭");
         InvalidateRect(hwnd, NULL, FALSE);
     } else if (cmd == 3003) {
         PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
     }
 }
 
+/* control layout descriptors (logical units) */
+struct ctl_desc { int id; int x, y, w, h; const wchar_t *cls, *text; int style; };
+static const struct ctl_desc g_clayout[] = {
+    { IDC_HTTP_EDIT,  300, 54, 80, 24, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER },
+    { IDC_HTTPS_EDIT, 590, 54, 80, 24, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER },
+    { IDC_BIND_CHK,   210, 96, 260, 22, L"BUTTON", L"监听所有网卡（局域网）", BS_AUTOCHECKBOX },
+    { IDC_SAVE,       210, 130, 110, 28, L"BUTTON", L"保存设置", BS_PUSHBUTTON },
+    { IDC_RESTART,    330, 130, 120, 28, L"BUTTON", L"保存并重启", BS_PUSHBUTTON },
+    { IDM_TRUST,      210, 404, 96, 28, L"BUTTON", L"信任 CA", BS_PUSHBUTTON },
+    { IDM_UNTRUST,    316, 404, 96, 28, L"BUTTON", L"撤销 CA", BS_PUSHBUTTON },
+    { IDM_TEST,       422, 404, 110, 28, L"BUTTON", L"打开测试页", BS_PUSHBUTTON },
+    { IDC_FLUSH,      542, 404, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
+    { IDM_AUTOSTART,  648, 406, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
+};
+#define CL_MAIN 10
+
+static void layout_controls(HWND hwnd) {
+    for (int i = 0; i < CL_MAIN; i++)
+        SetWindowPos(GetDlgItem(hwnd, g_clayout[i].id), NULL,
+                     S(g_clayout[i].x), S(g_clayout[i].y),
+                     S(g_clayout[i].w), S(g_clayout[i].h), SWP_NOZORDER | SWP_NOACTIVATE);
+    /* policy checkboxes */
+    for (int i = 0; i < POLICY_COUNT; i++) {
+        int cx = (i % 2 == 0) ? 210 : 440;
+        int cy = 208 + (i / 2) * 28;
+        HWND w = GetDlgItem(hwnd, IDC_POL0 + i);
+        if (w) SetWindowPos(w, NULL, S(cx), S(cy), S(200), S(24), SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
+static void show_controls(HWND hwnd, int tab) {
+    bool show = (tab == 1);
+    for (int i = 0; i < CL_MAIN; i++)
+        ShowWindow(GetDlgItem(hwnd, g_clayout[i].id), show ? SW_SHOW : SW_HIDE);
+    for (int i = 0; i < POLICY_COUNT; i++)
+        ShowWindow(GetDlgItem(hwnd, IDC_POL0 + i), show ? SW_SHOW : SW_HIDE);
+}
+
+static void policy_apply(HWND hwnd) {
+    bool vals[POLICY_COUNT];
+    for (int i = 0; i < POLICY_COUNT; i++)
+        vals[i] = SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_GETCHECK, 0, 0) == BST_CHECKED;
+    policy_save(g_res, vals);
+    wchar_t st[128];
+    control_post(g_http_port, "reload_config", st, 128);
+    swprintf(g_status, 4096, L"拦截策略已更新（%ls）", st);
+    InvalidateRect(hwnd, NULL, FALSE);
+}
+
 static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+    case WM_DPICHANGED:
+        g_scale = HIWORD(wp) / 96.0;
+        {
+            const RECT *r = (const RECT *)lp;
+            SetWindowPos(hwnd, NULL, r->left, r->top,
+                         r->right - r->left, r->bottom - r->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        layout_controls(hwnd);
+        InvalidateRect(hwnd, NULL, TRUE);
+        return 0;
     case WM_CREATE: {
         const struct adblock_gui_args *args =
             (const struct adblock_gui_args *)((CREATESTRUCTW *)lp)->lpCreateParams;
@@ -729,37 +882,29 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_http_port = args->http_port;
         g_https_port = args->https_port;
         g_bind_all = args->bind_all;
+        g_tab = 0;
+        g_scale = GetDpiForWindow(hwnd) / 96.0;
+        g_sn = (struct snapshot *)calloc(1, sizeof(struct snapshot));
         if (args->startup_warning != NULL && args->startup_warning[0] != '\0')
             swprintf(g_status, 4096, L"%hs", args->startup_warning);
-        g_tab = 0;
-        g_sn = (struct snapshot *)calloc(1, sizeof(struct snapshot));
         HINSTANCE hinst = GetModuleHandleW(NULL);
-        s_ctrl_count = 0;
-        struct { const wchar_t *cls, *text; int style; int x, y, w, h; int id; } ctl[] = {
-            { L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, 130, 94, 90, 26, IDC_HTTP_EDIT },
-            { L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER, 345, 94, 90, 26, IDC_HTTPS_EDIT },
-            { L"BUTTON", L"Listen on all interfaces (LAN)", BS_AUTOCHECKBOX, 36, 130, 260, 26, IDC_BIND_CHK },
-            { L"BUTTON", L"Save settings", BS_PUSHBUTTON, 36, 168, 130, 28, IDC_SAVE },
-            { L"BUTTON", L"Apply & Restart", BS_PUSHBUTTON, 176, 168, 140, 28, IDC_RESTART },
-            { L"BUTTON", L"Trust CA", BS_PUSHBUTTON, 36, 432, 110, 30, IDM_TRUST },
-            { L"BUTTON", L"Remove CA", BS_PUSHBUTTON, 156, 432, 110, 30, IDM_UNTRUST },
-            { L"BUTTON", L"Open Test Page", BS_PUSHBUTTON, 276, 432, 140, 30, IDM_TEST },
-            { L"BUTTON", L"Flush stats", BS_PUSHBUTTON, 426, 432, 110, 30, IDC_FLUSH },
-            { L"BUTTON", L"Start with Windows", BS_AUTOCHECKBOX, 546, 434, 190, 26, IDM_AUTOSTART },
-            { L"BUTTON", L"Exit", BS_PUSHBUTTON, 866, 432, 110, 30, IDM_EXIT },
-        };
-        for (int i = 0; i < (int)(sizeof(ctl) / sizeof(ctl[0])); i++) {
-            s_ctrls[s_ctrl_count++] = CreateWindowExW(0, ctl[i].cls, ctl[i].text,
-                WS_CHILD | ctl[i].style, ctl[i].x, ctl[i].y, ctl[i].w, ctl[i].h,
-                hwnd, (HMENU)(INT_PTR)ctl[i].id, hinst, NULL);
+        for (int i = 0; i < CL_MAIN; i++) {
+            const struct ctl_desc *d = &g_clayout[i];
+            HWND w = CreateWindowExW(0, d->cls, d->text,
+                WS_CHILD | d->style, S(d->x), S(d->y), S(d->w), S(d->h),
+                hwnd, (HMENU)(INT_PTR)d->id, hinst, NULL);
+            s_ctrls[s_ctrl_count++] = w;
         }
         for (int i = 0; i < POLICY_COUNT; i++) {
-            int cx = (i % 2 == 0) ? 36 : 260;
-            int cy = 248 + (i / 2) * 28;
+            int cx = (i % 2 == 0) ? 210 : 440;
+            int cy = 208 + (i / 2) * 28;
             s_ctrls[s_ctrl_count++] = CreateWindowExW(0, L"BUTTON", g_policy[i].label,
-                WS_CHILD | BS_AUTOCHECKBOX, cx, cy, 200, 24, hwnd,
+                WS_CHILD | BS_AUTOCHECKBOX, S(cx), S(cy), S(200), S(24), hwnd,
                 (HMENU)(INT_PTR)g_policy[i].id, hinst, NULL);
         }
+        g_ctl_font = mfont(13, FW_NORMAL);
+        for (int i = 0; i < s_ctrl_count; i++)
+            SendMessageW(s_ctrls[i], WM_SETFONT, (WPARAM)g_ctl_font, TRUE);
         wchar_t tmp[32];
         swprintf(tmp, 32, L"%d", g_http_port);
         SetWindowTextW(GetDlgItem(hwnd, IDC_HTTP_EDIT), tmp);
@@ -774,10 +919,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         for (int i = 0; i < POLICY_COUNT; i++)
             SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_SETCHECK,
                          pol[i] ? BST_CHECKED : BST_UNCHECKED, 0);
-        for (int i = 0; i < s_ctrl_count; i++) ShowWindow(s_ctrls[i], SW_HIDE);
+        show_controls(hwnd, 0);
         tray_add(hwnd);
         SetTimer(hwnd, 1, 2000, NULL);
-        swprintf(g_status, 4096, L"polling http://127.0.0.1:%d/internal-stats ...", g_http_port);
+        swprintf(g_status, 4096, L"等待首次统计（http://127.0.0.1:%d/internal-stats）...", g_http_port);
         return 0;
     }
     case WM_TIMER:
@@ -787,14 +932,27 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 SYSTEMTIME st;
                 GetLocalTime(&st);
                 swprintf(g_status, 4096,
-                         L"live  -  updated %02d:%02d:%02d from http://127.0.0.1:%d/internal-stats",
-                         st.wHour, st.wMinute, st.wSecond, g_http_port);
+                         L"实时数据 - 更新于 %02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
             } else {
-                swprintf(g_status, 4096, L"server not reachable yet - waiting for the first stats reply...");
+                swprintf(g_status, 4096, L"服务器暂不可达，等待响应...");
             }
         }
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
+    case WM_LBUTTONUP: {
+        int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
+        if (nav_hit(x, y, 0) || nav_hit(x, y, 1)) {
+            int new_tab = nav_hit(x, y, 0) ? 0 : 1;
+            if (new_tab != g_tab) {
+                g_tab = new_tab;
+                show_controls(hwnd, g_tab);
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+        } else if (x >= S(16) && x <= S(176) && y >= S(576) && y <= S(616)) {
+            PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
+        }
+        return 0;
+    }
     case WM_COMMAND:
         if (HIWORD(wp) == BN_CLICKED) {
             int id = LOWORD(wp);
@@ -804,11 +962,11 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 int rc = cert_trust_set(cert_path, id == IDM_TRUST);
                 wchar_t msg[256];
                 if (rc == 0)
-                    swprintf(msg, 256, L"CA certificate %s. Browsers will now trust HTTPS://localhost.",
-                             id == IDM_TRUST ? L"added to Trusted Root" : L"removed from Trusted Root");
+                    swprintf(msg, 256, L"CA 证书已%s受信任根存储。浏览器访问 https://localhost 将显示安全锁。",
+                             id == IDM_TRUST ? L"添加至" : L"移出");
                 else
-                    swprintf(msg, 256, L"Certificate operation failed (is the resources dir present?).");
-                MessageBoxW(hwnd, msg, L"Certificate", MB_OK | MB_ICONINFORMATION);
+                    swprintf(msg, 256, L"证书操作失败（请检查 resources 目录）。");
+                MessageBoxW(hwnd, msg, L"证书", MB_OK | MB_ICONINFORMATION);
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id == IDM_TEST) {
                 wchar_t url[256];
@@ -817,13 +975,12 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             } else if (id == IDM_AUTOSTART) {
                 HWND chk = GetDlgItem(hwnd, IDM_AUTOSTART);
                 bool on = SendMessageW(chk, BM_GETCHECK, 0, 0) == BST_CHECKED;
-                char cmd[2048];
-                char exe[MAX_PATH];
+                char cmd[2048], exe[MAX_PATH];
                 GetModuleFileNameA(NULL, exe, sizeof(exe));
                 snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --no-gui",
                          exe, g_res, g_http_port, g_https_port);
                 win32_autostart_set(on, cmd);
-                swprintf(g_status, 4096, L"autostart %s", on ? L"enabled" : L"disabled");
+                swprintf(g_status, 4096, L"开机自启动已%s", on ? L"启用" : L"关闭");
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id == IDM_EXIT) {
                 PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
@@ -833,8 +990,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 GetWindowTextW(GetDlgItem(hwnd, IDC_HTTP_EDIT), wt, 32); hp = _wtoi(wt);
                 GetWindowTextW(GetDlgItem(hwnd, IDC_HTTPS_EDIT), wt, 32); sp = _wtoi(wt);
                 if (hp < 1 || hp > 65535 || sp < 1 || sp > 65535) {
-                    MessageBoxW(hwnd, L"Ports must be between 1 and 65535.",
-                                L"Settings", MB_OK | MB_ICONWARNING);
+                    MessageBoxW(hwnd, L"端口范围必须为 1 - 65535。", L"设置", MB_OK | MB_ICONWARNING);
                 } else {
                     bool bind = SendMessageW(GetDlgItem(hwnd, IDC_BIND_CHK),
                                              BM_GETCHECK, 0, 0) == BST_CHECKED;
@@ -849,7 +1005,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                         PostMessageW(hwnd, WM_CLOSE, 0, 0);
                     } else {
                         swprintf(g_status, 4096,
-                                 L"settings saved - click Apply & Restart (or restart the server) to apply");
+                                 L"设置已保存 - 点击\"保存并重启\"应用新端口绑定");
                         InvalidateRect(hwnd, NULL, FALSE);
                     }
                 }
@@ -859,31 +1015,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 swprintf(g_status, 4096, L"%ls", st);
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id >= IDC_POL0 && id < IDC_POL0 + POLICY_COUNT) {
-                bool vals[POLICY_COUNT];
-                for (int i = 0; i < POLICY_COUNT; i++)
-                    vals[i] = SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i),
-                                           BM_GETCHECK, 0, 0) == BST_CHECKED;
-                policy_save(g_res, vals);
-                wchar_t st[128];
-                control_post(g_http_port, "reload_config", st, 128);
-                swprintf(g_status, 4096, L"%ls", st);
-                InvalidateRect(hwnd, NULL, FALSE);
+                policy_apply(hwnd);
             }
         }
         return 0;
-    case WM_LBUTTONUP: {
-        int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
-        int new_tab = -1;
-        if (x >= 16 && x <= 150 && y >= 56 && y <= 90) new_tab = 0;
-        else if (x >= 160 && x <= 294 && y >= 56 && y <= 90) new_tab = 1;
-        if (new_tab >= 0 && new_tab != g_tab) {
-            g_tab = new_tab;
-            for (int i = 0; i < s_ctrl_count; i++)
-                ShowWindow(s_ctrls[i], g_tab == 1 ? SW_SHOW : SW_HIDE);
-            InvalidateRect(hwnd, NULL, TRUE);
-        }
-        return 0;
-    }
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
@@ -891,77 +1026,30 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         GetClientRect(hwnd, &rc);
         FillRect(hdc, &rc, GetSysColorBrush(COLOR_WINDOW));
 
-        /* Header */
-        HFONT tf = CreateFontW(22, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-            DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, C_TEXT);
-        HFONT old = (HFONT)SelectObject(hdc, tf);
-        TextOutW(hdc, 20, 18, g_title, (int)wcslen(g_title));
+        /* content background */
+        RECT content = {0, 0, rc.right, rc.bottom};
+        HBRUSH cb = CreateSolidBrush(C_CONTENT_BG);
+        FillRect(hdc, &content, cb);
+        DeleteObject(cb);
 
-        /* running status chip */
-        {
-            bool up = (g_sn != NULL && g_sn->valid);
-            HBRUSH dotb = CreateSolidBrush(up ? C_GREEN : C_RED);
-            HGDIOBJ oldbrush = SelectObject(hdc, dotb);
-            HGDIOBJ oldpen = SelectObject(hdc, GetStockObject(NULL_PEN));
-            Ellipse(hdc, 876, 24, 892, 40);
-            SelectObject(hdc, oldbrush);
-            SelectObject(hdc, oldpen);
-            DeleteObject(dotb);
-            HFONT cf = CreateFontW(13, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-            SelectObject(hdc, cf);
-            SetTextColor(hdc, up ? RGB(22, 163, 74) : RGB(190, 70, 70));
-            TextOutW(hdc, 898, 26, up ? L"RUNNING" : L"WAITING", up ? 7 : 7);
-            SelectObject(hdc, old);
-            DeleteObject(cf);
-        }
-
-        /* Tabs (pills) */
-        for (int t = 0; t < 2; t++) {
-            bool active = (g_tab == t);
-            int tx = t == 0 ? 16 : 160;
-            rounded_card(hdc, tx, 56, 134, 34, 16,
-                         active ? C_BLUE_SOFT : RGB(238, 241, 245),
-                         active ? C_BORDER : RGB(226, 229, 234));
-            HFONT tabf = CreateFontW(14, 0, 0, 0, active ? FW_SEMIBOLD : FW_NORMAL,
-                FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-            SelectObject(hdc, tabf);
-            SetTextColor(hdc, active ? C_ACCENT : C_MUTED);
-            const wchar_t *name = t == 0 ? L"Statistics" : L"Settings";
-            TextOutW(hdc, tx + 26, 68, name, (int)wcslen(name));
-            SelectObject(hdc, old);
-            DeleteObject(tabf);
-        }
+        draw_sidebar(hdc);
 
         if (g_tab == 1) {
-            /* Settings page: the child controls draw themselves; only
-               paint the section headers and the status line here. */
-            HFONT shf = CreateFontW(18, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-            SelectObject(hdc, shf);
+            HFONT shf = mfont(15, FW_SEMIBOLD);
+            HFONT old = (HFONT)SelectObject(hdc, shf);
+            SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, C_TEXT);
-            TextOutW(hdc, 36, 106, L"Server", 6);
-            TextOutW(hdc, 36, 236, L"Block reply policy (applies immediately)", 38);
-            TextOutW(hdc, 36, 402, L"Certificate & maintenance", 24);
+            TextOutW(hdc, S(210), S(20), L"服务器", 3);
+            TextOutW(hdc, S(210), S(176), L"拦截策略（保存后立即生效）", 12);
+            TextOutW(hdc, S(210), S(372), L"证书与维护", 5);
             SelectObject(hdc, old);
             DeleteObject(shf);
-            HFONT lf = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-            SelectObject(hdc, old);
-            DeleteObject(lf);
-            draw_statusbar(hdc, hwnd);
+            draw_statusbar(hdc);
             EndPaint(hwnd, &ps);
             return 0;
         }
 
+        /* statistics page */
         const struct snapshot *sn = g_sn;
         wchar_t val[64], txt[256];
         long long req = sn && sn->valid ? sn->total_requests : 0;
@@ -970,50 +1058,47 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             for (int i = 0; i < sn->hist_count; i++) blk += sn->hist[i].blocked;
         }
         fmt_num(val, 64, req);
-        draw_kpi(hdc, 20, 102, 155, 64, L"Requests", val, C_BLUE);
+        draw_kpi(hdc, 210, 24, 120, 72, L"请求量", val, C_BLUE);
         fmt_num(val, 64, blk);
-        draw_kpi(hdc, 187, 102, 155, 64, L"Blocked", val, C_RED);
+        draw_kpi(hdc, 348, 24, 120, 72, L"拦截量", val, C_RED);
         long long rate = (sn && sn->valid) ? (long long)(sn->block_rate * 100.0) : 0;
         swprintf(val, 64, L"%lld%%", rate);
-        draw_kpi(hdc, 354, 102, 155, 64, L"Block rate", val, C_ACCENT);
+        draw_kpi(hdc, 486, 24, 120, 72, L"拦截率", val, C_ACCENT);
         fmt_num(val, 64, sn && sn->valid ? sn->total_connections : 0);
-        draw_kpi(hdc, 521, 102, 155, 64, L"Connections", val, C_GREEN);
+        draw_kpi(hdc, 624, 24, 120, 72, L"连接数", val, C_GREEN);
         fmt_num(val, 64, sn && sn->valid ? sn->sni_certs_issued : 0);
-        draw_kpi(hdc, 688, 102, 155, 64, L"SNI certs", val, C_ACCENT);
+        draw_kpi(hdc, 762, 24, 120, 72, L"签发证书", val, RGB(139, 92, 246));
         long long up = sn && sn->valid ? sn->uptime_seconds : 0;
         swprintf(val, 64, L"%lldh %lldm", up / 3600, (up % 3600) / 60);
-        draw_kpi(hdc, 855, 102, 125, 64, L"Uptime", val, RGB(139, 92, 246));
+        draw_kpi(hdc, 900, 24, 120, 72, L"运行时长", val, RGB(20, 184, 166));
 
-        RECT ph = {20, 178, 490, 430};
-        draw_chart(hdc, ph, L"Hourly (last 24h)",
+        RECT ph = {210, 120, 600, 430};
+        draw_chart(hdc, ph, L"最近 24 小时",
                    sn ? sn->hist : NULL, sn ? sn->hist_count : 0);
-        RECT pd = {510, 178, 980, 430};
-        draw_chart(hdc, pd, L"Daily (last 30d)",
+        RECT pd = {616, 120, 1006, 430};
+        draw_chart(hdc, pd, L"最近 30 天",
                    sn ? sn->daily : NULL, sn ? sn->daily_count : 0);
-        draw_legend(hdc, 40, 402);
-        draw_legend(hdc, 530, 402);
+        draw_legend(hdc, 232, 398);
+        draw_legend(hdc, 638, 398);
 
         char cert_path[1024];
         snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
         long long days = cert_days_left(cert_path);
-        HFONT lf = CreateFontW(15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-            DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
-        SelectObject(hdc, lf);
-        int ok = days > 0;
+        int ok = days > 0 && days < 100000;
         int trusted = cert_trusted(cert_path);
+        HFONT lf = mfont(13, FW_NORMAL);
+        HFONT old2 = (HFONT)SelectObject(hdc, lf);
         if (ok)
-            swprintf(txt, 256, L"Certificate: valid for %lld days more", days);
+            swprintf(txt, 256, L"证书：剩余 %lld 天 · %s", days,
+                     trusted ? L"已在 Windows 受信任根中，浏览器绿色锁" : L"未信任（点击左侧\"设置\"→ 信任 CA）");
         else
-            swprintf(txt, 256, L"Certificate: unavailable (check resources folder)");
-        SetTextColor(hdc, ok ? RGB(22, 163, 74) : RGB(190, 70, 70));
-        TextOutW(hdc, 20, 444, txt, (int)wcslen(txt));
-        swprintf(val, 64, L"trusted: %s", trusted ? L"YES" : L"NO");
-        SetTextColor(hdc, trusted ? RGB(22, 163, 74) : RGB(190, 70, 70));
-        TextOutW(hdc, 496, 444, val, (int)wcslen(val));
-        SelectObject(hdc, old);
+            swprintf(txt, 256, L"证书：不可用（请检查 resources 目录）");
+        SetTextColor(hdc, ok ? C_GREEN_TXT : RGB(190, 70, 70));
+        TextOutW(hdc, S(210), S(444), txt, (int)wcslen(txt));
+        SelectObject(hdc, old2);
         DeleteObject(lf);
-        draw_statusbar(hdc, hwnd);
+
+        draw_statusbar(hdc);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -1030,12 +1115,12 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DestroyWindow(hwnd);
         return 0;
     case WM_CLOSE:
-        /* minimize to tray; double-click the tray icon to reopen */
-        ShowWindow(hwnd, SW_HIDE);
+        ShowWindow(hwnd, SW_HIDE);   /* minimize to tray */
         return 0;
     case WM_DESTROY:
         KillTimer(hwnd, 1);
         tray_remove();
+        if (g_ctl_font) { DeleteObject(g_ctl_font); g_ctl_font = NULL; }
         PostQuitMessage(0);
         return 0;
     default:
@@ -1060,21 +1145,25 @@ int adblock_gui_run(const struct adblock_gui_args *args) {
         WSACleanup();
         return -1;
     }
-    HWND hwnd = CreateWindowExW(0, L"ADBlockDashWin11", g_title,
-        (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX),
-        CW_USEDEFAULT, CW_USEDEFAULT, 1000, 620,
-        NULL, NULL, hinst, (LPVOID)args);
-    if (!hwnd) {
+    {
+        double sc = GetDpiForSystem() / 96.0;
+        HWND hwnd = CreateWindowExW(0, L"ADBlockDashWin11", g_title,
+            (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX),
+            CW_USEDEFAULT, CW_USEDEFAULT,
+            (int)(1024 * sc), (int)(678 * sc),
+            NULL, NULL, hinst, (LPVOID)args);
+        if (!hwnd) {
+            WSACleanup();
+            return -1;
+        }
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+        MSG msg;
+        while (GetMessageW(&msg, NULL, 0, 0) > 0) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
         WSACleanup();
-        return -1;
+        return 0;
     }
-    ShowWindow(hwnd, SW_SHOW);
-    UpdateWindow(hwnd);
-    MSG msg;
-    while (GetMessageW(&msg, NULL, 0, 0) > 0) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-    WSACleanup();
-    return 0;
 }
