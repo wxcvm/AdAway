@@ -3,14 +3,61 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <android/log.h>
 #include <errno.h>
+#include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/socket.h>   /* SO_PEERCRED / struct ucred for per-app stats */
 #include <stdint.h>       /* intptr_t (conn_uid) */
-#include <dirent.h>
-#include <linux/limits.h>
 #include <pthread.h>
+
+/*
+ * Portability shims.
+ *
+ * Android (NDK build) provides android/log.h + linux/limits.h and a logcat
+ * backend. The Windows build provides win32_dirent.h (opendir/readdir/
+ * closedir/rewinddir via FindFirstFile) and PATH_MAX, and degrades logcat
+ * to a no-op (the LOG_* macros still write to stderr/stdout, which is what
+ * a console/daemon needs). Per-app stats intentionally degrade to
+ * "unknown" (uid -1) on Windows: the /proc/net/tcp and /proc/<pid> lookups
+ * simply fail and are handled as "not found".
+ */
+#ifdef __ANDROID__
+#include <sys/socket.h>
+#include <android/log.h>
+#include <linux/limits.h>
+#define LOG_LOGCAT(prio, fmt, ...) __android_log_print(prio, THIS_FILE, fmt, ##__VA_ARGS__)
+#elif defined(_WIN32)
+#include <winsock2.h>   /* before windows.h; base for mongoose sockets */
+#include <direct.h>     /* _mkdir */
+#include <limits.h>
+#include <stdbool.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#include "win32_dirent.h"   /* opendir/readdir/closedir/rewinddir shim */
+#include "gui_win32.h"      /* native dashboard + autostart (Windows) */
+/* mingw-w64 has no POSIX uid_t (it only defines pid_t). */
+typedef unsigned int uid_t;
+#define ANDROID_LOG_FATAL 0
+#define ANDROID_LOG_WARN  1
+#define ANDROID_LOG_INFO  2
+#define ANDROID_LOG_DEBUG 3
+#define LOG_LOGCAT(prio, fmt, ...) do { } while (0)
+/* mingw-w64 has no POSIX strcasecmp/strncasecmp. */
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#else
+#include <sys/socket.h>
+#include <limits.h>
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+#include <dirent.h>
+#define ANDROID_LOG_FATAL 0
+#define ANDROID_LOG_WARN  1
+#define ANDROID_LOG_INFO  2
+#define ANDROID_LOG_DEBUG 3
+#define LOG_LOGCAT(prio, fmt, ...) do { } while (0)
+#endif
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -64,15 +111,15 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
    went wrong. Log to both destinations for anything that matters for
    diagnosing a failed/successful startup. */
 #define LOG_FATAL(fmt, ...) do { \
-    __android_log_print(ANDROID_LOG_FATAL, THIS_FILE, fmt, ##__VA_ARGS__); \
+    LOG_LOGCAT(ANDROID_LOG_FATAL, fmt, ##__VA_ARGS__); \
     fprintf(stderr, "[FATAL] " fmt "\n", ##__VA_ARGS__); fflush(stderr); \
 } while (0)
 #define LOG_WARN(fmt, ...) do { \
-    __android_log_print(ANDROID_LOG_WARN, THIS_FILE, fmt, ##__VA_ARGS__); \
+    LOG_LOGCAT(ANDROID_LOG_WARN, fmt, ##__VA_ARGS__); \
     fprintf(stderr, "[WARN] " fmt "\n", ##__VA_ARGS__); fflush(stderr); \
 } while (0)
 #define LOG_INFO(fmt, ...) do { \
-    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, fmt, ##__VA_ARGS__); \
+    LOG_LOGCAT(ANDROID_LOG_INFO, fmt, ##__VA_ARGS__); \
     fprintf(stdout, "[INFO] " fmt "\n", ##__VA_ARGS__); fflush(stdout); \
 } while (0)
 
@@ -227,6 +274,12 @@ struct settings {
     bool              bind_all;   /* listen on all interfaces */
     int               http_port;  /* HTTP listen port (default 80) */
     int               https_port; /* HTTPS listen port (default 443) */
+    bool              no_gui;     /* Windows: skip the dashboard window */
+    bool              minimized;  /* Windows: GUI started to tray (autostart) */
+    int               autostart;  /* Windows: 1=install, 2=uninstall Run key */
+    bool              cli_bind_set;      /* --bind given on the command line */
+    bool              cli_http_port_set; /* --http-port given */
+    bool              cli_https_port_set;/* --https-port given */
     int               block_image_count;
     char              block_images[BLOCK_IMAGE_MAX_COUNT][BLOCK_IMAGE_NAME_MAX];
 };
@@ -880,12 +933,18 @@ static void app_record_tls_host(uid_t uid, const char *host) {
 static volatile sig_atomic_t s_sig_num = 0;
 static void signal_handler(int n) { s_sig_num = n; }
 static void setup_signal_handler(void) {
+#ifdef _WIN32
+    /* Windows CRT signal(): SIGINT/SIGTERM only (no SIGPIPE/SIGHUP). */
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+#else
     struct sigaction sa; memset(&sa, 0, sizeof(sa));
     sa.sa_handler = SIG_IGN; sigaction(SIGPIPE, &sa, NULL);
     sa.sa_handler = signal_handler;
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGHUP,  &sa, NULL);
+#endif
 }
 
 /* ── OOM killer ───────────────────────────────────────────────── */
@@ -898,7 +957,7 @@ static void oom_adjust_setup(void) {
     if (OOM_ADJ_NOKILL < cur) {
         rewind(fp);
         if (fprintf(fp, "%d\n", OOM_ADJ_NOKILL) > 0)
-            __android_log_print(ANDROID_LOG_INFO, THIS_FILE,
+            LOG_LOGCAT(ANDROID_LOG_INFO,
                 "OOM score: %ld → %d", cur, OOM_ADJ_NOKILL);
     }
     fclose(fp);
@@ -1321,7 +1380,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
     pthread_mutex_unlock(&s_sni_mutex);
 
     SSL_set_SSL_CTX(ssl, ctx);
-    __android_log_print(ANDROID_LOG_DEBUG, THIS_FILE,
+    LOG_LOGCAT(ANDROID_LOG_DEBUG,
         "SNI: issued cert for %s (cache[%d])", host, pos);
     return SSL_TLSEXT_ERR_OK;
 }
@@ -2294,75 +2353,168 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 }
 
 /* ── CLI parsing ──────────────────────────────────────────────── */
+/*
+ * Prepare the resource directory (CA, localhost leaf cert, block
+ * images, paths). Creates the directory when it does not exist, so a
+ * plain double-click works out of the box, and logs a clear reason
+ * when the directory cannot be used. Returns true on success.
+ */
+static bool setup_resources_dir(struct settings *s, const char *rpath) {
+    LOG_INFO("Resources dir: %s", rpath);
+
+    struct stat st;
+    if (stat(rpath, &st) != 0 || (st.st_mode & S_IFDIR) == 0) {
+        LOG_INFO("Resources dir '%s' not present — creating it…", rpath);
+#ifdef _WIN32
+        if (_mkdir(rpath) != 0) {
+#else
+        if (mkdir(rpath, 0755) != 0) {
+#endif
+            LOG_FATAL("Cannot create resources dir '%s' (errno %d). "
+                      "Run: webserver --resources <writable directory>", rpath, errno);
+            return false;
+        }
+    }
+
+    char cert_path[PATH_MAX], key_path[PATH_MAX];
+    snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", rpath);
+    snprintf(key_path,  sizeof(key_path),  "%s/localhost-2410.key", rpath);
+
+    /* Generate CA cert on first use */
+    bool missing = (access(cert_path, F_OK) != 0 || access(key_path, F_OK) != 0);
+    LOG_INFO("CA cert missing=%d (cert=%s key=%s)", missing, cert_path, key_path);
+    if (missing) {
+        LOG_INFO("Generating root CA…");
+        if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
+            LOG_FATAL("CA generation failed (dir '%s'): make sure the directory is writable", rpath);
+            return false;
+        }
+        LOG_INFO("Root CA generated OK");
+    }
+
+    /* Load CA into memory for SNI signing */
+    if (load_ca(cert_path, key_path, &s->ca) != EXIT_SUCCESS) {
+        LOG_FATAL("Failed to load CA");
+        return false;
+    }
+
+    /* Cert rotation: regenerate when the CA nears expiry (30d). */
+    if (maybe_rotate_ca(cert_path, key_path, &s->ca)) {
+        LOG_INFO("CA rotated — app will prompt to reinstall");
+    }
+    LOG_INFO("CA loaded OK");
+
+    /* TLS opts for the localhost listener: a leaf cert issued
+       specifically for "localhost"/127.0.0.1, not the raw CA
+       cert (see make_localhost_leaf() for why). */
+    if (make_localhost_leaf(&s->ca, &s->tls_opts) != EXIT_SUCCESS) {
+        LOG_FATAL("Failed to issue localhost leaf cert");
+        return false;
+    }
+    LOG_INFO("localhost leaf cert issued OK");
+    snprintf(s->resource_dir, sizeof(s->resource_dir), "%s", rpath);
+    snprintf(s->test_path,    sizeof(s->test_path),    "%s/test.html", rpath);
+    s->block_image_count = scan_block_images(rpath, s->block_images);
+    s->init = true;
+    return true;
+}
+
 static struct settings parse_cli_parameters(int argc, char *argv[]) {
     struct settings s = {0};
-    s.http_port = 80;
-    s.https_port = 443;
+    /* Double-click friendly defaults (unprivileged ports; the Android
+       app always passes --http-port/--https-port explicitly). */
+    s.http_port = 8080;
+    s.https_port = 8443;
     s.bind_all = false;
+    const char *rpath = NULL;
+    char resolved[PATH_MAX];
+    memset(resolved, 0, sizeof(resolved));
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--resources") == 0 && i < argc-1) {
-            const char *rpath = argv[++i];
-            LOG_INFO("Resources dir: %s", rpath);
-
-            char cert_path[PATH_MAX], key_path[PATH_MAX];
-            snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", rpath);
-            snprintf(key_path,  sizeof(key_path),  "%s/localhost-2410.key", rpath);
-
-            /* Generate CA cert on first use */
-            bool missing = (access(cert_path, F_OK) != 0 || access(key_path, F_OK) != 0);
-            LOG_INFO("CA cert missing=%d (cert=%s key=%s)", missing, cert_path, key_path);
-            if (missing) {
-                LOG_INFO("Generating root CA…");
-                if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
-                    LOG_FATAL("CA generation failed");
-                    return s;
-                }
-                LOG_INFO("Root CA generated OK");
-            }
-
-            /* Load CA into memory for SNI signing */
-            if (load_ca(cert_path, key_path, &s.ca) != EXIT_SUCCESS) {
-                LOG_FATAL("Failed to load CA");
-                return s;
-            }
-
-            /* Cert rotation: regenerate when the CA nears expiry (30d). */
-            if (maybe_rotate_ca(cert_path, key_path, &s.ca)) {
-                LOG_INFO("CA rotated — app will prompt to reinstall");
-            }
-            LOG_INFO("CA loaded OK");
-
-            /* TLS opts for the localhost listener: a leaf cert issued
-               specifically for "localhost"/127.0.0.1, not the raw CA
-               cert (see make_localhost_leaf() for why). */
-            if (make_localhost_leaf(&s.ca, &s.tls_opts) != EXIT_SUCCESS) {
-                LOG_FATAL("Failed to issue localhost leaf cert");
-                return s;
-            }
-            LOG_INFO("localhost leaf cert issued OK");
-            snprintf(s.resource_dir, sizeof(s.resource_dir), "%s", rpath);
-            snprintf(s.test_path,    sizeof(s.test_path),    "%s/test.html", rpath);
-            s.block_image_count = scan_block_images(rpath, s.block_images);
-            s.init = true;
+            rpath = argv[++i];
         } else if (strcmp(argv[i], "--debug") == 0) {
             s.debug = true;
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
             s.bind_all = strcmp(argv[++i], "all") == 0;
+            s.cli_bind_set = true;
             LOG_INFO("Bind mode: %s", s.bind_all ? "all interfaces" : "loopback");
         } else if (strcmp(argv[i], "--http-port") == 0 && i < argc-1) {
             s.http_port = atoi(argv[++i]);
+            s.cli_http_port_set = true;
             LOG_INFO("HTTP port: %d", s.http_port);
         } else if (strcmp(argv[i], "--https-port") == 0 && i < argc-1) {
             s.https_port = atoi(argv[++i]);
+            s.cli_https_port_set = true;
             LOG_INFO("HTTPS port: %d", s.https_port);
+        } else if (strcmp(argv[i], "--no-gui") == 0) {
+            s.no_gui = true;
+        } else if (strcmp(argv[i], "--minimized") == 0) {
+            s.minimized = true;
+        } else if (strcmp(argv[i], "--install-autostart") == 0) {
+            s.autostart = 1;
+        } else if (strcmp(argv[i], "--uninstall-autostart") == 0) {
+            s.autostart = 2;
         }
     }
+
+    /* Default / path-resolution: a plain double-click must work, so
+       fall back to a 'resources' folder next to the executable and
+       resolve relative --resources paths against the exe directory. */
+    char default_dir[PATH_MAX];
+    memset(default_dir, 0, sizeof(default_dir));
+#ifdef _WIN32
+    {
+        char exe_path[PATH_MAX];
+        memset(exe_path, 0, sizeof(exe_path));
+        if (GetModuleFileNameA(NULL, exe_path, (DWORD)sizeof(exe_path) - 1) > 0) {
+            char *slash = strrchr(exe_path, '\\');
+            if (slash) *slash = '\0';
+            if (rpath != NULL && rpath[0] != '\\' && rpath[0] != '/' && strchr(rpath, ':') == NULL) {
+                /* relative --resources: resolve against the exe dir */
+                snprintf(resolved, sizeof(resolved), "%s\\%s", exe_path, rpath);
+                rpath = resolved;
+            } else if (rpath == NULL) {
+                snprintf(default_dir, sizeof(default_dir), "%s\\resources", exe_path);
+                rpath = default_dir;
+                LOG_INFO("No --resources given — using %s", rpath);
+            }
+        }
+    }
+#endif
+    if (rpath == NULL) {
+        snprintf(default_dir, sizeof(default_dir), "resources");
+        rpath = default_dir;
+        LOG_INFO("No --resources given — using %s", rpath);
+    }
+
+    setup_resources_dir(&s, rpath);
     return s;
 }
 
+#ifndef ADBLOCK_APP_VERSION
+#define ADBLOCK_APP_VERSION "1.10.0"
+#endif
+
+/* autostart entry location (same key as gui_win32.c) */
+#define RUN_KEY_W L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define RUN_VALUE_W L"ADBlockWebServer"
+
 /* ── main ─────────────────────────────────────────────────────── */
+static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s);
+
+#ifdef _WIN32
+struct server_thread_arg { struct mg_mgr *mgr; struct settings *s; };
+static void *server_thread_main(void *p) {
+    struct server_thread_arg *a = (struct server_thread_arg *)p;
+    server_loop_and_cleanup(a->mgr, a->s);
+    return NULL;
+}
+#endif
+
 int main(int argc, char *argv[]) {
-    setsid();
+#ifndef _WIN32
+    setsid();   /* no-op on Windows: there is no controlling session */
+#endif
     /* NOTE: do NOT redirect stdin/stdout/stderr to /dev/null here even
        though setsid() detaches us from the controlling terminal.
        ShellUtils.runBundledExecutable() launches this binary with
@@ -2386,6 +2538,134 @@ int main(int argc, char *argv[]) {
         LOG_FATAL("Bad parameters.");
         return EXIT_FAILURE;
     }
+
+#ifdef _WIN32
+    /* Settings persistence: webserver.ini next to the exe (written by
+       the dashboard settings page); command-line flags still win. */
+    {
+        char exe[MAX_PATH];
+        if (GetModuleFileNameA(NULL, exe, sizeof(exe)) > 0) {
+            char *slash = strrchr(exe, '\\');
+            if (slash) *slash = '\0';
+            char path[MAX_PATH + 32];
+            snprintf(path, sizeof(path), "%s\\webserver.ini", exe);
+            FILE *f = fopen(path, "r");
+            if (f) {
+                char line[128];
+                while (fgets(line, sizeof(line), f)) {
+                    int v;
+                    if (sscanf(line, "http_port=%d", &v) == 1 && !s.cli_http_port_set)
+                        s.http_port = v;
+                    else if (sscanf(line, "https_port=%d", &v) == 1 && !s.cli_https_port_set)
+                        s.https_port = v;
+                    else if (sscanf(line, "bind_all=%d", &v) == 1 && !s.cli_bind_set)
+                        s.bind_all = (v != 0);
+                }
+                fclose(f);
+                LOG_INFO("Loaded webserver.ini settings (ports %d/%d, bind_all=%d).",
+                         s.http_port, s.https_port, s.bind_all ? 1 : 0);
+            }
+        }
+    }
+
+    /* Autostart entry self-heal: older versions registered
+       "--no-gui" (headless - no tray icon at all). Rewrite such entries
+       to "--minimized" so the tray icon appears after logon. */
+    {
+        DWORD sz = 0;
+        if (RegGetValueW(HKEY_CURRENT_USER, RUN_KEY_W, RUN_VALUE_W,
+                RRF_RT_REG_SZ, NULL, NULL, &sz) == ERROR_SUCCESS && sz > 4) {
+            wchar_t *val = (wchar_t *)malloc(sz);
+            if (val) {
+                if (RegGetValueW(HKEY_CURRENT_USER, RUN_KEY_W, RUN_VALUE_W,
+                        RRF_RT_REG_SZ, NULL, val, &sz) == ERROR_SUCCESS) {
+                    wchar_t *p = wcsstr(val, L"--no-gui");
+                    if (p) {
+                        wchar_t *newVal = (wchar_t *)malloc((wcslen(val) + 8) * sizeof(wchar_t));
+                        if (newVal) {
+                            wchar_t *d = newVal;
+                            size_t pre = (size_t)(p - val);
+                            memcpy(d, val, pre * sizeof(wchar_t));
+                            d += pre;
+                            wcscpy(d, L"--minimized");
+                            d += wcslen(L"--minimized");
+                            wcscpy(d, p + wcslen(L"--no-gui"));
+                            HKEY hk2 = NULL;
+                            if (RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY_W, 0,
+                                    KEY_SET_VALUE, &hk2) == ERROR_SUCCESS) {
+                                RegSetValueExW(hk2, RUN_VALUE_W, 0, REG_SZ,
+                                    (const BYTE *)newVal,
+                                    (DWORD)((wcslen(newVal) + 1) * sizeof(wchar_t)));
+                                RegCloseKey(hk2);
+                            }
+                            LOG_INFO("Autostart entry upgraded: --no-gui -> --minimized (tray icon after logon).");
+                            free(newVal);
+                        }
+                    }
+                }
+                free(val);
+            }
+        }
+    }
+
+    /* One-shot autostart registration (GUI toggle / CI) - do it before
+       binding so the command never needs a port to be free. */
+    if (s.autostart != 0) {
+        char exe[MAX_PATH];
+        if (GetModuleFileNameA(NULL, exe, sizeof(exe)) == 0) {
+            LOG_FATAL("Cannot resolve executable path.");
+            return EXIT_FAILURE;
+        }
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --minimized",
+                 exe, s.resource_dir, s.http_port, s.https_port);
+        bool enable = (s.autostart == 1);
+        int rc = win32_autostart_set(enable, cmd);
+        LOG_INFO("Autostart %s %s (entry=%s).", enable ? "enabled" : "disabled",
+                 rc == 0 ? "OK" : "FAILED",
+                 win32_autostart_installed() ? "installed" : "absent");
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+#endif
+
+    /* If a server instance is already listening on the HTTP port (a
+       previous launch, autostart, ...) do not bind again - open only the
+       dashboard and poll the running instance, instead of silently
+       exiting. */
+    bool server_already_running = false;
+#ifdef _WIN32
+    {
+        SOCKET probe = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (probe != INVALID_SOCKET) {
+            SOCKADDR_IN a;
+            memset(&a, 0, sizeof(a));
+            a.sin_family = AF_INET;
+            a.sin_port = htons((u_short)s.http_port);
+            a.sin_addr.s_addr = inet_addr("127.0.0.1");
+            server_already_running = (connect(probe, (SOCKADDR *)&a, sizeof(a)) == 0);
+            closesocket(probe);
+        }
+    }
+    if (server_already_running) {
+        if (s.no_gui) {
+            LOG_INFO("Web server already running on port %d - nothing to do.", s.http_port);
+            return EXIT_SUCCESS;
+        }
+        struct adblock_gui_args args;
+        args.resource_dir = s.resource_dir;
+        args.http_port = s.http_port;
+        args.https_port = s.https_port;
+        args.bind_all = s.bind_all;
+        args.start_minimized = s.minimized;
+        args.startup_warning = NULL;
+        LOG_INFO("A web server is already running on port %d - dashboard only mode.", s.http_port);
+        int rc = adblock_gui_run(&args);
+        if (rc != 0)
+            LOG_FATAL("Dashboard window could not be created (exit code %d).", rc);
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+#endif
+
     if (s.debug) mg_log_set(MG_LL_DEBUG);
 
     s_stats.start_time_ms = mg_millis();
@@ -2408,13 +2688,26 @@ int main(int argc, char *argv[]) {
     snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);
     snprintf(https_url6, sizeof(https_url6), "https://%s:%d", v6, s.https_port);
 
-    if (!mg_http_listen(&mgr, http_url, fn, &s)) {
-        LOG_FATAL("HTTP bind failed (%s).", http_url);
-        mg_mgr_free(&mgr); return EXIT_FAILURE;
+    char startup_warning[512] = {0};
+    bool http_ok = mg_http_listen(&mgr, http_url, fn, &s);
+    if (!http_ok) {
+        LOG_FATAL("HTTP bind failed (%s): the port is probably already in use.", http_url);
+        snprintf(startup_warning, sizeof(startup_warning),
+                 "Port %d is already in use - the server could not bind. "
+                 "Showing the dashboard anyway; close other instances or "
+                 "change the port in Settings (Apply & Restart).", s.http_port);
+#ifdef _WIN32
+        if (s.no_gui) {
+            mg_mgr_free(&mgr);
+            return EXIT_FAILURE;
+        }
+#else
+        mg_mgr_free(&mgr);
+        return EXIT_FAILURE;
+#endif
     }
     if (!mg_http_listen(&mgr, https_url, fn, &s)) {
-        LOG_FATAL("HTTPS bind failed (%s).", https_url);
-        mg_mgr_free(&mgr); return EXIT_FAILURE;
+        LOG_WARN("HTTPS bind failed (%s) - continuing without HTTPS.", https_url);
     }
     /*
      * IPv6 loopback listeners (::1) - optional. Devices with IPv6
@@ -2432,21 +2725,100 @@ int main(int argc, char *argv[]) {
         ipv6_ok = false;
     }
 
+    /* Extra ad-block monitoring: the hosts-file redirect targets ports
+       80 (HTTP) and 443 (HTTPS). Always try to monitor them in addition
+       to the configured ports. Binding them needs Administrator on
+       Windows (or the port must be free); failures are only warnings -
+       the configured ports keep working. */
+    {
+        char u[128];
+        if (s.http_port != 80) {
+            snprintf(u, sizeof(u), "http://127.0.0.1:80");
+            if (!mg_http_listen(&mgr, u, fn, &s))
+                LOG_WARN("Monitoring http://127.0.0.1:80 failed (admin needed or port in use).");
+            snprintf(u, sizeof(u), "http://[::1]:80");
+            if (!mg_http_listen(&mgr, u, fn, &s))
+                LOG_WARN("Monitoring http://[::1]:80 failed (admin needed or port in use).");
+        }
+        if (s.https_port != 443) {
+            snprintf(u, sizeof(u), "https://127.0.0.1:443");
+            if (!mg_http_listen(&mgr, u, fn, &s))
+                LOG_WARN("Monitoring https://127.0.0.1:443 failed (admin needed or port in use).");
+            snprintf(u, sizeof(u), "https://[::1]:443");
+            if (!mg_http_listen(&mgr, u, fn, &s))
+                LOG_WARN("Monitoring https://[::1]:443 failed (admin needed or port in use).");
+        }
+    }
+
     load_block_cfg(s.resource_dir);
     setup_signal_handler();
-    LOG_INFO("ADBlock webserver ready — arm64, Mongoose " MG_VERSION
+
+    LOG_INFO("ADBlock Web Server v" ADBLOCK_APP_VERSION " ready — Mongoose " MG_VERSION
         ", SNI cert issuance enabled, IPv6 loopback %s.",
         ipv6_ok ? "on" : "off");
 
-    while (s_sig_num == 0) mg_mgr_poll(&mgr, 1000);
-    save_stats(&s);
-    save_hist(&s);   /* final flush of chart buckets on exit */
-    sni_cache_save(s.resource_dir);  /* persist SNI cache (max hit rate) */
-    apps_save(s.resource_dir);       /* persist per-app stats on exit */
+#ifdef _WIN32
+    if (!s.no_gui) {
+        /* Native dashboard: the server runs on a worker thread and the
+           main thread hosts the dashboard window. */
+        struct adblock_gui_args args;
+        args.resource_dir = s.resource_dir;
+        args.http_port = s.http_port;
+        args.https_port = s.https_port;
+        args.bind_all = s.bind_all;
+        args.start_minimized = s.minimized;
+        args.startup_warning = startup_warning[0] ? startup_warning : NULL;
+        struct server_thread_arg targ;
+        targ.mgr = &mgr;
+        targ.s = &s;
+        pthread_t srv_thread;
+        if (pthread_create(&srv_thread, NULL, server_thread_main, &targ) != 0) {
+            LOG_FATAL("Failed to start server thread.");
+            mg_mgr_free(&mgr);
+            return EXIT_FAILURE;
+        }
+        LOG_INFO("Dashboard opened — close the window to shut down.");
+        int rc = adblock_gui_run(&args);
+        if (rc != 0) {
+            /* Window creation failed (rare): keep the server running
+               headless instead of dying silently. */
+            LOG_FATAL("Dashboard window failed to start (exit code %d) - running headless. Press Ctrl+C to stop.", rc);
+            while (s_sig_num == 0) Sleep(500);
+            pthread_join(srv_thread, NULL);
+            return 0;
+        }
+        s_sig_num = 1;   /* stop the poll loop */
+        pthread_join(srv_thread, NULL);
+        LOG_INFO("Server shut down (exit code %d).", rc);
+#ifdef _WIN32
+        if (win32_restart_requested()) {
+            LOG_INFO("Restart requested - relaunching with the new settings...");
+            wchar_t exeW[MAX_PATH], argsW[2048];
+            if (GetModuleFileNameW(NULL, exeW, MAX_PATH) > 0) {
+                swprintf(argsW, 2048, L"--resources \"%hs\"", s.resource_dir);
+                ShellExecuteW(NULL, L"open", exeW, argsW, NULL, SW_SHOWNORMAL);
+            }
+        }
+#endif
+        return 0;
+    }
+#endif
+    return server_loop_and_cleanup(&mgr, &s);
+}
+
+/* Run the mongoose poll loop until a stop signal, then persist + free.
+   Used directly by the Android/headless builds and from a worker thread
+   when the Windows dashboard window is shown. */
+static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
+    while (s_sig_num == 0) mg_mgr_poll(mgr, 1000);
+    save_stats(s);
+    save_hist(s);   /* final flush of chart buckets on exit */
+    sni_cache_save(s->resource_dir);  /* persist SNI cache (max hit rate) */
+    apps_save(s->resource_dir);       /* persist per-app stats on exit */
     LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);
-    mg_mgr_free(&mgr);
+    mg_mgr_free(mgr);
 
     /* Free SNI cache.
        BUG FIX: take the mutex before freeing so no concurrent
@@ -2460,12 +2832,13 @@ int main(int argc, char *argv[]) {
     pthread_mutex_destroy(&s_sni_mutex);
 
     /* Free CA in-memory objects */
-    if (s.ca.cert) X509_free(s.ca.cert);
-    if (s.ca.key)  EVP_PKEY_free(s.ca.key);
+    if (s->ca.cert) X509_free(s->ca.cert);
+    if (s->ca.key)  EVP_PKEY_free(s->ca.key);
 
-    free((void *)s.tls_opts.cert.buf);
-    free((void *)s.tls_opts.key.buf);
+    free((void *)s->tls_opts.cert.buf);
+    free((void *)s->tls_opts.key.buf);
 
-    __android_log_print(ANDROID_LOG_INFO, THIS_FILE, "Clean shutdown.");
+    LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
     return EXIT_SUCCESS;
 }
+
