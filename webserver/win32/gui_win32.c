@@ -797,7 +797,10 @@ static void draw_sidebar(HDC hdc) {
 static NOTIFYICONDATAW g_nid;
 static bool g_tray_initialized = false;
 
-static void tray_add(HWND hwnd) {
+static UINT g_taskbar_created = 0;   /* "TaskbarCreated" */
+static bool g_tray_ok = false;
+
+static bool tray_add(HWND hwnd) {
     memset(&g_nid, 0, sizeof(g_nid));
     g_nid.cbSize = sizeof(g_nid);
     g_nid.hWnd = hwnd;
@@ -806,13 +809,17 @@ static void tray_add(HWND hwnd) {
     g_nid.uCallbackMessage = WM_APP_TRAY;
     g_nid.hIcon = LoadIconW(NULL, IDI_APPLICATION);
     swprintf(g_nid.szTip, 128, L"ADBlock 拦截服务器 - http://localhost:%d", g_http_port);
-    Shell_NotifyIconW(NIM_ADD, &g_nid);
-    g_tray_initialized = true;
-    g_nid.uFlags |= NIF_INFO;
-    wcscpy(g_nid.szInfoTitle, L"ADBlock 拦截服务器");
-    wcscpy(g_nid.szInfo, L"运行中 - 双击此图标可重新打开窗口。");
-    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
-    g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    BOOL ok = Shell_NotifyIconW(NIM_ADD, &g_nid);
+    g_tray_ok = (ok == TRUE);
+    g_tray_initialized = g_tray_ok;
+    if (g_tray_ok) {
+        g_nid.uFlags |= NIF_INFO;
+        wcscpy(g_nid.szInfoTitle, L"ADBlock 拦截服务器");
+        wcscpy(g_nid.szInfo, L"运行中 - 双击此图标可重新打开窗口。");
+        Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+        g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    }
+    return g_tray_ok;
 }
 
 static void tray_remove(void) {
@@ -902,6 +909,10 @@ static void policy_apply(HWND hwnd) {
 }
 
 static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (g_taskbar_created != 0 && msg == g_taskbar_created) {
+        tray_add(hwnd);
+        return 0;
+    }
     switch (msg) {
     case WM_DPICHANGED:
         g_scale = HIWORD(wp) / 96.0;
@@ -960,6 +971,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_SETCHECK,
                          pol[i] ? BST_CHECKED : BST_UNCHECKED, 0);
         show_controls(hwnd, 0);
+        g_taskbar_created = RegisterWindowMessageW(L"TaskbarCreated");
         tray_add(hwnd);
         SetTimer(hwnd, 1, 2000, NULL);
         swprintf(g_status, 4096, L"等待首次统计（http://127.0.0.1:%d/internal-stats）...", g_http_port);
@@ -977,6 +989,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 swprintf(g_status, 4096, L"服务器暂不可达，等待响应...");
             }
         }
+        if (!g_tray_ok) tray_add(hwnd);   /* taskbar missing at logon -> retry */
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     case WM_LBUTTONUP: {
