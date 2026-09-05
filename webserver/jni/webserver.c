@@ -2590,9 +2590,14 @@ int main(int argc, char *argv[]) {
                             wcscpy(d, L"--minimized");
                             d += wcslen(L"--minimized");
                             wcscpy(d, p + wcslen(L"--no-gui"));
-                            RegSetValueExW(HKEY_CURRENT_USER, RUN_KEY_W, RUN_VALUE_W,
-                                0, REG_SZ, (const BYTE *)newVal,
-                                (DWORD)((wcslen(newVal) + 1) * sizeof(wchar_t)));
+                            HKEY hk2 = NULL;
+                            if (RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY_W, 0,
+                                    KEY_SET_VALUE, &hk2) == ERROR_SUCCESS) {
+                                RegSetValueExW(hk2, RUN_VALUE_W, 0, REG_SZ,
+                                    (const BYTE *)newVal,
+                                    (DWORD)((wcslen(newVal) + 1) * sizeof(wchar_t)));
+                                RegCloseKey(hk2);
+                            }
                             LOG_INFO("Autostart entry upgraded: --no-gui -> --minimized (tray icon after logon).");
                             free(newVal);
                         }
