@@ -56,6 +56,10 @@ public abstract class AbstractListFragment extends Fragment implements ListsView
      * The view related hosts source of the current action (<code>null</code> if view is not created).
      */
     private View mActionSourceView;
+    /**
+     * The recycler adapter for the list (<code>null</code> if view is not created).
+     */
+    private ListsAdapter mAdapter;
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -73,8 +77,8 @@ public abstract class AbstractListFragment extends Fragment implements ListsView
         LinearLayoutManager linearLayoutManager = new LinearLayoutManager(this.mActivity);
         recyclerView.setLayoutManager(linearLayoutManager);
         // Create recycler adapter
-        ListsAdapter adapter = new ListsAdapter(this, isTwoRowsItem());
-        recyclerView.setAdapter(adapter);
+        this.mAdapter = new ListsAdapter(this, isTwoRowsItem());
+        recyclerView.setAdapter(this.mAdapter);
         /*
          * Create action mode.
          */
@@ -138,11 +142,20 @@ public abstract class AbstractListFragment extends Fragment implements ListsView
         /*
          * Load data.
          */
-        // Get view model and bind it to the list view
+        // Get view model (the LiveData observe happens in onViewCreated,
+        // where getViewLifecycleOwner() is valid)
         this.mViewModel = new ViewModelProvider(this.mActivity).get(ListsViewModel.class);
-        getData().observe(getViewLifecycleOwner(), data -> adapter.submitData(getLifecycle(), data));
         // Return created view
         return view;
+    }
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+        super.onViewCreated(view, savedInstanceState);
+        // Observe the list data here: getViewLifecycleOwner() is only valid
+        // once the view has been created (before onCreateView returns it
+        // throws IllegalStateException on modern AndroidX lifecycle).
+        getData().observe(getViewLifecycleOwner(), data -> this.mAdapter.submitData(getLifecycle(), data));
     }
 
     @Override

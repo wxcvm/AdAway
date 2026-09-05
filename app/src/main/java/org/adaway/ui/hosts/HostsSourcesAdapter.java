@@ -18,6 +18,7 @@ import org.adaway.db.entity.HostsSource;
 
 import java.time.Duration;
 import java.time.ZonedDateTime;
+import java.util.Objects;
 
 /**
  * This class is a the {@link RecyclerView.Adapter} for the hosts sources view.
@@ -39,7 +40,13 @@ class HostsSourcesAdapter extends ListAdapter<HostsSource, HostsSourcesAdapter.V
                 public boolean areContentsTheSame(@NonNull HostsSource oldSource, @NonNull HostsSource newSource) {
                     // NOTE: if you use equals, your object must properly override Object#equals()
                     // Incorrectly returning false here will result in too many animations.
-                    return oldSource.equals(newSource);
+                    // BUG FIX: HostsSource#equals() omits size and label (and the allow/redirect
+                    // flags/entityTag), so after a hosts sync updates a source's size the row
+                    // would never rebind and the host-count text stayed stale. Also compare the
+                    // fields the row actually renders.
+                    return oldSource.equals(newSource)
+                            && oldSource.getSize() == newSource.getSize()
+                            && Objects.equals(oldSource.getLabel(), newSource.getLabel());
                 }
             };
 

@@ -95,7 +95,7 @@ public class SourceModel {
     /**
      * The HTTP client to download hosts sources ({@code null} until initialized by {@link #getHttpClient()}).
      */
-    private OkHttpClient cachedHttpClient;
+    private volatile OkHttpClient cachedHttpClient;
     /**
      * Lock guarding {@link #retrieveHostsSources()} / {@link #syncHostEntries()}.
      * <p>
@@ -514,10 +514,14 @@ public class SourceModel {
         Timber.v("Reading hosts source file: %s.", hostsFileUrl);
         // Set state to copying hosts source
         setState(R.string.status_read_source, hostsFileUrl);
-        try (InputStream inputStream = this.context.getContentResolver().openInputStream(fileUri);
-             InputStreamReader reader = new InputStreamReader(inputStream);
-             BufferedReader bufferedReader = new BufferedReader(reader)) {
-            parseSourceInputStream(hostsSource, bufferedReader);
+        try (InputStream inputStream = this.context.getContentResolver().openInputStream(fileUri)) {
+            if (inputStream == null) {
+                throw new IOException("Unable to open input stream for " + hostsFileUrl + ".");
+            }
+            try (InputStreamReader reader = new InputStreamReader(inputStream);
+                 BufferedReader bufferedReader = new BufferedReader(reader)) {
+                parseSourceInputStream(hostsSource, bufferedReader);
+            }
         } catch (IOException e) {
             throw new IOException("Error while reading hosts file from " + hostsFileUrl + ".", e);
         }

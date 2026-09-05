@@ -228,7 +228,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         vertical = 4.dp,
                     ),
                 ) {
-                    items(rules, key = { "${it.host}:${it.sourceId}" }) { item ->
+                    items(rules, key = { it.id }) { item ->
                         RuleRow(
                             item = item,
                             sourceLabel = sourceLabels[item.sourceId],

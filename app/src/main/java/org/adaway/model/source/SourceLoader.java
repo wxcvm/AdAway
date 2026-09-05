@@ -237,6 +237,17 @@ class SourceLoader {
                 } catch (InterruptedException e) {
                     Timber.w(e, "Interrupted while parsing hosts list item.");
                     endOfSource = true;
+                    // BUG FIX: ensure the inserter still receives this parser's
+                    // end-of-source marker. Otherwise workerStopped can never
+                    // reach parserCount and ItemInserter#call() blocks forever
+                    // on hostListItemQueue.take().
+                    HostListItem endItem = new HostListItem();
+                    endItem.setHost(END_OF_QUEUE_MARKER);
+                    try {
+                        this.itemQueue.put(endItem);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
                     Thread.currentThread().interrupt();
                 }
             }
@@ -281,7 +292,7 @@ class SourceLoader {
         private HostListItem parseAllowListItem(String line) {
             // Extract hostname
             int indexOf = line.indexOf('#');
-            if (indexOf == 1) {
+            if (indexOf > 0) {
                 line = line.substring(0, indexOf);
             }
             line = line.trim();

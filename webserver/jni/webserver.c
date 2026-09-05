@@ -714,17 +714,22 @@ static void addr_to_proc_v4(const struct mg_addr *a, char *out, size_t sz) {
              ((unsigned)(a->port & 0xFF) << 8) | ((unsigned)a->port >> 8));
 }
 
-/* Format an mg_addr as /proc/net/tcp6 (IPv4-mapped) would print it. */
-static void addr_to_proc_v6mapped(const struct mg_addr *a, char *out, size_t sz) {
-    /* ::ffff:a.b.c.d — kernel prints each 32-bit word in host order
-       (ntohl), so the ff:ff word shows as "FFFF0000" on this device. */
+/* Format an mg_addr as /proc/net/tcp6 would print it - works for BOTH
+   real IPv6 addresses and IPv4-mapped ones (::ffff:a.b.c.d): the kernel
+   prints each 32-bit word as a host-endian hex number (bytes reversed per
+   32-bit group; e.g. the ff:ff word of an IPv4-mapped address shows as
+   "FFFF0000" on little-endian devices).
+   BUG FIX: the previous version only handled the IPv4-mapped form, so
+   genuine IPv6 loopback clients ([::1]) never matched their /proc/net/tcp6
+   row and per-app statistics fell back to the socket-inode path - which
+   reports the SERVER's own uid (0, root), attributing app traffic to the
+   root package. */
+static void addr_to_proc_v6(const struct mg_addr *a, char *out, size_t sz) {
     char *d = out;
-    for (int g = 0; g < 2; g++)
-        d += snprintf(d, 9, "00000000");
-    d += snprintf(d, 9, "FFFF0000");
-    d += snprintf(d, 9, "%02X%02X%02X%02X",
-                  (unsigned)a->addr.ip[3], (unsigned)a->addr.ip[2],
-                  (unsigned)a->addr.ip[1], (unsigned)a->addr.ip[0]);
+    for (int g = 0; g < 4; g++)
+        d += snprintf(d, 9, "%02X%02X%02X%02X",
+                      (unsigned)a->addr.ip[g * 4 + 3], (unsigned)a->addr.ip[g * 4 + 2],
+                      (unsigned)a->addr.ip[g * 4 + 1], (unsigned)a->addr.ip[g * 4 + 0]);
     snprintf(out + 32, sz - 32, ":%04X",
              ((unsigned)(a->port & 0xFF) << 8) | ((unsigned)a->port >> 8));
 }
@@ -741,8 +746,8 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
     char loc_m6[64], rem_m6[64];
     addr_to_proc_v4(&c->loc, loc_v4, sizeof(loc_v4));
     addr_to_proc_v4(&c->rem, rem_v4, sizeof(rem_v4));
-    addr_to_proc_v6mapped(&c->loc, loc_m6, sizeof(loc_m6));
-    addr_to_proc_v6mapped(&c->rem, rem_m6, sizeof(rem_m6));
+    addr_to_proc_v6(&c->loc, loc_m6, sizeof(loc_m6));
+    addr_to_proc_v6(&c->rem, rem_m6, sizeof(rem_m6));
 
     /* Pass 0: /proc/net/tcp6 with the v4-mapped form (real uid).
        NOTE: /proc rows are client-first (local = the connecting end,

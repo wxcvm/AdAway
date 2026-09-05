@@ -560,6 +560,9 @@ fun refreshServerStats() {
 
     override fun onCleared() {
         pollingJob?.cancel()
+        wsJob?.cancel()
+        wsJob = null
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver)
         super.onCleared()
     }
 }
