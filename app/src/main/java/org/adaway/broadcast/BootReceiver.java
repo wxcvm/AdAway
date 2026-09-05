@@ -26,52 +26,34 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
+import androidx.work.BackoffPolicy;
+import androidx.work.ExistingWorkPolicy;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.WorkManager;
+
 import org.adaway.helper.PreferenceHelper;
-import org.adaway.util.WebServerUtils;
+
+import java.util.concurrent.TimeUnit;
 
 import timber.log.Timber;
 
 /**
  * Receives BOOT_COMPLETED (and vendor-specific quick-boot equivalents) and
- * starts the web server (ROOT mode) as configured.
+ * schedules the web server start via {@link ServerStartWorker}.
  *
- * <h3>Why goAsync() + background thread?</h3>
- * BroadcastReceiver.onReceive() runs on the main thread and has a hard ~10 s
- * deadline. Shell.cmd().exec() (the root shell call inside startWebServer) is
- * blocking and can easily exceed that limit, especially when the root shell
- * itself is being initialised for the first time in the boot context. Moving
- * all work off the main thread via goAsync() avoids that timeout.
- *
- * <h3>Why the initial delay?</h3>
- * BOOT_COMPLETED fires before Magisk's root daemon (magiskd) has finished
- * initialising on many devices. Attempting a root shell too early silently
- * fails. A 15-second delay gives magiskd time to become available; if the
- * first attempt still fails the receiver retries twice more at 20-second
- * intervals before giving up (~55 s total, well under Android's 60 s ANR
- * limit for async broadcast receivers).
- *
- * <h3>Why self-terminate?</h3>
- * The web server (libwebserver_exec.so) is a separate native process that
- * calls setsid() on startup and survives independently of the Java runtime.
- * The Java process is no longer needed once boot work is done; killing it
- * frees ~30–50 MB of RAM.
+ * <p>The previous implementation did all the work here with
+ * {@code goAsync()} plus a background thread that slept and retried for up
+ * to ~55&nbsp;s. Async broadcast receivers only get about 10&nbsp;s before
+ * the system flags them as ANR, so on devices where Magisk's root daemon
+ * initialises slowly the work was aborted and the web server never started
+ * at boot. WorkManager (see {@link ServerStartWorker}) runs outside that
+ * deadline with its own retry/backoff, so this receiver only enqueues the
+ * job and returns immediately.
  */
 public class BootReceiver extends BroadcastReceiver {
 
-    /** Wait this long before the first attempt (ms). Gives magiskd time to start. */
-    private static final long INITIAL_DELAY_MS = 10_000L;
-
-    /** Wait this long between retry attempts (ms). */
-    private static final long RETRY_DELAY_MS = 15_000L;
-
-    /** How many times to try starting the server (first attempt + retries). */
-    private static final int MAX_ATTEMPTS = 3;
-
-    /** How long to wait after a start attempt before checking if the server is up (ms). */
-    private static final long START_VERIFY_MS = 3_000L;
-
-    /** How long to linger after confirming the server is running before killing the process (ms). */
-    private static final long EXIT_GRACE_MS = 3_000L;
+    /** Initial delay before the first start attempt (root boot-up time). */
+    private static final long INITIAL_DELAY_SECONDS = 10L;
 
     /** All boot-completed actions this receiver recognises. */
     private static final java.util.Set<String> BOOT_ACTIONS = new java.util.HashSet<>(java.util.Arrays.asList(
@@ -93,88 +75,14 @@ public class BootReceiver extends BroadcastReceiver {
             return;
         }
 
-        final PendingResult pendingResult = goAsync();
-
-        new Thread(() -> {
-            try {
-                startWebServerReliably(context);
-            } catch (Exception e) {
-                Timber.e(e, "BootReceiver: unexpected error.");
-            } finally {
-                pendingResult.finish();
-                sleep(EXIT_GRACE_MS);
-                // The native web server binary calls setsid() on startup, so it
-                // is a detached process that outlives the Java runtime.
-                // Killing the Java process here is safe and frees ~30–50 MB of RAM.
-                Timber.d("BootReceiver: boot work done, terminating Java process.");
-                android.os.Process.killProcess(android.os.Process.myPid());
-            }
-        }, "boot-init").start();
-    }
-    /**
-     * Tries to start the web server up to {@link #MAX_ATTEMPTS} times.
-     *
-     * <p>Unlike a blind fixed delay, each attempt first probes for a usable
-     * root shell (Magisk's magiskd may take a while to initialise after
-     * boot); as soon as root answers we start immediately. If root never
-     * becomes ready within the probe window the attempt is skipped instead
-     * of failing inside startWebServer().
-     */
-    private void startWebServerReliably(Context context) {
-        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            long probeMs = attempt == 1 ? INITIAL_DELAY_MS : RETRY_DELAY_MS;
-            Timber.d("BootReceiver: attempt %d/%d, probing for root (%d ms)…",
-                    attempt, MAX_ATTEMPTS, probeMs);
-            if (!waitForRootReady(probeMs)) {
-                Timber.w("BootReceiver: root not ready after %d ms (attempt %d).", probeMs, attempt);
-                continue;
-            }
-
-            Timber.d("BootReceiver: root ready, starting web server (attempt %d/%d).",
-                    attempt, MAX_ATTEMPTS);
-            WebServerUtils.startWebServer(context);
-
-            sleep(START_VERIFY_MS);
-
-            if (WebServerUtils.isWebServerRunning()) {
-                Timber.d("BootReceiver: web server confirmed running after attempt %d.", attempt);
-                return;
-            }
-            Timber.w("BootReceiver: web server not running after attempt %d.", attempt);
-        }
-        Timber.e("BootReceiver: web server failed to start after %d attempts.", MAX_ATTEMPTS);
-    }
-
-    /**
-     * Polls for a usable root shell until the timeout elapses.
-     *
-     * @return true as soon as {@code su -c true} exits successfully.
-     */
-    private static boolean waitForRootReady(long timeoutMs) {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            try {
-                Process p = new ProcessBuilder("su", "-c", "true").start();
-                boolean ok = p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-                        && p.exitValue() == 0;
-                p.destroy();
-                if (ok) {
-                    return true;
-                }
-            } catch (Exception ignored) {
-                // su binary missing / busy; keep polling
-            }
-            sleep(1_000L);
-        }
-        return false;
-    }
-
-
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ServerStartWorker.class)
+                .setInitialDelay(INITIAL_DELAY_SECONDS, TimeUnit.SECONDS)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15L, TimeUnit.SECONDS)
+                .build();
+        WorkManager.getInstance(context).enqueueUniqueWork(
+                ServerStartWorker.UNIQUE_WORK,
+                ExistingWorkPolicy.REPLACE,
+                request);
+        Timber.d("BootReceiver: web server start scheduled via WorkManager.");
     }
 }
