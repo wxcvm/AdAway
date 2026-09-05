@@ -2492,8 +2492,12 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 }
 
 #ifndef ADBLOCK_APP_VERSION
-#define ADBLOCK_APP_VERSION "1.9.0"
+#define ADBLOCK_APP_VERSION "1.10.0"
 #endif
+
+/* autostart entry location (same key as gui_win32.c) */
+#define RUN_KEY_W L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define RUN_VALUE_W L"ADBlockWebServer"
 
 /* ── main ─────────────────────────────────────────────────────── */
 static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s);
@@ -2560,6 +2564,41 @@ int main(int argc, char *argv[]) {
                 fclose(f);
                 LOG_INFO("Loaded webserver.ini settings (ports %d/%d, bind_all=%d).",
                          s.http_port, s.https_port, s.bind_all ? 1 : 0);
+            }
+        }
+    }
+
+    /* Autostart entry self-heal: older versions registered
+       "--no-gui" (headless - no tray icon at all). Rewrite such entries
+       to "--minimized" so the tray icon appears after logon. */
+    {
+        DWORD sz = 0;
+        if (RegGetValueW(HKEY_CURRENT_USER, RUN_KEY_W, RUN_VALUE_W,
+                RRF_RT_REG_SZ, NULL, NULL, &sz) == ERROR_SUCCESS && sz > 4) {
+            wchar_t *val = (wchar_t *)malloc(sz);
+            if (val) {
+                if (RegGetValueW(HKEY_CURRENT_USER, RUN_KEY_W, RUN_VALUE_W,
+                        RRF_RT_REG_SZ, NULL, val, &sz) == ERROR_SUCCESS) {
+                    wchar_t *p = wcsstr(val, L"--no-gui");
+                    if (p) {
+                        wchar_t *newVal = (wchar_t *)malloc((wcslen(val) + 8) * sizeof(wchar_t));
+                        if (newVal) {
+                            wchar_t *d = newVal;
+                            size_t pre = (size_t)(p - val);
+                            memcpy(d, val, pre * sizeof(wchar_t));
+                            d += pre;
+                            wcscpy(d, L"--minimized");
+                            d += wcslen(L"--minimized");
+                            wcscpy(d, p + wcslen(L"--no-gui"));
+                            RegSetValueExW(HKEY_CURRENT_USER, RUN_KEY_W, RUN_VALUE_W,
+                                0, REG_SZ, (const BYTE *)newVal,
+                                (DWORD)((wcslen(newVal) + 1) * sizeof(wchar_t)));
+                            LOG_INFO("Autostart entry upgraded: --no-gui -> --minimized (tray icon after logon).");
+                            free(newVal);
+                        }
+                    }
+                }
+                free(val);
             }
         }
     }
