@@ -46,8 +46,10 @@ public class AdAwayApplication extends Application {
         // web server is still running and restart it if it is gone (covers
         // "web server often not started" - OEM kill / boot-race / crashes).
         androidx.work.PeriodicWorkRequest watchdog =
-                new androidx.work.PeriodicWorkRequest.Builder(ServerWatchdogWorker.class)
-                        .setInitialDelay(15, java.util.concurrent.TimeUnit.MINUTES)
+                new androidx.work.PeriodicWorkRequest.Builder(
+                        ServerWatchdogWorker.class,
+                        15,
+                        java.util.concurrent.TimeUnit.MINUTES)
                         .build();
         androidx.work.WorkManager.getInstance(this)
                 .enqueueUniquePeriodicWork(
