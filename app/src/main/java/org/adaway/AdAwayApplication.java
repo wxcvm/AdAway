@@ -2,6 +2,7 @@ package org.adaway;
 
 import android.app.Application;
 
+import org.adaway.broadcast.ServerWatchdogWorker;
 import org.adaway.helper.NotificationHelper;
 import org.adaway.helper.PreferenceHelper;
 import org.adaway.model.adblocking.AdBlockMethod;
@@ -41,6 +42,18 @@ public class AdAwayApplication extends Application {
         org.adaway.util.WebServerUtils.initPortCache(this);
         // Create notification channels
         NotificationHelper.createNotificationChannels(this);
+        // Web server self-healing watchdog: every ~15 min verify the native
+        // web server is still running and restart it if it is gone (covers
+        // "web server often not started" - OEM kill / boot-race / crashes).
+        androidx.work.PeriodicWorkRequest watchdog =
+                new androidx.work.PeriodicWorkRequest.Builder(ServerWatchdogWorker.class)
+                        .setInitialDelay(15, java.util.concurrent.TimeUnit.MINUTES)
+                        .build();
+        androidx.work.WorkManager.getInstance(this)
+                .enqueueUniquePeriodicWork(
+                        ServerWatchdogWorker.UNIQUE_PERIODIC,
+                        androidx.work.ExistingPeriodicWorkPolicy.KEEP,
+                        watchdog);
         // Create models
         this.sourceModel = new SourceModel(this);
         this.updateModel = new UpdateModel(this);
