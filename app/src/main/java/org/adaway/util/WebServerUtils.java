@@ -285,6 +285,16 @@ public static void startWebServer(Context context) {
     private static String sendControlCommand(String cmd) {
         return WebServerControl.sendControlCommand(cmd);
     }
+    /**
+     * Reload the server side configuration: block-reply switches plus the
+     * blocked-host set used by the transparent proxy (--proxy-filter), which
+     * is read from the system hosts file. Must be called after the hosts file
+     * was regenerated, otherwise newly blocked hosts would be proxied instead
+     * of blocked (and unblocked ones kept blocked).
+     */
+    public static boolean reloadConfig() {
+        return WebServerControl.sendControlCommand("reload_config") != null;
+    }
     /** @see WebServerControl#reloadImages() */
     public static boolean reloadImages() { return WebServerControl.reloadImages(); }
     /** @see WebServerControl#flushStats() */

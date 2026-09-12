@@ -565,6 +565,8 @@ fun refreshServerStats() {
                     val sourceModel = application.getSourceModel()
                     sourceModel.retrieveHostsSources()
                     adBlockModel.apply()
+                    // 规则变了：同步刷新服务器端拦截域名集合（透明代理用）
+                    org.adaway.util.WebServerUtils.reloadConfig()
                 }
                 Timber.i("Hosts sync completed")
             } catch (e: Exception) {
@@ -586,8 +588,10 @@ fun refreshServerStats() {
                 try {
                     val app = getApplication<Application>()
                     org.adaway.util.BlockMode.apply(app, mode)
-                    // 1) 先把新目标地址写进 hosts 并生效
+                    // 1) 先把新目标地址写进 hosts 并生效，再让服务器重读
+                    //    hosts（透明代理的拦截域名集合来自它）
                     adBlockModel.apply()
+                    org.adaway.util.WebServerUtils.reloadConfig()
                     if (mode == org.adaway.util.BlockMode.HIJACK) {
                         // 2) 劫持模式：确保服务器（--proxy-filter）在运行，
                         //    再挂上 iptables 重定向规则；服务器不在就不劫持，

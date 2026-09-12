@@ -2618,6 +2618,40 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         }
         chk_uid = eff;
     }
+    /*
+     * TRANSPARENT FILTERING PROXY (hijack mode, --proxy-filter):
+     * the app redirects the whole TCP 80/443 traffic here, so a request for
+     * a host that is NOT in the block list has to be forwarded to the real
+     * origin server instead of being answered locally. Blocked hosts keep
+     * the placeholder replies below - except for uids the user put on the
+     * per-app allowlist, whose traffic must never be blocked and is proxied
+     * as well (previously such a request got a useless 2-byte "ok" reply).
+     */
+    if (s->proxy_filter) {
+        struct mg_str *phdr = mg_http_get_header(hm, "Host");
+        if (phdr != NULL && phdr->len > 0) {
+            char phost[256];
+            size_t pl = phdr->len < sizeof(phost) - 1 ? phdr->len : sizeof(phost) - 1;
+            memcpy(phost, phdr->buf, pl);
+            phost[pl] = '\0';
+            if (phost[0] == '[') {                 /* IPv6 literal: [::1]:443 */
+                char *b = strrchr(phost, ']');
+                if (b != NULL) *b = '\0';
+                memmove(phost, phost + 1, strlen(phost) + 1);
+            } else {
+                char *colon = strchr(phost, ':');
+                if (colon != NULL) *colon = '\0';
+            }
+            if (phost[0] != '\0' && !host_is_local(phost)) {
+                bool allowed_uid = (req_uid != (uid_t)-1) &&
+                                   uid_is_allowed(chk_uid, s->resource_dir);
+                if (allowed_uid || !block_set_contains(phost, strlen(phost))) {
+                    if (proxy_start(c, s, hm, phost)) return;
+                }
+            }
+        }
+    }
+
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
         mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
                               "Cache-Control: no-store\r\n", "ok");
@@ -2756,35 +2790,6 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             mg_http_reply(c, 400, "Content-Type: text/plain\r\n", "Usage: cmd=reload_images|flush_stats|shutdown");
         }
         return;
-    }
-
-    /*
-     * TRANSPARENT FILTERING PROXY (hijack mode, --proxy-filter):
-     * the app redirected the whole TCP 80/443 traffic here, so a request
-     * for a host that is NOT in the block list must be forwarded to the
-     * real origin server instead of being answered locally. Blocked
-     * hosts keep the placeholder replies below.
-     */
-    if (s->proxy_filter) {
-        struct mg_str *phdr = mg_http_get_header(hm, "Host");
-        if (phdr != NULL && phdr->len > 0) {
-            char phost[256];
-            size_t pl = phdr->len < sizeof(phost) - 1 ? phdr->len : sizeof(phost) - 1;
-            memcpy(phost, phdr->buf, pl);
-            phost[pl] = '\0';
-            if (phost[0] == '[') {                 /* IPv6 literal: [::1]:443 */
-                char *b = strrchr(phost, ']');
-                if (b != NULL) *b = '\0';
-                memmove(phost, phost + 1, strlen(phost) + 1);
-            } else {
-                char *colon = strchr(phost, ':');
-                if (colon != NULL) *colon = '\0';
-            }
-            if (phost[0] && !host_is_local(phost) &&
-                !block_set_contains(phost, strlen(phost))) {
-                if (proxy_start(c, s, hm, phost)) return;
-            }
-        }
     }
 
     /* Classify blocked requests by type and reply with the most
