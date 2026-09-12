@@ -19,4 +19,21 @@
 
     <!-- Notification -->
     <string name="update_notification_description">Downloading latest ADBlock version…</string>
+
+    <!-- Update feed (GitHub Releases: wxcvm/Doh-ECH) -->
+    <string name="update_feed_checking">Checking for updates…</string>
+    <string name="update_feed_up_to_date">You are up to date (%1$s)</string>
+    <string name="update_feed_available">Version %1$s is available</string>
+    <string name="update_feed_failed">Update check failed: %1$s</string>
+    <string name="update_feed_unreachable">cannot reach the release feed</string>
+    <string name="update_feed_button">Check</string>
+    <string name="update_feed_download">Download</string>
+    <string name="update_feed_manual">Releases page</string>
+    <!-- Downloaded archive verification -->
+    <string name="update_verify_failed">Install cancelled: %1$s</string>
+    <string name="update_verify_unreadable">the downloaded file could not be read</string>
+    <string name="update_verify_unparsable">the downloaded file is not a valid APK</string>
+    <string name="update_verify_package">the package name does not match</string>
+    <string name="update_verify_version">the download is older than the installed version</string>
+    <string name="update_verify_signature">the signature does not match the installed app</string>
 </resources>

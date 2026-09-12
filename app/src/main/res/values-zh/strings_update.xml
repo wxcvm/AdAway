@@ -19,4 +19,21 @@
 
     <!-- Notification -->
     <string name="update_notification_description">正在下载最新ADBlock版本…</string>
+
+    <!-- 更新源（GitHub Releases: wxcvm/Doh-ECH） -->
+    <string name="update_feed_checking">正在检查更新…</string>
+    <string name="update_feed_up_to_date">已是最新版本（%1$s）</string>
+    <string name="update_feed_available">发现新版本 %1$s</string>
+    <string name="update_feed_failed">检查更新失败：%1$s</string>
+    <string name="update_feed_unreachable">无法连接更新服务器</string>
+    <string name="update_feed_button">检查</string>
+    <string name="update_feed_download">下载</string>
+    <string name="update_feed_manual">发布页</string>
+    <!-- 安装包校验 -->
+    <string name="update_verify_failed">已取消安装：%1$s</string>
+    <string name="update_verify_unreadable">安装包无法读取</string>
+    <string name="update_verify_unparsable">安装包不是有效的 APK</string>
+    <string name="update_verify_package">包名与当前应用不一致</string>
+    <string name="update_verify_version">下载的版本低于已安装版本</string>
+    <string name="update_verify_signature">签名与已安装应用不一致</string>
 </resources>

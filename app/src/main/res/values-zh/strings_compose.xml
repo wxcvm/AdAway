@@ -232,4 +232,22 @@
     <string name="compose_stats_status_ok">正常 · 更新于 %1$s</string>
     <string name="compose_stats_status_stale">最后更新 %1$s（可能已过期）</string>
     <string name="compose_stats_status_waiting">规则统计不受影响 · 等待 web 服务器数据</string>
+
+    <!-- 拦截模式（127.0.0.1 / 0.0.0.0） -->
+    <string name="compose_settings_block_mode_title">拦截模式</string>
+    <string name="compose_settings_block_mode_hint">被拦截域名在 hosts 中指向的地址</string>
+    <string name="compose_settings_block_mode_localhost">127.0.0.1</string>
+    <string name="compose_settings_block_mode_null">0.0.0.0</string>
+    <string name="compose_settings_block_mode_localhost_hint">本机拦截：由内置 Web 服务器返回拦截页与占位图，可统计每个应用的拦截量（需占用 80/443 端口）。</string>
+    <string name="compose_settings_block_mode_null_hint">空路由：连接直接失败，不占用任何端口，可与 AdGuard 等其它过滤/代理工具同时使用（无拦截页、无逐应用统计）。</string>
+    <string name="compose_settings_block_mode_custom_hint">自定义重定向地址（可在高级设置中修改 IPv4/IPv6 目标）。</string>
+    <string name="compose_settings_update_check">检查更新</string>
+    <string name="compose_settings_update_check_hint">当前版本 %1$s · 更新源：GitHub Releases</string>
+    <string name="compose_settings_update_downloading">已开始下载，完成后系统会提示安装</string>
+    <!-- 规则源：本地文件 -->
+    <string name="compose_rules_source_type_url">订阅链接</string>
+    <string name="compose_rules_source_type_file">本地文件</string>
+    <string name="compose_rules_pick_file">选择本地规则文件</string>
+    <string name="compose_rules_pick_file_hint">支持 hosts 或规则文本文件；读取本地文件不联网。</string>
+    <string name="compose_rules_add_source_failed">添加失败：链接无效或该订阅已存在</string>
 </resources>

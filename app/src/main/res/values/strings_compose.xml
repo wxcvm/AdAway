@@ -246,4 +246,22 @@
     <string name="compose_stats_status_ok">OK · updated %1$s</string>
     <string name="compose_stats_status_stale">Last update %1$s (may be stale)</string>
     <string name="compose_stats_status_waiting">Hosts statistics unaffected · waiting for web server data</string>
+
+    <!-- Blocking mode (127.0.0.1 / 0.0.0.0) -->
+    <string name="compose_settings_block_mode_title">Blocking mode</string>
+    <string name="compose_settings_block_mode_hint">Address blocked hosts are mapped to in the hosts file</string>
+    <string name="compose_settings_block_mode_localhost">127.0.0.1</string>
+    <string name="compose_settings_block_mode_null">0.0.0.0</string>
+    <string name="compose_settings_block_mode_localhost_hint">Local server: the built-in web server answers with the block page and placeholder images, and per-app statistics work (uses ports 80/443).</string>
+    <string name="compose_settings_block_mode_null_hint">Null route: connections fail immediately and no port is used, so it can run next to AdGuard or any other filter/proxy (no block page, no per-app statistics).</string>
+    <string name="compose_settings_block_mode_custom_hint">Custom redirect address (edit the IPv4/IPv6 targets in the advanced settings).</string>
+    <string name="compose_settings_update_check">Check for updates</string>
+    <string name="compose_settings_update_check_hint">Installed %1$s · source: GitHub Releases</string>
+    <string name="compose_settings_update_downloading">Download started — the installer will pop up when it finishes</string>
+    <!-- Rules source: local file -->
+    <string name="compose_rules_source_type_url">Subscription URL</string>
+    <string name="compose_rules_source_type_file">Local file</string>
+    <string name="compose_rules_pick_file">Choose a local rules file</string>
+    <string name="compose_rules_pick_file_hint">hosts or rules text files; local files are read offline.</string>
+    <string name="compose_rules_add_source_failed">Could not add: invalid URL or the subscription already exists</string>
 </resources>

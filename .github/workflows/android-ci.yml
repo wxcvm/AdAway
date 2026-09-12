@@ -168,6 +168,49 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      # Publish the freshly built APK to the in-app update feed
+      # (GitHub Releases of wxcvm/Doh-ECH, see UpdateModel.RELEASES_API).
+      # Skipped silently when the DOH_ECH_TOKEN secret is not configured, so
+      # forks without it still build.
+      - name: Publish to update feed (wxcvm/Doh-ECH)
+        continue-on-error: true
+        env:
+          FEED_TOKEN: ${{ secrets.DOH_ECH_TOKEN }}
+        run: |
+          if [ -z "$FEED_TOKEN" ]; then
+            echo "DOH_ECH_TOKEN is not configured - skipping update feed publish."
+            exit 0
+          fi
+          VERSION_NAME=$(cut -d'|' -f1 version.txt)
+          VERSION_CODE=$(cut -d'|' -f2 version.txt)
+          APK=app/build/outputs/apk/release/app-release-signed.apk
+          cp "$APK" ADBlock-latest.apk
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          printf '{"version":"%s","versionCode":%s,"changelog":"Automatic build %s from %s"}' \
+            "$VERSION_NAME" "$VERSION_CODE" "$SHORT_SHA" "${{ github.repository }}" > manifest.json
+          export GH_TOKEN="$FEED_TOKEN"
+          gh release create "$VERSION_NAME" ADBlock-latest.apk manifest.json \
+            --repo wxcvm/Doh-ECH --title "ADBlock $VERSION_NAME" \
+            --notes "Automatic build $VERSION_NAME (versionCode $VERSION_CODE) from ${{ github.repository }}@$SHORT_SHA" \
+            || gh release upload "$VERSION_NAME" ADBlock-latest.apk manifest.json --repo wxcvm/Doh-ECH --clobber
+          # Keep the feed tidy: drop CI releases older than the newest 5
+          # (only tags matching our build scheme, never manual releases).
+          curl -s -H "Authorization: Bearer $FEED_TOKEN" \
+            "https://api.github.com/repos/wxcvm/Doh-ECH/releases?per_page=100" \
+            | python3 -c "
+          import json, re, sys
+          rels = [r for r in json.load(sys.stdin)
+                  if not r['draft'] and re.fullmatch(r'[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+', r['tag_name'])]
+          rels.sort(key=lambda r: r['created_at'], reverse=True)
+          print('\\n'.join(str(r['id']) for r in rels[5:]))
+          " > /tmp/old-releases.txt
+          while read -r id; do
+            if [ -n "$id" ]; then
+              curl -s -X DELETE -H "Authorization: Bearer $FEED_TOKEN" \
+                "https://api.github.com/repos/wxcvm/Doh-ECH/releases/$id" || true
+            fi
+          done < /tmp/old-releases.txt
+
   release:
     name: Publish GitHub Release
     needs: build

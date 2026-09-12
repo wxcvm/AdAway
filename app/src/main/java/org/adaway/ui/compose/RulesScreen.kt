@@ -12,6 +12,10 @@ package org.adaway.ui.compose
  * 空状态时订阅卡片仍保留以便用户添加第一个订阅源。
  */
 
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.AlertDialog
@@ -42,8 +47,11 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -56,16 +64,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import org.adaway.R
 import org.adaway.db.entity.HostListItem
 import org.adaway.db.entity.ListType
+import timber.log.Timber
 
 /**
  * Rules screen: whitelist / blacklist / redirect tabs backed by the
@@ -102,6 +114,30 @@ fun RulesScreen(viewModel: StatsViewModel) {
     var ruleRedirectInput by remember { mutableStateOf("") }
     // 订阅源规则删除提示
     var deleteSourceHint by remember { mutableStateOf<org.adaway.db.entity.HostsSource?>(null) }
+    // 添加订阅源：远程链接 or 本地规则文件（SAF）
+    var sourceIsFile by remember { mutableStateOf(false) }
+    var pickedFileUri by remember { mutableStateOf("") }
+    var pickedFileName by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val filePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                // 持久化读权限：同步（可能发生在几天后）时仍然可读
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            } catch (e: SecurityException) {
+                Timber.w(e, "Failed to persist read permission for %s", uri)
+            }
+            pickedFileUri = uri.toString()
+            pickedFileName = queryDisplayName(context, uri)
+        }
+    }
 
     val tabs = listOf(
         RuleTab(R.string.compose_rules_whitelist, ListType.ALLOWED.value, R.string.compose_rules_empty_whitelist),
@@ -134,6 +170,7 @@ fun RulesScreen(viewModel: StatsViewModel) {
                 ),
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -278,27 +315,81 @@ fun RulesScreen(viewModel: StatsViewModel) {
             onDismissRequest = { showAddDialog = false },
             title = { Text(stringResource(R.string.compose_rules_add_source)) },
             text = {
-                OutlinedTextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    label = { Text(stringResource(R.string.compose_rules_source_url_hint)) },
-                    singleLine = true,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
-                    ),
-                )
+                Column {
+                    // 来源类型：远程订阅链接 / 本地规则文件
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = !sourceIsFile,
+                            onClick = { sourceIsFile = false },
+                            label = { Text(stringResource(R.string.compose_rules_source_type_url)) },
+                        )
+                        FilterChip(
+                            selected = sourceIsFile,
+                            onClick = { sourceIsFile = true },
+                            label = { Text(stringResource(R.string.compose_rules_source_type_file)) },
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    if (sourceIsFile) {
+                        // 本地规则：用系统文件选择器挑选 hosts / 规则文本文件
+                        OutlinedButton(
+                            onClick = { filePicker.launch(arrayOf("*/*")) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                Icons.Outlined.FolderOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(stringResource(R.string.compose_rules_pick_file))
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            pickedFileName.ifBlank {
+                                stringResource(R.string.compose_rules_pick_file_hint)
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = urlInput,
+                            onValueChange = { urlInput = it },
+                            label = { Text(stringResource(R.string.compose_rules_source_url_hint)) },
+                            singleLine = true,
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                            ),
+                        )
+                    }
+                }
             },
             confirmButton = {
+                val ready = if (sourceIsFile) pickedFileUri.isNotBlank() else urlInput.isNotBlank()
                 TextButton(
-                    enabled = urlInput.isNotBlank(),
+                    enabled = ready,
                     onClick = {
-                        val url = urlInput
+                        val url = if (sourceIsFile) pickedFileUri else urlInput
+                        val label = if (sourceIsFile) pickedFileName else null
                         showAddDialog = false
                         urlInput = ""
-                        viewModel.addSource(url) { ok ->
+                        pickedFileUri = ""
+                        pickedFileName = ""
+                        sourceIsFile = false
+                        viewModel.addSource(url, label) { ok ->
                             if (ok) {
                                 reloadSources()
                                 viewModel.syncHosts()
+                            } else {
+                                // 链接非法或订阅已存在：给出明确反馈而不是静默失败
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        context.getString(R.string.compose_rules_add_source_failed),
+                                    )
+                                }
                             }
                         }
                     },
@@ -598,4 +689,18 @@ private fun ruleTint(type: ListType): androidx.compose.ui.graphics.Color = when 
     ListType.BLOCKED -> MaterialTheme.colorScheme.error
     ListType.ALLOWED -> MaterialTheme.colorScheme.primary
     ListType.REDIRECTED -> MaterialTheme.colorScheme.tertiary
+}
+
+/**
+ * 查询 SAF 文件显示名，用于订阅源标签（失败时回退为 URI 末段）。
+ */
+private fun queryDisplayName(context: android.content.Context, uri: Uri): String {
+    return try {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        } ?: uri.lastPathSegment?.substringAfterLast('/') ?: uri.toString()
+    } catch (e: Exception) {
+        uri.lastPathSegment ?: uri.toString()
+    }
 }

@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -66,6 +67,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -362,6 +364,64 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             )
                         }
                     }
+                }
+            }
+
+// ── 拦截模式：127.0.0.1（本机拦截页）/ 0.0.0.0（空路由，可与 AdGuard 等共存）──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_block_mode_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_settings_block_mode_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    var blockMode by remember { mutableStateOf(viewModel.currentBlockMode()) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = blockMode == org.adaway.util.BlockMode.LOCALHOST,
+                            onClick = {
+                                blockMode = org.adaway.util.BlockMode.LOCALHOST
+                                viewModel.applyBlockMode(org.adaway.util.BlockMode.LOCALHOST)
+                            },
+                            label = {
+                                Text(stringResource(R.string.compose_settings_block_mode_localhost))
+                            },
+                        )
+                        FilterChip(
+                            selected = blockMode == org.adaway.util.BlockMode.NULL_ROUTE,
+                            onClick = {
+                                blockMode = org.adaway.util.BlockMode.NULL_ROUTE
+                                viewModel.applyBlockMode(org.adaway.util.BlockMode.NULL_ROUTE)
+                            },
+                            label = {
+                                Text(stringResource(R.string.compose_settings_block_mode_null))
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        stringResource(
+                            when (blockMode) {
+                                org.adaway.util.BlockMode.NULL_ROUTE ->
+                                    R.string.compose_settings_block_mode_null_hint
+                                org.adaway.util.BlockMode.CUSTOM ->
+                                    R.string.compose_settings_block_mode_custom_hint
+                                else -> R.string.compose_settings_block_mode_localhost_hint
+                            },
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
@@ -1051,6 +1111,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
+                    // 检查更新（更新源：GitHub Releases / wxcvm/Doh-ECH）
+                    UpdateCheckRow(viewModel = viewModel, currentVersion = versionName)
                 }
             }
 
@@ -1360,6 +1422,111 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 检查更新行：更新源为 GitHub Releases（wxcvm/Doh-ECH）。
+ *
+ * 显示当前版本与检查结果；发现新版本时提供下载按钮（下载完成后由
+ * ApkDownloadReceiver 校验签名/版本再交给系统安装器）。
+ */
+@Composable
+private fun UpdateCheckRow(viewModel: StatsViewModel, currentVersion: String) {
+    val context = LocalContext.current
+    var checking by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var available by remember { mutableStateOf<org.adaway.model.update.Manifest?>(null) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Outlined.Refresh,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.compose_settings_update_check),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    message ?: stringResource(R.string.compose_settings_update_check_hint, currentVersion),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(
+                enabled = !checking,
+                onClick = {
+                    checking = true
+                    message = context.getString(R.string.update_feed_checking)
+                    viewModel.checkUpdate(force = true) { manifest, error ->
+                        checking = false
+                        when {
+                            manifest == null -> {
+                                available = null
+                                message = context.getString(
+                                    R.string.update_feed_failed,
+                                    error ?: context.getString(R.string.update_feed_unreachable),
+                                )
+                            }
+
+                            manifest.updateAvailable -> {
+                                available = manifest
+                                message = context.getString(
+                                    R.string.update_feed_available,
+                                    manifest.version,
+                                )
+                            }
+
+                            else -> {
+                                available = null
+                                message = context.getString(
+                                    R.string.update_feed_up_to_date,
+                                    manifest.version,
+                                )
+                            }
+                        }
+                    }
+                },
+            ) { Text(stringResource(R.string.update_feed_button)) }
+        }
+        available?.let { manifest ->
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(
+                    onClick = {
+                        viewModel.downloadUpdate()
+                        message = context.getString(R.string.compose_settings_update_downloading)
+                    },
+                ) { Text(stringResource(R.string.update_feed_download)) }
+                Spacer(Modifier.width(8.dp))
+                TextButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(org.adaway.model.update.UpdateModel.getReleasesPage()),
+                            ),
+                        )
+                    },
+                ) { Text(stringResource(R.string.update_feed_manual)) }
+            }
+            manifest.changelog.takeIf { it.isNotBlank() }?.let { changelog ->
+                Text(
+                    changelog,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 8,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

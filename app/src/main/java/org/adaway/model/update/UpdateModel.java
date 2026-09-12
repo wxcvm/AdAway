@@ -1,9 +1,7 @@
 package org.adaway.model.update;
 
 import static android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE;
-import static android.os.Build.VERSION.SDK_INT;
 import static org.adaway.model.update.UpdateStore.getApkStore;
-import static java.util.Objects.requireNonNull;
 
 import android.app.DownloadManager;
 import android.content.Context;
@@ -13,17 +11,19 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 
 import androidx.core.content.ContextCompat;
-
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 
 import org.adaway.R;
 import org.adaway.helper.PreferenceHelper;
+import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
-import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -33,16 +33,46 @@ import timber.log.Timber;
 /**
  * This class is the model in charge of updating the application.
  *
+ * <p>The update feed is the GitHub Releases list of <b>wxcvm/Doh-ECH</b>: the
+ * newest published release carrying an APK asset is offered for install. When
+ * such a release also ships a <code>manifest.json</code> asset, its explicit
+ * version code is authoritative; otherwise the tag name is compared with the
+ * running version name, so a release published by hand (APK only) still works.</p>
+ *
  * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
  */
 public class UpdateModel {
-    private static final String MANIFEST_URL = "https://github.com/wxcvm/AdAway/releases/latest/download/manifest.json";
-    private static final String DOWNLOAD_URL = "https://github.com/wxcvm/AdAway/releases/latest/download/AdAway-latest.apk?versionCode=";
+    /**
+     * The GitHub repository hosting the release feed (owner/name).
+     */
+    private static final String RELEASES_REPO = "wxcvm/Doh-ECH";
+    /**
+     * The GitHub releases API endpoint (newest first, drafts excluded by GitHub).
+     */
+    private static final String RELEASES_API = "https://api.github.com/repos/" + RELEASES_REPO + "/releases?per_page=30";
+    /**
+     * The human readable releases page, used as manual fallback link.
+     */
+    private static final String RELEASES_PAGE = "https://github.com/" + RELEASES_REPO + "/releases";
+    /**
+     * The optional release asset carrying an explicit version code.
+     */
+    private static final String MANIFEST_ASSET_NAME = "manifest.json";
+    /**
+     * How long a successful check is reused before hitting the API again.
+     * The unauthenticated GitHub API is limited to 60 requests per hour per
+     * IP, and the check runs on every app start, so results are cached.
+     */
+    private static final long CHECK_CACHE_DELAY = 30L * 60L * 1000L;
+
     private final Context context;
     private final VersionInfo versionInfo;
     private final OkHttpClient client;
     private final MutableLiveData<Manifest> manifest;
     private ApkDownloadReceiver receiver;
+    private Manifest cachedManifest;
+    private long lastCheckAt;
+    private String lastError;
 
     /**
      * Constructor.
@@ -85,6 +115,24 @@ public class UpdateModel {
     }
 
     /**
+     * Get the releases page of the update feed.
+     *
+     * @return The releases page URL.
+     */
+    public static String getReleasesPage() {
+        return RELEASES_PAGE;
+    }
+
+    /**
+     * Get the last check failure reason ({@code null} when the last check succeeded).
+     *
+     * @return The last error, or {@code null}.
+     */
+    public String getLastError() {
+        return this.lastError;
+    }
+
+    /**
      * Get the application update store.
      *
      * @return The application update store.
@@ -103,14 +151,36 @@ public class UpdateModel {
     }
 
     /**
-     * Check if there is an update available.
+     * Check if there is an update available, reusing a recent result when possible.
      */
     public void checkForUpdate() {
-        Manifest manifest = downloadManifest();
-        // Notify update
-        if (manifest != null) {
-            this.manifest.postValue(manifest);
+        checkForUpdate(false);
+    }
+
+    /**
+     * Check if there is an update available.
+     *
+     * @param force {@code true} to bypass the short lived result cache.
+     * @return The manifest, or {@code null} if the check failed.
+     */
+    public Manifest checkForUpdate(boolean force) {
+        if (!force
+                && this.cachedManifest != null
+                && System.currentTimeMillis() - this.lastCheckAt < CHECK_CACHE_DELAY) {
+            this.manifest.postValue(this.cachedManifest);
+            return this.cachedManifest;
         }
+        Manifest manifest = downloadManifest();
+        this.lastCheckAt = System.currentTimeMillis();
+        if (manifest != null) {
+            this.cachedManifest = manifest;
+            this.lastError = null;
+            this.manifest.postValue(manifest);
+        } else if (this.cachedManifest == null) {
+            // Keep the previous result (if any) instead of clearing the UI.
+            this.lastError = this.lastError == null ? "unreachable" : this.lastError;
+        }
+        return manifest;
     }
 
     private OkHttpClient buildHttpClient() {
@@ -121,28 +191,176 @@ public class UpdateModel {
         if (!this.versionInfo.isValid()) {
             return null;
         }
-        HttpUrl httpUrl = requireNonNull(HttpUrl.parse(MANIFEST_URL), "Failed to parse manifest URL")
-                .newBuilder()
-                .addQueryParameter("versionCode", Integer.toString(this.versionInfo.code))
-                .addQueryParameter("sdkCode", Integer.toString(SDK_INT))
-                .addQueryParameter("channel", getChannel())
-                .addQueryParameter("store", getStore().getName())
-                .build();
         Request request = new Request.Builder()
-                .url(httpUrl)
+                .url(RELEASES_API)
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "ADBlock/" + this.versionInfo.name)
                 .build();
-        try (Response execute = this.client.newCall(request).execute();
-             ResponseBody body = execute.body()) {
-            if (execute.isSuccessful() && body != null) {
-                return new Manifest(body.string(), this.versionInfo.code);
-            } else {
+        try (Response response = this.client.newCall(request).execute();
+             ResponseBody body = response.body()) {
+            if (!response.isSuccessful() || body == null) {
+                Timber.w("Update check failed with HTTP %s.", response.code());
+                this.lastError = "HTTP " + response.code();
                 return null;
             }
+            return parseReleases(new JSONArray(body.string()));
         } catch (IOException | JSONException exception) {
-            Timber.e(exception, "Unable to download manifest.");
-            // Return failed
+            Timber.e(exception, "Unable to download the release list.");
+            this.lastError = exception.getClass().getSimpleName();
             return null;
         }
+    }
+
+    /**
+     * Pick the newest published release shipping an APK and turn it into a manifest.
+     */
+    private Manifest parseReleases(JSONArray releases) throws JSONException {
+        JSONObject newest = null;
+        String newestDate = null;
+        for (int i = 0; i < releases.length(); i++) {
+            JSONObject release = releases.optJSONObject(i);
+            if (release == null || release.optBoolean("draft", false)) {
+                continue;
+            }
+            if (findApkAsset(release) == null) {
+                continue;
+            }
+            String date = release.optString("published_at", release.optString("created_at", ""));
+            if (newestDate == null || date.compareTo(newestDate) > 0) {
+                newestDate = date;
+                newest = release;
+            }
+        }
+        if (newest == null) {
+            this.lastError = "no-release";
+            return null;
+        }
+        return buildManifest(newest);
+    }
+
+    private Manifest buildManifest(JSONObject release) {
+        JSONObject apk = findApkAsset(release);
+        String downloadUrl = apk == null ? "" : apk.optString("browser_download_url", "");
+        String tag = release.optString("tag_name", "");
+        String version = tag.startsWith("v") || tag.startsWith("V") ? tag.substring(1) : tag;
+        String changelog = release.optString("body", "").trim();
+        if (changelog.isEmpty()) {
+            changelog = release.optString("name", "").trim();
+        }
+        // An explicit manifest.json asset wins: it carries the real version code.
+        JSONObject manifestAsset = findAsset(release, MANIFEST_ASSET_NAME);
+        if (manifestAsset != null) {
+            JSONObject json = fetchJson(manifestAsset.optString("browser_download_url", ""));
+            if (json != null) {
+                int versionCode = json.optInt("versionCode", -1);
+                String manifestVersion = json.optString("version", version);
+                String manifestChangelog = json.optString("changelog", changelog);
+                return new Manifest(manifestVersion, versionCode, manifestChangelog, downloadUrl,
+                        versionCode > this.versionInfo.code);
+            }
+        }
+        boolean updateAvailable = compareVersions(version, this.versionInfo.name) > 0;
+        return new Manifest(version, -1, changelog, downloadUrl, updateAvailable);
+    }
+
+    private JSONObject fetchJson(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+        Request request = new Request.Builder()
+                .url(url)
+                .header("User-Agent", "ADBlock/" + this.versionInfo.name)
+                .build();
+        try (Response response = this.client.newCall(request).execute();
+             ResponseBody body = response.body()) {
+            if (!response.isSuccessful() || body == null) {
+                return null;
+            }
+            return new JSONObject(body.string());
+        } catch (IOException | JSONException exception) {
+            Timber.w(exception, "Unable to read the release manifest asset.");
+            return null;
+        }
+    }
+
+    private static JSONObject findAsset(JSONObject release, String name) {
+        JSONArray assets = release.optJSONArray("assets");
+        if (assets == null) {
+            return null;
+        }
+        for (int i = 0; i < assets.length(); i++) {
+            JSONObject asset = assets.optJSONObject(i);
+            if (asset != null && name.equalsIgnoreCase(asset.optString("name", ""))) {
+                return asset;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Find the APK asset of a release, tolerating any file name the release uses.
+     */
+    private static JSONObject findApkAsset(JSONObject release) {
+        JSONArray assets = release.optJSONArray("assets");
+        if (assets == null) {
+            return null;
+        }
+        JSONObject fallback = null;
+        for (int i = 0; i < assets.length(); i++) {
+            JSONObject asset = assets.optJSONObject(i);
+            if (asset == null) {
+                continue;
+            }
+            String name = asset.optString("name", "");
+            if (!name.toLowerCase().endsWith(".apk")) {
+                continue;
+            }
+            String lower = name.toLowerCase();
+            if (lower.startsWith("adblock-latest") || lower.startsWith("adblock-")) {
+                return asset;
+            }
+            if (fallback == null) {
+                fallback = asset;
+            }
+        }
+        return fallback;
+    }
+
+    /**
+     * Compare two dotted version names numerically.
+     *
+     * @return A negative value when {@code left} is older than {@code right}.
+     */
+    static int compareVersions(String left, String right) {
+        List<Integer> a = versionParts(left);
+        List<Integer> b = versionParts(right);
+        int size = Math.max(a.size(), b.size());
+        for (int i = 0; i < size; i++) {
+            int va = i < a.size() ? a.get(i) : 0;
+            int vb = i < b.size() ? b.get(i) : 0;
+            if (va != vb) {
+                return va < vb ? -1 : 1;
+            }
+        }
+        return 0;
+    }
+
+    private static List<Integer> versionParts(String version) {
+        List<Integer> parts = new ArrayList<>();
+        if (version == null) {
+            return parts;
+        }
+        for (String token : version.split("[^0-9]+")) {
+            if (token.isEmpty()) {
+                continue;
+            }
+            try {
+                parts.add(Integer.parseInt(token));
+            } catch (NumberFormatException ignored) {
+                // Ignore oversized components.
+            }
+        }
+        return parts;
     }
 
     /**
@@ -153,6 +371,9 @@ public class UpdateModel {
     public long update() {
         // Check manifest
         Manifest manifest = this.manifest.getValue();
+        if (manifest == null) {
+            manifest = this.cachedManifest;
+        }
         if (manifest == null) {
             return -1;
         }
@@ -170,11 +391,15 @@ public class UpdateModel {
     }
 
     private long download(Manifest manifest) {
-        Timber.i("Downloading " + manifest.version + ".");
-        Uri uri = Uri.parse(DOWNLOAD_URL + manifest.versionCode);
+        String url = manifest.downloadUrl == null || manifest.downloadUrl.isEmpty()
+                ? RELEASES_PAGE
+                : manifest.downloadUrl;
+        Timber.i("Downloading %s from %s.", manifest.version, url);
+        Uri uri = Uri.parse(url);
         DownloadManager.Request request = new DownloadManager.Request(uri)
                 .setMimeType("application/vnd.android.package-archive")
                 .setTitle("ADBlock " + manifest.version)
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDescription(this.context.getString(R.string.update_notification_description));
         DownloadManager downloadManager = this.context.getSystemService(DownloadManager.class);
         return downloadManager.enqueue(request);

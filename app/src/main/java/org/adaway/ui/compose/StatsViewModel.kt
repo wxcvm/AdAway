@@ -502,18 +502,35 @@ fun refreshServerStats() {
         }
     }
 
-    /** Add a new subscription from a hosts URL; returns false on failure. */
-    fun addSource(url: String, onDone: (Boolean) -> Unit) {
+    /**
+     * 添加一个规则源：远程订阅链接（https://…）或本地规则文件（content://…）。
+     *
+     * 本地文件通过 SAF 选择，调用方必须已调用 takePersistableUriPermission()
+     * 获得持久化读权限，否则同步时会读取失败。
+     *
+     * @param url   订阅链接或本地文件 URI
+     * @param label 显示名称（本地文件使用文件名；为空时按 URL 推导）
+     * @param onDone 结果回调（false = 链接非法或已存在）
+     */
+    fun addSource(url: String, label: String? = null, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
+                    val normalized = url.trim()
+                    if (!org.adaway.db.entity.HostsSource.isValidUrl(normalized)) {
+                        Timber.w("Rejected hosts source, unsupported URL: %s", normalized)
+                        return@withContext false
+                    }
                     val dao = database.hostsSourceDao()
                     val source = org.adaway.db.entity.HostsSource()
-                    source.setUrl(url.trim())
-                    source.setLabel(deriveSourceLabel(url))
+                    source.setUrl(normalized)
+                    source.setLabel(
+                        label?.takeIf { it.isNotBlank() } ?: deriveSourceLabel(normalized),
+                    )
                     dao.insert(source)
                     true
                 } catch (e: Exception) {
+                    // 唯一索引冲突（源已存在）等：返回 false 由界面提示
                     Timber.w(e, "Failed to add source %s", url)
                     false
                 }
@@ -556,6 +573,62 @@ fun refreshServerStats() {
                 _syncing.value = false
             }
         }
+    }
+
+    /**
+     * 切换拦截模式（[org.adaway.util.BlockMode.LOCALHOST] = 127.0.0.1 本机拦截页，
+     * [org.adaway.util.BlockMode.NULL_ROUTE] = 0.0.0.0 空路由），并立即重新生成
+     * hosts 文件使其生效。
+     */
+    fun applyBlockMode(mode: Int, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val app = getApplication<Application>()
+                    org.adaway.util.BlockMode.apply(app, mode)
+                    adBlockModel.apply()
+                    true
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to apply blocking mode %d", mode)
+                    false
+                }
+            }
+            onDone(ok)
+        }
+    }
+
+    /** 当前拦截模式：0=127.0.0.1 本机拦截，1=0.0.0.0 空路由，2=自定义。 */
+    fun currentBlockMode(): Int = org.adaway.util.BlockMode.current(getApplication())
+
+    /**
+     * 检查应用更新（更新源：GitHub Releases / wxcvm/Doh-ECH）。
+     *
+     * @param force 为 true 时忽略 30 分钟的结果缓存
+     * @param onResult 回调（新版本对象, 失败原因）；失败时对象为 null
+     */
+    fun checkUpdate(
+        force: Boolean,
+        onResult: (org.adaway.model.update.Manifest?, String?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val model = (app as org.adaway.AdAwayApplication).getUpdateModel()
+            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    model.checkForUpdate(force)
+                } catch (e: Exception) {
+                    Timber.w(e, "Update check failed")
+                    null
+                }
+            }
+            onResult(result, if (result == null) model.lastError else null)
+        }
+    }
+
+    /** 下载最新版本 APK（校验签名/版本后由系统安装器安装）。 */
+    fun downloadUpdate() {
+        val app = getApplication<Application>()
+        (app as org.adaway.AdAwayApplication).getUpdateModel().update()
     }
 
     override fun onCleared() {
