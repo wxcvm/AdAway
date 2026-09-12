@@ -264,4 +264,5 @@
     <string name="compose_rules_pick_file">Choose a local rules file</string>
     <string name="compose_rules_pick_file_hint">hosts or rules text files; local files are read offline.</string>
     <string name="compose_rules_add_source_failed">Could not add: invalid URL or the subscription already exists</string>
+    <string name="compose_settings_block_mode_adguard_hint">Works together with AdGuard and similar tools: set the blocking mode to 127.0.0.1 (local block page) or 0.0.0.0 (null route). Use 0.0.0.0 when running AdGuard at the same time — it does not take ports 80/443 and leaves the filtering to AdGuard; use 127.0.0.1 when this app is the only blocker.</string>
 </resources>

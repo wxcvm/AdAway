@@ -250,4 +250,5 @@
     <string name="compose_rules_pick_file">选择本地规则文件</string>
     <string name="compose_rules_pick_file_hint">支持 hosts 或规则文本文件；读取本地文件不联网。</string>
     <string name="compose_rules_add_source_failed">添加失败：链接无效或该订阅已存在</string>
+    <string name="compose_settings_block_mode_adguard_hint">可配合 AdGuard 等使用：需要把拦截模式设为 127.0.0.1（本机拦截页）或 0.0.0.0（空路由）。与 AdGuard 同时使用时选 0.0.0.0 —— 不占用 80/443 端口，交给 AdGuard 过滤；只使用本应用时选 127.0.0.1。</string>
 </resources>

@@ -384,6 +384,13 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(6.dp))
+                    // 与 AdGuard 等其它过滤工具搭配使用的提示
+                    Text(
+                        stringResource(R.string.compose_settings_block_mode_adguard_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                     Spacer(Modifier.height(8.dp))
                     var blockMode by remember { mutableStateOf(viewModel.currentBlockMode()) }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
