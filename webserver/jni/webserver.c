@@ -2214,21 +2214,26 @@ static void proxy_on_data(struct proxy_state *st, const char *data, size_t n) {
     if (hend == 0) return;   /* headers still incomplete */
     char ctype[64];
     ctype[0] = '\0';
+    bool encoded = false;
     for (size_t i = 0; i + 13 < hend; i++) {
-        if (strncasecmp(st->buf + i, "content-type:", 13) == 0) {
+        if (ctype[0] == '\0' && strncasecmp(st->buf + i, "content-type:", 13) == 0) {
             size_t v = i + 13;
             while (v < hend && (st->buf[v] == ' ' || st->buf[v] == '\t')) v++;
             size_t c = 0;
             while (v < hend && c < sizeof(ctype) - 1 &&
                    st->buf[v] != '\r' && st->buf[v] != '\n' && st->buf[v] != ';') ctype[c++] = st->buf[v++];
             ctype[c] = '\0';
-            break;
+        } else if (strncasecmp(st->buf + i, "content-encoding:", 17) == 0 ||
+                   strncasecmp(st->buf + i, "transfer-encoding:", 18) == 0) {
+            /* Compressed or chunked bodies must not be rewritten: stream them. */
+            encoded = true;
         }
     }
     st->headers_done = true;
     st->head_len = hend;
-    bool html = strncasecmp(ctype, "text/html", 9) == 0 ||
-                strncasecmp(ctype, "application/xhtml", 17) == 0;
+    bool html = !encoded &&
+                (strncasecmp(ctype, "text/html", 9) == 0 ||
+                 strncasecmp(ctype, "application/xhtml", 17) == 0);
     if (html) {
         st->filter_body = true;
         return;
@@ -2281,6 +2286,14 @@ static void proxy_fn(struct mg_connection *c, int ev, void *ev_data) {
         proxy_state_free(st);
         c->fn_data = NULL;
     }
+}
+
+/* Is a proxy request currently in flight for this client connection? */
+static bool proxy_busy(struct mg_connection *c) {
+    for (int i = 0; i < PROXY_MAX; i++) {
+        if (s_proxies[i] && s_proxies[i]->client == c) return true;
+    }
+    return false;
 }
 
 static bool proxy_start(struct mg_connection *c, struct settings *s,
@@ -2442,6 +2455,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 
     /* Idle-timeout enforcement */
     if (ev == MG_EV_POLL && c->data[sizeof(uint64_t)]) {
+        /* A transparent-proxy request may legitimately take longer than the
+           idle timeout, so it is exempt while it is in flight. */
+        if (proxy_busy(c)) return;
         uint64_t accepted_at; memcpy(&accepted_at, c->data, sizeof(accepted_at));
         if (mg_millis() - accepted_at > IDLE_TIMEOUT_MS) {
             c->is_draining = 1; return;
@@ -2646,6 +2662,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                 bool allowed_uid = (req_uid != (uid_t)-1) &&
                                    uid_is_allowed(chk_uid, s->resource_dir);
                 if (allowed_uid || !block_set_contains(phost, strlen(phost))) {
+                    /* A pipelined request on a connection that is already
+                       proxying is dropped (the first reply is still
+                       streaming back to the client). */
+                    if (proxy_busy(c)) return;
                     if (proxy_start(c, s, hm, phost)) return;
                 }
             }
