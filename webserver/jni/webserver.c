@@ -223,6 +223,7 @@ struct settings {
     char              resource_dir[PATH_MAX];
     char              test_path[PATH_MAX];
     struct ca_state   ca;
+    bool              proxy_filter; /* transparent hijack proxy (--proxy-filter) */
     bool              debug;
     bool              bind_all;   /* listen on all interfaces */
     int               http_port;  /* HTTP listen port (default 80) */
@@ -1845,6 +1846,518 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         apps_json, tls_json, hist_json, daily_json);
 }
 
+/* ── Transparent filtering proxy (hijack mode) ───────────────────
+ *
+ * In "hijack" mode the Android app installs iptables REDIRECT rules so
+ * that the whole TCP 80/443 traffic of the device lands on these very
+ * listeners (the HTTPS side is already terminated with a per-domain
+ * certificate issued by our CA, so the request is readable here). Every
+ * request for a host that is NOT in the block list is forwarded to the
+ * real origin server and the answer is filtered on the way back:
+ *
+ *   - HTML: external <script>/<iframe>/<link>/<img>/... tags whose host
+ *     is blocked are removed and a small element-hiding stylesheet is
+ *     injected (AdGuard-like cosmetic filtering);
+ *   - every other response is streamed through untouched;
+ *   - hosts that ARE in the block list keep the usual local placeholder
+ *     replies (reply_blocked_by_type), i.e. requests stay blocked.
+ *
+ * The block list is the system hosts file (that is what actually blocks
+ * on Android, written by the app), so it is always in sync with the
+ * app's rules. Only enabled with --proxy-filter.
+ */
+#define PROXY_MAX 128
+#define PROXY_BUF_MAX (4u * 1024u * 1024u)
+#define PROXY_TIMEOUT_MS 60000u
+#define PROXY_CONNECT_TIMEOUT_MS 15000u
+
+struct proxy_state {
+    struct mg_connection *client;
+    struct mg_connection *up;
+    char       host[256];
+    int        port;
+    bool       tls;
+    char      *req;
+    size_t     req_len;
+    char      *buf;
+    size_t     buf_len;
+    size_t     buf_cap;
+    size_t     head_len;      /* response header block length in buf */
+    bool       headers_done;
+    bool       filter_body;   /* HTML: buffer + rewrite */
+    bool       replied;
+    bool       connected;
+    uint64_t   started_ms;
+};
+
+static struct mg_mgr *s_mgr;
+static struct proxy_state *s_proxies[PROXY_MAX];
+
+/* ── blocked-host table (64-bit FNV-1a hashes, open addressing) ── */
+#define BLOCK_HASH_BITS 21
+#define BLOCK_HASH_SLOTS (1u << BLOCK_HASH_BITS)
+static uint64_t *s_block_slots;
+static size_t s_block_used;
+
+static uint64_t fnv1a_lower(const char *s, size_t n) {
+    uint64_t h = 1469598103934665603ULL;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char) s[i];
+        if (c >= 'A' && c <= 'Z') c = (unsigned char) (c + 32);
+        h ^= c;
+        h *= 1099511628211ULL;
+    }
+    return h ? h : 1;
+}
+
+static void block_set_add_hash(uint64_t h) {
+    if (!s_block_slots) {
+        s_block_slots = (uint64_t *) calloc(BLOCK_HASH_SLOTS, sizeof(uint64_t));
+        if (!s_block_slots) return;
+    }
+    if (s_block_used * 2 >= BLOCK_HASH_SLOTS) return;   /* keep load < 50% */
+    size_t i = (size_t) (h & (BLOCK_HASH_SLOTS - 1));
+    for (size_t probe = 0; probe < 128; probe++) {
+        size_t k = (i + probe) & (BLOCK_HASH_SLOTS - 1);
+        if (s_block_slots[k] == 0) { s_block_slots[k] = h; s_block_used++; return; }
+        if (s_block_slots[k] == h) return;
+    }
+}
+
+static bool block_set_contains(const char *host, size_t len) {
+    if (!s_block_slots || len == 0 || len > 255) return false;
+    uint64_t h = fnv1a_lower(host, len);
+    size_t i = (size_t) (h & (BLOCK_HASH_SLOTS - 1));
+    for (size_t probe = 0; probe < 128; probe++) {
+        size_t k = (i + probe) & (BLOCK_HASH_SLOTS - 1);
+        if (s_block_slots[k] == 0) return false;
+        if (s_block_slots[k] == h) return true;
+    }
+    return false;
+}
+
+/* Load the blocked hosts from a hosts file (127.0.0.1/0.0.0.0/::1/::). */
+static void block_set_load(const char *path) {
+    free(s_block_slots);
+    s_block_slots = NULL;
+    s_block_used = 0;
+#ifndef _WIN32
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        LOG_INFO("proxy: %s not readable - block list empty", path);
+        return;
+    }
+    char line[512];
+    size_t n = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0') continue;
+        char *ip = p;
+        while (*p && *p != ' ' && *p != '\t') p++;
+        if (!*p) continue;
+        *p++ = '\0';
+        if (strcmp(ip, "127.0.0.1") != 0 && strcmp(ip, "0.0.0.0") != 0 &&
+            strcmp(ip, "::1") != 0 && strcmp(ip, "::") != 0) continue;
+        while (*p == ' ' || *p == '\t') p++;
+        char *h = p;
+        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') p++;
+        *p = '\0';
+        if (*h) { block_set_add_hash(fnv1a_lower(h, strlen(h))); n++; }
+    }
+    fclose(f);
+    LOG_INFO("proxy: %zu blocked hosts loaded from %s", n, path);
+#else
+    (void) path;
+#endif
+}
+
+static bool host_is_local(const char *h) {
+    if (!h || !*h) return true;
+    if (strcasecmp(h, "localhost") == 0) return true;
+    if (strcasecmp(h, "localhost.localdomain") == 0) return true;
+    if (strncmp(h, "127.", 4) == 0) return true;
+    if (strcmp(h, "::1") == 0) return true;
+    if (strncmp(h, "::ffff:127.", 11) == 0) return true;
+    return false;
+}
+
+/* Element-hiding stylesheet injected into proxied HTML pages. */
+static const char kHideCss[] =
+    "<style id=\"adblock-hide\">"
+    ".adsbygoogle,ins.adsbygoogle,[id^=\"google_ads\"],[id^=\"div-gpt-ad\"],"
+    "[class^=\"ad-\"],[class^=\"ads-\"],[class^=\"advert\"],[id^=\"ad-\"],[id^=\"ads-\"],"
+    "[class*=\" ad-\"],[class*=\" ads-\"],[data-ad-slot],[data-ad-client],"
+    "iframe[src*=\"doubleclick.net\"],iframe[src*=\"googlesyndication.com\"],"
+    "iframe[src*=\"adsystem\"],[class$=\"-ad\"],[class$=\"-ads\"]"
+    "{display:none!important;visibility:hidden!important}"
+    "</style>";
+
+/* Extract the host of an URL and test it against the block list. */
+static bool url_host_blocked(const char *u, size_t n) {
+    size_t i = 0;
+    while (i < n && (u[i] == ' ' || u[i] == '\t')) i++;
+    if (i + 1 < n && u[i] == '/' && u[i + 1] == '/') {
+        i += 2;
+    } else {
+        size_t s = i;
+        while (i < n && u[i] != ':' && u[i] != '/' && u[i] != '?' && u[i] != '#') i++;
+        if (i < n && u[i] == ':') {
+            i++;
+            while (i < n && u[i] == '/') i++;
+        } else {
+            i = s;
+        }
+    }
+    size_t start = i;
+    while (i < n && u[i] != '/' && u[i] != ':' && u[i] != '?' && u[i] != '#' &&
+           u[i] != '"' && u[i] != '\'' && u[i] != ' ' && u[i] != '\t') i++;
+    size_t len = i - start;
+    for (size_t k = start; k < start + len; k++) {
+        if (u[k] == '@') { len -= (k - start + 1); start = k + 1; break; }
+    }
+    return len > 0 && block_set_contains(u + start, len);
+}
+
+/*
+ * Rewrite an HTML body: drop external resource tags that point at a
+ * blocked host and inject the element-hiding stylesheet after <head>.
+ * Returns the new length (may exceed the input by the stylesheet size).
+ */
+static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
+    size_t i = 0, o = 0;
+    bool injected = false;
+#define AB_PUT(ch) do { if (o < cap) out[o] = (char) (ch); o++; } while (0)
+    while (i < n) {
+        if (in[i] != '<') { AB_PUT(in[i]); i++; continue; }
+        size_t j = i + 1;
+        bool closing = false;
+        if (j < n && in[j] == '/') { closing = true; j++; }
+        size_t name_at = j;
+        while (j < n && ((in[j] >= 'a' && in[j] <= 'z') || (in[j] >= 'A' && in[j] <= 'Z'))) j++;
+        size_t name_len = j - name_at;
+        if (name_len == 0) { AB_PUT(in[i]); i++; continue; }
+        size_t k = j;
+        bool inq = false;
+        char q = 0;
+        while (k < n) {
+            char ch = in[k];
+            if (inq) { if (ch == q) inq = false; }
+            else if (ch == '"' || ch == '\'') { inq = true; q = ch; }
+            else if (ch == '>') break;
+            k++;
+        }
+        size_t tag_end = (k < n) ? k + 1 : n;
+        if (!closing) {
+            static const char *kRes[] = {"script", "iframe", "img", "link", "embed",
+                                         "object", "source", "ins", "video", "audio", NULL};
+            bool resource = false;
+            for (int t = 0; kRes[t]; t++) {
+                if (name_len == strlen(kRes[t]) &&
+                    strncasecmp(in + name_at, kRes[t], name_len) == 0) { resource = true; break; }
+            }
+            if (resource) {
+                static const char *kAttrs[] = {"src", "href", "data-src", "data-original", "poster", NULL};
+                bool blocked = false;
+                for (int t = 0; kAttrs[t] && !blocked; t++) {
+                    size_t alen = strlen(kAttrs[t]);
+                    for (size_t p = j; p + alen < tag_end; p++) {
+                        if (strncasecmp(in + p, kAttrs[t], alen) != 0) continue;
+                        if (p > j && in[p - 1] != ' ' && in[p - 1] != '\t' && in[p - 1] != '\n' && in[p - 1] != '\r') continue;
+                        size_t v = p + alen;
+                        while (v < tag_end && (in[v] == ' ' || in[v] == '\t')) v++;
+                        if (v >= tag_end || in[v] != '=') continue;
+                        v++;
+                        while (v < tag_end && (in[v] == ' ' || in[v] == '\t')) v++;
+                        char quote = 0;
+                        if (v < tag_end && (in[v] == '"' || in[v] == '\'')) { quote = in[v]; v++; }
+                        size_t vs = v;
+                        while (v < tag_end && (quote ? in[v] != quote
+                                                     : (in[v] != ' ' && in[v] != '>' && in[v] != '\t' && in[v] != '\n'))) v++;
+                        if (url_host_blocked(in + vs, v - vs)) { blocked = true; break; }
+                    }
+                }
+                if (blocked) { i = tag_end; continue; }   /* drop the whole tag */
+            }
+            if (!injected && name_len == 4 && strncasecmp(in + name_at, "head", 4) == 0) {
+                for (size_t p = i; p < tag_end; p++) AB_PUT(in[p]);
+                for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+                injected = true;
+                i = tag_end;
+                continue;
+            }
+        }
+        for (size_t p = i; p < tag_end; p++) AB_PUT(in[p]);
+        i = tag_end;
+    }
+    if (!injected) {
+        for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+    }
+#undef AB_PUT
+    return o;
+}
+
+/* ── proxy plumbing ── */
+static void proxy_state_free(struct proxy_state *st) {
+    if (!st) return;
+    for (int i = 0; i < PROXY_MAX; i++) if (s_proxies[i] == st) s_proxies[i] = NULL;
+    free(st->req);
+    free(st->buf);
+    free(st);
+}
+
+static void proxy_drop_for_client(struct mg_connection *c) {
+    for (int i = 0; i < PROXY_MAX; i++) {
+        struct proxy_state *st = s_proxies[i];
+        if (st && st->client == c) {
+            st->client = NULL;
+            if (st->up) st->up->is_closing = 1;
+        }
+    }
+}
+
+static void proxy_send_raw(struct proxy_state *st, const char *data, size_t n) {
+    if (st->client && n) mg_send(st->client, data, n);
+}
+
+static void proxy_fail(struct proxy_state *st, int code, const char *msg) {
+    if (st->replied || !st->client) return;
+    char head[320];
+    int n = snprintf(head, sizeof(head),
+                     "HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\n"
+                     "Content-Length: %u\r\nConnection: close\r\n\r\n%s",
+                     code, msg, (unsigned) strlen(msg), msg);
+    if (n > 0) mg_send(st->client, head, (size_t) n);
+    st->replied = true;
+    st->client->is_draining = 1;
+}
+
+static bool proxy_buf_append(struct proxy_state *st, const char *d, size_t n) {
+    size_t need = st->buf_len + n;
+    if (need > PROXY_BUF_MAX) return false;
+    if (need > st->buf_cap) {
+        size_t cap = st->buf_cap ? st->buf_cap : 65536;
+        while (cap < need) cap *= 2;
+        char *p = (char *) realloc(st->buf, cap);
+        if (!p) return false;
+        st->buf = p;
+        st->buf_cap = cap;
+    }
+    memcpy(st->buf + st->buf_len, d, n);
+    st->buf_len += n;
+    return true;
+}
+
+/* Rebuild an HTML response with the filtered body. */
+static void proxy_finish_filtered(struct proxy_state *st) {
+    if (!st->client || !st->buf || !st->headers_done) return;
+    size_t body_off = st->head_len;
+    size_t body_len = st->buf_len > body_off ? st->buf_len - body_off : 0;
+    char *filtered = (char *) malloc(body_len + 2048);
+    if (!filtered) { proxy_send_raw(st, st->buf, st->buf_len); st->replied = true; return; }
+    size_t flen = html_filter(st->buf + body_off, body_len, filtered, body_len + 2048);
+    /* status line first */
+    size_t line_end = 0;
+    while (line_end + 1 < body_off &&
+           !(st->buf[line_end] == '\r' && st->buf[line_end + 1] == '\n')) line_end++;
+    if (line_end + 2 > body_off) line_end = body_off - 2;
+    mg_send(st->client, st->buf, line_end + 2);
+    /* keep the origin headers except the ones we have to own */
+    static const char *kDrop[] = {"content-length:", "transfer-encoding:", "content-encoding:",
+                                  "connection:", "keep-alive:", NULL};
+    size_t p = line_end + 2;
+    while (p + 1 < body_off) {
+        size_t e = p;
+        while (e + 1 < body_off && !(st->buf[e] == '\r' && st->buf[e + 1] == '\n')) e++;
+        size_t llen = e - p;
+        if (llen == 0) break;
+        bool skip = false;
+        for (int t = 0; kDrop[t]; t++) {
+            size_t dl = strlen(kDrop[t]);
+            if (llen >= dl && strncasecmp(st->buf + p, kDrop[t], dl) == 0) { skip = true; break; }
+        }
+        if (!skip) mg_send(st->client, st->buf + p, llen + 2);
+        p = e + 2;
+    }
+    char head[96];
+    int hl = snprintf(head, sizeof(head),
+                      "Content-Length: %u\r\nConnection: close\r\n\r\n", (unsigned) flen);
+    if (hl > 0) mg_send(st->client, head, (size_t) hl);
+    mg_send(st->client, filtered, flen);
+    st->replied = true;
+    st->client->is_draining = 1;
+    free(filtered);
+}
+
+static void proxy_on_data(struct proxy_state *st, const char *data, size_t n) {
+    if (st->headers_done) {
+        if (!st->filter_body) { proxy_send_raw(st, data, n); st->replied = true; return; }
+        if (!proxy_buf_append(st, data, n)) {
+            /* response grew too large: stop filtering, stream what we have */
+            st->filter_body = false;
+            proxy_send_raw(st, st->buf, st->buf_len);
+            st->replied = true;
+            free(st->buf); st->buf = NULL; st->buf_len = 0; st->buf_cap = 0;
+        }
+        return;
+    }
+    if (!proxy_buf_append(st, data, n)) {
+        proxy_fail(st, 502, "Response too large");
+        if (st->up) st->up->is_closing = 1;
+        return;
+    }
+    size_t hend = 0;
+    for (size_t i = 0; i + 3 < st->buf_len; i++) {
+        if (st->buf[i] == '\r' && st->buf[i + 1] == '\n' &&
+            st->buf[i + 2] == '\r' && st->buf[i + 3] == '\n') { hend = i + 4; break; }
+    }
+    if (hend == 0) return;   /* headers still incomplete */
+    char ctype[64];
+    ctype[0] = '\0';
+    for (size_t i = 0; i + 13 < hend; i++) {
+        if (strncasecmp(st->buf + i, "content-type:", 13) == 0) {
+            size_t v = i + 13;
+            while (v < hend && (st->buf[v] == ' ' || st->buf[v] == '\t')) v++;
+            size_t c = 0;
+            while (v < hend && c < sizeof(ctype) - 1 &&
+                   st->buf[v] != '\r' && st->buf[v] != '\n' && st->buf[v] != ';') ctype[c++] = st->buf[v++];
+            ctype[c] = '\0';
+            break;
+        }
+    }
+    st->headers_done = true;
+    st->head_len = hend;
+    bool html = strncasecmp(ctype, "text/html", 9) == 0 ||
+                strncasecmp(ctype, "application/xhtml", 17) == 0;
+    if (html) {
+        st->filter_body = true;
+        return;
+    }
+    /* non-HTML: relay headers + body as they are */
+    proxy_send_raw(st, st->buf, st->buf_len);
+    st->replied = true;
+    free(st->buf);
+    st->buf = NULL;
+    st->buf_len = 0;
+    st->buf_cap = 0;
+}
+
+static void proxy_fn(struct mg_connection *c, int ev, void *ev_data) {
+    (void) ev_data;
+    struct proxy_state *st = (struct proxy_state *) c->fn_data;
+    if (!st) return;
+    if (ev == MG_EV_CONNECT) {
+        if (st->tls) {
+            struct mg_tls_opts o = {0};
+            o.name = mg_str(st->host);
+            o.skip_verification = true;   /* this server is a MITM by design */
+            mg_tls_init(c, &o);
+        }
+        st->connected = true;
+        return;
+    }
+    if (ev == MG_EV_ERROR) {
+        proxy_fail(st, 502, "Bad Gateway");
+        return;
+    }
+    if (ev == MG_EV_READ) {
+        proxy_on_data(st, (const char *) c->recv.buf, c->recv.len);
+        c->recv.len = 0;
+        return;
+    }
+    if (ev == MG_EV_POLL) {
+        uint64_t now = mg_millis();
+        uint64_t limit = st->connected ? PROXY_TIMEOUT_MS : PROXY_CONNECT_TIMEOUT_MS;
+        if (!st->replied && now - st->started_ms > limit) {
+            proxy_fail(st, 504, "Gateway Timeout");
+            c->is_closing = 1;
+        }
+        return;
+    }
+    if (ev == MG_EV_CLOSE) {
+        if (st->filter_body && !st->replied && st->buf) proxy_finish_filtered(st);
+        if (!st->replied) proxy_fail(st, 502, "Bad Gateway");
+        if (st->client) st->client->is_draining = 1;
+        proxy_state_free(st);
+        c->fn_data = NULL;
+    }
+}
+
+static bool proxy_start(struct mg_connection *c, struct settings *s,
+                        struct mg_http_message *hm, const char *host) {
+    (void) s;
+    if (!s_mgr) return false;
+    for (int i = 0; i < PROXY_MAX; i++) {
+        if (s_proxies[i] && s_proxies[i]->client == c) return false;
+    }
+    struct proxy_state *st = (struct proxy_state *) calloc(1, sizeof(*st));
+    if (!st) return false;
+    st->client = c;
+    snprintf(st->host, sizeof(st->host), "%s", host);
+    st->tls = c->is_tls ? true : false;
+    st->port = st->tls ? 443 : 80;
+    st->started_ms = mg_millis();
+
+    size_t cap = 2048 + hm->head.len + hm->body.len;
+    st->req = (char *) malloc(cap);
+    if (!st->req) { free(st); return false; }
+    int n = snprintf(st->req, cap, "%.*s %.*s HTTP/1.0\r\nHost: %s\r\n",
+                     (int) hm->method.len, hm->method.buf,
+                     (int) hm->uri.len, hm->uri.buf, st->host);
+    if (n < 0) { free(st->req); free(st); return false; }
+    size_t off = (size_t) n;
+    /* Forward the client headers except hop-by-hop ones and
+       Accept-Encoding (identity keeps HTML filterable). */
+    const char *hdrs = hm->head.buf;
+    size_t hlen = hm->head.len;
+    size_t first_eol = 0;
+    while (first_eol + 1 < hlen && !(hdrs[first_eol] == '\r' && hdrs[first_eol + 1] == '\n')) first_eol++;
+    size_t p = (first_eol + 2 <= hlen) ? first_eol + 2 : hlen;
+    static const char *kSkip[] = {"host:", "connection:", "proxy-connection:", "keep-alive:",
+                                  "transfer-encoding:", "te:", "trailer:", "upgrade:",
+                                  "accept-encoding:", "proxy-authorization:", "content-length:", NULL};
+    while (p + 1 < hlen) {
+        size_t e = p;
+        while (e + 1 < hlen && !(hdrs[e] == '\r' && hdrs[e + 1] == '\n')) e++;
+        size_t llen = e - p;
+        if (llen == 0) break;
+        bool skip = false;
+        for (int t = 0; kSkip[t]; t++) {
+            size_t sl = strlen(kSkip[t]);
+            if (llen >= sl && strncasecmp(hdrs + p, kSkip[t], sl) == 0) { skip = true; break; }
+        }
+        if (!skip && off + llen + 2 < cap) {
+            memcpy(st->req + off, hdrs + p, llen + 2);
+            off += llen + 2;
+        }
+        p = e + 2;
+    }
+    if (hm->body.len > 0) {
+        int bl = snprintf(st->req + off, cap - off, "Content-Length: %u\r\n\r\n",
+                          (unsigned) hm->body.len);
+        if (bl < 0) { free(st->req); free(st); return false; }
+        off += (size_t) bl;
+        memcpy(st->req + off, hm->body.buf, hm->body.len);
+        off += hm->body.len;
+    } else {
+        memcpy(st->req + off, "\r\n", 2);
+        off += 2;
+    }
+    st->req_len = off;
+
+    char url[320];
+    snprintf(url, sizeof(url), "tcp://%s:%d", st->host, st->port);
+    struct mg_connection *up = mg_connect(s_mgr, url, proxy_fn, st);
+    if (!up) { free(st->req); free(st); return false; }
+    st->up = up;
+    for (int i = 0; i < PROXY_MAX; i++) {
+        if (!s_proxies[i]) { s_proxies[i] = st; break; }
+    }
+    mg_send(up, st->req, st->req_len);
+    if (s->debug) LOG_INFO("[proxy] %s%s", st->tls ? "https://" : "http://", st->host);
+    return true;
+}
+
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev == MG_EV_ACCEPT) {
         /* Atomic cap check + increment (see the note on
@@ -1884,6 +2397,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
 
     if (ev == MG_EV_CLOSE) {
+        /* Drop any in-flight transparent-proxy request of this client. */
+        proxy_drop_for_client(c);
         /* Unregister from the WS push list. */
         pthread_mutex_lock(&s_sni_mutex);
         for (int i = 0; i < WS_PUSH_MAX; i++) {
@@ -2219,6 +2734,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         struct mg_str cmd = mg_str(cmd_buf);
         if (mg_strcmp(cmd, mg_str("reload_config")) == 0) {
             load_block_cfg(s->resource_dir);
+            /* Rules changed: refresh the transparent-proxy block set too. */
+            if (s->proxy_filter) block_set_load("/system/etc/hosts");
             char hdr[96];
             int hl = snprintf(hdr, sizeof(hdr), "Content-Type: text/plain%c%c", 0x0d, 0x0a);
             (void) hl;
@@ -2239,6 +2756,35 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             mg_http_reply(c, 400, "Content-Type: text/plain\r\n", "Usage: cmd=reload_images|flush_stats|shutdown");
         }
         return;
+    }
+
+    /*
+     * TRANSPARENT FILTERING PROXY (hijack mode, --proxy-filter):
+     * the app redirected the whole TCP 80/443 traffic here, so a request
+     * for a host that is NOT in the block list must be forwarded to the
+     * real origin server instead of being answered locally. Blocked
+     * hosts keep the placeholder replies below.
+     */
+    if (s->proxy_filter) {
+        struct mg_str *phdr = mg_http_get_header(hm, "Host");
+        if (phdr != NULL && phdr->len > 0) {
+            char phost[256];
+            size_t pl = phdr->len < sizeof(phost) - 1 ? phdr->len : sizeof(phost) - 1;
+            memcpy(phost, phdr->buf, pl);
+            phost[pl] = '\0';
+            if (phost[0] == '[') {                 /* IPv6 literal: [::1]:443 */
+                char *b = strrchr(phost, ']');
+                if (b != NULL) *b = '\0';
+                memmove(phost, phost + 1, strlen(phost) + 1);
+            } else {
+                char *colon = strchr(phost, ':');
+                if (colon != NULL) *colon = '\0';
+            }
+            if (phost[0] && !host_is_local(phost) &&
+                !block_set_contains(phost, strlen(phost))) {
+                if (proxy_start(c, s, hm, phost)) return;
+            }
+        }
     }
 
     /* Classify blocked requests by type and reply with the most
@@ -2351,6 +2897,10 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             s.init = true;
         } else if (strcmp(argv[i], "--debug") == 0) {
             s.debug = true;
+        } else if (strcmp(argv[i], "--proxy-filter") == 0) {
+            /* Transparent hijack proxy: forward non-blocked hosts to the
+               real origin and filter the answer (see proxy_start()). */
+            s.proxy_filter = true;
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
             s.bind_all = strcmp(argv[++i], "all") == 0;
             LOG_INFO("Bind mode: %s", s.bind_all ? "all interfaces" : "loopback");
@@ -2403,6 +2953,12 @@ int main(int argc, char *argv[]) {
 
     struct mg_mgr mgr;
     mg_mgr_init(&mgr);
+    /* Transparent proxy support: remember the event loop and load the
+       blocked-host set from the system hosts file (Android). */
+    s_mgr = &mgr;
+    if (s.proxy_filter) {
+        block_set_load("/system/etc/hosts");
+    }
 
     /* Build listen URLs from the configured bind mode + ports. */
     char http_url[128], https_url[128], http_url6[128], https_url6[128];

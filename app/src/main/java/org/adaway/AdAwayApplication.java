@@ -59,6 +59,27 @@ public class AdAwayApplication extends Application {
         // Create models
         this.sourceModel = new SourceModel(this);
         this.updateModel = new UpdateModel(this);
+        // Hijack-mode safety net: when the app was killed while the iptables
+        // redirect rules were installed, the device's 80/443 traffic would be
+        // pointed at a server that may be gone. Remove the rules unless the
+        // hijack mode is still selected and the server is alive. The check is
+        // gated on the "rules installed" marker so a device without root is
+        // never asked for it.
+        if (org.adaway.model.root.HijackModel.wasEnabled(this)) {
+            new Thread(() -> {
+                try {
+                    boolean stillHijacking =
+                            org.adaway.util.BlockMode.current(this) == org.adaway.util.BlockMode.HIJACK
+                                    && org.adaway.util.WebServerUtils.isWebServerRunning();
+                    if (!stillHijacking) {
+                        org.adaway.model.root.HijackModel.disable();
+                        Timber.i("Stale hijack rules removed at startup");
+                    }
+                } catch (Throwable throwable) {
+                    Timber.w(throwable, "Hijack cleanup failed");
+                }
+            }, "hijack-cleanup").start();
+        }
         // Crash diagnostics: persist any uncaught exception to filesDir/crash.log
         // so a "it just closed" report can be diagnosed afterwards
         // (readable via root/adb even if logcat buffers have rotated).

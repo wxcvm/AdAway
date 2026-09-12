@@ -252,8 +252,12 @@ public static void startWebServer(Context context) {
         // Ensure captive portal login UIDs are in allowlist.txt
         ensureCaptivePortalAllowlist(context);
 
+        // --proxy-filter: requests that are not for a blocked host (they only
+        // arrive here in the "hijack" blocking mode, where iptables redirects
+        // the whole 80/443 traffic on the device) are forwarded to the real
+        // origin server and filtered - AdGuard-like content filtering.
         String params = "--resources " + resourcePath.toAbsolutePath() +
-                " --debug --bind " + (isBindAll(context) ? "all" : "loop") +
+                " --debug --proxy-filter --bind " + (isBindAll(context) ? "all" : "loop") +
                 " --http-port " + getHttpPort(context) +
                 " --https-port " + getHttpsPort(context);
         boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);

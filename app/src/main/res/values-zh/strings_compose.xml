@@ -251,4 +251,7 @@
     <string name="compose_rules_pick_file_hint">支持 hosts 或规则文本文件；读取本地文件不联网。</string>
     <string name="compose_rules_add_source_failed">添加失败：链接无效或该订阅已存在</string>
     <string name="compose_settings_block_mode_adguard_hint">可配合 AdGuard 等使用：需要把拦截模式设为 127.0.0.1（本机拦截页）或 0.0.0.0（空路由）。与 AdGuard 同时使用时选 0.0.0.0 —— 不占用 80/443 端口，交给 AdGuard 过滤；只使用本应用时选 127.0.0.1。</string>
+    <string name="compose_settings_block_mode_hijack">劫持过滤</string>
+    <string name="compose_settings_block_mode_hijack_hint">劫持过滤（类 AdGuard）：把本机 80/443 流量重定向到内置服务器，非拦截域名会转发回真实网站并过滤页面（隐藏广告位、剔除广告脚本），HTTPS 用本机 CA 解密后过滤。切回其它模式会立即撤销劫持规则。个别做证书校验（pinning）的应用可能无法联网。</string>
+    <string name="compose_settings_block_mode_hijack_ca">尚未信任本机 CA：请在“网络服务器 → 证书”里信任 CA，否则 HTTPS 页面会报证书错误。</string>
 </resources>

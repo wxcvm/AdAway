@@ -414,6 +414,17 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 Text(stringResource(R.string.compose_settings_block_mode_null))
                             },
                         )
+                        // 新增：劫持全部流量并由本机服务器过滤（类 AdGuard）
+                        FilterChip(
+                            selected = blockMode == org.adaway.util.BlockMode.HIJACK,
+                            onClick = {
+                                blockMode = org.adaway.util.BlockMode.HIJACK
+                                viewModel.applyBlockMode(org.adaway.util.BlockMode.HIJACK)
+                            },
+                            label = {
+                                Text(stringResource(R.string.compose_settings_block_mode_hijack))
+                            },
+                        )
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(
@@ -423,12 +434,26 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                     R.string.compose_settings_block_mode_null_hint
                                 org.adaway.util.BlockMode.CUSTOM ->
                                     R.string.compose_settings_block_mode_custom_hint
+                                org.adaway.util.BlockMode.HIJACK ->
+                                    R.string.compose_settings_block_mode_hijack_hint
                                 else -> R.string.compose_settings_block_mode_localhost_hint
                             },
                         ),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // 劫持过滤走 HTTPS 中间人：没有信任本机 CA 时会提示
+                    if (blockMode == org.adaway.util.BlockMode.HIJACK &&
+                        !org.adaway.util.WebServerUtils.isUserCertificateInstalled(context) &&
+                        !org.adaway.util.WebServerUtils.isSystemCertificateInstalled(context)
+                    ) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.compose_settings_block_mode_hijack_ca),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             }
 

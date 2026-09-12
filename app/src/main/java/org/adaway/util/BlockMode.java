@@ -16,6 +16,11 @@ import org.adaway.R;
  *     <li>{@link #NULL_ROUTE}: blocked hosts point at 0.0.0.0 / ::, so the
  *     connection simply fails. No port is used, which lets the app run next to
  *     AdGuard (or any other proxy/filter) without fighting for 80/443.</li>
+ *     <li>{@link #HIJACK}: same hosts targets as {@link #LOCALHOST}, plus the
+ *     whole TCP 80/443 traffic of the device is redirected into the bundled
+ *     server (root + iptables, see HijackModel), which then forwards
+ *     non-blocked hosts to the real origin and filters the answer -
+ *     AdGuard-like content filtering, including HTTPS (MITM with the local CA).</li>
  *     <li>{@link #CUSTOM}: any other user defined address.</li>
  * </ul>
  *
@@ -34,11 +39,20 @@ public final class BlockMode {
      * Any other address configured by the user.
      */
     public static final int CUSTOM = 2;
+    /**
+     * Hijack the whole device traffic and filter it like AdGuard does.
+     */
+    public static final int HIJACK = 3;
 
     /**
      * The IPv6 null route address.
      */
     public static final String NULL_ROUTE_IPV6 = "::";
+
+    /**
+     * Preference remembering that the iptables hijack rules are installed.
+     */
+    public static final String PREF_HIJACK_ENABLED = "hijack_enabled";
 
     private BlockMode() {
     }
@@ -61,7 +75,7 @@ public final class BlockMode {
      * generate the hosts file.
      *
      * @param context The application context.
-     * @param mode    One of {@link #LOCALHOST}, {@link #NULL_ROUTE}.
+     * @param mode    One of {@link #LOCALHOST}, {@link #NULL_ROUTE}, {@link #HIJACK}.
      */
     public static void apply(Context context, int mode) {
         String ipv4;
@@ -72,6 +86,7 @@ public final class BlockMode {
                 ipv6 = NULL_ROUTE_IPV6;
                 break;
             case LOCALHOST:
+            case HIJACK:
             default:
                 ipv4 = Constants.LOCALHOST_IPV4;
                 ipv6 = Constants.LOCALHOST_IPV6;
@@ -80,6 +95,7 @@ public final class BlockMode {
         prefs(context).edit()
                 .putString(ipv4Key(context), ipv4)
                 .putString(ipv6Key(context), ipv6)
+                .putBoolean(PREF_HIJACK_ENABLED, mode == HIJACK)
                 .apply();
     }
 
@@ -87,10 +103,13 @@ public final class BlockMode {
      * Get the currently configured mode.
      *
      * @param context The application context.
-     * @return One of {@link #LOCALHOST}, {@link #NULL_ROUTE} or {@link #CUSTOM}.
+     * @return One of {@link #LOCALHOST}, {@link #NULL_ROUTE}, {@link #HIJACK} or {@link #CUSTOM}.
      */
     public static int current(Context context) {
         SharedPreferences prefs = prefs(context);
+        if (prefs.getBoolean(PREF_HIJACK_ENABLED, false)) {
+            return HIJACK;
+        }
         String ipv4 = prefs.getString(ipv4Key(context), context.getString(R.string.pref_redirection_ipv4_def));
         String ipv6 = prefs.getString(ipv6Key(context), context.getString(R.string.pref_redirection_ipv6_def));
         if (Constants.BOGUS_IPV4.equals(ipv4)) {
@@ -103,7 +122,7 @@ public final class BlockMode {
     }
 
     /**
-     * Whether the bundled web server is required to block (localhost mode).
+     * Whether the bundled web server is required to block.
      *
      * @param context The application context.
      * @return {@code true} when the web server is part of the blocking path.

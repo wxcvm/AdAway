@@ -586,8 +586,27 @@ fun refreshServerStats() {
                 try {
                     val app = getApplication<Application>()
                     org.adaway.util.BlockMode.apply(app, mode)
+                    // 1) 先把新目标地址写进 hosts 并生效
                     adBlockModel.apply()
-                    true
+                    if (mode == org.adaway.util.BlockMode.HIJACK) {
+                        // 2) 劫持模式：确保服务器（--proxy-filter）在运行，
+                        //    再挂上 iptables 重定向规则；服务器不在就不劫持，
+                        //    避免把整机流量导到没人监听的口上。
+                        if (!org.adaway.util.WebServerUtils.isWebServerRunning()) {
+                            org.adaway.util.WebServerUtils.startWebServer(app)
+                            kotlinx.coroutines.delay(2000)
+                        }
+                        if (!org.adaway.util.WebServerUtils.isWebServerRunning()) {
+                            Timber.w("Hijack mode: web server is not running, rules not installed")
+                            false
+                        } else {
+                            org.adaway.model.root.HijackModel.enable(app)
+                        }
+                    } else {
+                        // 其它模式：立刻撤销劫持规则，恢复正常上网
+                        org.adaway.model.root.HijackModel.disable()
+                        true
+                    }
                 } catch (e: Exception) {
                     Timber.w(e, "Failed to apply blocking mode %d", mode)
                     false
