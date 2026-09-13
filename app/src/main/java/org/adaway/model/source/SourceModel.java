@@ -339,6 +339,8 @@ public class SourceModel {
     }
 
     private void retrieveHostsSourcesLocked() throws HostErrorException {
+        // Fresh run: forget the cosmetic rules collected by the previous sync.
+        org.adaway.model.source.CosmeticRules.clear();
         // Check connection status
         if (isDeviceOffline()) {
             throw new HostErrorException(NO_CONNECTION);

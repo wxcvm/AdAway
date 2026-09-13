@@ -2097,6 +2097,7 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
             if (!injected && name_len == 4 && strncasecmp(in + name_at, "head", 4) == 0) {
                 for (size_t p = i; p < tag_end; p++) AB_PUT(in[p]);
                 for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+                for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
                 injected = true;
                 i = tag_end;
                 continue;
@@ -2107,6 +2108,7 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
     }
     if (!injected) {
         for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+        for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
     }
 #undef AB_PUT
     return o;
@@ -2131,6 +2133,40 @@ static void write_stats_json_file(struct settings *s) {
     fclose(fp);
     remove(path);
     rename(tmp, path);
+}
+
+/*
+ * Cosmetic filtering: the app exports the AdGuard/adblock element hiding
+ * rules (##selector) it collected from the sources to <resource>/cosmetic.css;
+ * they are injected into every filtered page next to the built-in stylesheet.
+ */
+static char  *s_cosmetic_css;
+static size_t s_cosmetic_len;
+
+static void load_cosmetic_css(const char *resource_dir) {
+    free(s_cosmetic_css);
+    s_cosmetic_css = NULL;
+    s_cosmetic_len = 0;
+#ifndef _WIN32
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/cosmetic.css", resource_dir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > (long) (512 * 1024)) { fclose(f); return; }
+    char *buffer = (char *) malloc((size_t) size + 1);
+    if (!buffer) { fclose(f); return; }
+    size_t got = fread(buffer, 1, (size_t) size, f);
+    fclose(f);
+    buffer[got] = '\0';
+    s_cosmetic_css = buffer;
+    s_cosmetic_len = got;
+    LOG_INFO("cosmetic filter: %zu bytes loaded from %s", got, path);
+#else
+    (void) resource_dir;
+#endif
 }
 
 /* ── proxy plumbing ── */
@@ -2189,9 +2225,10 @@ static void proxy_finish_filtered(struct proxy_state *st) {
     if (!st->client || !st->buf || !st->headers_done) return;
     size_t body_off = st->head_len;
     size_t body_len = st->buf_len > body_off ? st->buf_len - body_off : 0;
-    char *filtered = (char *) malloc(body_len + 2048);
+    size_t cap = body_len + 2048 + s_cosmetic_len;
+    char *filtered = (char *) malloc(cap);
     if (!filtered) { proxy_send_raw(st, st->buf, st->buf_len); st->replied = true; return; }
-    size_t flen = html_filter(st->buf + body_off, body_len, filtered, body_len + 2048);
+    size_t flen = html_filter(st->buf + body_off, body_len, filtered, cap);
     /* status line first */
     size_t line_end = 0;
     while (line_end + 1 < body_off &&
@@ -2839,7 +2876,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         if (mg_strcmp(cmd, mg_str("reload_config")) == 0) {
             load_block_cfg(s->resource_dir);
             /* Rules changed: refresh the transparent-proxy block set too. */
-            if (s->proxy_filter) block_set_load(s->resource_dir);
+            if (s->proxy_filter) {
+                block_set_load(s->resource_dir);
+                load_cosmetic_css(s->resource_dir);
+            }
             char hdr[96];
             int hl = snprintf(hdr, sizeof(hdr), "Content-Type: text/plain%c%c", 0x0d, 0x0a);
             (void) hl;
@@ -3038,6 +3078,7 @@ int main(int argc, char *argv[]) {
     s_mgr = &mgr;
     if (s.proxy_filter) {
         block_set_load(s.resource_dir);
+        load_cosmetic_css(s.resource_dir);
     }
     /* Dedicated loopback management listener (statistics + control). */
     if (s.stats_port == 0) s.stats_port = 8686;

@@ -162,6 +162,21 @@ public class WebServerUtils {
             return -1;
         }
         Timber.i("Exported %d blocked hosts to %s", count, target);
+        // Element hiding rules (AdGuard / adblock syntax) picked up while the
+        // sources were parsed: the hijack proxy injects this stylesheet into
+        // every filtered page - the cosmetic filtering AdGuard does.
+        try {
+            java.io.File css = getResourcePath(context).resolve("cosmetic.css").toFile();
+            String content = org.adaway.model.source.CosmeticRules.toCss();
+            try (java.io.Writer writer = new java.io.OutputStreamWriter(
+                    new java.io.FileOutputStream(css), "UTF-8")) {
+                writer.write(content);
+            }
+            Timber.i("Exported %d cosmetic rules (%d bytes)",
+                    org.adaway.model.source.CosmeticRules.getSeenCount(), content.length());
+        } catch (Exception exception) {
+            Timber.w(exception, "Failed to export the cosmetic rules");
+        }
         return count;
     }
 

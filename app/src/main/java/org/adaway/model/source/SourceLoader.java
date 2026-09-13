@@ -225,6 +225,10 @@ class SourceLoader {
                         HostListItem endItem = new HostListItem();
                         endItem.setHost(line);
                         this.itemQueue.put(endItem);
+                    } // AdGuard / adblock cosmetic rules (##, #@#, #$#): not a
+                    // hosts entry - collected for the hijack mode instead
+                    else if (CosmeticRules.collect(line)) {
+                        Timber.v("Cosmetic rule: %s.", line);
                     } // Check comments
                     else if (line.isEmpty() || line.charAt(0) == '#') {
                         Timber.d("Skip comment: %s.", line);
@@ -256,6 +260,22 @@ class SourceLoader {
         private HostListItem parseHostListItem(String line) {
             Matcher matcher = HOSTS_PARSER_PATTERN.matcher(line);
             if (!matcher.matches()) {
+                /*
+                 * AdGuard / Adblock Plus network rule: ||example.com^ blocks the
+                 * whole domain, so an AdGuard-style rule list can be used as a
+                 * source here as well. Only "whole domain" rules are taken;
+                 * rules with a path, wildcard or option are left to the proxy
+                 * engine of the hijack mode.
+                 */
+                String domain = abpDomainOf(line);
+                if (domain != null) {
+                    HostListItem item = new HostListItem();
+                    item.setType(BLOCKED);
+                    item.setHost(domain);
+                    item.setEnabled(true);
+                    item.setSourceId(this.source.getId());
+                    return item;
+                }
                 Timber.d("Does not match: %s.", line);
                 return null;
             }
@@ -290,6 +310,18 @@ class SourceLoader {
         }
 
         private HostListItem parseAllowListItem(String line) {
+            // AdGuard / adblock exception rule (@@||example.com^): allow it
+            if (line.startsWith("@@")) {
+                String domain = abpDomainOf(line);
+                if (domain != null) {
+                    HostListItem item = new HostListItem();
+                    item.setType(ALLOWED);
+                    item.setHost(domain);
+                    item.setEnabled(true);
+                    item.setSourceId(this.source.getId());
+                    return item;
+                }
+            }
             // Extract hostname
             int indexOf = line.indexOf('#');
             if (indexOf > 0) {
@@ -303,6 +335,45 @@ class SourceLoader {
             item.setEnabled(true);
             item.setSourceId(this.source.getId());
             return item;
+        }
+
+        /**
+         * Extract the domain of an AdGuard / Adblock Plus rule such as
+         * <code>||ads.example.com^</code> or <code>@@||cdn.example.com^</code>.
+         *
+         * @param line The raw rule.
+         * @return The domain, or {@code null} when the rule is not a plain
+         * whole-domain rule.
+         */
+        private String abpDomainOf(String line) {
+            String rule = line.trim();
+            if (rule.startsWith("@@")) {
+                rule = rule.substring(2);
+            }
+            if (!rule.startsWith("||")) {
+                return null;
+            }
+            String rest = rule.substring(2);
+            int end = rest.length();
+            for (int i = 0; i < rest.length(); i++) {
+                char c = rest.charAt(i);
+                if (c == '^' || c == '/' || c == '$' || c == '|' || c == '*' || c == '?') {
+                    end = i;
+                    break;
+                }
+            }
+            char terminator = end < rest.length() ? rest.charAt(end) : '\0';
+            if (terminator != '\0' && terminator != '^') {
+                // Rule carries a path / wildcard / option: the hosts level
+                // cannot express it, the hijack proxy engine can.
+                return null;
+            }
+            String domain = rest.substring(0, end).trim();
+            if (domain.isEmpty() || domain.indexOf('.') < 0
+                    || !org.adaway.util.RegexUtils.isValidHostname(domain)) {
+                return null;
+            }
+            return domain;
         }
 
         private boolean isRedirectionValid(HostListItem item) {
