@@ -275,6 +275,7 @@ struct settings {
     int               http_port;  /* HTTP listen port (default 80) */
     int               https_port; /* HTTPS listen port (default 443) */
     bool              proxy_filter; /* transparent hijack proxy (--proxy-filter) */
+    int               stats_port;   /* loopback management port (default 8686) */
     bool              no_gui;     /* Windows: skip the dashboard window */
     bool              minimized;  /* Windows: GUI started to tray (autostart) */
     int               autostart;  /* Windows: 1=install, 2=uninstall Run key */
@@ -1995,15 +1996,29 @@ static bool block_set_contains(const char *host, size_t len) {
     return false;
 }
 
-/* Load the blocked hosts from a hosts file (127.0.0.1/0.0.0.0/::1/::). */
-static void block_set_load(const char *path) {
+/*
+ * Load the blocked hosts from the rules file the app exports
+ * (<resource>/blocklist.txt) and fall back to the system hosts file. Both use
+ * the "<ip> <host>" hosts syntax; only entries pointing at 127.0.0.1, 0.0.0.0,
+ * ::1 or :: count as blocked. Filtering from the exported rules keeps the
+ * hijack mode working even when the system hosts file is not written at all.
+ */
+static void block_set_load(const char *resource_dir) {
     free(s_block_slots);
     s_block_slots = NULL;
     s_block_used = 0;
 #ifndef _WIN32
+    char path[PATH_MAX];
+    const char *source = "blocklist.txt";
+    snprintf(path, sizeof(path), "%s/blocklist.txt", resource_dir);
     FILE *f = fopen(path, "r");
     if (!f) {
-        LOG_INFO("proxy: %s not readable - block list empty", path);
+        snprintf(path, sizeof(path), "/system/etc/hosts");
+        source = "hosts file";
+        f = fopen(path, "r");
+    }
+    if (!f) {
+        LOG_INFO("proxy: no rules file readable - block list empty");
         return;
     }
     char line[512];
@@ -2025,9 +2040,9 @@ static void block_set_load(const char *path) {
         if (*h) { block_set_add_hash(fnv1a_lower(h, strlen(h))); n++; }
     }
     fclose(f);
-    LOG_INFO("proxy: %zu blocked hosts loaded from %s", n, path);
+    LOG_INFO("proxy: %zu blocked hosts loaded from %s (%s)", n, source, path);
 #else
-    (void) path;
+    (void) resource_dir;
 #endif
 }
 
@@ -2154,6 +2169,27 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
     }
 #undef AB_PUT
     return o;
+}
+
+/*
+ * Persist the very same JSON snapshot the app polls from /internal-stats, so
+ * the statistics screens keep working when no HTTP port can be reached at all
+ * (30xx port taken, server not running for a moment, ...).
+ */
+static void write_stats_json_file(struct settings *s) {
+    if (!s || !s->init || !s->resource_dir[0]) return;
+    static char body[16384];
+    int n = build_stats_json(s, body, sizeof(body));
+    if (n <= 0) return;
+    char path[PATH_MAX], tmp[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/stats.json", s->resource_dir);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *fp = fopen(tmp, "wb");
+    if (!fp) return;
+    fwrite(body, 1, (size_t) n, fp);
+    fclose(fp);
+    remove(path);
+    rename(tmp, path);
 }
 
 /* ── proxy plumbing ── */
@@ -2527,6 +2563,18 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
 
+    /* The management port only answers the internal endpoints. */
+    if (s->stats_port != 0 && c->loc.port == (uint16_t) s->stats_port) {
+        bool internal = mg_match(hm->uri, mg_str("/internal-stats"), NULL) ||
+                        mg_match(hm->uri, mg_str("/internal-ws"), NULL) ||
+                        mg_match(hm->uri, mg_str("/internal-test"), NULL) ||
+                        mg_match(hm->uri, mg_str("/control"), NULL);
+        if (!internal) {
+            mg_http_reply(c, 404, "Content-Type: text/plain\r\n", "not found");
+            return;
+        }
+    }
+
     /*
      * CAPTIVE PORTAL PROTECTION (Android connectivity check):
      * Android (and iOS/Windows) periodically probe well-known URLs to
@@ -2717,7 +2765,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                 char *colon = strchr(phost, ':');
                 if (colon != NULL) *colon = '\0';
             }
-            if (phost[0] != '\0' && !host_is_local(phost)) {
+            /* Single-label hosts ("adaway", "localhost", printer names) are
+               never proxied: they are local names or simply broken. */
+            if (phost[0] != '\0' && strchr(phost, '.') != NULL && !host_is_local(phost)) {
                 bool allowed_uid = (req_uid != (uid_t)-1) &&
                                    uid_is_allowed(chk_uid, s->resource_dir);
                 if (allowed_uid || !block_set_contains(phost, strlen(phost))) {
@@ -2848,7 +2898,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         if (mg_strcmp(cmd, mg_str("reload_config")) == 0) {
             load_block_cfg(s->resource_dir);
             /* Rules changed: refresh the transparent-proxy block set too. */
-            if (s->proxy_filter) block_set_load("/system/etc/hosts");
+            if (s->proxy_filter) block_set_load(s->resource_dir);
             char hdr[96];
             int hl = snprintf(hdr, sizeof(hdr), "Content-Type: text/plain%c%c", 0x0d, 0x0a);
             (void) hl;
@@ -3014,6 +3064,11 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             /* Transparent hijack proxy: forward non-blocked hosts to the
                real origin and filter the answer (see proxy_start()). */
             s.proxy_filter = true;
+        } else if (strcmp(argv[i], "--stats-port") == 0 && i < argc-1) {
+            /* Loopback management port: /internal-stats and /control are
+               served there too, so the app can always read statistics even
+               when the user facing 80/443 ports are taken by another app. */
+            s.stats_port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
             s.bind_all = strcmp(argv[++i], "all") == 0;
             s.cli_bind_set = true;
@@ -3262,7 +3317,18 @@ int main(int argc, char *argv[]) {
        blocked-host set from the system hosts file (Android). */
     s_mgr = &mgr;
     if (s.proxy_filter) {
-        block_set_load("/system/etc/hosts");
+        block_set_load(s.resource_dir);
+    }
+    /* Dedicated loopback management listener (statistics + control). */
+    if (s.stats_port == 0) s.stats_port = 8686;
+    {
+        char su[64], su6[64];
+        snprintf(su, sizeof(su), "http://127.0.0.1:%d", s.stats_port);
+        snprintf(su6, sizeof(su6), "http://[::1]:%d", s.stats_port);
+        if (mg_http_listen(&mgr, su, fn, &s) == NULL) {
+            LOG_INFO("Management port %d is not available on 127.0.0.1", s.stats_port);
+        }
+        mg_http_listen(&mgr, su6, fn, &s);
     }
 
     /* Build listen URLs from the configured bind mode + ports. */
@@ -3396,7 +3462,16 @@ int main(int argc, char *argv[]) {
    Used directly by the Android/headless builds and from a worker thread
    when the Windows dashboard window is shown. */
 static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
-    while (s_sig_num == 0) mg_mgr_poll(mgr, 1000);
+    uint64_t last_json_ms = 0;
+    while (s_sig_num == 0) {
+        mg_mgr_poll(mgr, 1000);
+        /* Refresh the on-disk statistics snapshot every ~5 s. */
+        uint64_t now_ms = mg_millis();
+        if (now_ms - last_json_ms > 5000) {
+            last_json_ms = now_ms;
+            write_stats_json_file(&s);
+        }
+    }
     save_stats(s);
     save_hist(s);   /* final flush of chart buckets on exit */
     sni_cache_save(s->resource_dir);  /* persist SNI cache (max hit rate) */
