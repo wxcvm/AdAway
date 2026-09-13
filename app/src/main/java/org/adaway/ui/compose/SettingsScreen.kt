@@ -419,7 +419,16 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             selected = blockMode == org.adaway.util.BlockMode.HIJACK,
                             onClick = {
                                 blockMode = org.adaway.util.BlockMode.HIJACK
-                                viewModel.applyBlockMode(org.adaway.util.BlockMode.HIJACK)
+                                viewModel.applyBlockMode(org.adaway.util.BlockMode.HIJACK) { ok ->
+                                    if (!ok) {
+                                        // 端口没监听 / 无 root：不要静默失败
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.compose_settings_block_mode_hijack_failed),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                }
                             },
                             label = {
                                 Text(stringResource(R.string.compose_settings_block_mode_hijack))

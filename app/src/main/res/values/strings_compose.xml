@@ -268,4 +268,5 @@
     <string name="compose_settings_block_mode_hijack">Hijack + filter</string>
     <string name="compose_settings_block_mode_hijack_hint">Hijack + filter (AdGuard-like): the device\'s 80/443 traffic is redirected into the bundled server; hosts that are not blocked are forwarded to the real site and the page is filtered (ad slots hidden, ad scripts removed), with HTTPS decrypted through the local CA. Switching to another mode removes the hijack rules immediately. Apps that pin certificates may lose connectivity.</string>
     <string name="compose_settings_block_mode_hijack_ca">Local CA not trusted yet: trust it under "Network server → certificate", otherwise HTTPS pages will report certificate errors.</string>
+    <string name="compose_settings_block_mode_hijack_failed">Hijack not applied: nothing is listening on ports 80/443 (or the ports you configured) - AdGuard or another app may hold them, or root was denied. Switch the network server to 8080/8443 and retry (hijack mode does not depend on 80/443).</string>
 </resources>

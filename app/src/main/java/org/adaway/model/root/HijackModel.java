@@ -93,6 +93,18 @@ public final class HijackModel {
      */
     public static boolean enable(Context context) {
         try {
+            /*
+             * The redirect only makes sense when the server really listens on
+             * the configured ports: if something else (AdGuard, the ROM) holds
+             * 80/443, redirecting the device traffic there would black-hole it.
+             * The caller reports the failure so the user can switch ports.
+             */
+            if (!isPortListening(WebServerUtils.getHttpPort(context))
+                    || !isPortListening(WebServerUtils.getHttpsPort(context))) {
+                Timber.w("Hijack aborted: the proxy ports are not listening");
+                prefs(context).edit().putBoolean(PREF_ACTIVE, false).apply();
+                return false;
+            }
             Shell.Result result = Shell.cmd(enableCommands(context).toArray(new String[0])).exec();
             boolean active = Shell.cmd("iptables -t nat -C OUTPUT -j " + CHAIN).exec().isSuccess();
             prefs(context).edit().putBoolean(PREF_ACTIVE, active).apply();
@@ -100,6 +112,16 @@ public final class HijackModel {
             return active;
         } catch (Exception exception) {
             Timber.w(exception, "Failed to install the hijack rules");
+            return false;
+        }
+    }
+
+    /** Plain TCP connect test: is something listening on this loopback port? */
+    private static boolean isPortListening(int port) {
+        try (java.net.Socket socket = new java.net.Socket()) {
+            socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), 1200);
+            return true;
+        } catch (Exception ignored) {
             return false;
         }
     }

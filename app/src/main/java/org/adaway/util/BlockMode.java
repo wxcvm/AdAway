@@ -82,11 +82,18 @@ public final class BlockMode {
         String ipv6;
         switch (mode) {
             case NULL_ROUTE:
+            case HIJACK:
+                /*
+                 * The hijack mode filters with the app's own rules (the server
+                 * reads <resource>/blocklist.txt), so the hosts entries are only
+                 * a safety net for the moment the iptables rules are gone - and
+                 * a null route needs no listening port at all (the local 80/443
+                 * may well be taken by AdGuard).
+                 */
                 ipv4 = Constants.BOGUS_IPV4;
                 ipv6 = NULL_ROUTE_IPV6;
                 break;
             case LOCALHOST:
-            case HIJACK:
             default:
                 ipv4 = Constants.LOCALHOST_IPV4;
                 ipv6 = Constants.LOCALHOST_IPV6;

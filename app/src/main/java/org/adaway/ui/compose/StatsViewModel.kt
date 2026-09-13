@@ -324,14 +324,28 @@ private fun startPolling() {
 fun refreshServerStats() {
         viewModelScope.launch {
             try {
+                val context = getApplication<Application>()
                 // OkHttp request must not run on the main dispatcher
-                val stats = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                var fromSnapshot = false
+                var stats = withContext(kotlinx.coroutines.Dispatchers.IO) {
                     ServerStats.fromJson(WebServerUtils.getStats())
+                }
+                if (stats == null) {
+                    /*
+                     * 统计不再依赖 web 服务器端口可用：服务器每 5 秒会把同一份
+                     * JSON 落到 <files>/webserver/stats.json，端口被 AdGuard/系统
+                     * 占用或服务器刚好没在跑时，直接读这份快照。
+                     */
+                    stats = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        ServerStats.fromJson(WebServerUtils.readStatsSnapshot(context))
+                    }
+                    fromSnapshot = stats != null
                 }
                 if (stats != null) {
                     _serverStats.value = stats
                     statsUpdatedAt.value = System.currentTimeMillis()
-                    statsError.value = null
+                    // "snapshot" 会让状态栏显示“最后一次更新 xx:xx（可能已过期）”
+                    statsError.value = if (fromSnapshot) "snapshot" else null
                 } else {
                     _serverStats.value = null
                     statsError.value = "unreachable"
@@ -565,7 +579,9 @@ fun refreshServerStats() {
                     val sourceModel = application.getSourceModel()
                     sourceModel.retrieveHostsSources()
                     adBlockModel.apply()
-                    // 规则变了：同步刷新服务器端拦截域名集合（透明代理用）
+                    // 规则变了：导出规则文件并让服务器重读（透明代理按规则过滤，
+                    // 不依赖 hosts 文件是否真的写进了系统）
+                    org.adaway.util.WebServerUtils.exportBlockList(application)
                     org.adaway.util.WebServerUtils.reloadConfig()
                 }
                 Timber.i("Hosts sync completed")
@@ -588,9 +604,10 @@ fun refreshServerStats() {
                 try {
                     val app = getApplication<Application>()
                     org.adaway.util.BlockMode.apply(app, mode)
-                    // 1) 先把新目标地址写进 hosts 并生效，再让服务器重读
-                    //    hosts（透明代理的拦截域名集合来自它）
+                    // 1) 先把新目标地址写进 hosts 并生效，再导出规则文件让
+                    //    服务器重读（透明代理直接按导出规则过滤）
                     adBlockModel.apply()
+                    org.adaway.util.WebServerUtils.exportBlockList(app)
                     org.adaway.util.WebServerUtils.reloadConfig()
                     if (mode == org.adaway.util.BlockMode.HIJACK) {
                         // 2) 劫持模式：确保服务器（--proxy-filter）在运行，

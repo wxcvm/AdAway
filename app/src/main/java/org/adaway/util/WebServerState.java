@@ -36,7 +36,7 @@ public final class WebServerState {
         String body = WebServerNet.httpGetFirst(
                 WebServerNet.newLocalClient(),
                 WebServerNet.HTTP_HOSTS,
-                WebServerUtils.getHttpPort(context),
+                WebServerUtils.getStatsHttpPort(),
                 "/internal-test");
         if (body != null) return true;
         // HTTPS 双栈探活（TLS 端口无 DNAT 劫持风险，仍 ::1 优先）

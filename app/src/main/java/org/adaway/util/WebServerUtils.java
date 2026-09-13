@@ -110,9 +110,86 @@ public class WebServerUtils {
                 .getInt("https_port", 443);
     }
 
-    /** Port used by the stats client (cached; no Context needed). */
+    /**
+     * Dedicated loopback management port: /internal-stats, /internal-ws and
+     * /control are served here as well, so the statistics keep working even
+     * when the user facing 80/443 ports are taken by AdGuard or the ROM
+     * (binding 80 on 127.0.0.1 failed on at least one device because of that).
+     */
+    public static final int STATS_PORT = 8686;
+
+    /** Port used by the stats client (fixed management port). */
     public static int getStatsHttpPort() {
-        return sHttpPortCached;
+        return STATS_PORT;
+    }
+
+    /**
+     * Export the currently blocked hosts to the server's resource directory so
+     * the transparent proxy can filter from the app's own rules - no hosts
+     * file and no root hosts write is needed for that (AdGuard-like).
+     *
+     * @param context The application context.
+     * @return The number of exported rules ({@code -1} on failure).
+     */
+    public static int exportBlockList(Context context) {
+        java.io.File target = getResourcePath(context).resolve("blocklist.txt").toFile();
+        int count = 0;
+        try (android.database.Cursor cursor = org.adaway.db.AppDatabase.getInstance(context)
+                .hostEntryDao().getAllCursor();
+             java.io.BufferedWriter writer = new java.io.BufferedWriter(
+                     new java.io.OutputStreamWriter(new java.io.FileOutputStream(target), "UTF-8"), 1 << 16)) {
+            int hostIdx = cursor.getColumnIndexOrThrow("host");
+            int typeIdx = cursor.getColumnIndexOrThrow("type");
+            int redirectionIdx = cursor.getColumnIndexOrThrow("redirection");
+            while (cursor.moveToNext()) {
+                String host = cursor.getString(hostIdx);
+                if (host == null || host.isEmpty()) continue;
+                boolean redirected = cursor.getInt(typeIdx) ==
+                        org.adaway.db.entity.ListType.REDIRECTED.getValue();
+                if (redirected) {
+                    String redirection = cursor.getString(redirectionIdx);
+                    writer.write((redirection == null || redirection.isEmpty() ? "0.0.0.0" : redirection));
+                } else {
+                    writer.write("0.0.0.0");
+                }
+                writer.write(' ');
+                writer.write(host);
+                writer.write('\n');
+                count++;
+            }
+        } catch (Exception exception) {
+            Timber.w(exception, "Failed to export the block list");
+            return -1;
+        }
+        Timber.i("Exported %d blocked hosts to %s", count, target);
+        return count;
+    }
+
+    /**
+     * Read the JSON snapshot the server persists every few seconds
+     * ({@code <resource>/stats.json}). Used as fallback when no HTTP port can
+     * be reached, so the statistics screens are not blank.
+     *
+     * @param context The application context.
+     * @return The parsed snapshot, or {@code null} when unavailable.
+     */
+    @androidx.annotation.Nullable
+    public static org.json.JSONObject readStatsSnapshot(Context context) {
+        java.io.File file = getResourcePath(context).resolve("stats.json").toFile();
+        if (!file.isFile() || file.length() == 0) return null;
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            byte[] buffer = new byte[(int) file.length()];
+            int read = 0;
+            while (read < buffer.length) {
+                int n = in.read(buffer, read, buffer.length - read);
+                if (n <= 0) break;
+                read += n;
+            }
+            return new org.json.JSONObject(new String(buffer, 0, read, "UTF-8"));
+        } catch (Exception exception) {
+            Timber.w(exception, "Failed to read the statistics snapshot");
+            return null;
+        }
     }
 
     /** Test page URL honoring the configured HTTPS port. */
@@ -258,6 +335,7 @@ public static void startWebServer(Context context) {
         // origin server and filtered - AdGuard-like content filtering.
         String params = "--resources " + resourcePath.toAbsolutePath() +
                 " --debug --proxy-filter --bind " + (isBindAll(context) ? "all" : "loop") +
+                " --stats-port " + STATS_PORT +
                 " --http-port " + getHttpPort(context) +
                 " --https-port " + getHttpsPort(context);
         boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);

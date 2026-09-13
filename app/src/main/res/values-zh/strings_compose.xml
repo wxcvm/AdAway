@@ -254,4 +254,5 @@
     <string name="compose_settings_block_mode_hijack">劫持过滤</string>
     <string name="compose_settings_block_mode_hijack_hint">劫持过滤（类 AdGuard）：把本机 80/443 流量重定向到内置服务器，非拦截域名会转发回真实网站并过滤页面（隐藏广告位、剔除广告脚本），HTTPS 用本机 CA 解密后过滤。切回其它模式会立即撤销劫持规则。个别做证书校验（pinning）的应用可能无法联网。</string>
     <string name="compose_settings_block_mode_hijack_ca">尚未信任本机 CA：请在“网络服务器 → 证书”里信任 CA，否则 HTTPS 页面会报证书错误。</string>
+    <string name="compose_settings_block_mode_hijack_failed">劫持未生效：本机 80/443（或你设置的端口）没有监听——可能被 AdGuard 等占用，或未授予 root。可在“网络服务器”里改用 8080/8443 后重试（劫持模式不依赖 80/443）。</string>
 </resources>
