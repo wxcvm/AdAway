@@ -2098,6 +2098,40 @@ static bool url_host_blocked(const char *u, size_t n) {
  * blocked host and inject the element-hiding stylesheet after <head>.
  * Returns the new length (may exceed the input by the stylesheet size).
  */
+/*
+ * Cosmetic filtering: the app exports the AdGuard/adblock element hiding
+ * rules (##selector) it collected from the sources to <resource>/cosmetic.css;
+ * they are injected into every filtered page next to the built-in stylesheet.
+ */
+static char  *s_cosmetic_css;
+static size_t s_cosmetic_len;
+
+static void load_cosmetic_css(const char *resource_dir) {
+    free(s_cosmetic_css);
+    s_cosmetic_css = NULL;
+    s_cosmetic_len = 0;
+#ifndef _WIN32
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/cosmetic.css", resource_dir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > (long) (512 * 1024)) { fclose(f); return; }
+    char *buffer = (char *) malloc((size_t) size + 1);
+    if (!buffer) { fclose(f); return; }
+    size_t got = fread(buffer, 1, (size_t) size, f);
+    fclose(f);
+    buffer[got] = '\0';
+    s_cosmetic_css = buffer;
+    s_cosmetic_len = got;
+    LOG_INFO("cosmetic filter: %zu bytes loaded from %s", got, path);
+#else
+    (void) resource_dir;
+#endif
+}
+
 static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
     size_t i = 0, o = 0;
     bool injected = false;
@@ -2192,40 +2226,6 @@ static void write_stats_json_file(struct settings *s) {
     fclose(fp);
     remove(path);
     rename(tmp, path);
-}
-
-/*
- * Cosmetic filtering: the app exports the AdGuard/adblock element hiding
- * rules (##selector) it collected from the sources to <resource>/cosmetic.css;
- * they are injected into every filtered page next to the built-in stylesheet.
- */
-static char  *s_cosmetic_css;
-static size_t s_cosmetic_len;
-
-static void load_cosmetic_css(const char *resource_dir) {
-    free(s_cosmetic_css);
-    s_cosmetic_css = NULL;
-    s_cosmetic_len = 0;
-#ifndef _WIN32
-    char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/cosmetic.css", resource_dir);
-    FILE *f = fopen(path, "rb");
-    if (!f) return;
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (size <= 0 || size > (long) (512 * 1024)) { fclose(f); return; }
-    char *buffer = (char *) malloc((size_t) size + 1);
-    if (!buffer) { fclose(f); return; }
-    size_t got = fread(buffer, 1, (size_t) size, f);
-    fclose(f);
-    buffer[got] = '\0';
-    s_cosmetic_css = buffer;
-    s_cosmetic_len = got;
-    LOG_INFO("cosmetic filter: %zu bytes loaded from %s", got, path);
-#else
-    (void) resource_dir;
-#endif
 }
 
 /* ── proxy plumbing ── */
