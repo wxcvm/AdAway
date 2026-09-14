@@ -198,7 +198,6 @@ jobs:
             $err4 = Get-Content "server4.err" -ErrorAction SilentlyContinue | Out-String
             if ($err4 -notmatch 'already in use') { throw "the conflict was not reported in webserver.log/stderr" }
             Write-Output "port-conflict handling OK (dashboard alive, bind_ok=false, warning logged)"
-          }
           } catch {
             Write-Output ("PORT CONFLICT TEST ERROR: " + $_.Exception.Message)
             Get-Content "server4.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
