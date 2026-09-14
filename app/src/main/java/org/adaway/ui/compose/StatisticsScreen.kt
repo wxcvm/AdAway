@@ -49,6 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -237,6 +238,46 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
             // ── KPI 卡片行（参考 AdGuard Home：数值 + 迷你趋势线）──
             if (serverStats != null) {
                 KpiCardRow(stats = serverStats!!)
+            } else {
+                /*
+                 * 服务器未运行/不可达：不显示空白，改显示本机规则统计
+                 * （Room 直接读取，无网络与进程开销）。
+                 */
+                var localCounts by remember { mutableStateOf(Triple(0, 0, 0)) }
+                LaunchedEffect(statsErr) {
+                    viewModel.loadLocalHostCounts { blocked, allowed, redirected ->
+                        localCounts = Triple(blocked, allowed, redirected)
+                    }
+                }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            stringResource(R.string.compose_stats_status_waiting),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Text(
+                                stringResource(R.string.compose_hosts_blocked) + ": " + localCounts.first,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_hosts_allowed) + ": " + localCounts.second,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_hosts_redirected) + ": " + localCounts.third,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
+                    }
+                }
             }
 
             // Blocked-request chart

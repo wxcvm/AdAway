@@ -327,8 +327,14 @@ fun refreshServerStats() {
                 val context = getApplication<Application>()
                 // OkHttp request must not run on the main dispatcher
                 var fromSnapshot = false
+                // 自己的 try：服务器不可达时可能抛异常，不能因此跳过快照回退
                 var stats = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    ServerStats.fromJson(WebServerUtils.getStats())
+                    try {
+                        ServerStats.fromJson(WebServerUtils.getStats())
+                    } catch (e: Exception) {
+                        Timber.w(e, "Live statistics unavailable")
+                        null
+                    }
                 }
                 if (stats == null) {
                     /*
@@ -634,6 +640,25 @@ fun refreshServerStats() {
                 }
             }
             onDone(ok)
+        }
+    }
+
+    /**
+     * 本机规则统计（拦截/放行/重定向 条数）。
+     *
+     * 服务器没在运行时用它在统计页兜底显示，页面不会因为“拿不到服务器数据”
+     * 而完全空白；数据直接来自 Room，不产生任何网络/进程开销。
+     */
+    fun loadLocalHostCounts(onResult: (Int, Int, Int) -> Unit) {
+        viewModelScope.launch {
+            val counts = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                Triple(
+                    hostsListItemDao.getCountByType(org.adaway.db.entity.ListType.BLOCKED.value),
+                    hostsListItemDao.getCountByType(org.adaway.db.entity.ListType.ALLOWED.value),
+                    hostsListItemDao.getCountByType(org.adaway.db.entity.ListType.REDIRECTED.value),
+                )
+            }
+            onResult(counts.first, counts.second, counts.third)
         }
     }
 

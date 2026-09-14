@@ -66,14 +66,16 @@ public class ServerWatchdogWorker extends Worker {
         if (!PreferenceHelper.getWebServerEnabled(context)) {
             return Result.success();
         }
-        boolean running = WebServerUtils.isWebServerRunning()
-                || WebServerUtils.isWebServerReachable(context);
+        // Reachability first: it is a single socket connect to the management
+        // port, while the process check spawns a root shell (CPU/battery).
+        boolean running = WebServerUtils.isWebServerReachable(context)
+                || WebServerUtils.isWebServerRunning();
         if (!running) {
             Timber.w("ServerWatchdog: web server not running - restarting it.");
             WebServerUtils.startWebServer(context);
             sleep(START_VERIFY_MS);
-            running = WebServerUtils.isWebServerRunning()
-                    || WebServerUtils.isWebServerReachable(context);
+            running = WebServerUtils.isWebServerReachable(context)
+                    || WebServerUtils.isWebServerRunning();
             if (running) {
                 Timber.i("ServerWatchdog: web server restarted successfully.");
             } else {

@@ -93,6 +93,12 @@ public final class HijackModel {
      */
     public static boolean enable(Context context) {
         try {
+            // Already in place (the common case when the watchdog re-runs):
+            // skip the ~15 iptables invocations entirely.
+            if (isEnabled()) {
+                prefs(context).edit().putBoolean(PREF_ACTIVE, true).apply();
+                return true;
+            }
             /*
              * The redirect only makes sense when the server really listens on
              * the configured ports: if something else (AdGuard, the ROM) holds
