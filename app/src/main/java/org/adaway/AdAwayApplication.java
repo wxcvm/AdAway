@@ -56,6 +56,9 @@ public class AdAwayApplication extends Application {
                         ServerWatchdogWorker.UNIQUE_PERIODIC,
                         androidx.work.ExistingPeriodicWorkPolicy.KEEP,
                         watchdog);
+        // Restart check right away: opening the app is exactly when a user
+        // notices that the web server is gone.
+        org.adaway.broadcast.ServerWatchdogWorker.scheduleImmediateCheck(this);
         // Create models
         this.sourceModel = new SourceModel(this);
         this.updateModel = new UpdateModel(this);
