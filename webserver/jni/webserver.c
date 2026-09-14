@@ -2021,7 +2021,9 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
  * app's rules. Only enabled with --proxy-filter.
  */
 #define PROXY_MAX 128
-#define PROXY_BUF_MAX (4u * 1024u * 1024u)
+/* Only pages up to this size are buffered for rewriting; bigger responses are
+   streamed through untouched, which keeps the peak memory small. */
+#define PROXY_BUF_MAX (1u * 1024u * 1024u)
 #define PROXY_TIMEOUT_MS 60000u
 #define PROXY_CONNECT_TIMEOUT_MS 15000u
 
@@ -2047,11 +2049,16 @@ struct proxy_state {
 static struct mg_mgr *s_mgr;
 static struct proxy_state *s_proxies[PROXY_MAX];
 
-/* ── blocked-host table (64-bit FNV-1a hashes, open addressing) ── */
-#define BLOCK_HASH_BITS 21
-#define BLOCK_HASH_SLOTS (1u << BLOCK_HASH_BITS)
+/* ── blocked-host table (64-bit FNV-1a hashes, open addressing) ──
+ * Grown on demand (512 KB at first, doubling up to 16 MB) so the common case
+ * of a few thousand rules costs almost no memory.
+ */
+#define BLOCK_HASH_MIN_SLOTS (1u << 16)
+#define BLOCK_HASH_MAX_SLOTS (1u << 21)
 static uint64_t *s_block_slots;
+static size_t s_block_cap;    /* allocated slots (power of two, 0 = none) */
 static size_t s_block_used;
+static bool s_block_grow(void);
 
 static uint64_t fnv1a_lower(const char *s, size_t n) {
     uint64_t h = 1469598103934665603ULL;
@@ -2064,15 +2071,32 @@ static uint64_t fnv1a_lower(const char *s, size_t n) {
     return h ? h : 1;
 }
 
-static void block_set_add_hash(uint64_t h) {
-    if (!s_block_slots) {
-        s_block_slots = (uint64_t *) calloc(BLOCK_HASH_SLOTS, sizeof(uint64_t));
-        if (!s_block_slots) return;
+/* Double the table (rehashing in place); keeps the load factor below 50%. */
+static bool s_block_grow(void) {
+    size_t newCap = s_block_cap ? s_block_cap * 2 : BLOCK_HASH_MIN_SLOTS;
+    if (newCap > BLOCK_HASH_MAX_SLOTS) return false;
+    uint64_t *slots = (uint64_t *) calloc(newCap, sizeof(uint64_t));
+    if (!slots) return false;
+    for (size_t i = 0; i < s_block_cap; i++) {
+        uint64_t h = s_block_slots ? s_block_slots[i] : 0;
+        if (!h) continue;
+        size_t k = (size_t) (h & (newCap - 1));
+        while (slots[k]) k = (k + 1) & (newCap - 1);
+        slots[k] = h;
     }
-    if (s_block_used * 2 >= BLOCK_HASH_SLOTS) return;   /* keep load < 50% */
-    size_t i = (size_t) (h & (BLOCK_HASH_SLOTS - 1));
+    free(s_block_slots);
+    s_block_slots = slots;
+    s_block_cap = newCap;
+    return true;
+}
+
+static void block_set_add_hash(uint64_t h) {
+    if (!s_block_slots || s_block_used * 2 >= s_block_cap) {
+        if (!s_block_grow() && !s_block_slots) return;
+    }
+    size_t i = (size_t) (h & (s_block_cap - 1));
     for (size_t probe = 0; probe < 128; probe++) {
-        size_t k = (i + probe) & (BLOCK_HASH_SLOTS - 1);
+        size_t k = (i + probe) & (s_block_cap - 1);
         if (s_block_slots[k] == 0) { s_block_slots[k] = h; s_block_used++; return; }
         if (s_block_slots[k] == h) return;
     }
@@ -2081,9 +2105,9 @@ static void block_set_add_hash(uint64_t h) {
 static bool block_set_contains(const char *host, size_t len) {
     if (!s_block_slots || len == 0 || len > 255) return false;
     uint64_t h = fnv1a_lower(host, len);
-    size_t i = (size_t) (h & (BLOCK_HASH_SLOTS - 1));
+    size_t i = (size_t) (h & (s_block_cap - 1));
     for (size_t probe = 0; probe < 128; probe++) {
-        size_t k = (i + probe) & (BLOCK_HASH_SLOTS - 1);
+        size_t k = (i + probe) & (s_block_cap - 1);
         if (s_block_slots[k] == 0) return false;
         if (s_block_slots[k] == h) return true;
     }
@@ -2128,6 +2152,7 @@ static size_t block_set_load_file(const char *path) {
 static void block_set_load(const char *resource_dir) {
     free(s_block_slots);
     s_block_slots = NULL;
+    s_block_cap = 0;
     s_block_used = 0;
 #ifndef _WIN32
     char path[PATH_MAX];
@@ -2328,7 +2353,10 @@ static void write_stats_json_file(struct settings *s) {
 /* ── proxy plumbing ── */
 static void proxy_state_free(struct proxy_state *st) {
     if (!st) return;
-    for (int i = 0; i < PROXY_MAX; i++) if (s_proxies[i] == st) s_proxies[i] = NULL;
+    for (int i = 0; i < PROXY_MAX; i++) {
+        if (s_proxies[i] == st) { s_proxies[i] = NULL; s_proxy_active--; break; }
+    }
+    if (s_proxy_active < 0) s_proxy_active = 0;
     free(st->req);
     free(st->buf);
     free(st);
@@ -2517,8 +2545,13 @@ static void proxy_fn(struct mg_connection *c, int ev, void *ev_data) {
     }
 }
 
+/* Number of in-flight proxy requests: lets the (very hot) poll path skip the
+   lookup entirely while no proxy request is active. */
+static int s_proxy_active;
+
 /* Is a proxy request currently in flight for this client connection? */
 static bool proxy_busy(struct mg_connection *c) {
+    if (s_proxy_active == 0) return false;   /* fast path: nothing to scan */
     for (int i = 0; i < PROXY_MAX; i++) {
         if (s_proxies[i] && s_proxies[i]->client == c) return true;
     }
@@ -2593,7 +2626,7 @@ static bool proxy_start(struct mg_connection *c, struct settings *s,
     if (!up) { free(st->req); free(st); return false; }
     st->up = up;
     for (int i = 0; i < PROXY_MAX; i++) {
-        if (!s_proxies[i]) { s_proxies[i] = st; break; }
+        if (!s_proxies[i]) { s_proxies[i] = st; s_proxy_active++; break; }
     }
     mg_send(up, st->req, st->req_len);
     if (s->debug) LOG_INFO("[proxy] %s%s", st->tls ? "https://" : "http://", st->host);
@@ -3603,13 +3636,20 @@ int main(int argc, char *argv[]) {
    Used directly by the Android/headless builds and from a worker thread
    when the Windows dashboard window is shown. */
 static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
-    uint64_t last_json_ms = 0;
+    /* Snapshot once at startup, then only when something actually changed and
+       at most every 20 s (5 min when idle): writing 16 KB every few seconds for
+       nothing would cost flash I/O and CPU on a phone. */
+    write_stats_json_file(&s);
+    uint64_t last_json_ms = mg_millis();
+    uint64_t last_json_counter = s_stats.total_requests + s_stats.total_connections;
     while (s_sig_num == 0) {
         mg_mgr_poll(mgr, 1000);
-        /* Refresh the on-disk statistics snapshot every ~5 s. */
         uint64_t now_ms = mg_millis();
-        if (now_ms - last_json_ms > 5000) {
+        uint64_t counter = s_stats.total_requests + s_stats.total_connections;
+        if (now_ms - last_json_ms > 300000 ||
+            (counter != last_json_counter && now_ms - last_json_ms > 20000)) {
             last_json_ms = now_ms;
+            last_json_counter = counter;
             write_stats_json_file(&s);
         }
     }
