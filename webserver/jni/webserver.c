@@ -1,3 +1,11 @@
+/*
+ * _GNU_SOURCE is required for bionic to expose backtrace() and
+ * backtrace_symbols_fd() (used by the native crash handler below). It has to
+ * be defined before the first system header is included.
+ */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
