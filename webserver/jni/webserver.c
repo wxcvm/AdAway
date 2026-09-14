@@ -7,6 +7,10 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdint.h>       /* intptr_t (conn_uid) */
+#if !defined(_WIN32)
+#include <execinfo.h>     /* backtrace() for the native crash log */
+#include <fcntl.h>
+#endif
 #include <pthread.h>
 
 /*
@@ -934,6 +938,79 @@ static void app_record_tls_host(uid_t uid, const char *host) {
     if (s_tls_count < RECENT_TLS_MAX) s_tls_count++;
     struct appstat *a = app_find_or_add(uid);
     if (a) a->tls_hosts++;
+}
+
+/* ── Resilience: stay alive, and leave evidence when we do crash ──
+ *
+ * The server is a detached root process; aggressive OEM memory managers
+ * otherwise reap it and the device silently loses its blocker. A very low
+ * oom_score_adj makes the kernel pick almost any other process first.
+ * The crash handler appends the signal and a backtrace to the log the app
+ * displays (/data/local/tmp/webserver_start.log), so "the server often stops"
+ * finally becomes diagnosable instead of silent.
+ */
+#ifndef _WIN32
+static char s_crash_dir[PATH_MAX];
+
+static void crash_handler(int sig) {
+    /* Async-signal-safe only: open()/write()/backtrace_symbols_fd(). */
+    char header[192];
+    int n = snprintf(header, sizeof(header),
+                     "\n[CRASH] webserver killed by signal %d\n", sig);
+    if (n > 0) {
+        int fd = open("/data/local/tmp/webserver_start.log",
+                      O_WRONLY | O_APPEND | O_CREAT, 0644);
+        if (fd >= 0) { ssize_t w = write(fd, header, (size_t) n); (void) w; close(fd); }
+        if (s_crash_dir[0]) {
+            char path[PATH_MAX];
+            snprintf(path, sizeof(path), "%s/native_crash.log", s_crash_dir);
+            fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+            if (fd >= 0) {
+                ssize_t w = write(fd, header, (size_t) n);
+                (void) w;
+                void *frames[32];
+                int count = backtrace(frames, 32);
+                backtrace_symbols_fd(frames, count, fd);
+                close(fd);
+            }
+        }
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+#endif
+
+static void setup_crash_handler(const char *resource_dir) {
+#ifndef _WIN32
+    if (resource_dir && *resource_dir) {
+        snprintf(s_crash_dir, sizeof(s_crash_dir), "%s", resource_dir);
+    }
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = crash_handler;
+    sa.sa_flags = SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+#else
+    (void) resource_dir;
+#endif
+}
+
+static void harden_process(void) {
+#ifndef _WIN32
+    /* -900 keeps the blocker alive when the system runs out of memory. */
+    FILE *f = fopen("/proc/self/oom_score_adj", "w");
+    if (f) {
+        fputs("-900", f);
+        fclose(f);
+        LOG_INFO("oom_score_adj set to -900 (resistant to low-memory kills)");
+    }
+    signal(SIGPIPE, SIG_IGN);
+#endif
 }
 
 /* ── Signal handling ──────────────────────────────────────────── */
@@ -1996,31 +2073,11 @@ static bool block_set_contains(const char *host, size_t len) {
     return false;
 }
 
-/*
- * Load the blocked hosts from the rules file the app exports
- * (<resource>/blocklist.txt) and fall back to the system hosts file. Both use
- * the "<ip> <host>" hosts syntax; only entries pointing at 127.0.0.1, 0.0.0.0,
- * ::1 or :: count as blocked. Filtering from the exported rules keeps the
- * hijack mode working even when the system hosts file is not written at all.
- */
-static void block_set_load(const char *resource_dir) {
-    free(s_block_slots);
-    s_block_slots = NULL;
-    s_block_used = 0;
 #ifndef _WIN32
-    char path[PATH_MAX];
-    const char *source = "blocklist.txt";
-    snprintf(path, sizeof(path), "%s/blocklist.txt", resource_dir);
+/* Parse one rules file ("<ip> <host>") and return the number of entries added. */
+static size_t block_set_load_file(const char *path) {
     FILE *f = fopen(path, "r");
-    if (!f) {
-        snprintf(path, sizeof(path), "/system/etc/hosts");
-        source = "hosts file";
-        f = fopen(path, "r");
-    }
-    if (!f) {
-        LOG_INFO("proxy: no rules file readable - block list empty");
-        return;
-    }
+    if (!f) return 0;
     char line[512];
     size_t n = 0;
     while (fgets(line, sizeof(line), f)) {
@@ -2040,7 +2097,30 @@ static void block_set_load(const char *resource_dir) {
         if (*h) { block_set_add_hash(fnv1a_lower(h, strlen(h))); n++; }
     }
     fclose(f);
-    LOG_INFO("proxy: %zu blocked hosts loaded from %s (%s)", n, source, path);
+    return n;
+}
+#endif
+
+/*
+ * Load the blocked hosts from the rules file the app exports
+ * (<resource>/blocklist.txt) and fall back to the system hosts file when it is
+ * missing OR empty - the export is written before the first sync, and an empty
+ * rule set must never silently disable filtering. Only entries pointing at
+ * 127.0.0.1, 0.0.0.0, ::1 or :: count as blocked.
+ */
+static void block_set_load(const char *resource_dir) {
+    free(s_block_slots);
+    s_block_slots = NULL;
+    s_block_used = 0;
+#ifndef _WIN32
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/blocklist.txt", resource_dir);
+    size_t n = block_set_load_file(path);
+    if (n == 0) {
+        snprintf(path, sizeof(path), "/system/etc/hosts");
+        n = block_set_load_file(path);
+    }
+    LOG_INFO("proxy: %zu blocked hosts loaded from %s", n, path);
 #else
     (void) resource_dir;
 #endif
@@ -3445,6 +3525,9 @@ int main(int argc, char *argv[]) {
 
     load_block_cfg(s.resource_dir);
     setup_signal_handler();
+    /* Stay alive under memory pressure and log native crashes. */
+    setup_crash_handler(s.resource_dir);
+    harden_process();
 
     LOG_INFO("ADBlock Web Server v" ADBLOCK_APP_VERSION " ready — Mongoose " MG_VERSION
         ", SNI cert issuance enabled, IPv6 loopback %s.",
