@@ -184,15 +184,21 @@ jobs:
             Start-Sleep -Seconds 90
           }
           Start-Sleep -Seconds 5
-          $p4 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18084","--https-port","18447","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server4.log" -RedirectStandardError "server4.err"
-          Start-Sleep -Seconds 10
+          # GUI mode on purpose: the dashboard must stay alive and keep the
+          # loopback management port serving even when the main port is taken
+          # (headless --no-gui exits fast instead, which is checked at the end).
+          $p4 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18084","--https-port","18447") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server4.log" -RedirectStandardError "server4.err"
+          Start-Sleep -Seconds 12
           try {
             $s4 = Invoke-WebRequest -Uri "http://127.0.0.1:8686/internal-stats" -UseBasicParsing -TimeoutSec 10
             Write-Output ("busy-main-port: management /internal-stats HTTP " + $s4.StatusCode)
             if ($s4.StatusCode -ne 200) { throw "management port is dead while the main port is busy" }
             if ($s4.Content -notmatch '"bind_ok"\s*:\s*false') { throw "expected bind_ok=false when the main HTTP port is taken" }
             if ($s4.Content -notmatch '"bound"\s*:\s*false') { throw "expected a listener entry with bound=false" }
-            Write-Output "port-conflict handling OK"
+            $err4 = Get-Content "server4.err" -ErrorAction SilentlyContinue | Out-String
+            if ($err4 -notmatch 'already in use') { throw "the conflict was not reported in webserver.log/stderr" }
+            Write-Output "port-conflict handling OK (dashboard alive, bind_ok=false, warning logged)"
+          }
           } catch {
             Write-Output ("PORT CONFLICT TEST ERROR: " + $_.Exception.Message)
             Get-Content "server4.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
@@ -203,6 +209,13 @@ jobs:
             Stop-Job $blocker -ErrorAction SilentlyContinue
             Remove-Job $blocker -Force -ErrorAction SilentlyContinue
           }
+          # Headless mode is expected to fail fast when the port is taken
+          # (a scheduled task should report the problem instead of idling).
+          $p5 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18084","--https-port","18447","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server5.log" -RedirectStandardError "server5.err"
+          Start-Sleep -Seconds 8
+          Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          if (-not $p5.HasExited) { throw "headless mode should exit when the main port is taken" }
+          Write-Output ("headless mode exited as expected with code " + $p5.ExitCode)
 
       - name: Autostart registry test
         shell: pwsh
