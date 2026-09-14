@@ -125,6 +125,33 @@ struct snapshot {
     struct listener_info listeners[LISTENER_MAX_GUI];
 };
 
+/* ── shared dashboard state ─────────────────────────────────────────
+ * The statistics and certificate helpers below are defined before the GUI
+ * state block, so the state they touch is declared here as tentative
+ * definitions (the initialised definitions live further down the file). */
+#ifndef WM_APP_STATS
+#define WM_APP_STATS (WM_USER + 3)
+#endif
+#define CERT_CACHE_MS 30000
+static char g_res[512];
+static int  g_http_port;
+static int  g_https_port;
+static bool g_bind_all;
+static bool g_start_minimized;
+static int  g_tab;
+static int  g_stats_port;
+static int  g_active_port;
+static int  g_poll_started;
+static volatile int g_poll_stop;
+static pthread_t g_poll_thread;
+static pthread_mutex_t g_snap_mutex;
+static struct snapshot g_snap_next;
+static long long g_cert_days;
+static int  g_cert_trusted_flag;
+static DWORD g_cert_checked_tick;
+static long long cert_days_left(const char *cert_path);
+static int  cert_trusted(const char *cert_path);
+
 static long long json_num(const char *body, const char *key) {
     char pat[64];
     int pl = snprintf(pat, sizeof(pat), "\"%s\":", key);
