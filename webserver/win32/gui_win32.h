@@ -3,12 +3,13 @@
 #include <stdbool.h>
 
 /* Version marker - shown in the window title and the console startup log. */
-#define ADBLOCK_APP_VERSION "1.10.0"
+#define ADBLOCK_APP_VERSION "1.11.0"
 
 struct adblock_gui_args {
     const char *resource_dir;   /* folder holding localhost-2410.crt/.key */
     int http_port;
     int https_port;
+    int stats_port;             /* loopback management port (statistics/control) */
     bool bind_all;              /* listen on all interfaces */
     bool start_minimized;       /* show only the tray icon (autostart) */
     const char *startup_warning;/* non-null when the server could not bind */
