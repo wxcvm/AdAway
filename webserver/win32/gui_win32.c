@@ -15,9 +15,12 @@
 #include <shellapi.h>
 #include <iphlpapi.h>
 #include <wincrypt.h>
+#include <dwmapi.h>
+#include <uxtheme.h>
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
@@ -27,6 +30,40 @@
 #include <openssl/pem.h>
 
 #include "gui_win32.h"
+
+/* --- theme (persisted in webserver.ini as theme=0/1/2) ---------------- */
+#define THEME_SYSTEM (-1)
+static int g_theme_pref = THEME_SYSTEM;   /* -1 system, 0 light, 1 dark */
+static int g_dark = 0;                    /* resolved theme actually drawn */
+
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+
+/* Windows 11 rounded corners + immersive dark title bar (no-op on older
+ * builds: DwmSetWindowAttribute simply fails). */
+static void apply_window_chrome(HWND hwnd, int dark) {
+    BOOL d = dark ? TRUE : FALSE;
+    DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &d, sizeof(d));
+    DWORD pref = 2;   /* DWMWCP_ROUND */
+    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
+}
+
+/* Best-effort dark styling for the native child controls (edit boxes and
+ * check boxes); custom-drawn areas always honour the palette. */
+static void apply_control_theme(HWND hwnd) {
+    static const wchar_t *classes[2] = { L"EDIT", L"BUTTON" };
+    for (int c = 0; c < 2; c++) {
+        HWND w = FindWindowExW(hwnd, NULL, classes[c], NULL);
+        while (w != NULL) {
+            SetWindowTheme(w, g_dark ? L"DarkMode_Explorer" : L"Explorer", NULL);
+            w = FindWindowExW(hwnd, w, classes[c], NULL);
+        }
+    }
+}
 
 /* --- restart coordination (old instance stops server, then relaunches) --- */
 static bool g_restart_requested = false;
@@ -53,6 +90,14 @@ static void utf8_to_wide(const char *src, wchar_t *dst, size_t n) {
 
 #define HIST_MAX 48
 #define STEAL_JSON_BUF 16384
+#define LISTENER_MAX_GUI 14
+
+/* One socket the server reported through /internal-stats. */
+struct listener_info {
+    wchar_t name[20];
+    wchar_t addr[96];
+    int bound, ipv6, loopback;
+};
 
 struct histogram {
     long long requests;
@@ -73,6 +118,11 @@ struct snapshot {
     struct histogram daily[HIST_MAX];
     int daily_count;
     int valid;
+    /* v1.11 listener diagnostics (absent -> zeros) */
+    int bind_ok;
+    int stats_port;
+    int listener_count;
+    struct listener_info listeners[LISTENER_MAX_GUI];
 };
 
 static long long json_num(const char *body, const char *key) {
@@ -124,6 +174,52 @@ static int json_hist(const char *body, const char *key,
     return count;
 }
 
+/* Parses stats_port / bind_ok / listeners[] from the /internal-stats JSON so
+ * the dashboard can show exactly which sockets the server owns.  Tolerates an
+ * older server that does not emit the fields (they simply stay zero). */
+static void json_listeners(const char *body, struct snapshot *sn) {
+    sn->listener_count = 0;
+    sn->bind_ok = strstr(body, "\"bind_ok\":true") != NULL;
+    sn->stats_port = (int)json_num(body, "stats_port");
+    const char *p = strstr(body, "\"listeners\":[");
+    if (p == NULL) return;
+    p = strchr(p, '[');
+    if (p == NULL) return;
+    p++;
+    while (sn->listener_count < LISTENER_MAX_GUI) {
+        const char *open = strchr(p, '{');
+        if (open == NULL) break;
+        const char *close = strchr(open, '}');
+        if (close == NULL) break;
+        char item[384];
+        size_t il = (size_t)(close - open) + 1;
+        if (il >= sizeof(item)) il = sizeof(item) - 1;
+        memcpy(item, open, il);
+        item[il] = '\0';
+        struct listener_info *li = &sn->listeners[sn->listener_count];
+        memset(li, 0, sizeof(*li));
+        const char *q = strstr(item, "\"name\":\"");
+        if (q != NULL) {
+            q += 8;
+            const char *e = strchr(q, '"');
+            if (e != NULL && e > q)
+                MultiByteToWideChar(CP_UTF8, 0, q, (int)(e - q), li->name, 19);
+        }
+        q = strstr(item, "\"addr\":\"");
+        if (q != NULL) {
+            q += 8;
+            const char *e = strchr(q, '"');
+            if (e != NULL && e > q)
+                MultiByteToWideChar(CP_UTF8, 0, q, (int)(e - q), li->addr, 95);
+        }
+        li->bound = strstr(item, "\"bound\":true") != NULL;
+        li->ipv6 = strstr(item, "\"ipv6\":true") != NULL;
+        li->loopback = strstr(item, "\"loopback\":true") != NULL;
+        sn->listener_count++;
+        p = close + 1;
+    }
+}
+
 static int http_get(int port, const char *path, char *out, size_t outsz) {
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == INVALID_SOCKET) return -1;
@@ -171,7 +267,45 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->sni_hit_rate = json_double(buf, "sni_hit_rate");
     sn->hist_count = json_hist(buf, "history", sn->hist, HIST_MAX);
     sn->daily_count = json_hist(buf, "daily", sn->daily, HIST_MAX);
+    json_listeners(buf, sn);
     sn->valid = 1;
+}
+
+/* Try the loopback management port first (it exists exactly so statistics
+   stay readable even when the user facing ports are taken or bound to LAN),
+   then fall back to the main HTTP port. */
+static void snapshot_fetch_any(struct snapshot *sn) {
+    if (g_stats_port > 0 && g_stats_port != g_http_port) {
+        snapshot_fetch(g_stats_port, sn);
+        if (sn->valid) { g_active_port = g_stats_port; return; }
+    }
+    snapshot_fetch(g_http_port, sn);
+    if (sn->valid) g_active_port = g_http_port;
+}
+
+static void cert_refresh(bool force) {
+    DWORD now = GetTickCount();
+    if (!force && g_cert_checked_tick != 0 && now - g_cert_checked_tick < CERT_CACHE_MS)
+        return;
+    char cert_path[1024];
+    snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
+    g_cert_days = cert_days_left(cert_path);
+    g_cert_trusted_flag = cert_trusted(cert_path);
+    g_cert_checked_tick = now;
+}
+
+static void *stats_poll_thread(void *arg) {
+    HWND hwnd = (HWND)arg;
+    while (!g_poll_stop) {
+        struct snapshot tmp;
+        snapshot_fetch_any(&tmp);
+        pthread_mutex_lock(&g_snap_mutex);
+        g_snap_next = tmp;
+        pthread_mutex_unlock(&g_snap_mutex);
+        if (!g_poll_stop) PostMessageW(hwnd, WM_APP_STATS, 0, 0);
+        for (int i = 0; i < 20 && !g_poll_stop; i++) Sleep(100);
+    }
+    return NULL;
 }
 
 #define IDC_POL0      1110
@@ -212,7 +346,33 @@ static void ini_save(int http_port, int https_port, bool bind_all) {
     fprintf(f, "http_port=%d\n", http_port);
     fprintf(f, "https_port=%d\n", https_port);
     fprintf(f, "bind_all=%d\n", bind_all ? 1 : 0);
+    fprintf(f, "theme=%d\n", g_theme_pref);
     fclose(f);
+}
+
+/* Reads theme= from webserver.ini; returns THEME_SYSTEM when absent. */
+static int ini_read_theme(void) {
+    char path[1024], line[256];
+    ini_file_path(path, sizeof(path));
+    FILE *f = fopen(path, "r");
+    if (!f) return THEME_SYSTEM;
+    int theme = THEME_SYSTEM;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        int v = 99;
+        if (sscanf(line, "theme=%d", &v) == 1 && v >= -1 && v <= 1) theme = v;
+    }
+    fclose(f);
+    return theme;
+}
+
+/* Follow the Windows "app mode" setting when no preference was stored. */
+static int system_prefers_dark(void) {
+    DWORD val = 1, sz = sizeof(val);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            L"AppsUseLightTheme", RRF_RT_REG_DWORD, NULL, &val, &sz) == ERROR_SUCCESS)
+        return val == 0;
+    return 0;
 }
 
 /* ── block_config.json read/write (applied via /control reload_config) ── */
@@ -468,6 +628,8 @@ bool win32_autostart_installed(void) {
 #define IDM_TEST     1003
 #define IDM_AUTOSTART 1004
 #define IDM_EXIT     1005
+#define IDM_DARK     1006
+#define IDC_FIXPORT  1107
 #define IDC_HTTP_EDIT 1101
 #define IDC_HTTPS_EDIT 1102
 #define IDC_BIND_CHK  1103
@@ -475,22 +637,43 @@ bool win32_autostart_installed(void) {
 #define IDC_RESTART   1105
 #define IDC_FLUSH     1106
 
-/* AdGuard-inspired palette */
-#define C_SIDEBAR    RGB(30, 37, 55)
-#define C_NAV_ACTIVE RGB(42, 54, 84)
-#define C_NAV_TEXT   RGB(147, 163, 190)
-#define C_CONTENT_BG RGB(243, 245, 248)
-#define C_CARD       RGB(255, 255, 255)
-#define C_BORDER     RGB(229, 232, 238)
-#define C_TEXT       RGB(31, 41, 55)
-#define C_MUTED      RGB(100, 116, 139)
+/* AdGuard-inspired palette.
+ *
+ * The surface colours live in a switchable palette so the dashboard can be
+ * rendered in a light or a dark theme (the accent colours are shared). */
+struct palette {
+    COLORREF sidebar, nav_active, nav_text, content_bg, card, border,
+             text, muted, gridline, strip;
+};
+static const struct palette P_LIGHT = {
+    RGB(30, 37, 55), RGB(42, 54, 84), RGB(147, 163, 190),
+    RGB(243, 245, 248), RGB(255, 255, 255), RGB(229, 232, 238),
+    RGB(31, 41, 55), RGB(100, 116, 139), RGB(237, 240, 244),
+    RGB(255, 255, 255)
+};
+static const struct palette P_DARK = {
+    RGB(17, 21, 32), RGB(38, 46, 66), RGB(148, 163, 190),
+    RGB(22, 26, 36), RGB(31, 36, 49), RGB(48, 55, 71),
+    RGB(226, 232, 240), RGB(148, 163, 184), RGB(44, 51, 66),
+    RGB(31, 36, 49)
+};
+/* Active theme: starts as a literal copy of the light palette so it is valid
+ * even before theme_apply() has run. */
+static struct palette g_pal = {
+    RGB(30, 37, 55), RGB(42, 54, 84), RGB(147, 163, 190),
+    RGB(243, 245, 248), RGB(255, 255, 255), RGB(229, 232, 238),
+    RGB(31, 41, 55), RGB(100, 116, 139), RGB(237, 240, 244),
+    RGB(255, 255, 255)
+};
+static void theme_apply(int dark) {
+    g_pal = dark ? P_DARK : P_LIGHT;
+}
 #define C_ACCENT     RGB(59, 130, 246)
 #define C_BLUE_SOFT  RGB(219, 234, 254)
 #define C_BLUE       RGB(59, 130, 246)
 #define C_RED        RGB(239, 68, 68)
 #define C_GREEN      RGB(34, 197, 94)
 #define C_GREEN_TXT  RGB(22, 163, 74)
-#define C_GRIDLINE   RGB(237, 240, 244)
 
 static const wchar_t *g_title = L"ADBlock 拦截服务器 v" ADBLOCK_APP_VERSION;
 
@@ -505,6 +688,27 @@ static wchar_t g_status[4096] = L"";
 static HWND s_ctrls[64];
 static int s_ctrl_count = 0;
 static HFONT g_ctl_font = NULL;
+
+/* ── polling / caching state ─────────────────────────────────────
+ * The statistics fetch runs on its own thread so a slow or unreachable
+ * server can never freeze the window; the certificate files and the
+ * Root-store lookup are cached with a TTL instead of being repeated on
+ * every (2 s) repaint. */
+static int  g_stats_port = 8686;     /* loopback management port (preferred) */
+static int  g_active_port = 0;       /* port that answered the last poll */
+static pthread_t g_poll_thread;
+static volatile int g_poll_stop = 0;
+static int  g_poll_started = 0;
+static pthread_mutex_t g_snap_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct snapshot g_snap_next;
+static long long g_cert_days = -100000;
+static int  g_cert_trusted_flag = 0;
+static DWORD g_cert_checked_tick = 0;
+#define CERT_CACHE_MS 30000
+
+static int mgmt_port(void) {
+    return g_active_port > 0 ? g_active_port : g_stats_port;
+}
 
 /* rounded card */
 static void rounded_card(HDC hdc, int x, int y, int w, int h, int radius,
@@ -538,23 +742,25 @@ static void fmt_num(wchar_t *dst, size_t n, long long v) {
 static void draw_kpi(HDC hdc, int x, int y, int w, int h,
                      const wchar_t *label, const wchar_t *value,
                      COLORREF accent) {
-    rounded_card(hdc, x, y, w, h, 12, C_CARD, C_BORDER);
+    rounded_card(hdc, x + 1, y + 2, w, h, 12, g_pal.gridline, g_pal.gridline);  /* soft shadow */
+    rounded_card(hdc, x, y, w, h, 12, g_pal.card, g_pal.border);
     HBRUSH ab = CreateSolidBrush(accent);
     HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
     HGDIOBJ ob = SelectObject(hdc, ab);
-    Ellipse(hdc, S(x + 14), S(y + 14), S(x + 26), S(y + 26));
+    RoundRect(hdc, S(x + 3), S(y + 14), S(x + 7), S(y + h - 14), S(4), S(4));  /* accent bar */
+    Ellipse(hdc, S(x + w - 15), S(y + 13), S(x + w - 8), S(y + 20));           /* corner dot */
     SelectObject(hdc, op);
     SelectObject(hdc, ob);
     DeleteObject(ab);
-    HFONT vf = mfont(21, FW_SEMIBOLD);
+    HFONT vf = mfont(20, FW_SEMIBOLD);
     HFONT lf = mfont(12, FW_NORMAL);
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, C_TEXT);
+    SetTextColor(hdc, g_pal.text);
     HFONT old = (HFONT)SelectObject(hdc, vf);
-    TextOutW(hdc, S(x + 16), S(y + 10), value, (int)wcslen(value));
-    SetTextColor(hdc, C_MUTED);
+    TextOutW(hdc, S(x + 16), S(y + 16), value, (int)wcslen(value));
+    SetTextColor(hdc, g_pal.muted);
     SelectObject(hdc, lf);
-    TextOutW(hdc, S(x + 16), S(y + 40), label, (int)wcslen(label));
+    TextOutW(hdc, S(x + 16), S(y + 46), label, (int)wcslen(label));
     SelectObject(hdc, old);
     DeleteObject(vf);
     DeleteObject(lf);
@@ -563,10 +769,10 @@ static void draw_kpi(HDC hdc, int x, int y, int w, int h,
 static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
                        const struct histogram *h, int count) {
     rounded_card(hdc, panel.left, panel.top,
-                 panel.right - panel.left, panel.bottom - panel.top, 12, C_CARD, C_BORDER);
+                 panel.right - panel.left, panel.bottom - panel.top, 12, g_pal.card, g_pal.border);
     HFONT tf = mfont(14, FW_SEMIBOLD);
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, C_TEXT);
+    SetTextColor(hdc, g_pal.text);
     HFONT old = (HFONT)SelectObject(hdc, tf);
     TextOutW(hdc, S(panel.left + 16), S(panel.top + 12), title, (int)wcslen(title));
     SelectObject(hdc, old);
@@ -575,7 +781,7 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
     int ax = panel.left + 20, ay = panel.top + 42;
     int aw = panel.right - panel.left - 34, ah = panel.bottom - panel.top - 62;
     if (count <= 0 || aw < 10 || ah < 10) {
-        SetTextColor(hdc, C_MUTED);
+        SetTextColor(hdc, g_pal.muted);
         TextOutW(hdc, S(ax + 4), S(ay + 12), L"暂无数据", 4);
         return;
     }
@@ -584,7 +790,7 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
         if (h[i].requests > maxv) maxv = h[i].requests;
         if (h[i].blocked > maxv) maxv = h[i].blocked;
     }
-    HPEN gp = CreatePen(PS_SOLID, 1, C_GRIDLINE);
+    HPEN gp = CreatePen(PS_SOLID, 1, g_pal.gridline);
     HGDIOBJ gop = SelectObject(hdc, gp);
     for (int g = 0; g <= 3; g++) {
         int gy = S(ay) + (int)((double)(S(ah)) * g / 3.0);
@@ -597,7 +803,7 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
     wchar_t numbuf[64];
     HFONT lf = mfont(11, FW_NORMAL);
     SelectObject(hdc, lf);
-    SetTextColor(hdc, C_MUTED);
+    SetTextColor(hdc, g_pal.muted);
     swprintf(numbuf, 64, L"%lld", maxv);
     TextOutW(hdc, S(ax), S(ay) - S(18), numbuf, (int)wcslen(numbuf));
     TextOutW(hdc, S(ax), S(ay) + S(ah) + S(4), L"0", 1);
@@ -638,7 +844,7 @@ static void draw_legend(HDC hdc, int x, int y) {
     SelectObject(hdc, ob);
     DeleteObject(b);
     SetBkMode(hdc, TRANSPARENT);
-    SetTextColor(hdc, C_MUTED);
+    SetTextColor(hdc, g_pal.muted);
     TextOutW(hdc, S(x + 14), S(y), L"请求", 2);
     HBRUSH r = CreateSolidBrush(C_RED);
     ob = SelectObject(hdc, r);
@@ -648,10 +854,93 @@ static void draw_legend(HDC hdc, int x, int y) {
     TextOutW(hdc, S(x + 90), S(y), L"拦截", 2);
 }
 
+/* "监听状态" card: lists every socket the server reported through
+ * /internal-stats so a port that failed to bind is visible inside the app
+ * instead of only in webserver.log. */
+static void draw_listener_card(HDC hdc, int x, int y, int w, int h,
+                               const struct snapshot *sn, int two_col) {
+    rounded_card(hdc, x + 1, y + 2, w, h, 12, g_pal.gridline, g_pal.gridline);
+    rounded_card(hdc, x, y, w, h, 12, g_pal.card, g_pal.border);
+
+    bool live = (sn != NULL && sn->valid);
+    int total = 0, bound = 0;
+    if (live) {
+        total = sn->listener_count;
+        for (int i = 0; i < total; i++)
+            if (sn->listeners[i].bound) bound++;
+    }
+    bool ok = live && sn->bind_ok != 0;
+
+    HFONT tf = mfont(14, FW_SEMIBOLD);
+    HFONT old = (HFONT)SelectObject(hdc, tf);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, g_pal.text);
+    TextOutW(hdc, S(x + 16), S(y + 12), L"监听状态", 4);
+
+    wchar_t pill[160];
+    if (live)
+        swprintf(pill, 160, ok ? L"绑定正常 · %d/%d 个端口在监听"
+                               : L"有端口绑定失败 · %d/%d 已监听", bound, total);
+    else
+        swprintf(pill, 160, L"服务器暂不可达，无法确认监听状态");
+    HFONT pf = mfont(12, FW_NORMAL);
+    SelectObject(hdc, pf);
+    SetTextColor(hdc, !live ? g_pal.muted : (ok ? C_GREEN_TXT : RGB(200, 60, 60)));
+    SIZE ps;
+    GetTextExtentPoint32W(hdc, pill, (int)wcslen(pill), &ps);
+    int px = x + w - 18 - ps.cx;
+    if (px < x + 110) px = x + 110;
+    TextOutW(hdc, S(px), S(y + 14), pill, (int)wcslen(pill));
+    SelectObject(hdc, old);
+    DeleteObject(tf);
+    DeleteObject(pf);
+
+    int shown = 0;
+    int cols = two_col ? 2 : 1;
+    int maxrow = two_col ? 4 : 8;
+    HFONT nf = mfont(12, FW_NORMAL);
+    old = (HFONT)SelectObject(hdc, nf);
+    for (int i = 0; i < total && shown < cols * maxrow; i++) {
+        const struct listener_info *li = &sn->listeners[i];
+        int col = shown % cols, row = shown / cols;
+        int lx = x + 16 + col * ((w - 32) / cols + 8);
+        int ly = y + 40 + row * 19;
+        HBRUSH db = CreateSolidBrush(li->bound
+                                     ? (li->loopback ? C_BLUE : C_GREEN)
+                                     : RGB(200, 60, 60));
+        HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+        HGDIOBJ ob = SelectObject(hdc, db);
+        Ellipse(hdc, S(lx), S(ly + 4), S(lx + 7), S(ly + 11));
+        SelectObject(hdc, op);
+        SelectObject(hdc, ob);
+        DeleteObject(db);
+        SetTextColor(hdc, li->bound ? g_pal.text : RGB(200, 60, 60));
+        TextOutW(hdc, S(lx + 13), S(ly), li->name, (int)wcslen(li->name));
+        SetTextColor(hdc, g_pal.muted);
+        TextOutW(hdc, S(lx + 80), S(ly), li->addr, (int)wcslen(li->addr));
+        shown++;
+    }
+    if (total == 0) {
+        SetTextColor(hdc, g_pal.muted);
+        const wchar_t *msg = live ? L"服务器未上报监听列表（可能是旧版服务器进程）"
+                                  : L"正在连接服务器 ...";
+        TextOutW(hdc, S(x + 16), S(y + 44), msg, (int)wcslen(msg));
+    } else if (!ok && h > 120) {
+        SetTextColor(hdc, RGB(200, 60, 60));
+        const wchar_t *msg =
+            L"提示：切到“设置”页点击“改用备用端口 18080/18443”即可避开被占用的端口。";
+        TextOutW(hdc, S(x + 16), S(y + h - 26), msg, (int)wcslen(msg));
+    }
+    SelectObject(hdc, old);
+    DeleteObject(nf);
+}
+
 static void draw_statusbar(HDC hdc) {
     RECT strip = {0, 630, 1000, 678};
-    FillRect(hdc, &strip, GetSysColorBrush(COLOR_WINDOW));
-    HPEN tp = CreatePen(PS_SOLID, 1, C_BORDER);
+    HBRUSH sbg = CreateSolidBrush(g_pal.strip);
+    FillRect(hdc, &strip, sbg);
+    DeleteObject(sbg);
+    HPEN tp = CreatePen(PS_SOLID, 1, g_pal.border);
     HGDIOBJ tpold = SelectObject(hdc, tp);
     MoveToEx(hdc, 0, S(630), NULL);
     LineTo(hdc, S(1000), S(630));
@@ -678,28 +967,28 @@ static void draw_statusbar(HDC hdc) {
 
     char cert_path[1024];
     snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
-    long long days = cert_days_left(cert_path);
+    long long days = g_cert_days;   /* cached: see cert_refresh() */
     wchar_t cert[200];
     if (days > 0 && days < 200000)
         swprintf(cert, 200, L"CA 证书剩余 %lld 天 · %s", days,
-                 cert_trusted(cert_path) ? L"已信任" : L"未信任");
+                 g_cert_trusted_flag ? L"已信任" : L"未信任");
     else if (days == -100001)
         swprintf(cert, 200, L"CA 证书文件缺失: %hs", cert_path);
     else if (days == -100002)
         swprintf(cert, 200, L"CA 证书解析失败: %hs", cert_path);
     else
         swprintf(cert, 200, L"CA 证书已过期 - 删除 %hs 后重启", cert_path);
-    SetTextColor(hdc, C_MUTED);
+    SetTextColor(hdc, g_pal.muted);
     TextOutW(hdc, S(430), S(643), cert, (int)wcslen(cert));
 
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t tm[64];
     swprintf(tm, 64, L"%02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
-    SetTextColor(hdc, RGB(148, 163, 184));
+    SetTextColor(hdc, g_pal.muted);
     TextOutW(hdc, S(920), S(643), tm, (int)wcslen(tm));
 
-    SetTextColor(hdc, C_MUTED);
+    SetTextColor(hdc, g_pal.muted);
     TextOutW(hdc, S(16), S(661), g_status, (int)wcslen(g_status));
 
     SelectObject(hdc, old);
@@ -714,7 +1003,7 @@ static bool nav_hit(int x, int y, int which) {
 
 static void draw_sidebar(HDC hdc) {
     RECT sb = {0, 0, 190, 680};
-    HBRUSH bg = CreateSolidBrush(C_SIDEBAR);
+    HBRUSH bg = CreateSolidBrush(g_pal.sidebar);
     FillRect(hdc, &sb, bg);
     DeleteObject(bg);
 
@@ -729,6 +1018,18 @@ static void draw_sidebar(HDC hdc) {
     wchar_t ver[64];
     swprintf(ver, 64, L"拦截服务器 v" ADBLOCK_APP_VERSION);
     TextOutW(hdc, S(22), S(48), ver, (int)wcslen(ver));
+    {
+        bool live = (g_sn != NULL && g_sn->valid);
+        HBRUSH nb = CreateSolidBrush(live ? C_GREEN : RGB(120, 135, 160));
+        HGDIOBJ nop = SelectObject(hdc, GetStockObject(NULL_PEN));
+        HGDIOBJ nob = SelectObject(hdc, nb);
+        Ellipse(hdc, S(22), S(70), S(31), S(79));
+        SelectObject(hdc, nop);
+        SelectObject(hdc, nob);
+        DeleteObject(nb);
+        SetTextColor(hdc, live ? RGB(110, 231, 183) : RGB(143, 163, 192));
+        TextOutW(hdc, S(37), S(67), live ? L"服务器运行中" : L"等待服务器 ...", live ? 6 : 9);
+    }
     SelectObject(hdc, old);
     DeleteObject(lf);
     DeleteObject(sf);
@@ -738,8 +1039,8 @@ static void draw_sidebar(HDC hdc) {
         int ny = t == 0 ? 96 : 148;
         bool active = (g_tab == t);
         rounded_card(hdc, 16, ny, 160, 40, 10,
-                     active ? C_NAV_ACTIVE : C_SIDEBAR,
-                     active ? C_NAV_ACTIVE : C_SIDEBAR);
+                     active ? g_pal.nav_active : g_pal.sidebar,
+                     active ? g_pal.nav_active : g_pal.sidebar);
         if (active) {
             HBRUSH ab = CreateSolidBrush(C_ACCENT);
             RECT bar = {S(16), S(ny + 10), S(20), S(ny + 30)};
@@ -748,7 +1049,7 @@ static void draw_sidebar(HDC hdc) {
         }
         /* icon: bars (statistics) / sliders (settings) */
         if (t == 0) {
-            HBRUSH ib = CreateSolidBrush(active ? C_ACCENT : C_NAV_TEXT);
+            HBRUSH ib = CreateSolidBrush(active ? C_ACCENT : g_pal.nav_text);
             HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
             HGDIOBJ ob = SelectObject(hdc, ib);
             RoundRect(hdc, S(34), S(ny + 14), S(40), S(ny + 30), S(3), S(3));
@@ -758,7 +1059,7 @@ static void draw_sidebar(HDC hdc) {
             SelectObject(hdc, ob);
             DeleteObject(ib);
         } else {
-            HPEN ip = CreatePen(PS_SOLID, S(2), active ? C_ACCENT : C_NAV_TEXT);
+            HPEN ip = CreatePen(PS_SOLID, S(2), active ? C_ACCENT : g_pal.nav_text);
             HGDIOBJ op = SelectObject(hdc, ip);
             HGDIOBJ ob2 = SelectObject(hdc, GetStockObject(NULL_BRUSH));
             for (int k = 0; k < 3; k++) {
@@ -774,17 +1075,17 @@ static void draw_sidebar(HDC hdc) {
         }
         HFONT nf = mfont(14, active ? FW_SEMIBOLD : FW_NORMAL);
         SelectObject(hdc, nf);
-        SetTextColor(hdc, active ? RGB(255, 255, 255) : C_NAV_TEXT);
+        SetTextColor(hdc, active ? RGB(255, 255, 255) : g_pal.nav_text);
         TextOutW(hdc, S(70), S(ny + 10), t == 0 ? L"统计" : L"设置", 2);
         SelectObject(hdc, old);
         DeleteObject(nf);
     }
 
     /* exit at sidebar bottom */
-    rounded_card(hdc, 16, 576, 160, 40, 10, C_SIDEBAR, C_SIDEBAR);
+    rounded_card(hdc, 16, 576, 160, 40, 10, g_pal.sidebar, g_pal.sidebar);
     HFONT xf = mfont(13, FW_NORMAL);
     SelectObject(hdc, xf);
-    SetTextColor(hdc, C_NAV_TEXT);
+    SetTextColor(hdc, g_pal.nav_text);
     TextOutW(hdc, S(70), S(586), L"退出", 2);
     SelectObject(hdc, old);
     DeleteObject(xf);
@@ -807,7 +1108,13 @@ static bool tray_add(HWND hwnd) {
     g_nid.uID = 1;
     g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     g_nid.uCallbackMessage = WM_APP_TRAY;
-    g_nid.hIcon = LoadIconW(NULL, IDI_APPLICATION);
+    {
+        /* Use the embedded application icon for the tray, too. */
+        HICON ti = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(1),
+                                     IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                     GetSystemMetrics(SM_CYSMICON), LR_SHARED);
+        g_nid.hIcon = (ti != NULL) ? ti : LoadIconW(NULL, IDI_APPLICATION);
+    }
     swprintf(g_nid.szTip, 128, L"ADBlock 拦截服务器 - http://localhost:%d", g_http_port);
     BOOL ok = Shell_NotifyIconW(NIM_ADD, &g_nid);
     g_tray_ok = (ok == TRUE);
@@ -867,13 +1174,15 @@ static const struct ctl_desc g_clayout[] = {
     { IDC_BIND_CHK,   210, 96, 260, 22, L"BUTTON", L"监听所有网卡（局域网）", BS_AUTOCHECKBOX },
     { IDC_SAVE,       210, 130, 110, 28, L"BUTTON", L"保存设置", BS_PUSHBUTTON },
     { IDC_RESTART,    330, 130, 120, 28, L"BUTTON", L"保存并重启", BS_PUSHBUTTON },
+    { IDC_FIXPORT,    460, 130, 190, 28, L"BUTTON", L"改用备用端口 18080/18443", BS_PUSHBUTTON },
+    { IDM_DARK,       664, 132, 170, 24, L"BUTTON", L"深色外观", BS_AUTOCHECKBOX },
     { IDM_TRUST,      210, 404, 96, 28, L"BUTTON", L"信任 CA", BS_PUSHBUTTON },
     { IDM_UNTRUST,    316, 404, 96, 28, L"BUTTON", L"撤销 CA", BS_PUSHBUTTON },
     { IDM_TEST,       422, 404, 110, 28, L"BUTTON", L"打开测试页", BS_PUSHBUTTON },
     { IDC_FLUSH,      542, 404, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 406, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
 };
-#define CL_MAIN 10
+#define CL_MAIN 12
 
 static void layout_controls(HWND hwnd) {
     for (int i = 0; i < CL_MAIN; i++)
@@ -903,7 +1212,7 @@ static void policy_apply(HWND hwnd) {
         vals[i] = SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_GETCHECK, 0, 0) == BST_CHECKED;
     policy_save(g_res, vals);
     wchar_t st[128];
-    control_post(g_http_port, "reload_config", st, 128);
+    control_post(mgmt_port(), "reload_config", st, 128);
     swprintf(g_status, 4096, L"拦截策略已更新（%ls）", st);
     InvalidateRect(hwnd, NULL, FALSE);
 }
@@ -933,12 +1242,23 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_https_port = args->https_port;
         g_bind_all = args->bind_all;
         g_start_minimized = args->start_minimized;
+        g_stats_port = args->stats_port > 0 ? args->stats_port : 8686;
         g_tab = 0;
         g_scale = GetDpiForWindow(hwnd) / 96.0;
+        g_theme_pref = ini_read_theme();
+        g_dark = (g_theme_pref == THEME_SYSTEM) ? system_prefers_dark()
+                                                : (g_theme_pref == 1);
+        theme_apply(g_dark);
+        apply_window_chrome(hwnd, g_dark);
         g_sn = (struct snapshot *)calloc(1, sizeof(struct snapshot));
         if (args->startup_warning != NULL && args->startup_warning[0] != '\0')
             swprintf(g_status, 4096, L"%hs", args->startup_warning);
         HINSTANCE hinst = GetModuleHandleW(NULL);
+        HICON app_icon = (HICON)LoadImageW(hinst, MAKEINTRESOURCEW(1), IMAGE_ICON,
+                                           0, 0, LR_DEFAULTSIZE | LR_SHARED);
+        if (app_icon == NULL) app_icon = LoadIconW(NULL, IDI_APPLICATION);
+        SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)app_icon);
+        SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)app_icon);
         for (int i = 0; i < CL_MAIN; i++) {
             const struct ctl_desc *d = &g_clayout[i];
             HWND w = CreateWindowExW(0, d->cls, d->text,
@@ -956,6 +1276,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_ctl_font = mfont(13, FW_NORMAL);
         for (int i = 0; i < s_ctrl_count; i++)
             SendMessageW(s_ctrls[i], WM_SETFONT, (WPARAM)g_ctl_font, TRUE);
+        SendMessageW(GetDlgItem(hwnd, IDM_DARK), BM_SETCHECK,
+                     g_dark ? BST_CHECKED : BST_UNCHECKED, 0);
+        apply_control_theme(hwnd);
         wchar_t tmp[32];
         swprintf(tmp, 32, L"%d", g_http_port);
         SetWindowTextW(GetDlgItem(hwnd, IDC_HTTP_EDIT), tmp);
@@ -973,24 +1296,40 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         show_controls(hwnd, 0);
         g_taskbar_created = RegisterWindowMessageW(L"TaskbarCreated");
         tray_add(hwnd);
+        cert_refresh(true);
+        if (pthread_create(&g_poll_thread, NULL, stats_poll_thread, hwnd) == 0)
+            g_poll_started = 1;   /* else: WM_TIMER fallback below */
         SetTimer(hwnd, 1, 2000, NULL);
         swprintf(g_status, 4096, L"等待首次统计（http://127.0.0.1:%d/internal-stats）...", g_http_port);
         return 0;
     }
     case WM_TIMER:
+        if (!g_poll_started && g_sn) {
+            /* Fallback when the worker thread could not start. */
+            snapshot_fetch_any(g_sn);
+        }
+        cert_refresh(false);
+        if (!g_tray_ok) tray_add(hwnd);   /* taskbar missing at logon -> retry */
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+    case WM_APP_STATS:
         if (g_sn) {
-            snapshot_fetch(g_http_port, g_sn);
+            pthread_mutex_lock(&g_snap_mutex);
+            *g_sn = g_snap_next;
+            pthread_mutex_unlock(&g_snap_mutex);
             if (g_sn->valid) {
                 SYSTEMTIME st;
                 GetLocalTime(&st);
                 swprintf(g_status, 4096,
-                         L"实时数据 - 更新于 %02d:%02d:%02d", st.wHour, st.wMinute, st.wSecond);
+                         L"实时数据 · 管理端口 %d · 更新于 %02d:%02d:%02d",
+                         mgmt_port(), st.wHour, st.wMinute, st.wSecond);
             } else {
-                swprintf(g_status, 4096, L"服务器暂不可达，等待响应...");
+                swprintf(g_status, 4096,
+                         L"服务器暂不可达（已尝试 %d 与 %d 端口）", g_stats_port, g_http_port);
             }
+            cert_refresh(false);
+            InvalidateRect(hwnd, NULL, FALSE);
         }
-        if (!g_tray_ok) tray_add(hwnd);   /* taskbar missing at logon -> retry */
-        InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     case WM_LBUTTONUP: {
         int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
@@ -1019,6 +1358,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                              id == IDM_TRUST ? L"添加至" : L"移出");
                 else
                     swprintf(msg, 256, L"证书操作失败（请检查 resources 目录）。");
+                cert_refresh(true);   /* trust state changed - drop the cache */
                 MessageBoxW(hwnd, msg, L"证书", MB_OK | MB_ICONINFORMATION);
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id == IDM_TEST) {
@@ -1030,11 +1370,38 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 bool on = SendMessageW(chk, BM_GETCHECK, 0, 0) == BST_CHECKED;
                 char cmd[2048], exe[MAX_PATH];
                 GetModuleFileNameA(NULL, exe, sizeof(exe));
-                snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --no-gui",
-                         exe, g_res, g_http_port, g_https_port);
+                snprintf(cmd, sizeof(cmd),
+                         "\"%s\" --resources \"%s\" --http-port %d --https-port %d --stats-port %d --minimized",
+                         exe, g_res, g_http_port, g_https_port, g_stats_port);
                 win32_autostart_set(on, cmd);
                 swprintf(g_status, 4096, L"开机自启动已%s", on ? L"启用" : L"关闭");
                 InvalidateRect(hwnd, NULL, FALSE);
+            } else if (id == IDM_DARK) {
+                bool on = SendMessageW(GetDlgItem(hwnd, IDM_DARK), BM_GETCHECK, 0, 0) == BST_CHECKED;
+                g_theme_pref = on ? 1 : 0;
+                g_dark = on ? 1 : 0;
+                theme_apply(g_dark);
+                apply_window_chrome(hwnd, g_dark);
+                apply_control_theme(hwnd);
+                ini_save(g_http_port, g_https_port, g_bind_all);
+                swprintf(g_status, 4096, L"已切换为%ls主题（下次启动仍然生效）",
+                         g_dark ? L"深色" : L"浅色");
+                InvalidateRect(hwnd, NULL, TRUE);
+            } else if (id == IDC_FIXPORT) {
+                /* The default ports were taken (another server is running):
+                 * move to 18080/18443 and restart so the dashboard comes back
+                 * on a port that is actually free. */
+                wchar_t wt[32];
+                swprintf(wt, 32, L"18080");
+                SetWindowTextW(GetDlgItem(hwnd, IDC_HTTP_EDIT), wt);
+                swprintf(wt, 32, L"18443");
+                SetWindowTextW(GetDlgItem(hwnd, IDC_HTTPS_EDIT), wt);
+                g_http_port = 18080;
+                g_https_port = 18443;
+                ini_save(g_http_port, g_https_port, g_bind_all);
+                swprintf(g_status, 4096, L"已改用 18080/18443，正在重启...");
+                win32_notify_restart();
+                PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
             } else if (id == IDM_EXIT) {
                 PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
             } else if (id == IDC_SAVE || id == IDC_RESTART) {
@@ -1062,7 +1429,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
             } else if (id == IDC_FLUSH) {
                 wchar_t st[128];
-                control_post(g_http_port, "flush_stats", st, 128);
+                control_post(mgmt_port(), "flush_stats", st, 128);
                 swprintf(g_status, 4096, L"%ls", st);
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id >= IDC_POL0 && id < IDC_POL0 + POLICY_COUNT) {
@@ -1086,30 +1453,45 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         /* content background */
         RECT content = {0, 0, rc.right, rc.bottom};
-        HBRUSH cb = CreateSolidBrush(C_CONTENT_BG);
+        HBRUSH cb = CreateSolidBrush(g_pal.content_bg);
         FillRect(hdc, &content, cb);
         DeleteObject(cb);
 
         draw_sidebar(hdc);
 
         if (g_tab == 1) {
+            /* grouped card backgrounds behind the native controls */
+            int pol_bottom = 208 + ((POLICY_COUNT + 1) / 2) * 28;
+            rounded_card(hdc, 202, 12, 812, 156, 12, g_pal.card, g_pal.border);
+            rounded_card(hdc, 202, 178, 812, pol_bottom - 164, 12, g_pal.card, g_pal.border);
+            rounded_card(hdc, 202, 372, 812, 92, 12, g_pal.card, g_pal.border);
+
             HFONT shf = mfont(15, FW_SEMIBOLD);
+            HFONT lf = mfont(12, FW_NORMAL);
             HFONT old = (HFONT)SelectObject(hdc, shf);
             SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, C_TEXT);
-            TextOutW(hdc, S(210), S(20), L"服务器", 3);
-            {
-                HFONT hf = mfont(12, FW_NORMAL);
-                SelectObject(hdc, hf);
-                SetTextColor(hdc, C_MUTED);
-                TextOutW(hdc, S(210), S(44), L"本机访问：http://localhost:%d · 勾选\"监听所有网卡\"并重启后可从局域网访问", g_http_port);
-                SelectObject(hdc, old);
-                DeleteObject(hf);
-            }
-            TextOutW(hdc, S(210), S(176), L"拦截策略（保存后立即生效）", 12);
-            TextOutW(hdc, S(210), S(372), L"证书与维护", 5);
+            SetTextColor(hdc, g_pal.text);
+            TextOutW(hdc, S(218), S(20), L"服务器", 3);
+            SelectObject(hdc, lf);
+            SetTextColor(hdc, g_pal.muted);
+            wchar_t shint[320];
+            swprintf(shint, 320,
+                     L"本机访问：http://localhost:%d · 勾选“监听所有网卡”并重启后局域网可访问",
+                     g_http_port);
+            TextOutW(hdc, S(218), S(44), shint, (int)wcslen(shint));
+            TextOutW(hdc, S(218), S(60), L"HTTP 端口:", 9);
+            TextOutW(hdc, S(508), S(60), L"HTTPS 端口:", 10);
+            SelectObject(hdc, shf);
+            SetTextColor(hdc, g_pal.text);
+            TextOutW(hdc, S(218), S(184), L"拦截策略（勾选后立即生效）", 12);
+            TextOutW(hdc, S(218), S(378), L"证书与维护", 5);
+            SelectObject(hdc, lf);
+            SetTextColor(hdc, g_pal.muted);
+            TextOutW(hdc, S(218), S(400), L"浏览器显示安全锁需要把 CA 证书加入受信任的根证书颁发机构。", 29);
             SelectObject(hdc, old);
             DeleteObject(shf);
+            DeleteObject(lf);
+            draw_listener_card(hdc, 202, 474, 812, 142, g_sn, 1);
             draw_statusbar(hdc);
             BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
             SelectObject(mem, oldbmp);
@@ -1153,8 +1535,8 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         char cert_path[1024];
         snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
-        long long days = cert_days_left(cert_path);
-        int trusted = cert_trusted(cert_path);
+        long long days = g_cert_days;          /* cached (30 s TTL) */
+        int trusted = g_cert_trusted_flag;
         HFONT lf = mfont(13, FW_NORMAL);
         HFONT old2 = (HFONT)SelectObject(hdc, lf);
         if (days > 0 && days < 200000)
@@ -1180,12 +1562,13 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             } else {
                 swprintf(hint, 300, L"访问地址：http://localhost:%d（其他设备：设置→\"监听所有网卡\"）", g_http_port);
             }
-            SetTextColor(hdc, C_MUTED);
+            SetTextColor(hdc, g_pal.muted);
             TextOutW(hdc, S(210), S(470), hint, (int)wcslen(hint));
         }
         SelectObject(hdc, old2);
         DeleteObject(lf);
 
+        draw_listener_card(hdc, 210, 486, 796, 130, sn, 1);
         draw_statusbar(hdc);
         BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
         SelectObject(mem, oldbmp);
@@ -1211,6 +1594,11 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_DESTROY:
         KillTimer(hwnd, 1);
+        if (g_poll_started) {
+            g_poll_stop = 1;
+            pthread_join(g_poll_thread, NULL);
+            g_poll_started = 0;
+        }
         tray_remove();
         if (g_ctl_font) { DeleteObject(g_ctl_font); g_ctl_font = NULL; }
         PostQuitMessage(0);
