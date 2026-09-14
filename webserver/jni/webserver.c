@@ -16,8 +16,7 @@
 #include <sys/stat.h>
 #include <stdint.h>       /* intptr_t (conn_uid) */
 #if !defined(_WIN32)
-#include <execinfo.h>     /* backtrace() for the native crash log */
-#include <fcntl.h>
+#include <fcntl.h>        /* open() in the async-signal-safe crash handler */
 #endif
 #include <pthread.h>
 
@@ -960,6 +959,14 @@ static void app_record_tls_host(uid_t uid, const char *host) {
 #ifndef _WIN32
 static char s_crash_dir[PATH_MAX];
 
+/*
+ * backtrace()/backtrace_symbols_fd() are only exposed from API 33 on, so they
+ * are declared weak here: the crash log keeps working everywhere and simply
+ * omits the backtrace on older platforms.
+ */
+extern int backtrace(void **, int) __attribute__((weak));
+extern void backtrace_symbols_fd(void *const *, int, int) __attribute__((weak));
+
 static void crash_handler(int sig) {
     /* Async-signal-safe only: open()/write()/backtrace_symbols_fd(). */
     char header[192];
@@ -976,9 +983,11 @@ static void crash_handler(int sig) {
             if (fd >= 0) {
                 ssize_t w = write(fd, header, (size_t) n);
                 (void) w;
-                void *frames[32];
-                int count = backtrace(frames, 32);
-                backtrace_symbols_fd(frames, count, fd);
+                if (backtrace != 0 && backtrace_symbols_fd != 0) {
+                    void *frames[32];
+                    int count = backtrace(frames, 32);
+                    backtrace_symbols_fd(frames, count, fd);
+                }
                 close(fd);
             }
         }
