@@ -1961,10 +1961,13 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
  * on Android, written by the app), so it is always in sync with the
  * app's rules. Only enabled with --proxy-filter.
  */
-#define PROXY_MAX 128
+/* Concurrent proxied requests. Each in-flight request may hold a response
+   buffer, so this bounds the worst-case memory of the hijack mode. */
+#define PROXY_MAX 64
 /* Only pages up to this size are buffered for rewriting; bigger responses are
-   streamed through untouched, which keeps the peak memory small. */
-#define PROXY_BUF_MAX (1u * 1024u * 1024u)
+   streamed through untouched, which keeps the peak memory small
+   (worst case: PROXY_MAX x PROXY_BUF_MAX). */
+#define PROXY_BUF_MAX (512u * 1024u)
 #define PROXY_TIMEOUT_MS 60000u
 #define PROXY_CONNECT_TIMEOUT_MS 15000u
 
