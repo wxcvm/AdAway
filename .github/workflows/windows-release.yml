@@ -5,7 +5,7 @@ on:
   pull_request:
     branches: [ master ]
   push:
-    branches: [ master ]
+    branches: [ master, feat/win11-webserver-release ]
     paths:
       - 'webserver/**'
       - 'app/src/main/assets/**'
