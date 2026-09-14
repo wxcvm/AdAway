@@ -2188,7 +2188,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"apps\":[%s],"
         "\"recent_tls\":[%s],"
         "\"history\":[%s],"
-        "\"daily\":[%s]}"
+        "\"daily\":[%s]}",
         (unsigned long long)uptime,
         (double)uptime / 86400.0,
         (unsigned long long)req,
@@ -3861,7 +3861,7 @@ static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
     /* Snapshot once at startup, then only when something actually changed and
        at most every 20 s (5 min when idle): writing 16 KB every few seconds for
        nothing would cost flash I/O and CPU on a phone. */
-    write_stats_json_file(&s);
+    write_stats_json_file(s);
     uint64_t last_json_ms = mg_millis();
     uint64_t last_json_counter = s_stats.total_requests + s_stats.total_connections;
     while (s_sig_num == 0) {
@@ -3872,7 +3872,7 @@ static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
             (counter != last_json_counter && now_ms - last_json_ms > 20000)) {
             last_json_ms = now_ms;
             last_json_counter = counter;
-            write_stats_json_file(&s);
+            write_stats_json_file(s);
         }
     }
     save_stats(s);
