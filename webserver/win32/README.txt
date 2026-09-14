@@ -1,57 +1,76 @@
-ADBlock Web Server - Windows 11 (x64) standalone build
-=========================================================
+ADBlock 拦截服务器 - Windows 11 (x64) 独立版
+================================================
 
-What it is:
-  The C web server component from the ADBlock (AdAway fork) project
-  (webserver/jni/webserver.c + mongoose + OpenSSL), packaged as a native
-  Windows 11 x64 executable. What it does:
-    * Block placeholder images / empty JS / CSS / fonts / media / API
-      replies (same CORS + caching policy as Android);
-    * Per-domain HTTPS certificates (SNI) signed by its own CA;
-    * Native dashboard window: live KPIs, hourly/daily bar charts,
-      certificate status, "Trust CA" button and "Start with Windows";
-    * Hot-reloadable block_config.json / allowlist.txt filtering;
-    * /internal-stats (JSON), /internal-ws (realtime), /internal-test.
+这是什么：
+  取自 ADBlock（AdAway 分支）项目中的 C 语言 Web 服务器组件
+  （webserver/jni/webserver.c + mongoose + OpenSSL），打包为原生
+  Windows 11 x64 可执行文件。功能：
+    * 拦截占位图 / 空 JS / CSS / 字体 / 媒体 / API 请求（与 Android 相同的
+      CORS 与缓存策略）；
+    * 每个域名使用自有 CA 签发的 HTTPS(SNI) 证书；
+    * 原生仪表盘：实时 KPI、按小时/按天柱状图、证书状态、"信任 CA"、
+      "开机自启动"、"深色外观"；
+    * "监听状态"卡片：每个端口是否绑定成功一目了然；
+    * 热加载 block_config.json / allowlist.txt；
+    * /internal-stats（JSON）、/internal-ws（实时）、/internal-test。
 
-Quick start (double-click friendly):
-  1. Extract the zip anywhere (e.g. C:\ADBlock). Keep ALL files together.
-  2. DOUBLE-CLICK start.bat.
-     - A dashboard window opens showing live statistics + charts.
-     - Server listens on http://localhost:8080 and https://localhost:8443
-       (resources folder next to the exe, created automatically).
-  3. In the dashboard click:
-     - "Trust CA"  - installs the local CA into Windows Trusted Root store
-                     so https://localhost:8443 shows a green lock.
-     - "Open Test Page" - opens https://localhost:8443/internal-test.
-     - "Start with Windows" - registers autostart (HKCU Run key, no admin).
-     - Close the window to stop the server.
+快速开始（双击即可）：
+  1. 解压到任意目录（例如 C:\ADBlock），所有文件放在一起。
+  2. 双击 start.bat。
+     - 弹出仪表盘窗口，显示实时统计与图表。
+     - 服务器监听 http://localhost:8080 与 https://localhost:8443
+       （resources 目录位于 exe 同级，缺失时自动创建）。
+  3. 在仪表盘中：
+     - "信任 CA" - 把本机 CA 装入 Windows 受信任根，https 显示安全锁；
+     - "打开测试页" - 打开 https://localhost:8443/internal-test；
+     - "开机自启动" - 注册 HKCU Run（无需管理员；命令行带 --minimized，
+       开机后常驻托盘）；
+     - "深色外观" - 立即切换深色主题并记住选择（未勾选时跟随 Windows）；
+     - 关闭窗口 = 最小化到托盘（双击托盘图标恢复，右键菜单可退出）。
+  4. 端口被占用时：仪表盘照常打开，"监听状态"卡片会标出失败的端口，
+     点"改用备用端口 18080/18443"即可自动换端口并重启。
 
-Command line:
-  webserver.exe [options]
-    --resources <dir>    resources dir (img_*.webp, test.html, allowlist,
-                         block_config.json). Default: "resources" next to
-                         the exe (created if missing).
-    --http-port N        HTTP  port (default 8080)
-    --https-port N       HTTPS port (default 8443)
-    --bind all           listen on all interfaces (default loopback)
-    --debug              verbose mongoose logs
-    --no-gui             run headless (no dashboard window)
-    --install-autostart  register "Start with Windows" and exit
-    --uninstall-autostart  remove the autostart entry and exit
+命令行：
+  webserver.exe [选项]
+    --resources <dir>  资源目录（img_*.webp、test.html、allowlist、
+                       block_config.json）。默认 exe 同级的 resources。
+    --http-port N      HTTP 端口（默认 8080）
+    --https-port N     HTTPS 端口（默认 8443）
+    --stats-port N     仅回环的管理端口（默认 8686）：提供 /internal-stats
+                       与 /control。即使 8080/8443 被占用或绑定失败，
+                       仪表盘仍能读取统计并控制服务器。
+    --bind all         监听所有网卡（默认仅回环）
+    --minimized        启动后直接进托盘（开机自启动使用）
+    --debug            输出 mongoose 详细日志
+    --no-gui           无界面运行（纯服务）
+    --install-autostart / --uninstall-autostart   注册/移除开机自启动后退出
 
-Using ports 80/443:
-  They need Administrator privileges: run a terminal as Administrator and
-  pass --http-port 80 --https-port 443.
+日志与配置：
+  * webserver.log      与 exe 同目录（超过 1 MB 自动轮转）：绑定失败、
+                       证书生成、配置重载等事件都会记录；
+  * webserver.ini      保存 http/https 端口、bind_all、theme；
+  * block_config.json  拦截策略（界面里勾选即时生效）。
 
-Windows SmartScreen / antivirus:
-  If the exe is not code-signed, Windows may show "Windows protected your
-  PC" -> click "More info" -> "Run anyway". A code-signed build is
-  produced automatically when the repository has the
-  WINDOWS_CERT_PFX_B64 / WINDOWS_CERT_PASSWORD secrets configured.
+使用 80/443 端口：
+  需要管理员权限：以管理员身份运行终端，并加 --http-port 80 --https-port 443。
 
-Troubleshooting:
-  * "Cannot create resources dir" / "CA generation failed" - the folder
-    is not writable: extract to your user folder or pass --resources.
-  * Dashboard shows "no data yet" - wait a few seconds (or generate some
-    blocked traffic); the server itself is fine.
-  * Per-app statistics show "unknown" on Windows (no /proc equivalent).
+性能说明：
+  * 统计采集在独立线程中完成，界面不会因服务器无响应而卡顿；
+  * 证书状态与受信任根查询有 30 秒缓存；
+  * 统计 / SNI 缓存落盘做了节流（最多每 15 秒 / 60 秒一次），
+    避免无意义的磁盘写入。
+
+Windows SmartScreen / 杀毒软件：
+  未签名的 exe 可能提示"Windows 已保护你的电脑" → 更多信息 → 仍要运行。
+  仓库配置 WINDOWS_CERT_PFX_B64 / WINDOWS_CERT_PASSWORD 后会自动签名。
+
+平台差异：
+  * 透明代理（--proxy-filter，依赖 iptables 重定向）只在 Android/Linux 上
+    生效，Windows 上不会启用。
+
+故障排查：
+  * "无法创建 resources 目录" / "CA 生成失败" - 目录不可写：换到用户目录，
+    或用 --resources 指定其它位置。
+  * 仪表盘一直显示"等待服务器 ..." - 等几秒；仍不行请查看 webserver.log，
+    并看"监听状态"卡片（红色 = 该端口没有绑定成功）。
+  * 按应用统计在 Windows 上显示 unknown（没有 /proc 等价物）。
