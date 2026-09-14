@@ -2049,6 +2049,10 @@ struct proxy_state {
 static struct mg_mgr *s_mgr;
 static struct proxy_state *s_proxies[PROXY_MAX];
 
+/* Number of in-flight proxy requests: lets the (very hot) poll path skip the
+   lookup entirely while no proxy request is active. */
+static int s_proxy_active;
+
 /* ── blocked-host table (64-bit FNV-1a hashes, open addressing) ──
  * Grown on demand (512 KB at first, doubling up to 16 MB) so the common case
  * of a few thousand rules costs almost no memory.
@@ -2544,10 +2548,6 @@ static void proxy_fn(struct mg_connection *c, int ev, void *ev_data) {
         c->fn_data = NULL;
     }
 }
-
-/* Number of in-flight proxy requests: lets the (very hot) poll path skip the
-   lookup entirely while no proxy request is active. */
-static int s_proxy_active;
 
 /* Is a proxy request currently in flight for this client connection? */
 static bool proxy_busy(struct mg_connection *c) {
