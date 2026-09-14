@@ -15,6 +15,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdint.h>       /* intptr_t (conn_uid) */
+#include <stdarg.h>       /* va_list - webserver.log mirror */
+#include <time.h>         /* timestamps in webserver.log */
 #if !defined(_WIN32)
 #include <fcntl.h>        /* open() in the async-signal-safe crash handler */
 #endif
@@ -121,17 +123,87 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
    stdout/stderr, that file was always empty regardless of what actually
    went wrong. Log to both destinations for anything that matters for
    diagnosing a failed/successful startup. */
+/* ── webserver.log mirror ────────────────────────────────────────
+ * The Windows build is a GUI-subsystem app (-mwindows): there is no console,
+ * so stdout/stderr go nowhere and a failed bind / autostart problem left no
+ * trace at all except native_crash.log. Mirror every LOG_* line into
+ * <resource_dir>/webserver.log (rotated at 1 MB, one previous file kept) so a
+ * user can simply send the file when something goes wrong. */
+#define LOG_FILE_MAX_BYTES (1024 * 1024)
+static FILE *s_log_fp = NULL;
+static long  s_log_bytes = 0;
+static char  s_log_path[PATH_MAX];
+
+static void log_file_open(const char *dir) {
+    if (!dir || !dir[0] || s_log_fp) return;
+    snprintf(s_log_path, sizeof(s_log_path), "%s/webserver.log", dir);
+    s_log_fp = fopen(s_log_path, "a");
+    if (s_log_fp) {
+        if (fseek(s_log_fp, 0, SEEK_END) == 0) s_log_bytes = ftell(s_log_fp);
+    }
+}
+
+static void log_file_rotate(void) {
+    char prev[PATH_MAX + 4];
+    if (s_log_fp) { fclose(s_log_fp); s_log_fp = NULL; }
+    snprintf(prev, sizeof(prev), "%s.1", s_log_path);
+    remove(prev);
+    rename(s_log_path, prev);
+    s_log_fp = fopen(s_log_path, "a");
+    s_log_bytes = 0;
+}
+
+static void log_file_line(const char *level, const char *fmt, ...) {
+    if (!s_log_fp) return;
+    if (s_log_bytes > LOG_FILE_MAX_BYTES) {
+        log_file_rotate();
+        if (!s_log_fp) return;
+    }
+    int n = 0;
+#ifdef _WIN32
+    {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        n = fprintf(s_log_fp, "[%04d-%02d-%02d %02d:%02d:%02d] [%s] ",
+                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond, level);
+    }
+#else
+    {
+        time_t now = time(NULL);
+        struct tm tmv;
+        struct tm *lt = localtime(&now);
+        if (lt) tmv = *lt; else memset(&tmv, 0, sizeof(tmv));
+        n = fprintf(s_log_fp, "[%04d-%02d-%02d %02d:%02d:%02d] [%s] ",
+                    tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                    tmv.tm_hour, tmv.tm_min, tmv.tm_sec, level);
+    }
+#endif
+    if (n > 0) s_log_bytes += n;
+    {
+        va_list ap;
+        va_start(ap, fmt);
+        n = vfprintf(s_log_fp, fmt, ap);
+        va_end(ap);
+        if (n > 0) s_log_bytes += n;
+    }
+    if (fputc('\n', s_log_fp) != EOF) s_log_bytes += 1;
+    fflush(s_log_fp);
+}
+
 #define LOG_FATAL(fmt, ...) do { \
     LOG_LOGCAT(ANDROID_LOG_FATAL, fmt, ##__VA_ARGS__); \
     fprintf(stderr, "[FATAL] " fmt "\n", ##__VA_ARGS__); fflush(stderr); \
+    log_file_line("FATAL", fmt, ##__VA_ARGS__); \
 } while (0)
 #define LOG_WARN(fmt, ...) do { \
     LOG_LOGCAT(ANDROID_LOG_WARN, fmt, ##__VA_ARGS__); \
     fprintf(stderr, "[WARN] " fmt "\n", ##__VA_ARGS__); fflush(stderr); \
+    log_file_line("WARN", fmt, ##__VA_ARGS__); \
 } while (0)
 #define LOG_INFO(fmt, ...) do { \
     LOG_LOGCAT(ANDROID_LOG_INFO, fmt, ##__VA_ARGS__); \
     fprintf(stdout, "[INFO] " fmt "\n", ##__VA_ARGS__); fflush(stdout); \
+    log_file_line("INFO", fmt, ##__VA_ARGS__); \
 } while (0)
 
 #define OOM_ADJ_PATH   "/proc/self/oom_score_adj"
@@ -291,6 +363,7 @@ struct settings {
     bool              minimized;  /* Windows: GUI started to tray (autostart) */
     int               autostart;  /* Windows: 1=install, 2=uninstall Run key */
     bool              cli_bind_set;      /* --bind given on the command line */
+    bool              cli_stats_port_set;/* --stats-port given */
     bool              cli_http_port_set; /* --http-port given */
     bool              cli_https_port_set;/* --https-port given */
     int               block_image_count;
@@ -740,6 +813,36 @@ static void apps_save(const char *resource_dir) {
     FILE *fp = fopen(path, "wb");
     if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
 }
+
+/* ── throttled persistence ───────────────────────────────────────
+ * /internal-stats is polled by the dashboard every couple of seconds. Flushing
+ * stats.dat + hist.dat + apps.dat + sni_cache.dat (~270 KB) on every single
+ * poll was pure flash/disk churn. Write on change at a bounded rate instead;
+ * /control?cmd=flush_stats and shutdown still force a full flush. */
+#define PERSIST_MIN_INTERVAL_MS 15000ULL
+#define PERSIST_SNI_INTERVAL_MS 60000ULL
+
+static uint64_t s_persist_last_ms = 0;
+static uint64_t s_persist_sni_last_ms = 0;
+static uint64_t s_persist_sni_certs = 0;
+
+static void persist_dat_files(struct settings *st, bool force) {
+    uint64_t now = mg_millis();
+    if (force || now - s_persist_last_ms >= PERSIST_MIN_INTERVAL_MS) {
+        save_stats(st);
+        save_hist(st);
+        apps_save(st->resource_dir);
+        s_persist_last_ms = now;
+    }
+    bool sni_dirty = (s_stats.sni_certs_issued != s_persist_sni_certs);
+    if (force || now - s_persist_sni_last_ms >= PERSIST_SNI_INTERVAL_MS ||
+        (sni_dirty && now - s_persist_sni_last_ms >= PERSIST_MIN_INTERVAL_MS)) {
+        sni_cache_save(st->resource_dir);
+        s_persist_sni_last_ms = now;
+        s_persist_sni_certs = s_stats.sni_certs_issued;
+    }
+}
+
 static void apps_load(const char *resource_dir) {
     if (!resource_dir || !resource_dir[0]) return;
     char path[PATH_MAX];
@@ -772,6 +875,7 @@ static int s_tls_count = 0;  /* distinct pairs recorded so far */
    called when a request is being processed, i.e. the connection is
    definitely alive and present in /proc — no accept-time races.
    We run as root, so every row is visible. */
+#ifndef _WIN32   /* only the Android/Linux uid lookup below uses these */
 /* Format an mg_addr as /proc/net/tcp (IPv4) would print it. */
 static void addr_to_proc_v4(const struct mg_addr *a, char *out, size_t sz) {
     snprintf(out, sz, "%02X%02X%02X%02X:%04X",
@@ -807,7 +911,17 @@ static void addr_to_proc_v6(const struct mg_addr *a, char *out, size_t sz) {
    /proc/net/tcp, uid may be zeroed on some kernels) and IPv4-mapped
    (row in /proc/net/tcp6, uid preserved) — so we try both formats.
    We run as root, so every row is visible. */
+#endif  /* !_WIN32 - /proc address formatters above */
+
 static uid_t conn_uid_by_tuple(struct mg_connection *c) {
+#ifdef _WIN32
+    /* Windows has no /proc: the tuple and socket-inode lookups below cannot
+       work there, and probing them costs several failing fopen()/fstat()
+       syscalls on EVERY request. Per-app statistics are Android-only by
+       design (an unknown uid is dropped by app_find_or_add()). */
+    (void) c;
+    return (uid_t) -1;
+#else
     char loc_v4[64], rem_v4[64];
     char loc_m6[64], rem_m6[64];
     addr_to_proc_v4(&c->loc, loc_v4, sizeof(loc_v4));
@@ -899,6 +1013,7 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
     LOG_INFO("conn_uid: %s <-> %s / %s <-> %s -> NOT FOUND",
              loc_v4, rem_v4, loc_m6, rem_m6);
     return (uid_t)-1;
+#endif  /* !_WIN32 */
 }
 
 /* Store the resolved uid in c->data (accepted-at timestamp + flag
@@ -1854,6 +1969,89 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 /* ── HTTP event handler ───────────────────────────────────────── */
 
 /* Forward declaration (ws_push_broadcast below calls it). */
+/* ── listener registry ───────────────────────────────────────────
+ * Records every listen attempt so the dashboard can show, in-app, which
+ * endpoints are actually bound (and which one failed and why). Exposed as
+ * "listeners" in /internal-stats (appended field, old keys unchanged). */
+#define LISTENER_MAX 12
+struct listener_state {
+    char name[16];
+    char addr[80];
+    bool bound;
+    bool ipv6;
+    bool loopback;
+};
+static struct listener_state s_listeners[LISTENER_MAX];
+static int  s_listener_count = 0;
+static bool s_main_http_bound = false;
+
+static void listener_record(const char *name, const char *url, bool bound) {
+    if (s_listener_count >= LISTENER_MAX) return;
+    struct listener_state *l = &s_listeners[s_listener_count++];
+    snprintf(l->name, sizeof(l->name), "%s", name);
+    snprintf(l->addr, sizeof(l->addr), "%s", url);
+    l->bound = bound;
+    l->ipv6 = (strchr(url, '[') != NULL);
+    l->loopback = (strstr(url, "127.0.0.1") != NULL || strstr(url, "[::1]") != NULL);
+    if (bound) LOG_INFO("listening: %s (%s)", url, name);
+    else       LOG_WARN("NOT listening: %s (%s)", url, name);
+}
+
+/* Bind with a few retries: an instance that was just closed can leave the
+   port in TIME_WAIT, where the first bind fails even though nothing is
+   listening any more. */
+static struct mg_connection *bind_try(struct mg_mgr *mgr, const char *url,
+                                      mg_event_handler_t handler, void *fn_data,
+                                      const char *name) {
+    struct mg_connection *c = NULL;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        c = mg_http_listen(mgr, url, handler, fn_data);
+        if (c != NULL) break;
+        if (attempt < 3) {
+            LOG_WARN("bind %s failed (attempt %d/3), retrying", url, attempt);
+#ifdef _WIN32
+            Sleep(400);
+#else
+            usleep(400 * 1000);
+#endif
+        }
+    }
+    listener_record(name, url, c != NULL);
+    return c;
+}
+
+#ifdef _WIN32
+/* Is another instance already running? Ask the loopback MANAGEMENT port and
+   require our own JSON back, so a foreign process squatting on the user facing
+   HTTP port is never mistaken for a running ADBlock instance. */
+static bool adblock_instance_running(int stats_port) {
+    if (stats_port <= 0) return false;
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) return false;
+    SOCKADDR_IN a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons((u_short)stats_port);
+    a.sin_addr.s_addr = inet_addr("127.0.0.1");
+    bool found = false;
+    if (connect(sock, (SOCKADDR *)&a, sizeof(a)) == 0) {
+        const char *req = "GET /internal-stats HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+                          "Connection: close\r\n\r\n";
+        if (send(sock, req, (int)strlen(req), 0) > 0) {
+            char buf[512];
+            int n = recv(sock, buf, sizeof(buf) - 1, 0);
+            if (n > 0) {
+                buf[n] = '\0';
+                if (strstr(buf, "\"uptime_seconds\"") && strstr(buf, "\"total_requests\""))
+                    found = true;
+            }
+        }
+    }
+    closesocket(sock);
+    return found;
+}
+#endif
+
 static int build_stats_json(struct settings *s, char *out, size_t out_sz);
 
 /* WebSocket push subscribers: connections that upgraded to /internal-ws.
@@ -1928,6 +2126,23 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     buckets_to_json(daily_json, sizeof(daily_json),
                     s_daily, DAILY_SLOTS, s_daily_pos,
                     s_daily_slot_start, DAILY_INTERVAL_S, 30);
+    char listeners_json[1024] = "";
+    {
+        int loff = 0;
+        for (int i = 0; i < s_listener_count; i++) {
+            int n = snprintf(listeners_json + loff,
+                             sizeof(listeners_json) - (size_t)loff,
+                             "%s{\"name\":\"%s\",\"addr\":\"%s\",\"bound\":%s,"
+                             "\"ipv6\":%s,\"loopback\":%s}",
+                             loff ? "," : "",
+                             s_listeners[i].name, s_listeners[i].addr,
+                             s_listeners[i].bound ? "true" : "false",
+                             s_listeners[i].ipv6 ? "true" : "false",
+                             s_listeners[i].loopback ? "true" : "false");
+            if (n <= 0 || loff + n >= (int)sizeof(listeners_json)) break;
+            loff += n;
+        }
+    }
 
     uint64_t uptime = uptime_seconds();
     uint64_t req = s_stats.total_requests;
@@ -1967,10 +2182,13 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"blocked_clickbait\":%llu,"
         "\"sni_certs_issued\":%llu,"
         "\"block_image_count\":%d,"
+        "\"stats_port\":%d,"
+        "\"bind_ok\":%s,"
+        "\"listeners\":[%s],"
         "\"apps\":[%s],"
         "\"recent_tls\":[%s],"
         "\"history\":[%s],"
-        "\"daily\":[%s]}",
+        "\"daily\":[%s]}"
         (unsigned long long)uptime,
         (double)uptime / 86400.0,
         (unsigned long long)req,
@@ -1997,6 +2215,9 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         (unsigned long long)s_stats.blocked_clickbait,
         (unsigned long long)s_stats.sni_certs_issued,
         s->block_image_count,
+        s->stats_port,
+        s_main_http_bound ? "true" : "false",
+        listeners_json,
         apps_json, tls_json, hist_json, daily_json);
 }
 
@@ -3050,10 +3271,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         mg_http_reply(c, 200,
                       "Content-Type: application/json\r\n"
                       "Cache-Control: no-store\r\n", "%.*s", n, body);
-        save_stats(s);  /* persist lifetime counters (polled every 5 s) */
-        save_hist(s);   /* persist chart buckets (no reset on reboot) */
-        sni_cache_save(s->resource_dir);  /* persist SNI cache every poll */
-        apps_save(s->resource_dir);       /* persist per-app stats */
+        /* Throttled: see persist_dat_files(). The dashboard polls this
+           endpoint every few seconds, so an unconditional flush here used to
+           rewrite ~270 KB (sni_cache.dat) plus three more files per poll. */
+        persist_dat_files(s, false);
         return;
     }
 
@@ -3077,10 +3298,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             s->block_image_count = scan_block_images(s->resource_dir, s->block_images);
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);
         } else if (mg_strcmp(cmd, mg_str("flush_stats")) == 0) {
-            save_stats(s);
-            save_hist(s);
-            sni_cache_save(s->resource_dir);
-            apps_save(s->resource_dir);
+            persist_dat_files(s, true);   /* forced full flush */
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: stats flushed");
         } else if (mg_strcmp(cmd, mg_str("shutdown")) == 0) {
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: shutting down");
@@ -3239,6 +3457,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
                served there too, so the app can always read statistics even
                when the user facing 80/443 ports are taken by another app. */
             s.stats_port = atoi(argv[++i]);
+            s.cli_stats_port_set = true;
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
             s.bind_all = strcmp(argv[++i], "all") == 0;
             s.cli_bind_set = true;
@@ -3344,6 +3563,12 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    /* Mirror every LOG_* line into <resources>/webserver.log. The Windows
+       build is a GUI-subsystem app (no console), so this file is the only place
+       a failed bind / autostart problem can be diagnosed after the fact. */
+    log_file_open(s.resource_dir);
+    if (s.stats_port == 0) s.stats_port = 8686;
+
 #ifdef _WIN32
     /* Settings persistence: webserver.ini next to the exe (written by
        the dashboard settings page); command-line flags still win. */
@@ -3365,10 +3590,12 @@ int main(int argc, char *argv[]) {
                         s.https_port = v;
                     else if (sscanf(line, "bind_all=%d", &v) == 1 && !s.cli_bind_set)
                         s.bind_all = (v != 0);
+                    else if (sscanf(line, "stats_port=%d", &v) == 1 && !s.cli_stats_port_set)
+                        s.stats_port = v;
                 }
                 fclose(f);
-                LOG_INFO("Loaded webserver.ini settings (ports %d/%d, bind_all=%d).",
-                         s.http_port, s.https_port, s.bind_all ? 1 : 0);
+                LOG_INFO("Loaded webserver.ini settings (ports %d/%d, bind_all=%d, stats_port=%d).",
+                         s.http_port, s.https_port, s.bind_all ? 1 : 0, s.stats_port);
             }
         }
     }
@@ -3422,8 +3649,9 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
         char cmd[2048];
-        snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --minimized",
-                 exe, s.resource_dir, s.http_port, s.https_port);
+        snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d "
+                 "--stats-port %d --minimized",
+                 exe, s.resource_dir, s.http_port, s.https_port, s.stats_port);
         bool enable = (s.autostart == 1);
         int rc = win32_autostart_set(enable, cmd);
         LOG_INFO("Autostart %s %s (entry=%s).", enable ? "enabled" : "disabled",
@@ -3439,18 +3667,8 @@ int main(int argc, char *argv[]) {
        exiting. */
     bool server_already_running = false;
 #ifdef _WIN32
-    {
-        SOCKET probe = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (probe != INVALID_SOCKET) {
-            SOCKADDR_IN a;
-            memset(&a, 0, sizeof(a));
-            a.sin_family = AF_INET;
-            a.sin_port = htons((u_short)s.http_port);
-            a.sin_addr.s_addr = inet_addr("127.0.0.1");
-            server_already_running = (connect(probe, (SOCKADDR *)&a, sizeof(a)) == 0);
-            closesocket(probe);
-        }
-    }
+    if (s.stats_port == 0) s.stats_port = 8686;
+    server_already_running = adblock_instance_running(s.stats_port);
     if (server_already_running) {
         if (s.no_gui) {
             LOG_INFO("Web server already running on port %d - nothing to do.", s.http_port);
@@ -3462,6 +3680,7 @@ int main(int argc, char *argv[]) {
         args.https_port = s.https_port;
         args.bind_all = s.bind_all;
         args.start_minimized = s.minimized;
+        args.stats_port = s.stats_port;
         args.startup_warning = NULL;
         LOG_INFO("A web server is already running on port %d - dashboard only mode.", s.http_port);
         int rc = adblock_gui_run(&args);
@@ -3496,10 +3715,11 @@ int main(int argc, char *argv[]) {
         char su[64], su6[64];
         snprintf(su, sizeof(su), "http://127.0.0.1:%d", s.stats_port);
         snprintf(su6, sizeof(su6), "http://[::1]:%d", s.stats_port);
-        if (mg_http_listen(&mgr, su, fn, &s) == NULL) {
-            LOG_INFO("Management port %d is not available on 127.0.0.1", s.stats_port);
+        if (bind_try(&mgr, su, fn, &s, "mgmt") == NULL) {
+            LOG_FATAL("Management port %d is not available on 127.0.0.1 - "
+                      "the dashboard cannot read statistics.", s.stats_port);
         }
-        mg_http_listen(&mgr, su6, fn, &s);
+        bind_try(&mgr, su6, fn, &s, "mgmt6");
     }
 
     /* Build listen URLs from the configured bind mode + ports. */
@@ -3512,7 +3732,8 @@ int main(int argc, char *argv[]) {
     snprintf(https_url6, sizeof(https_url6), "https://%s:%d", v6, s.https_port);
 
     char startup_warning[512] = {0};
-    bool http_ok = mg_http_listen(&mgr, http_url, fn, &s);
+    bool http_ok = (bind_try(&mgr, http_url, fn, &s, "http") != NULL);
+    s_main_http_bound = http_ok;
     if (!http_ok) {
         LOG_FATAL("HTTP bind failed (%s): the port is probably already in use.", http_url);
         snprintf(startup_warning, sizeof(startup_warning),
@@ -3529,7 +3750,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
 #endif
     }
-    if (!mg_http_listen(&mgr, https_url, fn, &s)) {
+    if (bind_try(&mgr, https_url, fn, &s, "https") == NULL) {
         LOG_WARN("HTTPS bind failed (%s) - continuing without HTTPS.", https_url);
     }
     /*
@@ -3539,11 +3760,11 @@ int main(int argc, char *argv[]) {
      * log reflects the actual state.
      */
     bool ipv6_ok = true;
-    if (!mg_http_listen(&mgr, http_url6, fn, &s)) {
+    if (bind_try(&mgr, http_url6, fn, &s, "http6") == NULL) {
         LOG_WARN("HTTP IPv6 bind failed (%s) — continuing with IPv4 only.", http_url6);
         ipv6_ok = false;
     }
-    if (!mg_http_listen(&mgr, https_url6, fn, &s)) {
+    if (bind_try(&mgr, https_url6, fn, &s, "https6") == NULL) {
         LOG_WARN("HTTPS IPv6 bind failed (%s) — continuing with IPv4 only.", https_url6);
         ipv6_ok = false;
     }
@@ -3557,18 +3778,18 @@ int main(int argc, char *argv[]) {
         char u[128];
         if (s.http_port != 80) {
             snprintf(u, sizeof(u), "http://127.0.0.1:80");
-            if (!mg_http_listen(&mgr, u, fn, &s))
+            if (bind_try(&mgr, u, fn, &s, "mon80") == NULL)
                 LOG_WARN("Monitoring http://127.0.0.1:80 failed (admin needed or port in use).");
             snprintf(u, sizeof(u), "http://[::1]:80");
-            if (!mg_http_listen(&mgr, u, fn, &s))
+            if (bind_try(&mgr, u, fn, &s, "mon80-6") == NULL)
                 LOG_WARN("Monitoring http://[::1]:80 failed (admin needed or port in use).");
         }
         if (s.https_port != 443) {
             snprintf(u, sizeof(u), "https://127.0.0.1:443");
-            if (!mg_http_listen(&mgr, u, fn, &s))
+            if (bind_try(&mgr, u, fn, &s, "mon443") == NULL)
                 LOG_WARN("Monitoring https://127.0.0.1:443 failed (admin needed or port in use).");
             snprintf(u, sizeof(u), "https://[::1]:443");
-            if (!mg_http_listen(&mgr, u, fn, &s))
+            if (bind_try(&mgr, u, fn, &s, "mon443-6") == NULL)
                 LOG_WARN("Monitoring https://[::1]:443 failed (admin needed or port in use).");
         }
     }
@@ -3593,6 +3814,7 @@ int main(int argc, char *argv[]) {
         args.https_port = s.https_port;
         args.bind_all = s.bind_all;
         args.start_minimized = s.minimized;
+        args.stats_port = s.stats_port;
         args.startup_warning = startup_warning[0] ? startup_warning : NULL;
         struct server_thread_arg targ;
         targ.mgr = &mgr;
@@ -3683,3 +3905,4 @@ static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
     LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
     return EXIT_SUCCESS;
 }
+
