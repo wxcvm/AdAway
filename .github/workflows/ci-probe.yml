@@ -1,0 +1,10 @@
+name: CI probe
+on:
+  push:
+    branches: [ master, feat/win11-webserver-release ]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: hello
+        run: echo "probe workflow triggered"
