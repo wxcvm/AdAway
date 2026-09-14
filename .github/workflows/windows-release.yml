@@ -5,9 +5,7 @@ on:
   pull_request:
     branches: [ master ]
   push:
-    branches:
-      - master
-      - feat/win11-webserver-release
+    branches: [ master ]
     paths:
       - 'webserver/**'
       - 'app/src/main/assets/**'
@@ -67,6 +65,19 @@ jobs:
           d.text((36, 48), 'ADBlock', fill='white')
           img.save('resources/icon.png')
           PYEOF
+          # Multi-size application icon embedded into webserver.exe (windres).
+          python3 - <<'PYEOF'
+          from PIL import Image, ImageDraw
+          S = 256
+          img = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+          d = ImageDraw.Draw(img)
+          d.rounded_rectangle([8, 8, S - 8, S - 8], radius=54, fill=(37, 99, 235, 255))
+          d.ellipse([56, 56, S - 56, S - 56], outline=(255, 255, 255, 255), width=22)
+          d.line([82, 174, 174, 82], fill=(255, 255, 255, 255), width=22)
+          img.save('webserver/win32/app.ico',
+                   sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+          print('webserver/win32/app.ico written')
+          PYEOF
           echo "resources:" && ls -la resources
 
       - name: Build webserver.exe (mingw64 + OpenSSL)
@@ -101,6 +112,15 @@ jobs:
             $https = Invoke-WebRequest -Uri "https://127.0.0.1:18443/internal-test" -SkipCertificateCheck -UseBasicParsing -TimeoutSec 10
             Write-Output "https internal-test HTTP $($https.StatusCode)"
             if ($stats.StatusCode -ne 200 -or $test.StatusCode -ne 200 -or $https.StatusCode -ne 200) { throw "smoke test failed" }
+            # v1.11: /internal-stats must carry the listener table so the
+            # dashboard can show which sockets are really bound.
+            $json = $stats.Content
+            if ($json -notmatch '"listeners"\s*:\s*\[') { throw "internal-stats has no listeners[] array" }
+            if ($json -notmatch '"bind_ok"\s*:\s*true') { throw "internal-stats reports bind_ok=false" }
+            if ($json -notmatch '"stats_port"\s*:\s*8686') { throw "internal-stats has no stats_port" }
+            $mgmt = Invoke-WebRequest -Uri "http://127.0.0.1:8686/internal-stats" -UseBasicParsing -TimeoutSec 10
+            Write-Output ("management port /internal-stats HTTP " + $mgmt.StatusCode)
+            if ($mgmt.StatusCode -ne 200) { throw "management port not reachable" }
           } catch {
             Write-Output "SMOKE TEST ERROR: $($_.Exception.Message)"
             Write-Output "---- stdout tail ----"
@@ -153,6 +173,37 @@ jobs:
             Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
 
+      - name: Port-conflict test (management port must survive a busy main port)
+        shell: pwsh
+        run: |
+          $res4 = (Resolve-Path "webserver\win32\dist\resources").Path
+          # Occupy 18084 so the server cannot bind its main HTTP port.
+          $blocker = Start-Job -ScriptBlock {
+            $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 18084)
+            $l.Start()
+            Start-Sleep -Seconds 90
+          }
+          Start-Sleep -Seconds 5
+          $p4 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18084","--https-port","18447","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server4.log" -RedirectStandardError "server4.err"
+          Start-Sleep -Seconds 10
+          try {
+            $s4 = Invoke-WebRequest -Uri "http://127.0.0.1:8686/internal-stats" -UseBasicParsing -TimeoutSec 10
+            Write-Output ("busy-main-port: management /internal-stats HTTP " + $s4.StatusCode)
+            if ($s4.StatusCode -ne 200) { throw "management port is dead while the main port is busy" }
+            if ($s4.Content -notmatch '"bind_ok"\s*:\s*false') { throw "expected bind_ok=false when the main HTTP port is taken" }
+            if ($s4.Content -notmatch '"bound"\s*:\s*false') { throw "expected a listener entry with bound=false" }
+            Write-Output "port-conflict handling OK"
+          } catch {
+            Write-Output ("PORT CONFLICT TEST ERROR: " + $_.Exception.Message)
+            Get-Content "server4.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
+            Get-Content "server4.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
+            throw
+          } finally {
+            Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Stop-Job $blocker -ErrorAction SilentlyContinue
+            Remove-Job $blocker -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Autostart registry test
         shell: pwsh
         run: |
@@ -164,6 +215,8 @@ jobs:
           if (-not $exists1) { throw "autostart key not found after install" }
           $run = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "ADBlockWebServer" -ErrorAction SilentlyContinue
           Write-Output ("autostart installed: " + $run.ADBlockWebServer)
+          if ($run.ADBlockWebServer -notmatch '--minimized') { throw "autostart command lacks --minimized (window would never show)" }
+          if ($run.ADBlockWebServer -notmatch '--stats-port') { throw "autostart command lacks --stats-port" }
           $pU = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res2,"--http-port","18082","--https-port","18445","--no-gui","--uninstall-autostart") -Wait -PassThru
           if ($pU.ExitCode -ne 0) { throw "uninstall-autostart exited with code $($pU.ExitCode)" }
           $exists2 = $false
@@ -206,14 +259,14 @@ jobs:
       - name: Create GitHub Release (draft)
         shell: bash
         run: |
-          TAG="win11-webserver-v1.10"
+          TAG="win11-webserver-v1.11"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
             echo "uploaded to existing release"
           else
             gh release create "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" \
               --title "ADBlock Web Server - Windows 11 (x64)" \
-              --notes "ADBlock Web Server for Windows 11 (x64) v1.4.2: version shown in title & console (verify: console must say ADBlock Web Server v1.4.2, NOT arm64). Window always opens; tray icon; Statistics+Settings tabs.  the dashboard window ALWAYS opens - even when the HTTP port is already in use the window shows the conflict instead of exiting silently. System tray icon (double-click reopens, right-click menu), Statistics + Settings tabs, live KPIs & charts, block reply policy toggles, certificate trust, Start with Windows. Double-click start.bat." || true
+              --notes "ADBlock Web Server for Windows 11 (x64) v1.11.0. Dashboard: 浅色/深色主题（跟随系统）、圆角卡片、KPI 卡片带阴影与强调色、监听状态卡片（每个端口的绑定结果一目了然）、端口被占用时一键改用 18080/18443 并重启。可靠性：独立回环管理端口（--stats-port，默认 8686）保证统计与控制在主端口被占用时依然可用；每个监听套接字最多重试 3 次并记录到 webserver.log。性能：统计轮询移到工作线程（界面不再卡顿）、证书与根存储查询 30 秒缓存、.dat 落盘节流。开箱即用：双击 start.bat，托盘常驻，开机自启动（--minimized），CA 证书一键信任。" || true
           fi
         env:
           GH_TOKEN: ${{ github.token }}
