@@ -14,9 +14,11 @@ echo "==> Embedding Win11 visual-style manifest + application icon ..."
 # local build still works.
 RC_FILE="$HERE/app.rc"
 if [ -f "$HERE/app.ico" ]; then
+  # windres resolves resources relative to the .rc file, and it is a native
+  # Windows binary: an MSYS-style /d/... path would not be found.
   RC_FILE="$HERE/app_build.rc"
   cat "$HERE/app.rc" > "$RC_FILE"
-  printf '\n1 ICON "%s"\n' "$HERE/app.ico" >> "$RC_FILE"
+  printf '\n1 ICON "app.ico"\n' >> "$RC_FILE"
 fi
 windres "$RC_FILE" -O coff -o "$HERE/app_res.o"
 
