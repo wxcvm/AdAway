@@ -348,8 +348,16 @@ public static void startWebServer(Context context) {
         // arrive here in the "hijack" blocking mode, where iptables redirects
         // the whole 80/443 traffic on the device) are forwarded to the real
         // origin server and filtered - AdGuard-like content filtering.
+        /*
+         * --debug makes mongoose log every connection/read/send. In the hijack
+         * mode that is the whole device traffic, so verbose logging is opt-in
+         * (Settings → Debug → detailed log) - it was the main CPU cost of the
+         * server process.
+         */
+        String debugFlag = org.adaway.helper.PreferenceHelper.getDebugEnabled(context)
+                ? " --debug" : "";
         String params = "--resources " + resourcePath.toAbsolutePath() +
-                " --debug --proxy-filter --bind " + (isBindAll(context) ? "all" : "loop") +
+                debugFlag + " --proxy-filter --bind " + (isBindAll(context) ? "all" : "loop") +
                 " --stats-port " + STATS_PORT +
                 " --http-port " + getHttpPort(context) +
                 " --https-port " + getHttpsPort(context);

@@ -778,8 +778,9 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
                 if (state == 1 /* ESTABLISHED */ &&
                     strcmp(l, rem_m6) == 0 && strcmp(r, loc_m6) == 0) {
                     fclose(f);
-                    LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp6/mapped)",
-                             loc_m6, rem_m6, (int)uid);
+                    if (s_verbose)
+                        LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp6/mapped)",
+                                 loc_m6, rem_m6, (int)uid);
                     return (uid_t)uid;
                 }
             }
@@ -800,8 +801,9 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
                 if (state == 1 /* ESTABLISHED */ &&
                     strcmp(l, rem_v4) == 0 && strcmp(r, loc_v4) == 0) {
                     fclose(f);
-                    LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp)",
-                             loc_v4, rem_v4, (int)uid);
+                    if (s_verbose)
+                        LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp)",
+                                 loc_v4, rem_v4, (int)uid);
                     return (uid_t)uid;
                 }
             }
@@ -833,8 +835,9 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
                                &state, &uid, &line_ino) == 3) {
                         if ((state == 1 || state == 6) && line_ino == sock_ino) {
                             fclose(f);
-                            LOG_INFO("conn_uid: ino=%lu -> uid=%d (%s)",
-                                     sock_ino, (int)uid, path);
+                            if (s_verbose)
+                                LOG_INFO("conn_uid: ino=%lu -> uid=%d (%s)",
+                                         sock_ino, (int)uid, path);
                             return (uid_t)uid;
                         }
                     }
@@ -843,8 +846,9 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
             }
         }
     }
-    LOG_INFO("conn_uid: %s <-> %s / %s <-> %s -> NOT FOUND",
-             loc_v4, rem_v4, loc_m6, rem_m6);
+    if (s_verbose)
+        LOG_INFO("conn_uid: %s <-> %s / %s <-> %s -> NOT FOUND",
+                 loc_v4, rem_v4, loc_m6, rem_m6);
     return (uid_t)-1;
 }
 
@@ -1802,6 +1806,11 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz);
    every counted request so clients get real-time updates. */
 #define WS_PUSH_MAX 16
 static struct mg_connection *ws_clients[WS_PUSH_MAX] = {0};
+
+/* Verbose (per-connection/request) logging is opt-in: with the hijack mode the
+   server sees the whole device traffic, and logging every connection to a file
+   costs real CPU and flash I/O. Enabled by --debug only. */
+static bool s_verbose;
 
 /*
  * Broadcast the current stats snapshot to every registered WebSocket
@@ -2845,7 +2854,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     uid_t chk_uid = req_uid;
     if (uid_is_isolated(req_uid)) {
         uid_t eff = resolve_effective_uid(req_uid);
-        if (eff != req_uid) {
+        if (eff != req_uid && s_verbose) {
             LOG_INFO("allowlist: isolated uid %d -> host uid %d",
                      (int)req_uid, (int)eff);
         }
@@ -3193,7 +3202,10 @@ int main(int argc, char *argv[]) {
         LOG_FATAL("Bad parameters.");
         return EXIT_FAILURE;
     }
-    if (s.debug) mg_log_set(MG_LL_DEBUG);
+    s_verbose = s.debug;
+    /* Without --debug, keep only errors: mongoose would otherwise log every
+       connection/read/send, which is the main CPU cost under hijack mode. */
+    mg_log_set(s.debug ? MG_LL_DEBUG : MG_LL_ERROR);
 
     s_stats.start_time_ms = mg_millis();
     load_stats(&s);  /* lifetime counters survive restarts */
