@@ -134,6 +134,8 @@ static FILE *s_log_fp = NULL;
 static long  s_log_bytes = 0;
 static char  s_log_path[PATH_MAX];
 
+static void log_file_line(const char *level, const char *fmt, ...);
+
 static void log_file_open(const char *dir) {
     if (!dir || !dir[0] || s_log_fp) return;
     snprintf(s_log_path, sizeof(s_log_path), "%s/webserver.log", dir);
@@ -141,6 +143,17 @@ static void log_file_open(const char *dir) {
     if (s_log_fp) {
         if (fseek(s_log_fp, 0, SEEK_END) == 0) s_log_bytes = ftell(s_log_fp);
     }
+}
+
+/* Public wrapper used by the Windows dashboard to append heartbeat lines to
+ * webserver.log (the GUI carries the resource numbers). */
+void win32_log_line(const char *fmt, ...) {
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    log_file_line("INFO", "%s", buf);
 }
 
 static void log_file_rotate(void) {
@@ -152,6 +165,8 @@ static void log_file_rotate(void) {
     s_log_fp = fopen(s_log_path, "a");
     s_log_bytes = 0;
 }
+
+static void log_file_line(const char *level, const char *fmt, ...);
 
 #ifdef _WIN32
 /* ── crash forensics ────────────────────────────────────────────────
@@ -176,8 +191,7 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS *ep) {
     if (f) {
         SYSTEMTIME st;
         GetLocalTime(&st);
-        fprintf(f, "[%04d-%02d-%02d %02d:%02d:%02d] EXCEPTION code=0x%08lX addr=%p module=%s pid=%lu
-",
+        fprintf(f, "[%04d-%02d-%02d %02d:%02d:%02d] EXCEPTION code=0x%08lX addr=%p module=%s pid=%lu\n",
                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
                 (unsigned long)ep->ExceptionRecord->ExceptionCode, addr, modname,
                 (unsigned long)GetCurrentProcessId());
