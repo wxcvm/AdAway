@@ -153,6 +153,55 @@ static void log_file_rotate(void) {
     s_log_bytes = 0;
 }
 
+#ifdef _WIN32
+/* ── crash forensics ────────────────────────────────────────────────
+ * The Windows build is a GUI-subsystem process: when it dies there is no
+ * console and no dialog, so a crash left no trace at all. Record what
+ * happened (exception code, faulting address, module, and the tail of
+ * webserver.log for context) in <resources>/crash.log. */
+static char s_crash_dir[PATH_MAX];
+
+static LONG WINAPI crash_filter(EXCEPTION_POINTERS *ep) {
+    const char *dir = s_crash_dir[0] ? s_crash_dir : ".";
+    char path[PATH_MAX + 32];
+    void *addr = (void *)ep->ExceptionRecord->ExceptionAddress;
+    char modname[MAX_PATH] = "?";
+    HMODULE mod = NULL;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)addr, &mod))
+        GetModuleFileNameA(mod, modname, sizeof(modname));
+    snprintf(path, sizeof(path), "%s/crash.log", dir);
+    FILE *f = fopen(path, "a");
+    if (f) {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        fprintf(f, "[%04d-%02d-%02d %02d:%02d:%02d] EXCEPTION code=0x%08lX addr=%p module=%s pid=%lu
+",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                (unsigned long)ep->ExceptionRecord->ExceptionCode, addr, modname,
+                (unsigned long)GetCurrentProcessId());
+        fflush(f);
+        char lp[PATH_MAX + 32];
+        snprintf(lp, sizeof(lp), "%s/webserver.log", dir);
+        FILE *l = fopen(lp, "r");
+        if (l) {
+            static char ring[40][256];
+            int n = 0;
+            while (fgets(ring[n % 40], sizeof(ring[0]), l) != NULL) n++;
+            fclose(l);
+            int start = n > 40 ? n - 40 : 0;
+            fprintf(f, "---- webserver.log tail (%d lines) ----\n", n - start);
+            for (int i = start; i < n; i++) fputs(ring[i % 40], f);
+        }
+        fclose(f);
+        log_file_line("FATAL", "Unhandled exception 0x%08lX at %p (%s) - details in crash.log",
+                      (unsigned long)ep->ExceptionRecord->ExceptionCode, addr, modname);
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+#endif
+
 static void log_file_line(const char *level, const char *fmt, ...) {
     if (!s_log_fp) return;
     if (s_log_bytes > LOG_FILE_MAX_BYTES) {
@@ -3387,6 +3436,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
  */
 static bool setup_resources_dir(struct settings *s, const char *rpath) {
     LOG_INFO("Resources dir: %s", rpath);
+#ifdef _WIN32
+    snprintf(s_crash_dir, sizeof(s_crash_dir), "%s", rpath);
+    SetUnhandledExceptionFilter(crash_filter);   /* crash.log forensics */
+#endif
 
     struct stat st;
     if (stat(rpath, &st) != 0 || (st.st_mode & S_IFDIR) == 0) {
@@ -3537,6 +3590,10 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 
 /* ── main ─────────────────────────────────────────────────────── */
 static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s);
+
+/* Read by the Windows dashboard: 0 = the server loop has returned. */
+static volatile int s_server_alive = 1;
+bool win32_server_alive(void) { return s_server_alive != 0; }
 
 #ifdef _WIN32
 struct server_thread_arg { struct mg_mgr *mgr; struct settings *s; };
@@ -3693,6 +3750,7 @@ int main(int argc, char *argv[]) {
         args.bind_all = s.bind_all;
         args.start_minimized = s.minimized;
         args.stats_port = s.stats_port;
+        args.owns_server = false;    /* attached to the instance above */
         args.startup_warning = NULL;
         LOG_INFO("A web server is already running on port %d - dashboard only mode.", s.http_port);
         int rc = adblock_gui_run(&args);
@@ -3830,6 +3888,7 @@ int main(int argc, char *argv[]) {
         args.bind_all = s.bind_all;
         args.start_minimized = s.minimized;
         args.stats_port = s.stats_port;
+        args.owns_server = true;     /* this process runs the server thread */
         args.startup_warning = startup_warning[0] ? startup_warning : NULL;
         struct server_thread_arg targ;
         targ.mgr = &mgr;
@@ -3894,6 +3953,7 @@ static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
     save_hist(s);   /* final flush of chart buckets on exit */
     sni_cache_save(s->resource_dir);  /* persist SNI cache (max hit rate) */
     apps_save(s->resource_dir);       /* persist per-app stats on exit */
+    s_server_alive = 0;
     LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);
