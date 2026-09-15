@@ -11,6 +11,7 @@
 #define UNICODE
 #define _UNICODE
 #include <winsock2.h>
+#include "update_win32.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <iphlpapi.h>
@@ -656,6 +657,7 @@ bool win32_autostart_installed(void) {
 #define IDM_AUTOSTART 1004
 #define IDM_EXIT     1005
 #define IDM_DARK     1006
+#define IDM_UPDATE   1007
 #define IDC_FIXPORT  1107
 #define IDC_HTTP_EDIT 1101
 #define IDC_HTTPS_EDIT 1102
@@ -1208,8 +1210,9 @@ static const struct ctl_desc g_clayout[] = {
     { IDM_TEST,       422, 404, 110, 28, L"BUTTON", L"打开测试页", BS_PUSHBUTTON },
     { IDC_FLUSH,      542, 404, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 406, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
+    { IDM_UPDATE,     838, 404, 110, 28, L"BUTTON", L"检查更新", BS_PUSHBUTTON },
 };
-#define CL_MAIN 12
+#define CL_MAIN 13
 
 static void layout_controls(HWND hwnd) {
     for (int i = 0; i < CL_MAIN; i++)
@@ -1387,6 +1390,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                     swprintf(msg, 256, L"证书操作失败（请检查 resources 目录）。");
                 cert_refresh(true);   /* trust state changed - drop the cache */
                 MessageBoxW(hwnd, msg, L"证书", MB_OK | MB_ICONINFORMATION);
+                InvalidateRect(hwnd, NULL, FALSE);
+            } else if (id == IDM_UPDATE) {
+                swprintf(g_status, 4096, L"正在检查更新…");
+                update_check_async(hwnd);
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id == IDM_TEST) {
                 wchar_t url[256];
@@ -1602,6 +1609,27 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         DeleteObject(bmp);
         DeleteDC(mem);
         EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_APP_UPDATE_FOUND: {
+        struct update_info *info = (struct update_info *) lp;
+        if (wp && info) {
+            wchar_t msg[512];
+            swprintf(msg, 512,
+                     L"发现新版本 %ls（当前版本 v" L"" ADBLOCK_APP_VERSION L"）。\n\n"
+                     L"现在下载并自动更新吗？更新会关闭本窗口，替换文件后自动重启。",
+                     info->tag);
+            if (MessageBoxW(hwnd, msg, L"检查更新", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                swprintf(g_status, 4096, L"正在下载更新（完成后会自动重启）…");
+                update_apply_async(hwnd, info);
+            } else {
+                swprintf(g_status, 4096, L"已忽略新版本 %ls", info->tag);
+            }
+        } else {
+            swprintf(g_status, 4096, L"已是最新版本（v" L"" ADBLOCK_APP_VERSION L"）");
+        }
+        update_info_free(info);
+        InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     }
     case WM_APP_TRAY:

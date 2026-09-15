@@ -1,0 +1,22 @@
+#ifndef UPDATE_WIN32_H
+#define UPDATE_WIN32_H
+
+#include <windows.h>
+
+/* Posted to the dashboard when the background update check finished.
+   wParam = 1 when a newer release exists, lParam = struct update_info*
+   (owned by the window, free with update_info_free), or NULL. */
+#define WM_APP_UPDATE_FOUND (WM_APP + 21)
+
+struct update_info {
+    wchar_t tag[128];
+    wchar_t url[1024];
+};
+
+/* Check the release feed in the background (never blocks the UI). */
+void update_check_async(HWND hwnd);
+/* Download + extract the release and restart the executable afterwards. */
+void update_apply_async(HWND hwnd, const struct update_info *info);
+void update_info_free(struct update_info *info);
+
+#endif

@@ -3528,7 +3528,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 }
 
 #ifndef ADBLOCK_APP_VERSION
-#define ADBLOCK_APP_VERSION "1.10.0"
+#define ADBLOCK_APP_VERSION "1.12"
 #endif
 
 /* autostart entry location (same key as gui_win32.c) */
@@ -3920,3 +3920,4 @@ static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
     LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
     return EXIT_SUCCESS;
 }
+
