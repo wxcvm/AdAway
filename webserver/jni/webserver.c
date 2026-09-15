@@ -3256,8 +3256,18 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
-    s_stats.total_requests++;
-    hist_add(HIST_REQ);
+    /*
+     * The dashboard / the Android app poll /internal-stats (and the extra
+     * /internal-test probe) once a second; counting our own management traffic
+     * made "请求量" grow by 1 every second with no real traffic at all. Only
+     * actual web traffic is counted now.
+     */
+    bool internal_path = mg_match(hm->uri, mg_str("/internal-*"), NULL) ||
+                         mg_match(hm->uri, mg_str("/control"), NULL);
+    if (!internal_path) {
+        s_stats.total_requests++;
+        hist_add(HIST_REQ);
+    }
 
     /* Check if this is a known portal host (user clicked "Sign in to network").
        If so, allow the request through so the portal page loads properly
