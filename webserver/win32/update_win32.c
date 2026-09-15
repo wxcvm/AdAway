@@ -21,7 +21,7 @@
 #include <wchar.h>
 
 #define UPDATE_API_HOST L"api.github.com"
-#define UPDATE_API_PATH L"/repos/wxcvm/Doh-ECH/releases?per_page=30"
+#define UPDATE_API_PATH L"/repos/wxcvm/AdAway/releases?per_page=30"
 #define UPDATE_MAX_BYTES (8u * 1024u * 1024u)
 
 static HWND s_update_hwnd;
@@ -187,14 +187,23 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
         char tag[128] = "", url[1024] = "";
         const char *next = strstr(p + 10, "\"tag_name\"");
         if (json_string(json, "\"tag_name\"", p, tag, sizeof(tag))) {
+            /* Walk every asset of this release: the Inno Setup installer is
+               preferred, the portable zip is the fallback. */
+            char candidate[1024] = "", fallback[1024] = "";
             const char *q = p;
             while ((q = strstr(q, "\"browser_download_url\"")) != NULL &&
                    (next == NULL || q < next)) {
-                if (json_string(json, "\"browser_download_url\"", q, url, sizeof(url)) &&
-                    strstr(url, ".zip"))
-                    break;
+                char one[1024] = "";
+                if (json_string(json, "\"browser_download_url\"", q, one, sizeof(one))) {
+                    size_t l = strlen(one);
+                    if (l > 4 && _stricmp(one + l - 4, ".exe") == 0 && candidate[0] == 0)
+                        snprintf(candidate, sizeof(candidate), "%s", one);
+                    else if (l > 4 && _stricmp(one + l - 4, ".zip") == 0 && fallback[0] == 0)
+                        snprintf(fallback, sizeof(fallback), "%s", one);
+                }
                 q++;
             }
+            snprintf(url, sizeof(url), "%s", candidate[0] ? candidate : fallback);
             if (url[0]) {
                 const char *v = strrchr(tag, 'v');
                 v = v ? v + 1 : tag;
@@ -207,9 +216,10 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
                 int is_win_release = strncmp(tag, "win11-webserver-", 16) == 0 ||
                                      strstr(url, "adblock-webserver") != NULL;
                 size_t ulen = strlen(url);
-                int is_zip = ulen > 4 &&
-                             (strcmp(url + ulen - 4, ".zip") == 0);
-                if (is_win_release && is_zip && version_cmp(v, ADBLOCK_APP_VERSION) > 0) {
+                int is_pkg = ulen > 4 &&
+                             (_stricmp(url + ulen - 4, ".zip") == 0 ||
+                              _stricmp(url + ulen - 4, ".exe") == 0);
+                if (is_win_release && is_pkg && version_cmp(v, ADBLOCK_APP_VERSION) > 0) {
                     utf8_to_wide(tag, tag_out, tag_cap);
                     utf8_to_wide(url, url_out, url_cap);
                     found = 1;
@@ -283,7 +293,14 @@ static int write_ansi_file(const wchar_t *path, const wchar_t *text) {
     return ok;
 }
 
-/* A downloaded update must really be a zip (PK\x03\x04) - never an APK. */
+/* Is this downloaded package the installer? */
+static int file_is_exe(const wchar_t *path) {
+    size_t n = wcslen(path);
+    if (n < 4) return 0;
+    return _wcsicmp(path + n - 4, L".exe") == 0;
+}
+
+/* A downloaded portable update must really be a zip (PK\x03\x04) - never an APK. */
 static int file_is_zip(const wchar_t *path) {
     FILE *fp = _wfopen(path, L"rb");
     if (!fp) return 0;
@@ -340,7 +357,26 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     swprintf(dir, MAX_PATH, L"%sadblock-update", temp);
     swprintf(bat, MAX_PATH, L"%sadblock-update.bat", temp);
 
-    if (!http_download_to_file(info->url, zip) || !file_is_zip(zip)) {
+    if (!http_download_to_file(info->url, zip)) {
+        MessageBoxW(NULL, L"下载更新失败，请检查网络后重试。", L"更新", MB_OK | MB_ICONWARNING);
+        free(info);
+        return 0;
+    }
+    /*
+     * The preferred package is the Inno Setup installer: it stops the running
+     * server (taskkill in its [Code] section), replaces the files, recreates
+     * the shortcuts and restarts the server - no batch script needed.
+     */
+    if (file_is_exe(zip)) {
+        wchar_t run[2048];
+        swprintf(run, 2048, L"\"%s\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART", zip);
+        ShellExecuteW(NULL, L"open", zip, L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", NULL, SW_SHOWNORMAL);
+        (void) run;
+        free(info);
+        if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_CLOSE, 0, 0);
+        return 0;
+    }
+    if (!file_is_zip(zip)) {
         DeleteFileW(zip);
         MessageBoxW(NULL, L"下载更新失败，请检查网络后重试（也可手动下载 zip 覆盖）。",
                     L"更新", MB_OK | MB_ICONWARNING);

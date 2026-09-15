@@ -304,3 +304,21 @@ jobs:
             --title "ADBlock Windows 服务器 v$VERSION" \
             --notes "Windows 端一键更新版（自动检查/下载/替换/重启）" \
             || gh release upload "$TAG" "$ZIP" --repo wxcvm/Doh-ECH --clobber
+
+      - name: Build installer (Inno Setup)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" webserver/win32/installer.iss
+          Get-ChildItem webserver/win32/dist-installer
+
+      - name: Attach installer to the release
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = "webserver/win32/dist-installer/adblock-webserver-setup.exe"
+          if (-not (Test-Path $exe)) { Write-Host "installer not built - skipped"; exit 0 }
+          gh release upload "win11-webserver-v1.14" $exe --repo "${{ github.repository }}" --clobber
