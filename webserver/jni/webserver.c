@@ -275,6 +275,10 @@ struct webstats {
     uint64_t sni_cache_hits;     /* SNI cache hits (avoid re-issue) */
 };
 static struct webstats s_stats = {0};
+/* Verbose (per-connection/request) logging is opt-in: with the hijack mode the
+   server sees the whole device traffic, and logging every connection to a file
+   costs real CPU and flash I/O. Enabled by --debug only. */
+static bool s_verbose;
 /* Block-reply policy gates - loaded from block_config.json, hot-reloadable. */
 static bool cfg_images = true;
 static bool cfg_scripts = true;
@@ -1807,10 +1811,6 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz);
 #define WS_PUSH_MAX 16
 static struct mg_connection *ws_clients[WS_PUSH_MAX] = {0};
 
-/* Verbose (per-connection/request) logging is opt-in: with the hijack mode the
-   server sees the whole device traffic, and logging every connection to a file
-   costs real CPU and flash I/O. Enabled by --debug only. */
-static bool s_verbose;
 
 /*
  * Broadcast the current stats snapshot to every registered WebSocket
