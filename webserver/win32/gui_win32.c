@@ -149,6 +149,7 @@ static volatile int g_poll_stop;
 static pthread_t g_poll_thread;
 static pthread_mutex_t g_snap_mutex;
 static struct snapshot g_snap_next;
+static struct snapshot *g_sn;
 static long long g_cert_days;
 static int  g_cert_trusted_flag;
 static DWORD g_cert_checked_tick;
@@ -159,6 +160,7 @@ static int  cert_trusted(const char *cert_path);
  * that appear above it compile). */
 static long long g_poll_sig;
 static DWORD g_poll_last_post;
+static int  g_hb_ticks;
 static bool g_owns_server;
 static volatile int g_ui_visible;
 static int  g_hidden_trimmed;
@@ -1529,6 +1531,19 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         cert_refresh(false);
         diag_sample();
+        /* Heartbeat every 5 minutes: after a sudden death the tail of
+         * webserver.log then shows the last known CPU/memory/handle trend. */
+        if (++g_hb_ticks >= 150) {
+            g_hb_ticks = 0;
+            win32_log_line("hb cpu=%.1f%% mem=%lluMB handles=%lu threads=%lu gdi=%lu "
+                           "visible=%d server=%d valid=%d bind_ok=%d listeners=%d uptime=%llds",
+                           g_cpu_pct, g_ws_kb / 1024ULL, (unsigned long)g_handle_count,
+                           (unsigned long)g_thread_count, (unsigned long)g_gdi_obj,
+                           (int)g_ui_visible, win32_server_alive() ? 1 : 0,
+                           (g_sn && g_sn->valid) ? 1 : 0, (g_sn && g_sn->bind_ok) ? 1 : 0,
+                           g_sn ? g_sn->listener_count : 0,
+                           g_sn ? (long long)g_sn->uptime_seconds : 0LL);
+        }
         if (!g_tray_ok) tray_add(hwnd);   /* taskbar missing at logon -> retry */
         if (vis) InvalidateRect(hwnd, NULL, FALSE);   /* never paint while hidden */
         return 0;
