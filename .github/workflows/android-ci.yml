@@ -88,7 +88,7 @@ jobs:
           # Monotonic versionCode: use run_number (per-workflow counter) instead
           # of date +%s which can collide or regress.
           VERSION_CODE=$((100000 + ${{ github.run_number }}))
-          VERSION_NAME="6.5.0.${{ github.run_number }}"
+          VERSION_NAME="6.7.0.${{ github.run_number }}"
           echo "Building $VERSION_NAME (versionCode $VERSION_CODE)"
           echo "$VERSION_NAME|$VERSION_CODE" > version.txt
           ./gradlew test assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
@@ -154,19 +154,12 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      # Publish APK as a draft GitHub Release asset. Release assets do NOT
-      # count against the Actions artifact storage quota, so this always
-      # succeeds even when artifact upload is rejected.
-      - name: Publish APK to GitHub Release (draft)
-        run: |
-          APK=app/build/outputs/apk/release/app-release-signed.apk
-          TAG="ci-${{ github.run_number }}"
-          gh release create "$TAG" "$APK" --draft --repo "${{ github.repository }}" \
-            --title "ADBlock CI #${{ github.run_number }}" \
-            --notes "Automatic CI build - download the APK asset." || true
-          gh release view "$TAG" --repo "${{ github.repository }}" --json url -q .url || true
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # NOTE: a "ci-<run_number>" DRAFT release used to be created here. It was
+      # removed on purpose: drafts are invisible to everybody but the owner, the
+      # step swallowed its own errors (|| true) so failures never showed up, and
+      # the in-app update feed step below already publishes every build publicly.
+      # This repository now only gets real releases, created by the "release" job
+      # for v* tags.
 
       # Publish the freshly built APK to the in-app update feed
       # (GitHub Releases of wxcvm/Doh-ECH, see UpdateModel.RELEASES_API).
@@ -241,7 +234,7 @@ jobs:
           VERSION_NAME=$(cut -d'|' -f1 "$VERSION_FILE")
           VERSION_CODE=$(cut -d'|' -f2 "$VERSION_FILE")
           cp "$APK_FILE" release-assets/ADBlock-latest.apk
-          printf '{"version":"%s","versionCode":%s,"changelog":"New Material 3 UI, per-app stats, ADBlock branding, dynamic versioning, captive portal fix"}' "$VERSION_NAME" "$VERSION_CODE" > release-assets/manifest.json
+          printf '{"version":"%s","versionCode":%s,"changelog":"ADBlock %s (versionCode %s)"}' "$VERSION_NAME" "$VERSION_CODE" "$VERSION_NAME" "$VERSION_CODE" > release-assets/manifest.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -249,5 +242,6 @@ jobs:
           files: release-assets/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
