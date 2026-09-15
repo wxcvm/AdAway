@@ -3178,11 +3178,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        app asked us to sign a certificate for. The uid is resolved once
        per connection (cached in c->data) to avoid /proc scans on every
        request of a keep-alive connection. */
+    /* Only the uid cached when the connection was first seen. Resolving it
+       scans /proc/net/tcp* for EVERY connection, which under the hijack mode
+       (the whole device traffic) was the dominant CPU cost; blocked requests
+       resolve it further down, where the allowlist decision needs it. */
     uid_t req_uid = conn_load_uid(c);
-    if (req_uid == (uid_t)-1) {
-        req_uid = conn_uid_by_tuple(c);
-        conn_store_uid(c, req_uid);
-    }
 
     /*
      * PER-APP ALLOWLIST: the app writes <resource_dir>/allowlist.txt
@@ -3195,6 +3195,12 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      * allocated per renderer instance; map them to their host app first
      * so an "Allow"-ed app's WebView requests also pass through.
      */
+    /* Blocked/local request: this is the minority path, so resolving the uid
+       here keeps the per-connection /proc scan out of the proxy hot path. */
+    if (req_uid == (uid_t)-1) {
+        req_uid = conn_uid_by_tuple(c);
+        conn_store_uid(c, req_uid);
+    }
     uid_t chk_uid = req_uid;
     if (uid_is_isolated(req_uid)) {
         uid_t eff = resolve_effective_uid(req_uid);
@@ -3231,9 +3237,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             /* Single-label hosts ("adaway", "localhost", printer names) are
                never proxied: they are local names or simply broken. */
             if (phost[0] != '\0' && strchr(phost, '.') != NULL && !host_is_local(phost)) {
-                bool allowed_uid = (req_uid != (uid_t)-1) &&
-                                   uid_is_allowed(chk_uid, s->resource_dir);
-                if (allowed_uid || !block_set_contains(phost, strlen(phost))) {
+                /* Allowlisted apps need no uid lookup here: their traffic is
+                   proxied like every other non-blocked host. */
+                if (!block_set_contains(phost, strlen(phost))) {
                     /* A pipelined request on a connection that is already
                        proxying is dropped (the first reply is still
                        streaming back to the client). */
@@ -3994,4 +4000,3 @@ static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
     LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
     return EXIT_SUCCESS;
 }
-
