@@ -1384,13 +1384,13 @@ static const struct ctl_desc g_clayout[] = {
     { IDC_RESTART,    330, 130, 120, 28, L"BUTTON", L"保存并重启", BS_PUSHBUTTON },
     { IDC_FIXPORT,    460, 130, 190, 28, L"BUTTON", L"改用备用端口 18080/18443", BS_PUSHBUTTON },
     { IDM_DARK,       664, 132, 170, 24, L"BUTTON", L"深色外观", BS_AUTOCHECKBOX },
-    { IDM_TRUST,      210, 404, 96, 28, L"BUTTON", L"信任 CA", BS_PUSHBUTTON },
-    { IDM_UNTRUST,    316, 404, 96, 28, L"BUTTON", L"撤销 CA", BS_PUSHBUTTON },
-    { IDM_TEST,       422, 404, 110, 28, L"BUTTON", L"打开测试页", BS_PUSHBUTTON },
-    { IDC_FLUSH,      542, 404, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
+    { IDM_TRUST,      210, 424, 96, 28, L"BUTTON", L"信任 CA", BS_PUSHBUTTON },
+    { IDM_UNTRUST,    316, 424, 96, 28, L"BUTTON", L"撤销 CA", BS_PUSHBUTTON },
+    { IDM_TEST,       422, 424, 110, 28, L"BUTTON", L"打开测试页", BS_PUSHBUTTON },
+    { IDC_FLUSH,      542, 424, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
     { IDC_DIAG,       844, 434, 170, 26, L"BUTTON", L"导出诊断信息", BS_PUSHBUTTON },
-    { IDM_AUTOSTART,  648, 406, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
-    { IDM_UPDATE,     838, 404, 110, 28, L"BUTTON", L"检查更新", BS_PUSHBUTTON },
+    { IDM_AUTOSTART,  648, 426, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
+    { IDM_UPDATE,     838, 424, 110, 28, L"BUTTON", L"检查更新", BS_PUSHBUTTON },
 };
 #define CL_MAIN 14
 
