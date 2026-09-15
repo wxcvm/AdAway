@@ -215,8 +215,9 @@ public class UpdateModel {
      * Pick the newest published release shipping an APK and turn it into a manifest.
      */
     private Manifest parseReleases(JSONArray releases) throws JSONException {
-        JSONObject newest = null;
-        String newestDate = null;
+        JSONObject best = null;
+        long bestBuild = Long.MIN_VALUE;
+        String bestDate = null;
         for (int i = 0; i < releases.length(); i++) {
             JSONObject release = releases.optJSONObject(i);
             if (release == null || release.optBoolean("draft", false)) {
@@ -225,17 +226,55 @@ public class UpdateModel {
             if (findApkAsset(release) == null) {
                 continue;
             }
+            // The API order is a creation-date order and creation dates are NOT a
+            // reliable build order: CI releases recreated in bulk share one
+            // timestamp, which used to make an older APK look "newest". Rank by
+            // the build number in the tag instead - CI publishes
+            // "<versionName>.<run_number>" with versionCode 100000 + run_number -
+            // and only fall back to the date for hand published non numeric tags.
+            long build = tagBuildNumber(release.optString("tag_name", ""));
             String date = release.optString("published_at", release.optString("created_at", ""));
-            if (newestDate == null || date.compareTo(newestDate) > 0) {
-                newestDate = date;
-                newest = release;
+            if (best == null || build > bestBuild
+                    || (build == bestBuild && date.compareTo(bestDate) > 0)) {
+                best = release;
+                bestBuild = build;
+                bestDate = date;
             }
         }
-        if (newest == null) {
+        if (best == null) {
             this.lastError = "no-release";
             return null;
         }
-        return buildManifest(newest);
+        return buildManifest(best);
+    }
+
+    /**
+     * Extract the trailing build number of a release tag
+     * ({@code 6.5.0.490} to {@code 490}, {@code v6.7.0} to {@code 0}).
+     *
+     * @param tag The release tag name.
+     * @return The build number, or {@code -1} when the tag has no number.
+     */
+    private static long tagBuildNumber(String tag) {
+        if (tag == null) {
+            return -1L;
+        }
+        int end = tag.length();
+        while (end > 0 && !Character.isDigit(tag.charAt(end - 1))) {
+            end--;
+        }
+        int start = end;
+        while (start > 0 && Character.isDigit(tag.charAt(start - 1))) {
+            start--;
+        }
+        if (start == end) {
+            return -1L;
+        }
+        try {
+            return Long.parseLong(tag.substring(start, end));
+        } catch (NumberFormatException exception) {
+            return -1L;
+        }
     }
 
     private Manifest buildManifest(JSONObject release) {
