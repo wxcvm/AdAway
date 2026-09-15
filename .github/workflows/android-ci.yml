@@ -194,8 +194,10 @@ jobs:
           import json, re, sys
           rels = [r for r in json.load(sys.stdin)
                   if not r['draft'] and re.fullmatch(r'[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+', r['tag_name'])]
-          rels.sort(key=lambda r: r['created_at'], reverse=True)
-          print('\\n'.join(str(r['id']) for r in rels[5:]))
+          # Rank by build number, not by created_at: CI releases can share one
+          # timestamp (bulk recreation) and the app ranks the feed the same way.
+          rels.sort(key=lambda r: int(r['tag_name'].rsplit('.', 1)[1]), reverse=True)
+          print('\n'.join(str(r['id']) for r in rels[5:]))
           " > /tmp/old-releases.txt
           while read -r id; do
             if [ -n "$id" ]; then
