@@ -171,7 +171,10 @@ jobs:
           FEED_TOKEN: ${{ secrets.DOH_ECH_TOKEN }}
         run: |
           if [ -z "$FEED_TOKEN" ]; then
-            echo "DOH_ECH_TOKEN is not configured - skipping update feed publish."
+            # The in-app updater reads this feed, so a missing token means
+            # every installed app stops seeing new builds. Never let that
+            # rot silently again: report it as a workflow warning.
+            echo "::warning::DOH_ECH_TOKEN is not configured - the in-app update feed (wxcvm/Doh-ECH) was NOT updated."
             exit 0
           fi
           VERSION_NAME=$(cut -d'|' -f1 version.txt)
@@ -182,6 +185,9 @@ jobs:
           printf '{"version":"%s","versionCode":%s,"changelog":"Automatic build %s from %s"}' \
             "$VERSION_NAME" "$VERSION_CODE" "$SHORT_SHA" "${{ github.repository }}" > manifest.json
           export GH_TOKEN="$FEED_TOKEN"
+          if ! gh auth status >/dev/null 2>&1; then
+            echo "::warning::DOH_ECH_TOKEN is invalid or expired - the update feed was NOT updated."
+          fi
           gh release create "$VERSION_NAME" ADBlock-latest.apk manifest.json \
             --repo wxcvm/Doh-ECH --title "ADBlock $VERSION_NAME" \
             --notes "Automatic build $VERSION_NAME (versionCode $VERSION_CODE) from ${{ github.repository }}@$SHORT_SHA" \
