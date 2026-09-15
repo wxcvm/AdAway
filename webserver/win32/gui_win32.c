@@ -154,6 +154,19 @@ static int  g_cert_trusted_flag;
 static DWORD g_cert_checked_tick;
 static long long cert_days_left(const char *cert_path);
 static int  cert_trusted(const char *cert_path);
+/* Polling + self-measurement state (definitions with initialisers live in the
+ * GUI state block further down; these tentative declarations let the helpers
+ * that appear above it compile). */
+static long long g_poll_sig;
+static DWORD g_poll_last_post;
+static bool g_owns_server;
+static volatile int g_ui_visible;
+static int  g_hidden_trimmed;
+static double g_cpu_pct;
+static unsigned long long g_ws_kb;
+static DWORD g_gdi_obj, g_user_obj, g_thread_count, g_handle_count;
+static ULONGLONG g_cpu_prev_ms;
+static DWORD g_cpu_prev_tick;
 
 static long long json_num(const char *body, const char *key) {
     char pat[64];
