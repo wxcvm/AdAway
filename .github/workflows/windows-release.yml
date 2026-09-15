@@ -271,7 +271,7 @@ jobs:
       - name: Create GitHub Release (draft)
         shell: bash
         run: |
-          TAG="win11-webserver-v1.13"
+          TAG="win11-webserver-v1.14"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
             echo "uploaded to existing release"
@@ -282,3 +282,25 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+
+      # The in-app updater checks the PUBLIC feed repository (this one is
+      # private, so its release API cannot be read without a token).
+      # Skipped silently when DOH_ECH_TOKEN is not configured.
+      - name: Publish zip to the public update feed (wxcvm/Doh-ECH)
+        continue-on-error: true
+        shell: bash
+        env:
+          FEED_TOKEN: ${{ secrets.DOH_ECH_TOKEN }}
+        run: |
+          if [ -z "$FEED_TOKEN" ]; then
+            echo "DOH_ECH_TOKEN is not configured - skipping public feed publish."
+            exit 0
+          fi
+          ZIP=$(find . -name 'adblock-webserver-win64.zip' | head -1)
+          if [ -z "$ZIP" ]; then echo "no zip found"; exit 0; fi
+          export GH_TOKEN="$FEED_TOKEN"
+          VERSION="${TAG#win11-webserver-v}"
+          gh release create "$TAG" "$ZIP" --repo wxcvm/Doh-ECH \
+            --title "ADBlock Windows 服务器 v$VERSION" \
+            --notes "Windows 端一键更新版（自动检查/下载/替换/重启）" \
+            || gh release upload "$TAG" "$ZIP" --repo wxcvm/Doh-ECH --clobber
