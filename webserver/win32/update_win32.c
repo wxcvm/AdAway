@@ -198,7 +198,18 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
             if (url[0]) {
                 const char *v = strrchr(tag, 'v');
                 v = v ? v + 1 : tag;
-                if (version_cmp(v, ADBLOCK_APP_VERSION) > 0) {
+                /*
+                 * Only the Windows zip of this program is a valid update: the
+                 * same feed also carries the Android APK, so the tag has to be
+                 * the Windows one and the download must really be a .zip (this
+                 * is what made an earlier build offer the Android APK).
+                 */
+                int is_win_release = strncmp(tag, "win11-webserver-", 16) == 0 ||
+                                     strstr(url, "adblock-webserver") != NULL;
+                size_t ulen = strlen(url);
+                int is_zip = ulen > 4 &&
+                             (strcmp(url + ulen - 4, ".zip") == 0);
+                if (is_win_release && is_zip && version_cmp(v, ADBLOCK_APP_VERSION) > 0) {
                     utf8_to_wide(tag, tag_out, tag_cap);
                     utf8_to_wide(url, url_out, url_cap);
                     found = 1;
@@ -272,6 +283,16 @@ static int write_ansi_file(const wchar_t *path, const wchar_t *text) {
     return ok;
 }
 
+/* A downloaded update must really be a zip (PK\x03\x04) - never an APK. */
+static int file_is_zip(const wchar_t *path) {
+    FILE *fp = _wfopen(path, L"rb");
+    if (!fp) return 0;
+    unsigned char magic[4] = {0, 0, 0, 0};
+    size_t got = fread(magic, 1, 4, fp);
+    fclose(fp);
+    return got == 4 && magic[0] == 'P' && magic[1] == 'K';
+}
+
 /* Does this directory contain webserver.exe? */
 static int dir_has_exe(const wchar_t *dir) {
     wchar_t probe[MAX_PATH];
@@ -319,7 +340,8 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     swprintf(dir, MAX_PATH, L"%sadblock-update", temp);
     swprintf(bat, MAX_PATH, L"%sadblock-update.bat", temp);
 
-    if (!http_download_to_file(info->url, zip)) {
+    if (!http_download_to_file(info->url, zip) || !file_is_zip(zip)) {
+        DeleteFileW(zip);
         MessageBoxW(NULL, L"下载更新失败，请检查网络后重试（也可手动下载 zip 覆盖）。",
                     L"更新", MB_OK | MB_ICONWARNING);
         free(info);

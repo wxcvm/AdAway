@@ -1683,6 +1683,12 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_ERASEBKGND:
         return 1;   /* handled in WM_PAINT - no erase flicker */
+    case WM_SIZE:
+        /* Maximize / resize: put the controls back where they belong and
+           repaint the dashboard. */
+        layout_controls(hwnd);
+        if (g_ui_visible) InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC real = BeginPaint(hwnd, &ps);
@@ -1893,7 +1899,12 @@ int adblock_gui_run(const struct adblock_gui_args *args) {
     {
         double sc = GetDpiForSystem() / 96.0;
         HWND hwnd = CreateWindowExW(0, L"ADBlockDashWin11", g_title,
-            (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX),
+            (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
+             WS_MAXIMIZEBOX | WS_THICKFRAME |
+             /* WS_CLIPCHILDREN: without it the parent repaints over the child
+                controls on every statistics tick (1 Hz), which shows up as a
+                constantly flickering window. */
+             WS_CLIPCHILDREN),
             CW_USEDEFAULT, CW_USEDEFAULT,
             (int)(1024 * sc), (int)(678 * sc),
             NULL, NULL, hinst, (LPVOID)args);
