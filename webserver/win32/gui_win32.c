@@ -18,6 +18,8 @@
 #include <wincrypt.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
+#include <psapi.h>
+#include <tlhelp32.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -311,6 +313,126 @@ static void snapshot_fetch_any(struct snapshot *sn) {
     if (sn->valid) g_active_port = g_http_port;
 }
 
+/* One cheap self-measurement per timer tick. */
+static void diag_sample(void) {
+    FILETIME ct, et, kt, ut;
+    if (GetProcessTimes(GetCurrentProcess(), &ct, &et, &kt, &ut)) {
+        ULARGE_INTEGER K, U;
+        K.LowPart = kt.dwLowDateTime; K.HighPart = kt.dwHighDateTime;
+        U.LowPart = ut.dwLowDateTime; U.HighPart = ut.dwHighDateTime;
+        ULONGLONG cpu_ms = (K.QuadPart + U.QuadPart) / 10000ULL;
+        DWORD now = GetTickCount();
+        if (g_cpu_prev_tick != 0 && now != g_cpu_prev_tick) {
+            double wall = (double)(now - g_cpu_prev_tick);
+            double used = (double)(cpu_ms - g_cpu_prev_ms);
+            SYSTEM_INFO si;
+            GetSystemInfo(&si);
+            double ncpu = si.dwNumberOfProcessors > 0 ? (double)si.dwNumberOfProcessors : 1.0;
+            double pct = used / (wall * ncpu) * 100.0;
+            g_cpu_pct = (pct < 0.0 || pct > 100.0) ? 0.0 : pct;
+        }
+        g_cpu_prev_ms = cpu_ms;
+        g_cpu_prev_tick = now;
+    }
+    PROCESS_MEMORY_COUNTERS pmc;
+    memset(&pmc, 0, sizeof(pmc));
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+        g_ws_kb = (unsigned long long)pmc.WorkingSetSize / 1024ULL;
+    g_gdi_obj = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
+    g_user_obj = GetGuiResources(GetCurrentProcess(), GR_USEROBJECTS);
+    g_handle_count = 0;
+    GetProcessHandleCount(GetCurrentProcess(), &g_handle_count);
+    g_thread_count = 0;
+    {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snap != INVALID_HANDLE_VALUE) {
+            THREADENTRY32 te;
+            memset(&te, 0, sizeof(te));
+            te.dwSize = sizeof(te);
+            DWORD pid = GetCurrentProcessId();
+            if (Thread32First(snap, &te)) {
+                do { if (te.th32OwnerProcessID == pid) g_thread_count++; } while (Thread32Next(snap, &te));
+            }
+            CloseHandle(snap);
+        }
+    }
+}
+
+/* Writes diagnose.txt (system + process + listener + log tail) so a user can
+ * send one file instead of describing the problem. */
+static void diag_write_file(HWND hwnd) {
+    char path[MAX_PATH + 32];
+    if (GetModuleFileNameA(NULL, path, MAX_PATH) <= 0) return;
+    char *slash = strrchr(path, '\\');
+    if (slash) *slash = '\0';
+    char out[MAX_PATH + 48];
+    snprintf(out, sizeof(out), "%s\\diagnose.txt", path);
+    FILE *f = fopen(out, "w");
+    if (!f) {
+        MessageBoxW(hwnd, L"无法写入 diagnose.txt（目录不可写）。", L"诊断", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    fprintf(f, "ADBlock Web Server v%s - diagnose.txt\n", ADBLOCK_APP_VERSION);
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    fprintf(f, "time: %04d-%02d-%02d %02d:%02d:%02d\n", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    OSVERSIONINFOEXW os;
+    memset(&os, 0, sizeof(os));
+    os.dwOSVersionInfoSize = sizeof(os);
+    if (GetVersionExW((OSVERSIONINFOW *)&os))
+        fprintf(f, "os: %lu.%lu build %lu\n", (unsigned long)os.dwMajorVersion,
+                (unsigned long)os.dwMinorVersion, (unsigned long)os.dwBuildNumber);
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    fprintf(f, "cpu: %lu cores\n", (unsigned long)si.dwNumberOfProcessors);
+    MEMORYSTATUSEX ms;
+    memset(&ms, 0, sizeof(ms));
+    ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms))
+        fprintf(f, "memory: %llu MB total, %llu MB free\n",
+                (unsigned long long)ms.ullTotalPhys / 1048576ULL,
+                (unsigned long long)ms.ullAvailPhys / 1048576ULL);
+    diag_sample();
+    fprintf(f, "process: cpu=%.2f%% working_set=%llu MB gdi=%lu user=%lu threads=%lu handles=%lu alive=%d\n",
+            g_cpu_pct, g_ws_kb / 1024ULL, (unsigned long)g_gdi_obj, (unsigned long)g_user_obj,
+            (unsigned long)g_thread_count, (unsigned long)g_handle_count,
+            win32_server_alive() ? 1 : 0);
+    fprintf(f, "ports: http=%d https=%d stats=%d active=%d bind_all=%d theme_dark=%d minimized=%d\n",
+            g_http_port, g_https_port, g_stats_port, g_active_port, g_bind_all ? 1 : 0,
+            g_dark, g_start_minimized ? 1 : 0);
+    fprintf(f, "server: valid=%d bind_ok=%d listeners=%d cert_days=%lld cert_trusted=%d\n",
+            (g_sn && g_sn->valid) ? 1 : 0, (g_sn && g_sn->bind_ok) ? 1 : 0,
+            g_sn ? g_sn->listener_count : 0, g_cert_days, g_cert_trusted_flag);
+    if (g_sn) {
+        for (int i = 0; i < g_sn->listener_count; i++)
+            fprintf(f, "  listener %-8ls %-28ls bound=%d ipv6=%d loopback=%d\n",
+                    g_sn->listeners[i].name, g_sn->listeners[i].addr,
+                    g_sn->listeners[i].bound, g_sn->listeners[i].ipv6, g_sn->listeners[i].loopback);
+    }
+    const char *tails[2] = { "webserver.log", "crash.log" };
+    for (int t = 0; t < 2; t++) {
+        char lp[MAX_PATH + 48];
+        snprintf(lp, sizeof(lp), "%s\\%s", g_res, tails[t]);
+        FILE *l = fopen(lp, "r");
+        fprintf(f, "---- %s ----\n", tails[t]);
+        if (l) {
+            static char ring[80][300];
+            int n = 0;
+            while (fgets(ring[n % 80], sizeof(ring[0]), l) != NULL) n++;
+            fclose(l);
+            int start = n > 80 ? n - 80 : 0;
+            for (int i = start; i < n; i++) fputs(ring[i % 80], f);
+        } else {
+            fprintf(f, "(not present)\n");
+        }
+    }
+    fclose(f);
+    wchar_t wout[MAX_PATH + 48];
+    MultiByteToWideChar(CP_ACP, 0, out, -1, wout, MAX_PATH + 48);
+    MessageBoxW(hwnd, L"诊断信息已导出，点确定后将打开该文件。", L"诊断", MB_OK | MB_ICONINFORMATION);
+    ShellExecuteW(NULL, L"open", wout, NULL, NULL, SW_SHOWNORMAL);
+}
+
 static void cert_refresh(bool force) {
     DWORD now = GetTickCount();
     if (!force && g_cert_checked_tick != 0 && now - g_cert_checked_tick < CERT_CACHE_MS)
@@ -330,8 +452,23 @@ static void *stats_poll_thread(void *arg) {
         pthread_mutex_lock(&g_snap_mutex);
         g_snap_next = tmp;
         pthread_mutex_unlock(&g_snap_mutex);
-        if (!g_poll_stop) PostMessageW(hwnd, WM_APP_STATS, 0, 0);
-        for (int i = 0; i < 20 && !g_poll_stop; i++) Sleep(100);
+        /* Wake the UI only when something it draws actually changed
+         * (seconds-level uptime is ignored) - idle CPU drops to ~0; a
+         * 60 s keep-alive still refreshes the clock line. */
+        long long sig = tmp.valid
+            ? (tmp.total_requests * 131 + tmp.total_connections * 17 +
+               tmp.sni_certs_issued * 7 + (tmp.uptime_seconds / 60) +
+               tmp.listener_count * 3 + tmp.bind_ok + tmp.stats_port)
+            : -1;
+        DWORD now = GetTickCount();
+        if ((sig != g_poll_sig || now - g_poll_last_post > 60000) && !g_poll_stop) {
+            g_poll_sig = sig;
+            g_poll_last_post = now;
+            PostMessageW(hwnd, WM_APP_STATS, 0, 0);
+        }
+        /* 2 s while the dashboard is on screen, 10 s while it lives in the
+         * tray only: a hidden window needs no fresh charts. */
+        for (int i = 0; i < 20 && !g_poll_stop; i++) Sleep(g_ui_visible ? 100 : 500);
     }
     return NULL;
 }
@@ -659,6 +796,7 @@ bool win32_autostart_installed(void) {
 #define IDM_DARK     1006
 #define IDM_UPDATE   1007
 #define IDC_FIXPORT  1107
+#define IDC_DIAG     1108
 #define IDC_HTTP_EDIT 1101
 #define IDC_HTTPS_EDIT 1102
 #define IDC_BIND_CHK  1103
@@ -733,6 +871,21 @@ static struct snapshot g_snap_next;
 static long long g_cert_days = -100000;
 static int  g_cert_trusted_flag = 0;
 static DWORD g_cert_checked_tick = 0;
+static long long g_poll_sig = -1;    /* signature of the last drawn snapshot */
+static DWORD g_poll_last_post = 0;   /* keep-alive post (clock) */
+
+/* ── resource accounting (shown in the dashboard + diagnose.txt) ────
+ * "高消耗" was reported without numbers, so the app now measures itself:
+ * CPU% (from GetProcessTimes deltas), working set, GDI/USER objects, threads
+ * and handles. Sampling happens once per timer tick, which is cheap. */
+static bool g_owns_server = false;       /* this process runs the server thread */
+static volatile int g_ui_visible = 1;    /* window shown (not only tray) */
+static int  g_hidden_trimmed = 0;        /* working set trimmed while hidden */
+static double g_cpu_pct = 0.0;
+static unsigned long long g_ws_kb = 0;
+static DWORD g_gdi_obj = 0, g_user_obj = 0, g_thread_count = 0, g_handle_count = 0;
+static ULONGLONG g_cpu_prev_ms = 0;
+static DWORD g_cpu_prev_tick = 0;
 #define CERT_CACHE_MS 30000
 
 static int mgmt_port(void) {
@@ -954,11 +1107,22 @@ static void draw_listener_card(HDC hdc, int x, int y, int w, int h,
         const wchar_t *msg = live ? L"服务器未上报监听列表（可能是旧版服务器进程）"
                                   : L"正在连接服务器 ...";
         TextOutW(hdc, S(x + 16), S(y + 44), msg, (int)wcslen(msg));
-    } else if (!ok && h > 120) {
+    } else if (!ok && h > 130) {
         SetTextColor(hdc, RGB(200, 60, 60));
         const wchar_t *msg =
             L"提示：切到“设置”页点击“改用备用端口 18080/18443”即可避开被占用的端口。";
-        TextOutW(hdc, S(x + 16), S(y + h - 26), msg, (int)wcslen(msg));
+        TextOutW(hdc, S(x + 16), S(y + h - 44), msg, (int)wcslen(msg));
+    }
+    /* self-measurement: the numbers behind "它很占资源" */
+    if (h > 120) {
+        wchar_t diag[260];
+        swprintf(diag, 260,
+                 L"进程：CPU %.1f%% · 内存 %llu MB · 句柄 %lu · 线程 %lu · GDI %lu · 服务器线程 %s",
+                 g_cpu_pct, g_ws_kb / 1024ULL, (unsigned long)g_handle_count,
+                 (unsigned long)g_thread_count, (unsigned long)g_gdi_obj,
+                 g_owns_server ? (win32_server_alive() ? L"运行中" : L"已停止") : L"外部进程");
+        SetTextColor(hdc, g_pal.muted);
+        TextOutW(hdc, S(x + 16), S(y + h - 24), diag, (int)wcslen(diag));
     }
     SelectObject(hdc, old);
     DeleteObject(nf);
@@ -1209,10 +1373,11 @@ static const struct ctl_desc g_clayout[] = {
     { IDM_UNTRUST,    316, 404, 96, 28, L"BUTTON", L"撤销 CA", BS_PUSHBUTTON },
     { IDM_TEST,       422, 404, 110, 28, L"BUTTON", L"打开测试页", BS_PUSHBUTTON },
     { IDC_FLUSH,      542, 404, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
+    { IDC_DIAG,       844, 434, 170, 26, L"BUTTON", L"导出诊断信息", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 406, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
     { IDM_UPDATE,     838, 404, 110, 28, L"BUTTON", L"检查更新", BS_PUSHBUTTON },
 };
-#define CL_MAIN 13
+#define CL_MAIN 14
 
 static void layout_controls(HWND hwnd) {
     for (int i = 0; i < CL_MAIN; i++)
@@ -1273,6 +1438,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         g_bind_all = args->bind_all;
         g_start_minimized = args->start_minimized;
         g_stats_port = args->stats_port > 0 ? args->stats_port : 8686;
+        g_owns_server = args->owns_server;
         g_tab = 0;
         g_scale = GetDpiForWindow(hwnd) / 96.0;
         g_theme_pref = ini_read_theme();
@@ -1333,15 +1499,27 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         swprintf(g_status, 4096, L"等待首次统计（http://127.0.0.1:%d/internal-stats）...", g_http_port);
         return 0;
     }
-    case WM_TIMER:
+    case WM_TIMER: {
+        bool vis = IsWindowVisible(hwnd) != 0;
+        g_ui_visible = vis ? 1 : 0;
+        if (!vis && !g_hidden_trimmed) {
+            /* Only the tray icon is left: hand the pages back to Windows so a
+             * background process does not sit on tens of MB. */
+            SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+            g_hidden_trimmed = 1;
+        } else if (vis) {
+            g_hidden_trimmed = 0;
+        }
         if (!g_poll_started && g_sn) {
             /* Fallback when the worker thread could not start. */
             snapshot_fetch_any(g_sn);
         }
         cert_refresh(false);
+        diag_sample();
         if (!g_tray_ok) tray_add(hwnd);   /* taskbar missing at logon -> retry */
-        InvalidateRect(hwnd, NULL, FALSE);
+        if (vis) InvalidateRect(hwnd, NULL, FALSE);   /* never paint while hidden */
         return 0;
+    }
     case WM_APP_STATS:
         if (g_sn) {
             pthread_mutex_lock(&g_snap_mutex);
@@ -1358,7 +1536,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                          L"服务器暂不可达（已尝试 %d 与 %d 端口）", g_stats_port, g_http_port);
             }
             cert_refresh(false);
-            InvalidateRect(hwnd, NULL, FALSE);
+            if (g_ui_visible) InvalidateRect(hwnd, NULL, FALSE);
         }
         return 0;
     case WM_LBUTTONUP: {
@@ -1420,6 +1598,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 ini_save(g_http_port, g_https_port, g_bind_all);
                 swprintf(g_status, 4096, L"已切换为%ls主题（下次启动仍然生效）",
                          g_dark ? L"深色" : L"浅色");
+                InvalidateRect(hwnd, NULL, TRUE);
+            } else if (id == IDC_DIAG) {
+                diag_write_file(hwnd);
+                swprintf(g_status, 4096, L"诊断信息已写入程序目录的 diagnose.txt");
                 InvalidateRect(hwnd, NULL, TRUE);
             } else if (id == IDC_FIXPORT) {
                 /* The default ports were taken (another server is running):
