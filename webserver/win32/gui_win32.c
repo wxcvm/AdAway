@@ -1799,7 +1799,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         else
             swprintf(txt, 256, L"证书已过期 - 请删除 %hs 后重启", cert_path);
         SetTextColor(hdc, days > 0 && days < 200000 ? C_GREEN_TXT : RGB(190, 70, 70));
-        TextOutW(hdc, S(210), S(444), txt, (int)wcslen(txt));
+        TextOutW(hdc, S(210), S(464), txt, (int)wcslen(txt));
         {
             wchar_t hint[300];
             if (g_bind_all) {
@@ -1813,12 +1813,12 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 swprintf(hint, 300, L"访问地址：http://localhost:%d（其他设备：设置→\"监听所有网卡\"）", g_http_port);
             }
             SetTextColor(hdc, g_pal.muted);
-            TextOutW(hdc, S(210), S(470), hint, (int)wcslen(hint));
+            TextOutW(hdc, S(210), S(486), hint, (int)wcslen(hint));
         }
         SelectObject(hdc, old2);
         DeleteObject(lf);
 
-        draw_listener_card(hdc, 210, 486, 796, 130, sn, 1);
+        draw_listener_card(hdc, 210, 502, 796, 130, sn, 1);
         draw_statusbar(hdc);
         BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
         SelectObject(mem, oldbmp);
