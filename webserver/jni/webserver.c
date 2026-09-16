@@ -707,6 +707,33 @@ static void apps_load(const char *resource_dir) {
     fclose(fp);
 }
 
+/* ── throttled persistence ──────────────────────────────────────────
+ * The app polls /internal-stats every few seconds; writing stats.dat,
+ * hist.dat, the per-app table AND the (up to ~270 KB) SNI cache on every
+ * single poll was pure flash I/O and CPU for no benefit - on a phone that
+ * is exactly the kind of background cost that gets the process killed with
+ * the "running in background" notification. Small counters are written at
+ * most every 30 s, the SNI cache every 2 minutes, and exit still forces a
+ * full flush. */
+#define PERSIST_MIN_INTERVAL_MS 30000ULL
+#define PERSIST_SNI_INTERVAL_MS 120000ULL
+static uint64_t s_persist_last_ms = 0;
+static uint64_t s_persist_sni_last_ms = 0;
+
+static void persist_dat_files(struct settings *s, bool force) {
+    if (!s) return;
+    uint64_t now = mg_millis();
+    if (force || now - s_persist_last_ms >= PERSIST_MIN_INTERVAL_MS) {
+        s_persist_last_ms = now;
+        save_stats(s);
+        save_hist(s);
+        apps_save(s->resource_dir);
+    }
+    if (force || now - s_persist_sni_last_ms >= PERSIST_SNI_INTERVAL_MS) {
+        s_persist_sni_last_ms = now;
+        sni_cache_save(s->resource_dir);
+    }
+}
 /* Distinct (uid, hostname) pairs seen on TLS connections — i.e. the
    per-domain leaf certs effectively issued per app. Ring buffer. */
 struct tls_host_rec {
@@ -3339,10 +3366,7 @@ int main(int argc, char *argv[]) {
             write_stats_json_file(&s);
         }
     }
-    save_stats(&s);
-    save_hist(&s);   /* final flush of chart buckets on exit */
-    sni_cache_save(s.resource_dir);  /* persist SNI cache (max hit rate) */
-    apps_save(s.resource_dir);       /* persist per-app stats on exit */
+    persist_dat_files(&s, true);   /* forced flush on exit */
     LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
 
     LOG_INFO("Signal %d — shutting down.", s_sig_num);
