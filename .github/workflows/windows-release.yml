@@ -258,6 +258,22 @@ jobs:
         shell: bash
         run: |
           cd webserver/win32/dist
+          # SECURITY (audit REL-1): the smoke tests above generated a CA key and
+          # runtime state inside dist\resources. Shipping those would give every
+          # user the SAME publicly downloadable CA private key (silent MITM for
+          # anyone who trusts it), so they are removed and their absence asserted
+          # before packaging.
+          rm -f webserver/win32/dist/resources/localhost-2410.key \
+                webserver/win32/dist/resources/localhost-2410.crt \
+                webserver/win32/dist/resources/*.dat \
+                webserver/win32/dist/resources/allowlist.txt \
+                webserver/win32/dist/resources/blocklist.txt \
+                webserver/win32/dist/resources/cosmetic.css \
+                webserver/win32/dist/webserver.log webserver/win32/dist/webserver.log.1 \
+                webserver/win32/dist/crash.log webserver/win32/dist/resources/crash.log
+          if ls webserver/win32/dist/resources/localhost-2410.key webserver/win32/dist/resources/*.dat 2>/dev/null | grep -q .; then
+            echo "::error::release package still contains CA key or runtime state"; exit 1
+          fi
           powershell -NoProfile -Command "Compress-Archive -Path .\* -DestinationPath '$GITHUB_WORKSPACE\adblock-webserver-win64.zip' -Force"
           ls -la "$GITHUB_WORKSPACE/adblock-webserver-win64.zip"
 

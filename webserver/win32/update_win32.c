@@ -237,8 +237,12 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
             if (digest_out && digest_cap) {
                 digest_out[0] = 0;
                 if (url[0]) {
-                    const char *dq = strstr(p, "\"digest\"");
-                    const char *nq = strstr(p + 10, "\"browser_download_url\"");
+                    /* Bind the digest to the asset actually chosen: taking
+                       the first "digest" of the release broke the updater as
+                       soon as the asset order changed (audit B-1). */
+                    const char *uq = strstr(p, url);
+                    const char *dq = uq ? strstr(uq, "\"digest\"") : NULL;
+                    const char *nq = uq ? strstr(uq + 1, "\"browser_download_url\"") : NULL;
                     if (dq && (nq == NULL || dq < nq)) {
                         char hex[128] = "";
                         if (json_string(json, "\"digest\"", dq, hex, sizeof(hex)))

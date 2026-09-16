@@ -3385,6 +3385,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        requests here to receive a snapshot; on open we send one
        immediately, then the client keeps polling as fallback. */
     if (mg_match(hm->uri, mg_str("/internal-ws"), NULL)) {
+        /*
+         * SECURITY (audit H-1): the WS snapshot carries recent_tls[] (browsing
+         * history). WebSocket is not subject to CORS, so a random web page could
+         * read it; only the management port and non-browser callers (the app's
+         * OkHttp client sends no Origin) may connect.
+         */
+        if (mg_http_get_header(hm, "Origin") != NULL ||
+            s->stats_port == 0 || c->loc.port != (uint16_t) s->stats_port) {
+            mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            return;
+        }
         mg_ws_upgrade(c, hm, NULL);
         return;
     }
