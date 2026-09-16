@@ -3388,6 +3388,16 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
             return;
         }
+        /*
+         * ... and it is only served on the loopback management port, so a LAN
+         * client of "--bind all" cannot reconfigure or shut the server down.
+         * Both clients (Windows dashboard and the Android app) already talk to
+         * /control on that port.
+         */
+        if (s->stats_port == 0 || c->loc.port != (uint16_t) s->stats_port) {
+            mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            return;
+        }
         char cmd_buf[32];
         mg_http_get_var(&hm->body, "cmd", cmd_buf, sizeof(cmd_buf));
         struct mg_str cmd = mg_str(cmd_buf);

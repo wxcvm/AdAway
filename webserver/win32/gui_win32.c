@@ -1365,7 +1365,7 @@ static void tray_menu(HWND hwnd) {
         bool on = SendMessageW(chk, BM_GETCHECK, 0, 0) != BST_CHECKED;
         char ccmd[2048], exe[MAX_PATH];
         GetModuleFileNameA(NULL, exe, sizeof(exe));
-        snprintf(ccmd, sizeof(ccmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --no-gui",
+        snprintf(ccmd, sizeof(ccmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --minimized",   /* --no-gui started without a tray icon after logon */
                  exe, g_res, g_http_port, g_https_port);
         win32_autostart_set(on, ccmd);
         SendMessageW(chk, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
