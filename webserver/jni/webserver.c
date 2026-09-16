@@ -2228,7 +2228,10 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     for (int i = 0; i < DAILY_SLOTS; i++)
         if (s_daily[i].blocked > daily_peak) daily_peak = s_daily[i].blocked;
 
-    return snprintf(out, out_sz,
+    /* SECURITY/robustness: snprintf returns the WOULD-BE length, which callers
+       ("%.*s", mg_ws_send, fwrite) would happily use - clamp it to the buffer. */
+    {
+        int n = snprintf(out, out_sz,
         "{\"uptime_seconds\":%llu,"
         "\"uptime_days\":%.1f,"
         "\"total_requests\":%llu,"
@@ -2292,6 +2295,9 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         s_main_http_bound ? "true" : "false",
         listeners_json,
         apps_json, tls_json, hist_json, daily_json);
+        if (n < 0) return 0;
+        return n < (int) out_sz ? n : (int) out_sz - 1;
+    }
 }
 
 /* ── Transparent filtering proxy (hijack mode) ───────────────────

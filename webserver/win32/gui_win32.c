@@ -1349,7 +1349,6 @@ static void tray_menu(HWND hwnd) {
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3001, L"打开仪表盘");
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3002, L"开机自启动");
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3004, L"检查更新");
-    AppendMenuW(m, MF_STRING | MF_ENABLED, 3004, L"检查更新");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3003, L"退出");
     POINT pt;

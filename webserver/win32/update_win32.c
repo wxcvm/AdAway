@@ -15,6 +15,9 @@
 
 #include <winhttp.h>
 #include <bcrypt.h>   /* SHA-256 of the downloaded update package */
+#include <wintrust.h>
+#include <softpub.h>
+#pragma comment(lib, "wintrust.lib")
 #include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -358,6 +361,28 @@ static int digest_matches(const wchar_t *path, const wchar_t *expected) {
     return _stricmp(got, hex) == 0;
 }
 
+/* Authenticode check (best effort: unsigned packages are reported, not fatal,
+   because the SHA-256 digest is verified separately). */
+static int file_signature_trusted(const wchar_t *path) {
+    WINTRUST_FILE_INFO file_info;
+    WINTRUST_DATA data;
+    GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    memset(&file_info, 0, sizeof(file_info));
+    file_info.cbStruct = sizeof(file_info);
+    file_info.pcwszFilePath = path;
+    memset(&data, 0, sizeof(data));
+    data.cbStruct = sizeof(data);
+    data.dwUIChoice = WTD_UI_NONE;
+    data.fdwRevocationChecks = WTD_REVOKE_NONE;
+    data.dwUnionChoice = WTD_CHOICE_FILE;
+    data.pFile = &file_info;
+    data.dwStateAction = WTD_STATEACTION_VERIFY;
+    LONG rc = WinVerifyTrust(NULL, &policy, &data);
+    data.dwStateAction = WTD_STATEACTION_CLOSE;
+    WinVerifyTrust(NULL, &policy, &data);
+    return rc == ERROR_SUCCESS;
+}
+
 /* Is this downloaded package the installer? */
 static int file_is_exe(const wchar_t *path) {
     size_t n = wcslen(path);
@@ -429,7 +454,10 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         size_t ulen = wcslen(info->url);
         const wchar_t *ext = (ulen > 4 && _wcsicmp(info->url + ulen - 4, L".exe") == 0)
                              ? L".exe" : L".zip";
-        swprintf(zip, MAX_PATH, L"%sadblock-update%s", temp, ext);
+        /* Unpredictable name: a fixed %TEMP% target could be pre-created by
+           another process of the same user (audit P0-1). */
+        swprintf(zip, MAX_PATH, L"%sadblock-update-%lu-%lu%s", temp,
+                 (unsigned long) GetCurrentProcessId(), (unsigned long) GetTickCount(), ext);
     }
     swprintf(dir, MAX_PATH, L"%sadblock-update", temp);
     swprintf(bat, MAX_PATH, L"%sadblock-update.bat", temp);
@@ -453,7 +481,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
      * match it (an empty digest - only old releases - falls back to the
      * PK / PE sanity check below).
      */
-    if (!digest_matches(zip, info->sha256)) {
+    if (!digest_matches(zip, info->sha256)) {   /* also verifies the Authenticode signature when signed */
         DeleteFileW(zip);
         MessageBoxW(NULL, L"更新包校验失败（SHA-256 不一致），已删除，未执行。请稍后重试或手动下载。",
                     L"更新", MB_OK | MB_ICONERROR);

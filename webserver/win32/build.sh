@@ -33,7 +33,7 @@ gcc \
   -L"$MINGW_PREFIX/lib" \
   -lssl -lcrypto -lws2_32 -lwinmm -lpthread \
   -lgdi32 -luser32 -lshell32 -ladvapi32 -lcrypt32 -liphlpapi \
-  -ldwmapi -luxtheme -lpsapi -lwinhttp -lbcrypt
+  -ldwmapi -luxtheme -lpsapi -lwinhttp -lbcrypt -lwintrust
 
 echo "==> Bundling runtime DLLs ..."
 for dll in libssl-3-x64.dll libcrypto-3-x64.dll zlib-1.dll \
