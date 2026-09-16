@@ -3191,6 +3191,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 
     /* Control endpoint: reload resources, flush stats, shutdown. */
     if (mg_match(hm->uri, mg_str("/control"), NULL)) {
+        /*
+         * SECURITY (audit P0-3): /control can reconfigure and shut the server
+         * down and its replies carry permissive CORS headers, so it is only
+         * served on the loopback management port and never for a request that
+         * comes from a web page (any Origin header).
+         */
+        if (mg_http_get_header(hm, "Origin") != NULL ||
+            s->stats_port == 0 || c->loc.port != (uint16_t) s->stats_port) {
+            mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            return;
+        }
         char cmd_buf[32];
         mg_http_get_var(&hm->body, "cmd", cmd_buf, sizeof(cmd_buf));
         struct mg_str cmd = mg_str(cmd_buf);
