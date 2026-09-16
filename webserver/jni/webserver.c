@@ -1884,6 +1884,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     uint64_t blk = stats_total_blocked();
     uint64_t hs  = s_stats.tls_handshakes;
     uint64_t hits = s_stats.sni_cache_hits;
+    if (blk > req) blk = req;   /* lifetime counters can be inconsistent */
     double block_rate = req > 0 ? (double)blk * 100.0 / (double)req : 0.0;
     double hit_rate   = hs  > 0 ? (double)hits * 100.0 / (double)hs  : 0.0;
     uint64_t daily_peak = 0;
@@ -2896,6 +2897,12 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                 /* Allowlisted apps need no uid lookup here: their traffic is
                    proxied like every other non-blocked host. */
                 if (!block_set_contains(phost, strlen(phost))) {
+                    /* Proxied requests ARE real traffic: this branch returns
+                       before the generic counter below, so count them here -
+                       otherwise 请求量 only counted blocked requests and the
+                       block rate looked like ~100%. */
+                    s_stats.total_requests++;
+                    hist_add(HIST_REQ);
                     /* A pipelined request on a connection that is already
                        proxying is dropped (the first reply is still
                        streaming back to the client). */
