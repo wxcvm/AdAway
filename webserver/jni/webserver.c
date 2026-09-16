@@ -3378,6 +3378,16 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 
     /* Control endpoint: reload resources, flush stats, shutdown. */
     if (mg_match(hm->uri, mg_str("/control"), NULL)) {
+        /*
+         * SECURITY: /control can reconfigure and shut the server down, and its
+         * replies carry permissive CORS headers. Requests coming from a web
+         * page (any Origin header) are therefore refused, which closes the
+         * drive-by CSRF hole (a plain local caller sends no Origin).
+         */
+        if (mg_http_get_header(hm, "Origin") != NULL) {
+            mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            return;
+        }
         char cmd_buf[32];
         mg_http_get_var(&hm->body, "cmd", cmd_buf, sizeof(cmd_buf));
         struct mg_str cmd = mg_str(cmd_buf);

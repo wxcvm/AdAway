@@ -3,7 +3,7 @@
 [Setup]
 ; Stable identity so an upgrade replaces the previous install (and keeps its
 ; folder as the default) instead of installing side by side.
-AppId={{8F2A61D4-6C0B-4B3E-9E77-ADB10CKWIN64}
+AppId={{8F2A61D4-6C0B-4B3E-9E77-ADB10C1A5F27}
 AppName=ADBlock 拦截服务器
 AppVersion=1.15
 AppPublisher=wxcvm
@@ -50,7 +50,7 @@ Name: "{autodesktop}\ADBlock"; Filename: "{app}\webserver.exe"; Tasks: desktopic
 Name: "{userstartup}\ADBlock"; Filename: "{app}\webserver.exe"; Parameters: "--minimized"; Tasks: autostart
 
 [Run]
-Filename: "{app}\webserver.exe"; Description: "立即启动 ADBlock"; Flags: nowait
+Filename: "{app}\webserver.exe"; Description: "立即启动 ADBlock"; Flags: nowait skipifsilent
 
 [Code]
 function InitializeSetup(): Boolean;
