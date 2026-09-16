@@ -88,7 +88,7 @@ jobs:
           # Monotonic versionCode: use run_number (per-workflow counter) instead
           # of date +%s which can collide or regress.
           VERSION_CODE=$((100000 + ${{ github.run_number }}))
-          VERSION_NAME="6.7.4.${{ github.run_number }}"
+          VERSION_NAME="6.7.5.${{ github.run_number }}"
           echo "Building $VERSION_NAME (versionCode $VERSION_CODE)"
           echo "$VERSION_NAME|$VERSION_CODE" > version.txt
           ./gradlew test assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
