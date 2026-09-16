@@ -29,7 +29,13 @@
 
 #define UPDATE_API_HOST L"api.github.com"
 #define UPDATE_API_PATH L"/repos/wxcvm/AdAway/releases?per_page=30"
-#define UPDATE_MAX_BYTES (8u * 1024u * 1024u)
+#define UPDATE_MAX_BYTES (8u * 1024u * 1024u)   /* API JSON answer only */
+/* Hard cap for the downloaded update package: without it a hostile or broken
+   release could stream until the disk is full (phase-2 audit, item A). */
+#define UPDATE_DOWNLOAD_MAX_BYTES (64u * 1024u * 1024u)
+/* Extraction budget (entries / total bytes) - see the staging check. */
+#define UPDATE_EXTRACT_MAX_ENTRIES 4000u
+#define UPDATE_EXTRACT_MAX_BYTES (256u * 1024u * 1024u)
 
 static HWND s_update_hwnd;
 
@@ -162,15 +168,31 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file) {
             DWORD status = 0, slen = sizeof(status);
             WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                                 WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen, WINHTTP_NO_HEADER_INDEX);
-            if (status == 200) out = _wfopen(file, L"wb");
+            /* Refuse an oversized package before writing a single byte, and
+               keep counting while streaming (a server may lie about or omit
+               Content-Length). */
+            int too_big = 0;
+            unsigned long long declared = 0;
+            DWORD clen_size = sizeof(declared);
+            if (WinHttpQueryHeaders(request,
+                    WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                    WINHTTP_HEADER_NAME_BY_INDEX, &declared, &clen_size,
+                    WINHTTP_NO_HEADER_INDEX) &&
+                declared > (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES) {
+                too_big = 1;
+            }
+            if (status == 200 && !too_big) out = _wfopen(file, L"wb");
             if (out) {
                 ok = 1;
+                unsigned long long total = 0;
                 for (;;) {
                     DWORD avail = 0, read = 0;
                     char buffer[65536];
                     if (!WinHttpQueryDataAvailable(request, &avail) || avail == 0) break;
                     if (avail > sizeof(buffer)) avail = (DWORD) sizeof(buffer);
                     if (!WinHttpReadData(request, buffer, avail, &read) || read == 0) { ok = 0; break; }
+                    total += read;
+                    if (total > (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES) { ok = 0; break; }
                     if (fwrite(buffer, 1, read, out) != read) { ok = 0; break; }
                 }
             }
@@ -351,7 +373,9 @@ done:
 
 /* Expected digest is "sha256:<hex>"; an empty expectation means "not published". */
 static int digest_matches(const wchar_t *path, const wchar_t *expected) {
-    if (!expected || !expected[0]) return 1;   /* nothing to compare against */
+    /* An absent digest is NOT a pass: the caller decides (it then requires a
+       valid Authenticode signature). Audit phase 2, item B. */
+    if (!expected || !expected[0]) return 0;
     char want[128] = "", got[128] = "";
     {
         char narrow[128] = "";
@@ -366,7 +390,6 @@ static int digest_matches(const wchar_t *path, const wchar_t *expected) {
 
 /* Authenticode check (best effort: unsigned packages are reported, not fatal,
    because the SHA-256 digest is verified separately). */
-static int file_signature_trusted(const wchar_t *path) __attribute__((unused));
 static int file_signature_trusted(const wchar_t *path) {
     WINTRUST_FILE_INFO file_info;
     WINTRUST_DATA data;
@@ -485,9 +508,24 @@ static DWORD WINAPI apply_thread(LPVOID param) {
      * match it (an empty digest - only old releases - falls back to the
      * PK / PE sanity check below).
      */
-    if (!digest_matches(zip, info->sha256)) {   /* also verifies the Authenticode signature when signed */
+    /*
+     * SECURITY (audit A2/A3): a package is accepted only when the published
+     * SHA-256 digest matches, or - if the release publishes no digest - when
+     * its Authenticode signature verifies. "No digest" never means "verified",
+     * and the signature check is really executed here (it used to be dead
+     * code).
+     */
+    if (info->sha256[0] != 0) {
+        if (!digest_matches(zip, info->sha256)) {
+            DeleteFileW(zip);
+            MessageBoxW(NULL, L"更新包校验失败（SHA-256 与发布信息不一致），已删除，未执行。",
+                        L"更新", MB_OK | MB_ICONERROR);
+            free(info);
+            return 0;
+        }
+    } else if (!file_signature_trusted(zip)) {
         DeleteFileW(zip);
-        MessageBoxW(NULL, L"更新包校验失败（SHA-256 不一致），已删除，未执行。请稍后重试或手动下载。",
+        MessageBoxW(NULL, L"更新包既没有发布方的 SHA-256，也没有有效的数字签名，已删除，未执行。\n\n请在 Releases 页手动下载并自行核对。",
                     L"更新", MB_OK | MB_ICONERROR);
         free(info);
         return 0;
@@ -500,7 +538,10 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     if (file_is_exe(zip)) {
         wchar_t run[2048];
         swprintf(run, 2048, L"\"%s\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART", zip);
-        ShellExecuteW(NULL, L"open", zip, L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", NULL, SW_SHOWNORMAL);
+        wchar_t params[256];
+        swprintf(params, 256, L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PID=%lu",
+                 (unsigned long) GetCurrentProcessId());
+        ShellExecuteW(NULL, L"open", zip, params, NULL, SW_SHOWNORMAL);
         (void) run;
         free(info);
         if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_APP_EXIT, 0, 0);   /* WM_CLOSE only hides the window: a helper batch waiting for the PID would wait forever */

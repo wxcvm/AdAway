@@ -34,6 +34,23 @@
 
 #include "gui_win32.h"
 
+/* GetModuleFileNameA() returns the ANSI code page path (GBK on a Chinese
+   system) while the rest of the code treats such strings as UTF-8, which made
+   every autostart/registry path point at a non-existent U+FFFD path. Use the
+   wide API and convert once (phase-2 audit, P1-3). Returns the length. */
+static int get_module_path_utf8(char *out, size_t cap) {
+    wchar_t wide[MAX_PATH];
+    if (out == NULL || cap == 0) return 0;
+    out[0] = 0;
+    if (GetModuleFileNameW(NULL, wide, MAX_PATH) == 0) return 0;
+    if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, out, (int) cap, NULL, NULL) <= 0) {
+        out[0] = 0;
+        return 0;
+    }
+    return (int) strlen(out);
+}
+
+
 /* --- theme (persisted in webserver.ini as theme=0/1/2) ---------------- */
 #define THEME_SYSTEM (-1)
 static int g_theme_pref = THEME_SYSTEM;   /* -1 system, 0 light, 1 dark */
@@ -377,7 +394,7 @@ static void diag_sample(void) {
  * send one file instead of describing the problem. */
 static void diag_write_file(HWND hwnd) {
     char path[MAX_PATH + 32];
-    if (GetModuleFileNameA(NULL, path, MAX_PATH) <= 0) return;
+    if (get_module_path_utf8(path, MAX_PATH) <= 0) return;
     char *slash = strrchr(path, '\\');
     if (slash) *slash = '\0';
     char out[MAX_PATH + 48];
@@ -509,7 +526,7 @@ static const struct policy_item g_policy[] = {
 /* ── settings persistence (webserver.ini next to the exe) ─────── */
 static void ini_file_path(char *out, size_t n) {
     char exe[MAX_PATH];
-    if (GetModuleFileNameA(NULL, exe, sizeof(exe)) <= 0) {
+    if (get_module_path_utf8(exe, sizeof(exe)) <= 0) {
         snprintf(out, n, "webserver.ini");
         return;
     }
@@ -1363,7 +1380,7 @@ static void tray_menu(HWND hwnd) {
         HWND chk = GetDlgItem(hwnd, IDM_AUTOSTART);
         bool on = SendMessageW(chk, BM_GETCHECK, 0, 0) != BST_CHECKED;
         char ccmd[2048], exe[MAX_PATH];
-        GetModuleFileNameA(NULL, exe, sizeof(exe));
+        get_module_path_utf8(exe, sizeof(exe));
         snprintf(ccmd, sizeof(ccmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d --minimized",   /* --no-gui started without a tray icon after logon */
                  exe, g_res, g_http_port, g_https_port);
         win32_autostart_set(on, ccmd);
@@ -1615,7 +1632,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 HWND chk = GetDlgItem(hwnd, IDM_AUTOSTART);
                 bool on = SendMessageW(chk, BM_GETCHECK, 0, 0) == BST_CHECKED;
                 char cmd[2048], exe[MAX_PATH];
-                GetModuleFileNameA(NULL, exe, sizeof(exe));
+                get_module_path_utf8(exe, sizeof(exe));
                 snprintf(cmd, sizeof(cmd),
                          "\"%s\" --resources \"%s\" --http-port %d --https-port %d --stats-port %d --minimized",
                          exe, g_res, g_http_port, g_https_port, g_stats_port);

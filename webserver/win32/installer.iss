@@ -5,7 +5,7 @@
 ; folder as the default) instead of installing side by side.
 AppId={{8F2A61D4-6C0B-4B3E-9E77-ADB10C1A5F27}
 AppName=ADBlock 拦截服务器
-AppVersion=1.16
+AppVersion=1.17
 AppPublisher=wxcvm
 DefaultDirName={autopf}\ADBlock
 DefaultGroupName=ADBlock
@@ -56,9 +56,15 @@ Filename: "{app}\webserver.exe"; Description: "立即启动 ADBlock"; Flags: now
 function InitializeSetup(): Boolean;
 var
   ResultCode: Integer;
+  Pid: String;
 begin
-  { Stop a running instance so its files can be replaced (also covers the
-    silent update path used by the in-app updater). }
-  Exec('taskkill.exe', '/F /IM webserver.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  { Only stop the instance the updater pointed at (/PID=...), so a server
+    running from a different folder or user session is never killed. Manual
+    installs (no /PID) fall back to the historic name-based kill. }
+  Pid := ExpandConstant('{param:PID|}');
+  if Pid <> '' then
+    Exec('taskkill.exe', '/F /PID ' + Pid, '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+  else
+    Exec('taskkill.exe', '/F /IM webserver.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := True;
 end;

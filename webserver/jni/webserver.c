@@ -22,6 +22,7 @@
 #endif
 #include <pthread.h>
 
+
 /*
  * Portability shims.
  *
@@ -70,6 +71,29 @@ typedef unsigned int uid_t;
 #define ANDROID_LOG_INFO  2
 #define ANDROID_LOG_DEBUG 3
 #define LOG_LOGCAT(prio, fmt, ...) do { } while (0)
+#endif
+
+/*
+ * Autostart / registry paths must be UTF-8. GetModuleFileNameA() returns the
+ * ANSI code page path (GBK on a Chinese system) which the rest of the code
+ * decodes as UTF-8, so the Run value pointed at a non-existent U+FFFD path
+ * (phase-2 audit, P1-3). Returns the length, like GetModuleFileNameA().
+ */
+#ifdef _WIN32
+static int get_module_path_utf8(char *out, size_t cap) {
+    wchar_t wide[MAX_PATH];
+    if (out == NULL || cap == 0) return 0;
+    out[0] = 0;
+    if (GetModuleFileNameW(NULL, wide, MAX_PATH) == 0) return 0;
+    if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, out, (int) cap, NULL, NULL) <= 0) {
+        out[0] = 0;
+        return 0;
+    }
+    return (int) strlen(out);
+}
+#else
+/* Never called outside the Windows-only autostart code. */
+static int get_module_path_utf8(char *out, size_t cap) { (void) out; (void) cap; return 0; }
 #endif
 #include <openssl/evp.h>
 #include <openssl/x509.h>
@@ -3618,7 +3642,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
     {
         char exe_path[PATH_MAX];
         memset(exe_path, 0, sizeof(exe_path));
-        if (GetModuleFileNameA(NULL, exe_path, (DWORD)sizeof(exe_path) - 1) > 0) {
+        if (get_module_path_utf8(exe_path, (DWORD)sizeof(exe_path) - 1) > 0) {
             char *slash = strrchr(exe_path, '\\');
             if (slash) *slash = '\0';
             if (rpath != NULL && rpath[0] != '\\' && rpath[0] != '/' && strchr(rpath, ':') == NULL) {
@@ -3706,7 +3730,7 @@ int main(int argc, char *argv[]) {
        the dashboard settings page); command-line flags still win. */
     {
         char exe[MAX_PATH];
-        if (GetModuleFileNameA(NULL, exe, sizeof(exe)) > 0) {
+        if (get_module_path_utf8(exe, sizeof(exe)) > 0) {
             char *slash = strrchr(exe, '\\');
             if (slash) *slash = '\0';
             char path[MAX_PATH + 32];
@@ -3776,7 +3800,7 @@ int main(int argc, char *argv[]) {
        binding so the command never needs a port to be free. */
     if (s.autostart != 0) {
         char exe[MAX_PATH];
-        if (GetModuleFileNameA(NULL, exe, sizeof(exe)) == 0) {
+        if (get_module_path_utf8(exe, sizeof(exe)) == 0) {
             LOG_FATAL("Cannot resolve executable path.");
             return EXIT_FAILURE;
         }
