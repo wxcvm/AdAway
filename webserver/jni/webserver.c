@@ -3073,10 +3073,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         mg_http_reply(c, 200,
                       "Content-Type: application/json\r\n"
                       "Cache-Control: no-store\r\n", "%.*s", n, body);
-        save_stats(s);  /* persist lifetime counters (polled every 5 s) */
-        save_hist(s);   /* persist chart buckets (no reset on reboot) */
-        sni_cache_save(s->resource_dir);  /* persist SNI cache every poll */
-        apps_save(s->resource_dir);       /* persist per-app stats */
+    persist_dat_files(s, false);   /* throttled: 30 s counters, 2 min SNI cache */
         return;
     }
 
@@ -3100,10 +3097,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             s->block_image_count = scan_block_images(s->resource_dir, s->block_images);
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);
         } else if (mg_strcmp(cmd, mg_str("flush_stats")) == 0) {
-            save_stats(s);
-            save_hist(s);
-            sni_cache_save(s->resource_dir);
-            apps_save(s->resource_dir);
+    persist_dat_files(s, false);   /* throttled: 30 s counters, 2 min SNI cache */
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: stats flushed");
         } else if (mg_strcmp(cmd, mg_str("shutdown")) == 0) {
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: shutting down");
