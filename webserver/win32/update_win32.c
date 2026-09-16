@@ -15,9 +15,12 @@
 
 #include <winhttp.h>
 #include <bcrypt.h>   /* SHA-256 of the downloaded update package */
+/* Posted by the dashboard to really quit (defined in gui_win32.c). */
+#ifndef WM_APP_EXIT
+#define WM_APP_EXIT (WM_USER + 2)
+#endif
 #include <wintrust.h>
 #include <softpub.h>
-#pragma comment(lib, "wintrust.lib")
 #include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -363,6 +366,7 @@ static int digest_matches(const wchar_t *path, const wchar_t *expected) {
 
 /* Authenticode check (best effort: unsigned packages are reported, not fatal,
    because the SHA-256 digest is verified separately). */
+static int file_signature_trusted(const wchar_t *path) __attribute__((unused));
 static int file_signature_trusted(const wchar_t *path) {
     WINTRUST_FILE_INFO file_info;
     WINTRUST_DATA data;
