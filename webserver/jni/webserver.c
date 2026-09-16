@@ -3068,9 +3068,18 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             /* Single-label hosts ("adaway", "localhost", printer names) are
                never proxied: they are local names or simply broken. */
             if (phost[0] != '\0' && strchr(phost, '.') != NULL && !host_is_local(phost)) {
-                /* Allowlisted apps need no uid lookup here: their traffic is
-                   proxied like every other non-blocked host. */
-                if (!block_set_contains(phost, strlen(phost))) {
+                /* SAFETY NET: with an empty block list this branch would forward
+                 * EVERY request to the real origin, i.e. silently disable
+                 * blocking. Never do that - fall through to the block reply
+                 * instead and say so once. (The app only enables the proxy in
+                 * hijack mode now, but the server must not depend on that.) */
+                static bool warned_empty;
+                if (s_block_used == 0) {
+                    if (!warned_empty) {
+                        warned_empty = true;
+                        LOG_WARN("proxy: block list is empty - refusing to proxy, blocking instead");
+                    }
+                } else if (!block_set_contains(phost, strlen(phost))) {
                     /* Proxied requests ARE real traffic: this branch returns
                        before the generic counter below, so count them here -
                        otherwise 请求量 only counted blocked requests and the
