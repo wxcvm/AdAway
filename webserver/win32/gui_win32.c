@@ -1348,6 +1348,7 @@ static void tray_menu(HWND hwnd) {
     HMENU m = CreatePopupMenu();
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3001, L"打开仪表盘");
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3002, L"开机自启动");
+    AppendMenuW(m, MF_STRING | MF_ENABLED, 3004, L"检查更新");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3003, L"退出");
     POINT pt;
@@ -1390,7 +1391,9 @@ static const struct ctl_desc g_clayout[] = {
     { IDC_FLUSH,      542, 424, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
     { IDC_DIAG,       844, 434, 170, 26, L"BUTTON", L"导出诊断信息", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 426, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
-    { IDM_UPDATE,     838, 424, 110, 28, L"BUTTON", L"检查更新", BS_PUSHBUTTON },
+    /* Below the "导出诊断信息" button (which sits at 844,434): the two used to
+       overlap in x 844-948 / y 434-452. */
+    { IDM_UPDATE,     844, 466, 170, 26, L"BUTTON", L"检查更新", BS_PUSHBUTTON },
 };
 #define CL_MAIN 14
 

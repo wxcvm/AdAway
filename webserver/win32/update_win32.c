@@ -358,7 +358,15 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     swprintf(bat, MAX_PATH, L"%sadblock-update.bat", temp);
 
     if (!http_download_to_file(info->url, zip)) {
-        MessageBoxW(NULL, L"下载更新失败，请检查网络后重试。", L"更新", MB_OK | MB_ICONWARNING);
+        /* github.com 的下载服务器（*.githubusercontent.com）在部分网络下不可达，
+           而 API 查询是通的 - 这时给出浏览器下载的兜底。 */
+        if (MessageBoxW(NULL,
+                        L"下载更新失败：无法访问 GitHub 的下载服务器（常见于网络受限）。\n\n"
+                        L"是否用浏览器打开下载页，手动下载安装？",
+                        L"更新", MB_YESNO | MB_ICONWARNING) == IDYES) {
+            ShellExecuteW(NULL, L"open", L"https://github.com/wxcvm/AdAway/releases",
+                          NULL, NULL, SW_SHOWNORMAL);
+        }
         free(info);
         return 0;
     }
