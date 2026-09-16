@@ -14,6 +14,7 @@
 #include "gui_win32.h"
 
 #include <winhttp.h>
+#include <bcrypt.h>   /* SHA-256 of the downloaded update package */
 #include <shellapi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -177,7 +178,8 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file) {
 }
 
 /* Newest release shipping a zip, when it is newer than this build. */
-static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out, size_t url_cap) {
+static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out, size_t url_cap,
+                              char *digest_out, size_t digest_cap) {
     size_t len = 0;
     char *json = http_get(UPDATE_API_HOST, UPDATE_API_PATH, &len);
     if (!json) return 0;
@@ -204,6 +206,18 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
                 q++;
             }
             snprintf(url, sizeof(url), "%s", candidate[0] ? candidate : fallback);
+            if (digest_out && digest_cap) {
+                digest_out[0] = 0;
+                if (url[0]) {
+                    const char *dq = strstr(p, "\"digest\"");
+                    const char *nq = strstr(p + 10, "\"browser_download_url\"");
+                    if (dq && (nq == NULL || dq < nq)) {
+                        char hex[128] = "";
+                        if (json_string(json, "\"digest\"", dq, hex, sizeof(hex)))
+                            snprintf(digest_out, digest_cap, "%s", hex);
+                    }
+                }
+            }
             if (url[0]) {
                 const char *v = strrchr(tag, 'v');
                 v = v ? v + 1 : tag;
@@ -235,12 +249,14 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
 static DWORD WINAPI check_thread(LPVOID param) {
     HWND hwnd = (HWND) param;
     wchar_t tag[128] = L"", url[1024] = L"";
+    char digest[128] = "";
     struct update_info *info = NULL;
-    if (find_latest_update(tag, 128, url, 1024)) {
+    if (find_latest_update(tag, 128, url, 1024, digest, sizeof(digest))) {
         info = (struct update_info *) calloc(1, sizeof(*info));
         if (info) {
             wcsncpy(info->tag, tag, 127);
             wcsncpy(info->url, url, 1023);
+            utf8_to_wide(digest, info->sha256, 128);
         }
     }
     PostMessageW(hwnd, WM_APP_UPDATE_FOUND, info ? 1 : 0, (LPARAM) info);
@@ -291,6 +307,55 @@ static int write_ansi_file(const wchar_t *path, const wchar_t *text) {
     }
     free(bytes);
     return ok;
+}
+
+/* SHA-256 of a file, lowercase hex (Bcrypt). Returns 0 on failure. */
+static int file_sha256_hex(const wchar_t *path, char *out, size_t cap) {
+    BCRYPT_ALG_HANDLE alg = NULL;
+    BCRYPT_HASH_HANDLE hash = NULL;
+    unsigned char *obj = NULL, *buf = NULL, digest[32];
+    DWORD obj_len = 0, got = 0, hash_len = 0;
+    int ok = 0;
+    FILE *fp = _wfopen(path, L"rb");
+    if (!fp) return 0;
+    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, NULL, 0) != 0) goto done;
+    if (BCryptGetProperty(alg, BCRYPT_OBJECT_LENGTH, (PUCHAR) &obj_len, sizeof(obj_len), &got, 0) != 0) goto done;
+    obj = (unsigned char *) malloc(obj_len);
+    buf = (unsigned char *) malloc(64 * 1024);
+    if (!obj || !buf) goto done;
+    if (BCryptCreateHash(alg, &hash, obj, obj_len, NULL, 0, 0) != 0) goto done;
+    for (;;) {
+        size_t n = fread(buf, 1, 64 * 1024, fp);
+        if (n == 0) break;
+        if (BCryptHashData(hash, buf, (ULONG) n, 0) != 0) goto done;
+    }
+    if (BCryptFinishHash(hash, digest, sizeof(digest), 0) != 0) goto done;
+    if (BCryptGetProperty(alg, BCRYPT_HASH_LENGTH, (PUCHAR) &hash_len, sizeof(hash_len), &got, 0) != 0) goto done;
+    if (hash_len != 32 || cap < 65) goto done;
+    for (int i = 0; i < 32; i++) snprintf(out + i * 2, cap - i * 2, "%02x", digest[i]);
+    ok = 1;
+done:
+    if (hash) BCryptDestroyHash(hash);
+    if (alg) BCryptCloseAlgorithmProvider(alg, 0);
+    free(obj);
+    free(buf);
+    fclose(fp);
+    return ok;
+}
+
+/* Expected digest is "sha256:<hex>"; an empty expectation means "not published". */
+static int digest_matches(const wchar_t *path, const wchar_t *expected) {
+    if (!expected || !expected[0]) return 1;   /* nothing to compare against */
+    char want[128] = "", got[128] = "";
+    {
+        char narrow[128] = "";
+        WideCharToMultiByte(CP_UTF8, 0, expected, -1, narrow, sizeof(narrow), NULL, NULL);
+        snprintf(want, sizeof(want), "%s", narrow);
+    }
+    const char *hex = strchr(want, ':');
+    hex = hex ? hex + 1 : want;
+    if (!file_sha256_hex(path, got, sizeof(got))) return 0;
+    return _stricmp(got, hex) == 0;
 }
 
 /* Is this downloaded package the installer? */
@@ -383,6 +448,19 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         return 0;
     }
     /*
+     * SECURITY: never execute a downloaded file blindly. The API publishes a
+     * per-asset "sha256:<hex>" digest and we refuse anything that does not
+     * match it (an empty digest - only old releases - falls back to the
+     * PK / PE sanity check below).
+     */
+    if (!digest_matches(zip, info->sha256)) {
+        DeleteFileW(zip);
+        MessageBoxW(NULL, L"更新包校验失败（SHA-256 不一致），已删除，未执行。请稍后重试或手动下载。",
+                    L"更新", MB_OK | MB_ICONERROR);
+        free(info);
+        return 0;
+    }
+    /*
      * The preferred package is the Inno Setup installer: it stops the running
      * server (taskkill in its [Code] section), replaces the files, recreates
      * the shortcuts and restarts the server - no batch script needed.
@@ -393,7 +471,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         ShellExecuteW(NULL, L"open", zip, L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART", NULL, SW_SHOWNORMAL);
         (void) run;
         free(info);
-        if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_CLOSE, 0, 0);
+        if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_APP_EXIT, 0, 0);   /* WM_CLOSE only hides the window: a helper batch waiting for the PID would wait forever */
         return 0;
     }
     if (!file_is_zip(zip)) {
@@ -456,7 +534,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         CloseHandle(pi.hThread);
     }
     free(info);
-    if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_CLOSE, 0, 0);
+    if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_APP_EXIT, 0, 0);   /* WM_CLOSE only hides the window: a helper batch waiting for the PID would wait forever */
     return 0;
 }
 
