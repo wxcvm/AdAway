@@ -182,11 +182,59 @@ static int scan_block_images(const char *resource_dir,
    SNI_CERT_VALIDITY_DAYS and each cache entry records when it was
    issued; a hit whose cert is past half its validity is treated as a
    miss and re-issued (see sni_callback()). */
-#define SNI_CACHE_SIZE 1024  /* bigger cache = more hits, fewer re-issues */
+/* MEMORY: every occupied slot owns a live SSL_CTX (EC key + leaf cert + the
+ * CA chain dup), roughly 10 KB each, so 1024 slots could pin ~10 MB of
+ * OpenSSL objects on a phone. 256 keeps the recent hot domains while capping
+ * the worst case at ~2.5 MB - a missed cert is cheap now (EC P-256 keygen and
+ * signing are sub-millisecond). */
+#define SNI_CACHE_SIZE 256
 #define SNI_CERT_VALIDITY_DAYS 60  /* longer validity = fewer re-issues */
 #define SNI_CERT_RENEW_MS ((uint64_t) SNI_CERT_VALIDITY_DAYS * 86400000ULL / 2)
 struct sni_entry { char hostname[256]; SSL_CTX *ctx; uint64_t issued_at; };
 static struct sni_entry s_sni_cache[SNI_CACHE_SIZE];
+
+/* ── retired per-domain SSL_CTX objects ─────────────────────────────
+ * SSL_set_SSL_CTX() does NOT take a reference: the caller must keep the
+ * SSL_CTX alive as long as the SSL object may use it, and a connection lives
+ * up to IDLE_TIMEOUT_MS (10 s). Freeing an evicted ctx immediately (what the
+ * code used to do) could hand a live connection a dangling pointer - a native
+ * crash waiting for the ring to wrap. Evicted ctxs are parked here for a grace
+ * period and freed once no connection can still reference them. The list is
+ * bounded: if it fills up the oldest entry is freed early, which is no worse
+ * than the previous behaviour. */
+#define SNI_RETIRE_MAX 128
+#define SNI_RETIRE_GRACE_MS 60000ULL   /* comfortably > IDLE_TIMEOUT_MS */
+static struct { SSL_CTX *ctx; uint64_t free_at; } s_sni_retired[SNI_RETIRE_MAX];
+static int s_sni_retire_count = 0;
+
+/* Add a ctx to the retired list. Caller holds s_sni_mutex. */
+static void sni_retire(SSL_CTX *ctx, uint64_t now) {
+    if (!ctx) return;
+    if (s_sni_retire_count >= SNI_RETIRE_MAX) {
+        int oldest = 0;
+        for (int i = 1; i < s_sni_retire_count; i++)
+            if (s_sni_retired[i].free_at < s_sni_retired[oldest].free_at) oldest = i;
+        SSL_CTX_free(s_sni_retired[oldest].ctx);
+        s_sni_retired[oldest] = s_sni_retired[s_sni_retire_count - 1];
+        s_sni_retire_count--;
+    }
+    s_sni_retired[s_sni_retire_count].ctx = ctx;
+    s_sni_retired[s_sni_retire_count].free_at = now + SNI_RETIRE_GRACE_MS;
+    s_sni_retire_count++;
+}
+
+/* Free retired ctxs whose grace period has passed. Caller holds s_sni_mutex. */
+static void sni_retire_drain(uint64_t now) {
+    for (int i = 0; i < s_sni_retire_count; ) {
+        if (now >= s_sni_retired[i].free_at) {
+            SSL_CTX_free(s_sni_retired[i].ctx);
+            s_sni_retired[i] = s_sni_retired[s_sni_retire_count - 1];
+            s_sni_retire_count--;
+        } else {
+            i++;
+        }
+    }
+}
 /* BUG FIX (integer overflow): s_sni_pos used to be a plain signed int
    incremented without bound (s_sni_pos++ on every SNI cache miss, even
    after the ring wrapped). A boot-time daemon that keeps issuing
@@ -1394,7 +1442,9 @@ static void sni_cache_save(const char *resource_dir) {
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/sni_cache.dat", resource_dir);
     pthread_mutex_lock(&s_sni_mutex);
-    struct sni_cache_file f;
+    /* static: ~66 KB, must not sit on the event-loop thread's stack;
+     * save/load only ever run from the event loop. */
+    static struct sni_cache_file f;
     memset(&f, 0, sizeof(f));
     f.magic = SNI_CACHE_MAGIC;
     f.count = (uint32_t)(s_sni_pos < SNI_CACHE_SIZE ? s_sni_pos : SNI_CACHE_SIZE);
@@ -1414,7 +1464,9 @@ static void sni_cache_load(const char *resource_dir) {
     snprintf(path, sizeof(path), "%s/sni_cache.dat", resource_dir);
     FILE *fp = fopen(path, "rb");
     if (!fp) return;
-    struct sni_cache_file f;
+    /* static: ~66 KB, must not sit on the event-loop thread's stack;
+     * save/load only ever run from the event loop. */
+    static struct sni_cache_file f;
     if (fread(&f, sizeof(f), 1, fp) == 1 && f.magic == SNI_CACHE_MAGIC) {
         pthread_mutex_lock(&s_sni_mutex);
         uint32_t n = f.count < SNI_CACHE_SIZE ? f.count : SNI_CACHE_SIZE;
@@ -1454,8 +1506,9 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
      * keep serving expired certificates to returning clients.
      */
 
-    /* Fast path: cache lookup under lock */
+    /* Fast path: cache lookup under lock (also reaps expired retired ctxs) */
     pthread_mutex_lock(&s_sni_mutex);
+    sni_retire_drain(mg_millis());
     for (int i = 0; i < SNI_CACHE_SIZE; i++) {
         if (s_sni_cache[i].ctx && strcmp(s_sni_cache[i].hostname, host) == 0) {
             if (mg_millis() - s_sni_cache[i].issued_at < SNI_CERT_RENEW_MS) {
@@ -1484,8 +1537,10 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
 
     /* Insert into cache under lock */
     pthread_mutex_lock(&s_sni_mutex);
+    uint64_t evict_ms = mg_millis();
+    sni_retire_drain(evict_ms);
     int pos = s_sni_pos % SNI_CACHE_SIZE;
-    if (s_sni_cache[pos].ctx) SSL_CTX_free(s_sni_cache[pos].ctx);
+    if (s_sni_cache[pos].ctx) sni_retire(s_sni_cache[pos].ctx, evict_ms);
     strncpy(s_sni_cache[pos].hostname, host, 255);
     s_sni_cache[pos].issued_at = mg_millis();
     s_sni_cache[pos].hostname[255] = '\0';  /* BUG FIX: strncpy doesn't
@@ -1880,6 +1935,11 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz);
    every counted request so clients get real-time updates. */
 #define WS_PUSH_MAX 16
 static struct mg_connection *ws_clients[WS_PUSH_MAX] = {0};
+/* ws_push_broadcast() runs after EVERY counted request. Building the ~16 KB
+ * snapshot and pushing it is expensive, so it is skipped entirely when nobody
+ * is subscribed and otherwise coalesced to one push per second. */
+#define WS_PUSH_MIN_INTERVAL_MS 1000ULL
+static uint64_t s_ws_last_push_ms = 0;
 
 
 /*
@@ -1891,6 +1951,22 @@ static struct mg_connection *ws_clients[WS_PUSH_MAX] = {0};
  */
 static void ws_push_broadcast(struct settings *s) {
     if (!s || !s->init) return;
+    /* CPU: this used to build the full JSON snapshot even with zero
+     * subscribers - a page load with dozens of blocked requests rebuilt ~16 KB
+     * of stats dozens of times per second for nothing. Only work when a
+     * subscriber exists, and at most once per second afterwards (the UI draws
+     * a chart and a few counters; it does not need per-request pushes). */
+    bool subscribed = false;
+    pthread_mutex_lock(&s_sni_mutex);
+    for (int i = 0; i < WS_PUSH_MAX; i++) {
+        struct mg_connection *cl0 = ws_clients[i];
+        if (cl0 && !cl0->is_closing && !cl0->is_draining) { subscribed = true; break; }
+    }
+    pthread_mutex_unlock(&s_sni_mutex);
+    if (!subscribed) return;
+    uint64_t ws_now = mg_millis();
+    if (s_ws_last_push_ms != 0 && ws_now - s_ws_last_push_ms < WS_PUSH_MIN_INTERVAL_MS) return;
+    s_ws_last_push_ms = ws_now;
     char body[16384];
     int n = build_stats_json(s, body, sizeof(body));
     if (n <= 0) return;
@@ -3396,6 +3472,9 @@ int main(int argc, char *argv[]) {
     pthread_mutex_lock(&s_sni_mutex);
     for (int i = 0; i < SNI_CACHE_SIZE; i++)
         if (s_sni_cache[i].ctx) SSL_CTX_free(s_sni_cache[i].ctx);
+    for (int i = 0; i < s_sni_retire_count; i++)
+        if (s_sni_retired[i].ctx) SSL_CTX_free(s_sni_retired[i].ctx);
+    s_sni_retire_count = 0;
     pthread_mutex_unlock(&s_sni_mutex);
     pthread_mutex_destroy(&s_sni_mutex);
 
