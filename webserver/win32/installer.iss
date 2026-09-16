@@ -35,7 +35,13 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Name: "autostart"; Description: "开机自动启动"; GroupDescription: "附加任务:"; Flags: unchecked
 
 [Files]
-Source: "dist\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; Program files are always replaced, but the resources folder is USER DATA:
+; it holds the CA (.crt/.key), statistics (*.dat), the exported rule files
+; (blocklist.txt / cosmetic.css), allowlist.txt, webserver.ini side files and
+; any custom block image. Never overwrite those on an upgrade
+; (onlyifdoesntexist), so updating keeps the certificate and the statistics.
+Source: "dist\*"; DestDir: "{app}"; Excludes: "resources\*"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "dist\resources\*"; DestDir: "{app}\resources"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist
 
 [Icons]
 Name: "{group}\ADBlock 仪表盘"; Filename: "{app}\webserver.exe"

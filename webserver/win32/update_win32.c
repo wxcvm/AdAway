@@ -353,7 +353,19 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     DWORD pid = GetCurrentProcessId();
 
     GetTempPathW(MAX_PATH, temp);
-    swprintf(zip, MAX_PATH, L"%sadblock-update.zip", temp);
+    /*
+     * Keep the REAL extension of the downloaded asset: the feed ships either
+     * the Inno Setup installer (.exe) or the portable zip. Naming everything
+     * "adblock-update.zip" made file_is_exe() always false, so an installer
+     * download then failed the PK check and reported "download failed" even
+     * though the network was fine.
+     */
+    {
+        size_t ulen = wcslen(info->url);
+        const wchar_t *ext = (ulen > 4 && _wcsicmp(info->url + ulen - 4, L".exe") == 0)
+                             ? L".exe" : L".zip";
+        swprintf(zip, MAX_PATH, L"%sadblock-update%s", temp, ext);
+    }
     swprintf(dir, MAX_PATH, L"%sadblock-update", temp);
     swprintf(bat, MAX_PATH, L"%sadblock-update.bat", temp);
 
