@@ -356,8 +356,15 @@ public static void startWebServer(Context context) {
          */
         String debugFlag = org.adaway.helper.PreferenceHelper.getDebugEnabled(context)
                 ? " --debug" : "";
+        // --proxy-filter turns the server into a transparent forwarder for every
+        // host that is NOT in <resource>/blocklist.txt. In the normal 127.0.0.1
+        // mode that silently UNBLOCKS anything missing from that (possibly
+        // stale) export - ads simply loaded again - so the flag is now only
+        // passed in hijack mode, where forwarding is the actual feature.
+        String proxyFlag = org.adaway.util.BlockMode.current(context) == org.adaway.util.BlockMode.HIJACK
+                ? " --proxy-filter" : "";
         String params = "--resources " + resourcePath.toAbsolutePath() +
-                debugFlag + " --proxy-filter --bind " + (isBindAll(context) ? "all" : "loop") +
+                debugFlag + proxyFlag + " --bind " + (isBindAll(context) ? "all" : "loop") +
                 " --stats-port " + STATS_PORT +
                 " --http-port " + getHttpPort(context) +
                 " --https-port " + getHttpsPort(context);
