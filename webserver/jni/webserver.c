@@ -978,6 +978,10 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
    occupy bytes 0-8; uid at offset 9, see MG_DATA_SIZE=32). */
 #define UID_OFFSET (sizeof(uint64_t) + 1)
 #define REC_OFFSET (UID_OFFSET + sizeof(uid_t))
+/* WebSocket connections are long-lived on purpose (the app's realtime stats
+ * stream); they are flagged so the idle drain leaves them alone - the client
+ * reconnects by itself when the stream really goes away. */
+#define WS_CONN_OFFSET (REC_OFFSET + 1)
 static void conn_store_uid(struct mg_connection *c, uid_t uid) {
     memcpy(c->data + UID_OFFSET, &uid, sizeof(uid));
 }
@@ -2786,6 +2790,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     /* WebSocket: keep the connection open (client pulls or we push). */
     if (ev == MG_EV_WS_OPEN) {
         /* Register this connection as a push subscriber. */
+        c->data[WS_CONN_OFFSET] = 1;   /* exempt from the idle drain below */
         pthread_mutex_lock(&s_sni_mutex);  /* reuse cache mutex as a cheap lock */
         for (int i = 0; i < WS_PUSH_MAX; i++) {
             if (ws_clients[i] == NULL) { ws_clients[i] = c; break; }
@@ -2818,6 +2823,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev == MG_EV_POLL && c->data[sizeof(uint64_t)]) {
         /* A transparent-proxy request may legitimately take longer than the
            idle timeout, so it is exempt while it is in flight. */
+        if (c->data[WS_CONN_OFFSET]) return;   /* realtime stats stream: keep alive */
         if (proxy_busy(c)) return;
         uint64_t accepted_at; memcpy(&accepted_at, c->data, sizeof(accepted_at));
         if (mg_millis() - accepted_at > IDLE_TIMEOUT_MS) {
@@ -2828,6 +2834,14 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev != MG_EV_HTTP_MSG) return;
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
+
+    /* Keep-alive: the idle timer must measure IDLE time, not the age of the
+     * connection. Without this refresh every connection was drained exactly
+     * IDLE_TIMEOUT_MS after accept, so a browser had to open (and TLS
+     * handshake) a fresh connection for every further request, and a long
+     * download was cut off mid-flight. */
+    uint64_t last_io_ms = mg_millis();
+    memcpy(c->data, &last_io_ms, sizeof(last_io_ms));
 
     /* The management port only answers the internal endpoints. */
     if (s->stats_port != 0 && c->loc.port == (uint16_t) s->stats_port) {
