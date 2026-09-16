@@ -1,12 +1,19 @@
 ; Inno Setup script for the ADBlock Windows web server.
 ; Build: iscc.exe installer.iss   (output: dist-installer\adblock-webserver-setup.exe)
 [Setup]
+; Stable identity so an upgrade replaces the previous install (and keeps its
+; folder as the default) instead of installing side by side.
+AppId={{8F2A61D4-6C0B-4B3E-9E77-ADB10CKWIN64}
 AppName=ADBlock 拦截服务器
-AppVersion=1.14
+AppVersion=1.15
 AppPublisher=wxcvm
 DefaultDirName={autopf}\ADBlock
 DefaultGroupName=ADBlock
 DisableProgramGroupPage=yes
+; Never skip the destination page: on an upgrade Inno hides it, so the folder
+; could not be changed (only /VERYSILENT skips it now).
+DisableDirPage=no
+UsePreviousAppDir=yes
 OutputDir=dist-installer
 OutputBaseFilename=adblock-webserver-setup
 Compression=lzma2

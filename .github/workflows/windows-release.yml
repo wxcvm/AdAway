@@ -271,7 +271,7 @@ jobs:
       - name: Create GitHub Release (draft)
         shell: bash
         run: |
-          TAG="win11-webserver-v1.14"
+          TAG="win11-webserver-v1.15"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
             echo "uploaded to existing release"
@@ -321,4 +321,4 @@ jobs:
         run: |
           $exe = "webserver/win32/dist-installer/adblock-webserver-setup.exe"
           if (-not (Test-Path $exe)) { Write-Host "installer not built - skipped"; exit 0 }
-          gh release upload "win11-webserver-v1.14" $exe --repo "${{ github.repository }}" --clobber
+          gh release upload "win11-webserver-v1.15" $exe --repo "${{ github.repository }}" --clobber

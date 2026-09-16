@@ -1349,6 +1349,7 @@ static void tray_menu(HWND hwnd) {
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3001, L"打开仪表盘");
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3002, L"开机自启动");
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3004, L"检查更新");
+    AppendMenuW(m, MF_STRING | MF_ENABLED, 3004, L"检查更新");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING | MF_ENABLED, 3003, L"退出");
     POINT pt;
@@ -1370,7 +1371,10 @@ static void tray_menu(HWND hwnd) {
         SendMessageW(chk, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
         swprintf(g_status, 4096, L"开机自启动已%s", on ? L"启用" : L"关闭");
         InvalidateRect(hwnd, NULL, FALSE);
-    } else if (cmd == 3003) {
+    } else if (cmd == 3004) {
+            swprintf(g_status, 4096, L"正在检查更新…");
+            update_check_async(hwnd);
+        } else if (cmd == 3003) {
         PostMessageW(hwnd, WM_APP_EXIT, 0, 0);
     }
 }
