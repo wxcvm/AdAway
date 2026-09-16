@@ -470,7 +470,26 @@ static int proc_status_uid_ppid(const char *pid_str, uid_t *uid_out, int *ppid_o
     return (*uid_out == (uid_t)-1) ? -1 : 0;
 }
 
+/* Isolated uids (WebView renderers) are recycled by the platform, so the
+ * resolved host uid is cached with a short TTL. Without this cache every
+ * single request from such a renderer walked all of /proc and read
+ * /proc/<pid>/status for every process on the device - hundreds of file
+ * opens per request, which was one of the biggest CPU/battery costs of
+ * the server in normal (127.0.0.1) mode. */
+#define ISO_CACHE_MAX 16
+#define ISO_CACHE_TTL_MS 60000ULL
+struct iso_map { uid_t in; uid_t out; uint64_t at; };
+static struct iso_map s_iso_map[ISO_CACHE_MAX];
+static int s_iso_next = 0;
+
 static uid_t resolve_effective_uid(uid_t uid) {
+    if (!uid_is_isolated(uid)) return uid;
+    uint64_t now = mg_millis();
+    for (int ci = 0; ci < ISO_CACHE_MAX; ci++) {
+        if (s_iso_map[ci].in == uid && now - s_iso_map[ci].at < ISO_CACHE_TTL_MS)
+            return s_iso_map[ci].out;
+    }
+
     if (!uid_is_isolated(uid)) return uid;
     DIR *dir = opendir("/proc");
     if (!dir) return uid;
@@ -497,8 +516,11 @@ static uid_t resolve_effective_uid(uid_t uid) {
             }
         }
         if (!advanced) break; /* parent chain broken (process exited) */
-    }
-    closedir(dir);
+    }    closedir(dir);
+    s_iso_map[s_iso_next].in = uid;
+    s_iso_map[s_iso_next].out = cur;
+    s_iso_map[s_iso_next].at = now;
+    s_iso_next = (s_iso_next + 1) % ISO_CACHE_MAX;
     return cur;
 }
 
