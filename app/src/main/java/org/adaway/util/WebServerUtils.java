@@ -363,6 +363,13 @@ public static void startWebServer(Context context) {
         // passed in hijack mode, where forwarding is the actual feature.
         String proxyFlag = org.adaway.util.BlockMode.current(context) == org.adaway.util.BlockMode.HIJACK
                 ? " --proxy-filter" : "";
+        // Hijack mode needs a FRESH <resource>/blocklist.txt: the server only
+        // reads it at startup and on reload_config, and every host missing from
+        // a stale export would be forwarded to the real origin (= not blocked).
+        // Traffic/hosts change on every source update, so refresh it here.
+        if (org.adaway.util.BlockMode.current(context) == org.adaway.util.BlockMode.HIJACK) {
+            exportBlockList(context);
+        }
         String params = "--resources " + resourcePath.toAbsolutePath() +
                 debugFlag + proxyFlag + " --bind " + (isBindAll(context) ? "all" : "loop") +
                 " --stats-port " + STATS_PORT +
