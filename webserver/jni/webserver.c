@@ -758,6 +758,66 @@ static void addr_to_proc_v6(const struct mg_addr *a, char *out, size_t sz) {
    /proc/net/tcp, uid may be zeroed on some kernels) and IPv4-mapped
    (row in /proc/net/tcp6, uid preserved) — so we try both formats.
    We run as root, so every row is visible. */
+/* ── /proc socket table cache ───────────────────────────────────────
+ * Resolving the uid of the requesting app used to open and parse
+ * /proc/net/tcp6 + /proc/net/tcp for EVERY blocked connection. Both files
+ * list every socket on the device (hundreds of KB on a busy phone) and a
+ * single web page produces dozens of blocked requests, so most of the
+ * server time went into re-reading the same tables - I/O and CPU that
+ * made the process look expensive to the system and got it killed in the
+ * background. The parsed rows are cached for a short window instead, so a
+ * burst of requests shares one read. */
+#define PROCTAB_MAX 768
+#define PROCTAB_TTL_MS 250
+struct procrow {
+    char l[46];
+    char r[46];
+    unsigned int state;
+    unsigned long uid;
+    unsigned long ino;
+};
+static struct procrow s_pt6[PROCTAB_MAX];
+static int s_pt6_n = 0;
+static struct procrow s_pt4[PROCTAB_MAX];
+static int s_pt4_n = 0;
+static uint64_t s_proctab_ms = 0;
+
+static void proctab_read(const char *path, struct procrow *rows, int *count) {
+    *count = 0;
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        if (*count >= PROCTAB_MAX) break;   /* table full: keep the first rows */
+        char l[46] = "", r[46] = "";
+        unsigned int state = 0;
+        unsigned long uid = 0, ino = 0;
+        if (sscanf(line, "%*s %45s %45s %X %*s %*s %*s %lu %*s %lu",
+                   l, r, &state, &uid, &ino) == 5) {
+            struct procrow *row = &rows[*count];
+            snprintf(row->l, sizeof(row->l), "%s", l);
+            snprintf(row->r, sizeof(row->r), "%s", r);
+            row->state = state;
+            row->uid = uid;
+            row->ino = ino;
+            (*count)++;
+        }
+    }
+    fclose(f);
+}
+
+static void proctab_refresh(void) {
+    uint64_t now = mg_millis();
+    if (s_proctab_ms != 0 && now - s_proctab_ms < PROCTAB_TTL_MS) return;
+    proctab_read("/proc/net/tcp6", s_pt6, &s_pt6_n);
+    proctab_read("/proc/net/tcp", s_pt4, &s_pt4_n);
+    s_proctab_ms = now;
+}
+
+/* Resolve the uid owning this connection: match its (local, remote)
+   4-tuple against the cached tables, then fall back to the socket inode
+   (the kernel may drop the ESTABLISHED row before we look, but the fd is
+   still ours). We run as root, so every row is visible. */
 static uid_t conn_uid_by_tuple(struct mg_connection *c) {
     char loc_v4[64], rem_v4[64];
     char loc_m6[64], rem_m6[64];
@@ -766,87 +826,48 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
     addr_to_proc_v6(&c->loc, loc_m6, sizeof(loc_m6));
     addr_to_proc_v6(&c->rem, rem_m6, sizeof(rem_m6));
 
-    /* Pass 0: /proc/net/tcp6 with the v4-mapped form (real uid).
-       NOTE: /proc rows are client-first (local = the connecting end,
-       remote = our listener), while c->loc is our listener and c->rem
-       the client — so compare l against rem_* and r against loc_*. */
-    FILE *f = fopen("/proc/net/tcp6", "r");
-    if (f) {
-        char line[512];
-        while (fgets(line, sizeof(line), f)) {
-            char l[64] = "", r[64] = "";
-            unsigned int state;
-            unsigned long uid = 0;
-            if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %lu %*s %*s",
-                       l, r, &state, &uid) == 4) {
-                if (state == 1 /* ESTABLISHED */ &&
-                    strcmp(l, rem_m6) == 0 && strcmp(r, loc_m6) == 0) {
-                    fclose(f);
-                    if (s_verbose)
-                        LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp6/mapped)",
-                                 loc_m6, rem_m6, (int)uid);
-                    return (uid_t)uid;
-                }
-            }
-        }
-        fclose(f);
-    }
+    proctab_refresh();
 
-    /* Pass 1: /proc/net/tcp with the plain IPv4 form. */
-    f = fopen("/proc/net/tcp", "r");
-    if (f) {
-        char line[512];
-        while (fgets(line, sizeof(line), f)) {
-            char l[64] = "", r[64] = "";
-            unsigned int state;
-            unsigned long uid = 0;
-            if (sscanf(line, "%*s %63s %63s %X %*s %*s %*s %lu %*s %*s",
-                       l, r, &state, &uid) == 4) {
-                if (state == 1 /* ESTABLISHED */ &&
-                    strcmp(l, rem_v4) == 0 && strcmp(r, loc_v4) == 0) {
-                    fclose(f);
-                    if (s_verbose)
-                        LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp)",
-                                 loc_v4, rem_v4, (int)uid);
-                    return (uid_t)uid;
-                }
-            }
+    /* Pass 0: tcp6 rows (IPv4-mapped clients keep their real uid here).
+       /proc rows are client-first, so compare l with our peer address. */
+    for (int i = 0; i < s_pt6_n; i++) {
+        if (s_pt6[i].state == 1 /* ESTABLISHED */ &&
+            strcmp(s_pt6[i].l, rem_m6) == 0 && strcmp(s_pt6[i].r, loc_m6) == 0) {
+            if (s_verbose)
+                LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp6/mapped)",
+                         loc_m6, rem_m6, (int)s_pt6[i].uid);
+            return (uid_t)s_pt6[i].uid;
         }
-        fclose(f);
     }
-
-    /* Pass 2 (fallback): socket-inode match. The 4-tuple can miss when
-       the client closes the connection right after its request (the
-       kernel drops the ESTABLISHED row before we scan), but the fd is
-       still ours; fstat() gives the socket inode, which /proc lists in
-       the last column while the socket exists (including TIME_WAIT-ish
-       states is fine: any row with our inode and its uid is the peer).
-       We accept state 0x01 (ESTABLISHED) or 0x06 (TIME_WAIT). */
+    /* Pass 1: plain IPv4 rows. */
+    for (int i = 0; i < s_pt4_n; i++) {
+        if (s_pt4[i].state == 1 &&
+            strcmp(s_pt4[i].l, rem_v4) == 0 && strcmp(s_pt4[i].r, loc_v4) == 0) {
+            if (s_verbose)
+                LOG_INFO("conn_uid: %s <-> %s -> uid=%d (tcp)",
+                         loc_v4, rem_v4, (int)s_pt4[i].uid);
+            return (uid_t)s_pt4[i].uid;
+        }
+    }
+    /* Pass 2 (fallback): socket-inode match (ESTABLISHED or TIME_WAIT). */
     {
         int sfd = (int)(intptr_t)c->fd;
         struct stat st;
         if (sfd > 0 && fstat(sfd, &st) == 0) {
             unsigned long sock_ino = (unsigned long)st.st_ino;
-            for (int pass = 0; pass < 2; pass++) {
-                const char *path = pass == 0 ? "/proc/net/tcp6" : "/proc/net/tcp";
-                f = fopen(path, "r");
-                if (!f) continue;
-                char line[512];
-                while (fgets(line, sizeof(line), f)) {
-                    unsigned int state;
-                    unsigned long uid = 0, line_ino = 0;
-                    if (sscanf(line, "%*s %*s %*s %X %*s %*s %*s %lu %*s %lu",
-                               &state, &uid, &line_ino) == 3) {
-                        if ((state == 1 || state == 6) && line_ino == sock_ino) {
-                            fclose(f);
-                            if (s_verbose)
-                                LOG_INFO("conn_uid: ino=%lu -> uid=%d (%s)",
-                                         sock_ino, (int)uid, path);
-                            return (uid_t)uid;
-                        }
-                    }
+            for (int i = 0; i < s_pt6_n; i++) {
+                if ((s_pt6[i].state == 1 || s_pt6[i].state == 6) && s_pt6[i].ino == sock_ino) {
+                    if (s_verbose)
+                        LOG_INFO("conn_uid: ino=%lu -> uid=%d (tcp6)", sock_ino, (int)s_pt6[i].uid);
+                    return (uid_t)s_pt6[i].uid;
                 }
-                fclose(f);
+            }
+            for (int i = 0; i < s_pt4_n; i++) {
+                if ((s_pt4[i].state == 1 || s_pt4[i].state == 6) && s_pt4[i].ino == sock_ino) {
+                    if (s_verbose)
+                        LOG_INFO("conn_uid: ino=%lu -> uid=%d (tcp)", sock_ino, (int)s_pt4[i].uid);
+                    return (uid_t)s_pt4[i].uid;
+                }
             }
         }
     }
