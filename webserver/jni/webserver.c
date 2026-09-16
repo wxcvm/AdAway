@@ -90,8 +90,16 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
 #define OOM_ADJ_PATH   "/proc/self/oom_score_adj"
 #define OOM_ADJ_NOKILL -1000   /* OOM_SCORE_ADJ_MIN */
 
-#define MAX_CONNECTIONS   256
-#define IDLE_TIMEOUT_MS   10000
+/* Each connection costs mongoose ~16 KB of buffers (MG_IO_SIZE, plus another
+ * 16 KB receive buffer for TLS) and one SSL_CTX + SSL object, so the cap is
+ * also a memory cap: 128 concurrent connections is far more than a phone
+ * browser ever needs and halves the worst case. */
+#define MAX_CONNECTIONS   128
+/* Idle (not connection-age!) timeout - see the timestamp refresh in fn().
+ * Browsers keep connections alive between requests, so a short value only buys
+ * reconnect + TLS handshake churn; a proxy request in flight is exempt and
+ * WebSocket streams are exempt entirely. */
+#define IDLE_TIMEOUT_MS   30000
 /* CORS: ad SDKs usually issue cross-origin XHR/fetch/beacon requests
    from the page origin to their ad endpoints. Those requests are
    redirected here by the hosts-file block, so this server IS the
@@ -3185,7 +3193,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         mg_http_reply(c, 200,
                       "Content-Type: application/json\r\n"
                       "Cache-Control: no-store\r\n", "%.*s", n, body);
-    persist_dat_files(s, false);   /* throttled: 30 s counters, 2 min SNI cache */
+            persist_dat_files(s, false);   /* throttled: 30 s counters, 2 min SNI cache */
         return;
     }
 
@@ -3220,7 +3228,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             s->block_image_count = scan_block_images(s->resource_dir, s->block_images);
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);
         } else if (mg_strcmp(cmd, mg_str("flush_stats")) == 0) {
-    persist_dat_files(s, false);   /* throttled: 30 s counters, 2 min SNI cache */
+            persist_dat_files(s, false);   /* throttled: 30 s counters, 2 min SNI cache */
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: stats flushed");
         } else if (mg_strcmp(cmd, mg_str("shutdown")) == 0) {
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: shutting down");
