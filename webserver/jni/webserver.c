@@ -155,6 +155,9 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
  * user can simply send the file when something goes wrong. */
 #define LOG_FILE_MAX_BYTES (1024 * 1024)
 static FILE *s_log_fp = NULL;
+/* One log writer at a time (audit I-1): the GUI thread appends heartbeat
+   lines through win32_log_line() while the server thread logs. */
+static pthread_mutex_t s_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static long  s_log_bytes = 0;
 static char  s_log_path[PATH_MAX];
 
@@ -193,6 +196,42 @@ static void log_file_rotate(void) {
 static void log_file_line(const char *level, const char *fmt, ...);
 
 #ifdef _WIN32
+/* ── CA private key hardening (audit D2) ──────────────────────────────
+ * localhost-2410.key is the trust anchor for every intercepted connection.
+ * With the inherited ACL any other account on the machine could read it and
+ * impersonate every site, so the ACL is reduced to the three principals that
+ * legitimately need it. icacls is used (instead of SetNamedSecurityInfo) so
+ * the effective rights stay easy to inspect and repair by hand. Failure is
+ * never fatal: the server keeps running, it only logs the exit code. */
+static void harden_ca_key_acl(const char *resource_dir) {
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s\\localhost-2410.key", resource_dir);
+    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) return;
+    wchar_t wpath[PATH_MAX], cmd[PATH_MAX + 256];
+    if (MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, PATH_MAX) <= 0) return;
+    _snwprintf(cmd, PATH_MAX + 256,
+               L"cmd.exe /c icacls \"%ls\" /inheritance:r "
+               L"/grant:r \"%%USERNAME%%\":F /grant:r *S-1-5-18:F /grant:r *S-1-5-32-544:F",
+               wpath);
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    memset(&pi, 0, sizeof(pi));
+    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        LOG_WARN("CA key ACL: could not run icacls");
+        return;
+    }
+    WaitForSingleObject(pi.hProcess, 10000);
+    DWORD rc = (DWORD) -1;
+    GetExitCodeProcess(pi.hProcess, &rc);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    if (rc == 0) LOG_INFO("CA key ACL hardened (%s)", path);
+    else LOG_WARN("CA key ACL: icacls rc=%lu (key keeps the inherited ACL)", (unsigned long) rc);
+}
+
 /* ── crash forensics ────────────────────────────────────────────────
  * The Windows build is a GUI-subsystem process: when it dies there is no
  * console and no dialog, so a crash left no trace at all. Record what
@@ -241,10 +280,13 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS *ep) {
 #endif
 
 static void log_file_line(const char *level, const char *fmt, ...) {
-    if (!s_log_fp) return;
+    /* Audit I-1: serialise writers, and never let a rotation close the FILE*
+       while another thread is inside vfprintf(). */
+    pthread_mutex_lock(&s_log_mutex);
+    if (!s_log_fp) { pthread_mutex_unlock(&s_log_mutex); return; }
     if (s_log_bytes > LOG_FILE_MAX_BYTES) {
         log_file_rotate();
-        if (!s_log_fp) return;
+        if (!s_log_fp) { pthread_mutex_unlock(&s_log_mutex); return; }
     }
     int n = 0;
 #ifdef _WIN32
@@ -275,6 +317,7 @@ static void log_file_line(const char *level, const char *fmt, ...) {
     }
     if (fputc('\n', s_log_fp) != EOF) s_log_bytes += 1;
     fflush(s_log_fp);
+    pthread_mutex_unlock(&s_log_mutex);
 }
 
 #define LOG_FATAL(fmt, ...) do { \
@@ -1650,6 +1693,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
      */
 
     /* Fast path: cache lookup under lock */
+    int expired_slot = -1;
     pthread_mutex_lock(&s_sni_mutex);
     for (int i = 0; i < SNI_CACHE_SIZE; i++) {
         if (s_sni_cache[i].ctx && strcmp(s_sni_cache[i].hostname, host) == 0) {
@@ -1662,8 +1706,9 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
             }
             /* Cert is near/at expiry: fall through and re-issue below.
                The stale entry stays until evicted by the insert (if
-               that slot happens to be this one) — a later hit will
-               simply find it expired again and re-issue. */
+               that slot happens to be this one) - a later hit would simply
+               find it expired again (audit D3: it is now replaced in place). */
+            expired_slot = i;
             break;
         }
     }
@@ -1679,7 +1724,12 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
 
     /* Insert into cache under lock */
     pthread_mutex_lock(&s_sni_mutex);
-    int pos = s_sni_pos % SNI_CACHE_SIZE;
+    int pos;
+    if (expired_slot >= 0) {
+        pos = expired_slot;          /* refresh the expired entry in place (D3) */
+    } else {
+        pos = (int) (s_sni_pos % SNI_CACHE_SIZE);
+    }
     if (s_sni_cache[pos].ctx) SSL_CTX_free(s_sni_cache[pos].ctx);
     strncpy(s_sni_cache[pos].hostname, host, 255);
     s_sni_cache[pos].issued_at = mg_millis();
@@ -1688,7 +1738,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
         bytes would leave the buffer unterminated, causing strcmp() above to
         read past the array boundary on subsequent lookups. */
     s_sni_cache[pos].ctx = ctx;
-    s_sni_pos++;
+    if (expired_slot < 0) s_sni_pos++;   /* an in-place refresh uses no new slot */
     s_sni_misses++;
     s_stats.sni_certs_issued++;
     hist_add(HIST_CERT);
@@ -2270,6 +2320,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"sni_cache_hits\":%llu,"
         "\"sni_hit_rate\":%.1f,"
         "\"block_rate\":%.1f,"
+        "\"total_blocked\":%llu,"
         "\"daily_peak\":%llu,"
         "\"blocked_images\":%llu,"
         "\"blocked_scripts\":%llu,"
@@ -2303,6 +2354,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         (unsigned long long)hits,
         hit_rate,
         block_rate,
+        (unsigned long long)blk,
         (unsigned long long)daily_peak,
         (unsigned long long)s_stats.blocked_images,
         (unsigned long long)s_stats.blocked_scripts,
@@ -3896,6 +3948,9 @@ int main(int argc, char *argv[]) {
 
     s_stats.start_time_ms = mg_millis();
     load_stats(&s);  /* lifetime counters survive restarts */
+#ifdef _WIN32
+    harden_ca_key_acl(s.resource_dir);   /* audit D2: key readable by the owner only */
+#endif
     load_hist(&s);   /* chart buckets survive restarts (reboot-proof) */
     sni_cache_load(s.resource_dir);  /* SNI cert cache survives restarts */
     apps_load(s.resource_dir);       /* per-app stats survive restarts */

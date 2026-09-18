@@ -131,6 +131,7 @@ struct snapshot {
     long long tls_handshakes;
     long long sni_certs_issued;
     long long sni_cache_hits;
+    long long total_blocked;
     double block_rate;
     double sni_hit_rate;
     struct histogram hist[HIST_MAX];
@@ -325,6 +326,7 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->tls_handshakes = json_num(buf, "tls_handshakes");
     sn->sni_certs_issued = json_num(buf, "sni_certs_issued");
     sn->sni_cache_hits = json_num(buf, "sni_cache_hits");
+    sn->total_blocked = json_num(buf, "total_blocked");
     sn->block_rate = json_double(buf, "block_rate");
     sn->sni_hit_rate = json_double(buf, "sni_hit_rate");
     sn->hist_count = json_hist(buf, "history", sn->hist, HIST_MAX);
@@ -1790,16 +1792,21 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         const struct snapshot *sn = g_sn;
         wchar_t val[64], txt[256];
         long long req = sn && sn->valid ? sn->total_requests : 0;
-        long long blk = 0;
-        if (sn && sn->valid) {
-            for (int i = 0; i < sn->hist_count; i++) blk += sn->hist[i].blocked;
-        }
+        /* Lifetime counter (same window as 请求量): summing the ring history
+           only showed the current session, so the KPI contradicted the request
+           count right next to it. */
+        long long blk = (sn && sn->valid) ? sn->total_blocked : 0;
         fmt_num(val, 64, req);
         draw_kpi(hdc, 210, 24, 120, 72, L"请求量", val, C_BLUE);
         fmt_num(val, 64, blk);
         draw_kpi(hdc, 348, 24, 120, 72, L"拦截量", val, C_RED);
-        long long rate = (sn && sn->valid) ? (long long)(sn->block_rate * 100.0) : 0;
-        swprintf(val, 64, L"%lld%%", rate);
+        /* block_rate is ALREADY a percentage (0-100) in the JSON; the old code
+           multiplied it by 100 again, so a fully blocked device showed
+           "10000%". Clamp it and print one decimal. */
+        double rate = (sn && sn->valid) ? sn->block_rate : 0.0;
+        if (rate < 0.0) rate = 0.0;
+        if (rate > 100.0) rate = 100.0;
+        swprintf(val, 64, L"%.1f%%", rate);
         draw_kpi(hdc, 486, 24, 120, 72, L"拦截率", val, C_ACCENT);
         fmt_num(val, 64, sn && sn->valid ? sn->total_connections : 0);
         draw_kpi(hdc, 624, 24, 120, 72, L"连接数", val, C_GREEN);

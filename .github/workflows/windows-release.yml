@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.18
+      TAG: win11-webserver-v1.19
     steps:
       - uses: actions/checkout@v6
 
@@ -310,7 +310,7 @@ jobs:
           else
             gh release create "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" \
               --title "ADBlock Web Server - Windows 11 (x64)" \
-              --notes "ADBlock Web Server for Windows 11 (x64) v1.12.0：崩溃取证（crash.log 记录异常码/地址/模块 + webserver.log 末尾 40 行）、仪表盘"导出诊断信息"按钮（生成 diagnose.txt：系统/CPU/内存/句柄/线程/监听表/日志尾部）、5 分钟心跳写入 webserver.log（掉进程后有据可查）。资源占用：缩到托盘后不重绘、统计轮询 2s→10s、回收工作集；数据无变化不刷新界面（空闲 CPU≈0）；"监听状态"卡片实时显示本进程 CPU%/内存/句柄/线程/GDI/服务器线程状态。旧说明： Dashboard: 浅色/深色主题（跟随系统）、圆角卡片、KPI 卡片带阴影与强调色、监听状态卡片（每个端口的绑定结果一目了然）、端口被占用时一键改用 18080/18443 并重启。可靠性：独立回环管理端口（--stats-port，默认 8686）保证统计与控制在主端口被占用时依然可用；每个监听套接字最多重试 3 次并记录到 webserver.log。性能：统计轮询移到工作线程（界面不再卡顿）、证书与根存储查询 30 秒缓存、.dat 落盘节流。开箱即用：双击 start.bat，托盘常驻，开机自启动（--minimized），CA 证书一键信任。" || true
+              --notes "ADBlock Web Server for Windows 11 (x64)：托盘常驻 + 开机自启、CA 一键信任、系统代理式拦截（拦截模式填 127.0.0.1 / 0.0.0.0，可配合 AdGuard）、劫持过滤（全流量 + HTTPS MITM + 类 AdGuard 规则）、应用内自动更新（SHA-256 校验 + API 兜底下载）、统计与诊断导出。统计口径修正：管理流量不再计入连接/请求，拦截率与拦截量一致。" || true
           fi
         env:
           GH_TOKEN: ${{ github.token }}

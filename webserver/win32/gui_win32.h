@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 /* Version marker - shown in the window title and the console startup log. */
-#define ADBLOCK_APP_VERSION "1.18"
+#define ADBLOCK_APP_VERSION "1.19"
 
 struct adblock_gui_args {
     const char *resource_dir;   /* folder holding localhost-2410.crt/.key */
