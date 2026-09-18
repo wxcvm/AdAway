@@ -134,8 +134,11 @@ done:
     return body;
 }
 
-/* Download a (redirecting) release asset to a local file. */
-static int http_download_to_file(const wchar_t *url, const wchar_t *file) {
+/* Download a (redirecting) release asset to a local file. "extra_headers" is
+   optional (e.g. "Accept: application/octet-stream\r\n" for the API endpoint,
+   which answers in networks where github.com's download host does not). */
+static int http_download_to_file(const wchar_t *url, const wchar_t *file,
+                                 const wchar_t *extra_headers) {
     wchar_t host[256] = L"", path[1024] = L"";
     const wchar_t *p = wcsstr(url, L"://");
     p = p ? p + 3 : url;
@@ -162,7 +165,9 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file) {
     FILE *out = NULL;
     if (request) {
         WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
-        if (WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+        if (WinHttpSendRequest(request,
+                               extra_headers ? extra_headers : WINHTTP_NO_ADDITIONAL_HEADERS,
+                               extra_headers ? (DWORD) -1L : 0,
                                WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
             WinHttpReceiveResponse(request, NULL)) {
             DWORD status = 0, slen = sizeof(status);
@@ -205,9 +210,22 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file) {
     return ok;
 }
 
+/* Decimal id after ".../releases/assets/" (the /releases/assets/<id> endpoint). */
+static void asset_id_from(const char *marker, char *out, size_t cap) {
+    size_t k = 0;
+    if (!out || cap == 0) return;
+    out[0] = 0;
+    while (marker && marker[k] >= '0' && marker[k] <= '9' && k + 1 < cap) {
+        out[k] = marker[k];
+        k++;
+    }
+    out[k] = 0;
+}
+
 /* Newest release shipping a zip, when it is newer than this build. */
 static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out, size_t url_cap,
-                              char *digest_out, size_t digest_cap) {
+                              char *digest_out, size_t digest_cap,
+                              wchar_t *api_url_out, size_t api_url_cap) {
     size_t len = 0;
     char *json = http_get(UPDATE_API_HOST, UPDATE_API_PATH, &len);
     if (!json) return 0;
@@ -219,36 +237,58 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
         if (json_string(json, "\"tag_name\"", p, tag, sizeof(tag))) {
             /* Walk every asset of this release: the Inno Setup installer is
                preferred, the portable zip is the fallback. */
+            /*
+             * Walk the assets of THIS release. An asset object starts at its
+             * "url": ".../releases/assets/<id>" and the API puts the download URL
+             * LAST inside that object (name, ..., digest, ..., 
+             * browser_download_url). The old code searched for "digest" AFTER
+             * the download URL, so it always picked up the digest of the NEXT
+             * asset: the downloaded installer then failed the SHA-256 check and
+             * the dashboard reported "network is fine but it will not update".
+             * name + digest + url are now read from the same asset object.
+             */
             char candidate[1024] = "", fallback[1024] = "";
-            const char *q = p;
-            while ((q = strstr(q, "\"browser_download_url\"")) != NULL &&
-                   (next == NULL || q < next)) {
-                char one[1024] = "";
-                if (json_string(json, "\"browser_download_url\"", q, one, sizeof(one))) {
-                    size_t l = strlen(one);
-                    if (l > 4 && _stricmp(one + l - 4, ".exe") == 0 && candidate[0] == 0)
-                        snprintf(candidate, sizeof(candidate), "%s", one);
-                    else if (l > 4 && _stricmp(one + l - 4, ".zip") == 0 && fallback[0] == 0)
-                        snprintf(fallback, sizeof(fallback), "%s", one);
+            char candidate_digest[128] = "", fallback_digest[128] = "";
+            char candidate_id[32] = "", fallback_id[32] = "";
+            const char *chunk = p;
+            for (;;) {
+                const char *a = strstr(chunk, "releases/assets/");
+                if (a == NULL || (next != NULL && a >= next)) break;
+                const char *b = strstr(a + 16, "releases/assets/");
+                if (b == NULL || (next != NULL && b > next)) b = next ? next : (a + strlen(a));
+                size_t span = (size_t) (b - a);
+                char region[8192];
+                if (span >= sizeof(region)) span = sizeof(region) - 1;
+                memcpy(region, a, span);
+                region[span] = 0;
+                char one[1024] = "", dig[128] = "";
+                json_string(region, "\"browser_download_url\"", region, one, sizeof(one));
+                json_string(region, "\"digest\"", region, dig, sizeof(dig));
+                size_t l = strlen(one);
+                int is_exe = l > 4 && _stricmp(one + l - 4, ".exe") == 0;
+                int is_zip = l > 4 && _stricmp(one + l - 4, ".zip") == 0;
+                if (is_exe && candidate[0] == 0) {
+                    snprintf(candidate, sizeof(candidate), "%s", one);
+                    snprintf(candidate_digest, sizeof(candidate_digest), "%s", dig);
+                    asset_id_from(a + 16, candidate_id, sizeof(candidate_id));
+                } else if (is_zip && fallback[0] == 0) {
+                    snprintf(fallback, sizeof(fallback), "%s", one);
+                    snprintf(fallback_digest, sizeof(fallback_digest), "%s", dig);
+                    asset_id_from(a + 16, fallback_id, sizeof(fallback_id));
                 }
-                q++;
+                chunk = a + 16;
             }
             snprintf(url, sizeof(url), "%s", candidate[0] ? candidate : fallback);
             if (digest_out && digest_cap) {
-                digest_out[0] = 0;
-                if (url[0]) {
-                    /* Bind the digest to the asset actually chosen: taking
-                       the first "digest" of the release broke the updater as
-                       soon as the asset order changed (audit B-1). */
-                    const char *uq = strstr(p, url);
-                    const char *dq = uq ? strstr(uq, "\"digest\"") : NULL;
-                    const char *nq = uq ? strstr(uq + 1, "\"browser_download_url\"") : NULL;
-                    if (dq && (nq == NULL || dq < nq)) {
-                        char hex[128] = "";
-                        if (json_string(json, "\"digest\"", dq, hex, sizeof(hex)))
-                            snprintf(digest_out, digest_cap, "%s", hex);
-                    }
-                }
+                snprintf(digest_out, digest_cap, "%s",
+                         candidate[0] ? candidate_digest : fallback_digest);
+            }
+            if (api_url_out && api_url_cap) {
+                const char *id = candidate[0] ? candidate_id : fallback_id;
+                api_url_out[0] = 0;
+                if (id[0])
+                    snprintf(api_url_out, api_url_cap,
+                             "https://api.github.com/repos/wxcvm/AdAway/releases/assets/%s", id);
             }
             if (url[0]) {
                 const char *v = strrchr(tag, 'v');
@@ -280,14 +320,15 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
 
 static DWORD WINAPI check_thread(LPVOID param) {
     HWND hwnd = (HWND) param;
-    wchar_t tag[128] = L"", url[1024] = L"";
+    wchar_t tag[128] = L"", url[1024] = L"", api_url[1024] = L"";
     char digest[128] = "";
     struct update_info *info = NULL;
-    if (find_latest_update(tag, 128, url, 1024, digest, sizeof(digest))) {
+    if (find_latest_update(tag, 128, url, 1024, digest, sizeof(digest), api_url, 1024)) {
         info = (struct update_info *) calloc(1, sizeof(*info));
         if (info) {
             wcsncpy(info->tag, tag, 127);
             wcsncpy(info->url, url, 1023);
+            wcsncpy(info->api_url, api_url, 1023);
             utf8_to_wide(digest, info->sha256, 128);
         }
     }
@@ -540,9 +581,15 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     swprintf(list, MAX_PATH, L"%sadblock-update-%lu-%lu.list", temp, (unsigned long) pid, (unsigned long) stamp);
     swprintf(bat, MAX_PATH, L"%sadblock-update-%lu-%lu.bat", temp, (unsigned long) pid, (unsigned long) stamp);
 
-    if (!http_download_to_file(info->url, zip)) {
-        /* github.com 的下载服务器（*.githubusercontent.com）在部分网络下不可达，
-           而 API 查询是通的 - 这时给出浏览器下载的兜底。 */
+    /*
+     * First the plain release URL, then the API asset endpoint
+     * (/releases/assets/<id> with Accept: application/octet-stream): the
+     * download host (*.githubusercontent.com) is unreachable on some networks
+     * while api.github.com answers fine.
+     */
+    if (!http_download_to_file(info->url, zip, NULL) &&
+        !(info->api_url[0] &&
+          http_download_to_file(info->api_url, zip, L"Accept: application/octet-stream\r\n"))) {
         if (MessageBoxW(NULL,
                         L"下载更新失败：无法访问 GitHub 的下载服务器（常见于网络受限）。\n\n"
                         L"是否用浏览器打开下载页，手动下载安装？",

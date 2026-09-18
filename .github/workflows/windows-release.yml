@@ -287,7 +287,7 @@ jobs:
       - name: Create GitHub Release (draft)
         shell: bash
         run: |
-          TAG="win11-webserver-v1.17"
+          TAG="win11-webserver-v1.18"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
             echo "uploaded to existing release"
@@ -312,7 +312,7 @@ jobs:
             echo "DOH_ECH_TOKEN is not configured - skipping public feed publish."
             exit 0
           fi
-          TAG="win11-webserver-v1.17"
+          TAG="win11-webserver-v1.18"
           ZIP=$(find . -name 'adblock-webserver-win64.zip' | head -1)
           if [ -z "$ZIP" ]; then echo "no zip found"; exit 0; fi
           export GH_TOKEN="$FEED_TOKEN"

@@ -1115,6 +1115,10 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
    occupy bytes 0-8; uid at offset 9, see MG_DATA_SIZE=32). */
 #define UID_OFFSET (sizeof(uint64_t) + 1)
 #define REC_OFFSET (UID_OFFSET + sizeof(uid_t))
+/* Set once this connection has carried a real (non-management) request; the
+   connection counters are fed from there, so the app's/dashboard's 1 Hz
+   /internal-stats polls are not counted as user traffic. */
+#define CONN_REQ_OFFSET (REC_OFFSET + 1)
 static void conn_store_uid(struct mg_connection *c, uid_t uid) {
     memcpy(c->data + UID_OFFSET, &uid, sizeof(uid));
 }
@@ -2973,8 +2977,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                     cur + 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
                 break;
         }
-        s_stats.total_connections++;
-        hist_add(HIST_CONN);
+        /* Connections are counted when the first REAL request arrives (see the
+           accounting block in fn()): the app and the dashboard poll
+           /internal-stats once a second, and counting those accept()s made the
+           connection totals and the hourly chart look like permanent traffic. */
         uint64_t t = mg_millis();
         memcpy(c->data, &t, sizeof(t));
         c->data[sizeof(t)] = 1;
@@ -3241,6 +3247,25 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         }
         chk_uid = eff;
     }
+
+    /*
+     * REQUEST / CONNECTION ACCOUNTING - exactly once per real request, and only
+     * for real traffic. The app and the dashboard poll /internal-stats (plus
+     * /internal-test and /control) once a second; counting that as user traffic
+     * made 请求量 and 连接数 grow on a completely idle device.
+     */
+    bool internal_path = mg_match(hm->uri, mg_str("/internal-*"), NULL) ||
+                         mg_match(hm->uri, mg_str("/control"), NULL);
+    if (!internal_path) {
+        if (c->data[CONN_REQ_OFFSET] == 0) {
+            c->data[CONN_REQ_OFFSET] = 1;
+            s_stats.total_connections++;
+            hist_add(HIST_CONN);
+        }
+        s_stats.total_requests++;
+        hist_add(HIST_REQ);
+    }
+
     /*
      * TRANSPARENT FILTERING PROXY (hijack mode, --proxy-filter):
      * the app redirects the whole TCP 80/443 traffic here, so a request for
@@ -3271,12 +3296,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                 /* Allowlisted apps need no uid lookup here: their traffic is
                    proxied like every other non-blocked host. */
                 if (!block_set_contains(phost, strlen(phost))) {
-                    /* Proxied requests ARE real traffic: this branch returns
-                       before the generic counter below, so count them here -
-                       otherwise 请求量 only counted blocked requests and the
-                       block rate looked like ~100%. */
-                    s_stats.total_requests++;
-                    hist_add(HIST_REQ);
+                    /* Already counted above: proxied requests are real traffic,
+                       and counting them here too double-counted every request
+                       whose proxy_start() failed. */
                     /* A pipelined request on a connection that is already
                        proxying is dropped (the first reply is still
                        streaming back to the client). */
@@ -3293,18 +3315,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
-    /*
-     * The dashboard / the Android app poll /internal-stats (and the extra
-     * /internal-test probe) once a second; counting our own management traffic
-     * made "请求量" grow by 1 every second with no real traffic at all. Only
-     * actual web traffic is counted now.
-     */
-    bool internal_path = mg_match(hm->uri, mg_str("/internal-*"), NULL) ||
-                         mg_match(hm->uri, mg_str("/control"), NULL);
-    if (!internal_path) {
-        s_stats.total_requests++;
-        hist_add(HIST_REQ);
-    }
+    /* (Request and connection counters are maintained further up, before the
+       proxy branch, so every real request is counted exactly once.) */
 
     /* Check if this is a known portal host (user clicked "Sign in to network").
        If so, allow the request through so the portal page loads properly
@@ -3335,7 +3347,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         }
     }
 
-    struct appstat *ra = app_find_or_add(req_uid);
+    /* Management traffic is not user traffic: attributing the app's own
+       /internal-stats polls to its uid made the app itself show up as the
+       busiest entry in the per-app statistics. */
+    struct appstat *ra = internal_path ? NULL : app_find_or_add(req_uid);
     if (ra) {
         if (!c->data[REC_OFFSET]) {
             ra->connections++;

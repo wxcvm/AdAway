@@ -11,6 +11,7 @@
 struct update_info {
     wchar_t tag[128];
     wchar_t url[1024];
+    wchar_t api_url[1024]; /* /releases/assets/<id> fallback download URL */
     wchar_t sha256[128];   /* "sha256:<hex>" published by the API, may be empty */
 };
 
