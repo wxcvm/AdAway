@@ -240,7 +240,7 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
             /*
              * Walk the assets of THIS release. An asset object starts at its
              * "url": ".../releases/assets/<id>" and the API puts the download URL
-             * LAST inside that object (name, ..., digest, ..., 
+             * LAST inside that object (name, ..., digest, ... and
              * browser_download_url). The old code searched for "digest" AFTER
              * the download URL, so it always picked up the digest of the NEXT
              * asset: the downloaded installer then failed the SHA-256 check and
@@ -286,9 +286,12 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
             if (api_url_out && api_url_cap) {
                 const char *id = candidate[0] ? candidate_id : fallback_id;
                 api_url_out[0] = 0;
-                if (id[0])
-                    snprintf(api_url_out, api_url_cap,
+                if (id[0]) {
+                    char api_narrow[512];
+                    snprintf(api_narrow, sizeof(api_narrow),
                              "https://api.github.com/repos/wxcvm/AdAway/releases/assets/%s", id);
+                    utf8_to_wide(api_narrow, api_url_out, api_url_cap);
+                }
             }
             if (url[0]) {
                 const char *v = strrchr(tag, 'v');
