@@ -1536,8 +1536,9 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
             }
             /* Cert is near/at expiry: fall through and re-issue below.
                The stale entry stays until evicted by the insert (if
-               that slot happens to be this one) — a later hit will
-               simply find it expired again and re-issue. */
+               that slot happens to be this one) - a later hit would simply
+               find it expired again (audit D3: it is now replaced in place). */
+            expired_slot = i;
             break;
         }
     }
@@ -1564,7 +1565,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
         bytes would leave the buffer unterminated, causing strcmp() above to
         read past the array boundary on subsequent lookups. */
     s_sni_cache[pos].ctx = ctx;
-    s_sni_pos++;
+    if (expired_slot < 0) s_sni_pos++;   /* an in-place refresh uses no new slot */
     s_sni_misses++;
     s_stats.sni_certs_issued++;
     hist_add(HIST_CERT);
@@ -2067,6 +2068,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"sni_cache_hits\":%llu,"
         "\"sni_hit_rate\":%.1f,"
         "\"block_rate\":%.1f,"
+        "\"total_blocked\":%llu,"
         "\"daily_peak\":%llu,"
         "\"blocked_images\":%llu,"
         "\"blocked_scripts\":%llu,"
@@ -2097,6 +2099,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         (unsigned long long)hits,
         hit_rate,
         block_rate,
+        (unsigned long long)blk,
         (unsigned long long)daily_peak,
         (unsigned long long)s_stats.blocked_images,
         (unsigned long long)s_stats.blocked_scripts,
