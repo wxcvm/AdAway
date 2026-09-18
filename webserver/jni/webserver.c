@@ -220,7 +220,9 @@ static void harden_ca_key_acl(const char *resource_dir) {
     si.cb = sizeof(si);
     memset(&pi, 0, sizeof(pi));
     if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
-        LOG_WARN("CA key ACL: could not run icacls");
+        /* log_file_line() is declared above this point; the LOG_* macros are
+           not (they live further down), which is why this uses it directly. */
+        log_file_line("WARN", "CA key ACL: could not run icacls");
         return;
     }
     WaitForSingleObject(pi.hProcess, 10000);
@@ -228,8 +230,8 @@ static void harden_ca_key_acl(const char *resource_dir) {
     GetExitCodeProcess(pi.hProcess, &rc);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    if (rc == 0) LOG_INFO("CA key ACL hardened (%s)", path);
-    else LOG_WARN("CA key ACL: icacls rc=%lu (key keeps the inherited ACL)", (unsigned long) rc);
+    if (rc == 0) log_file_line("INFO", "CA key ACL hardened (%s)", path);
+    else log_file_line("WARN", "CA key ACL: icacls rc=%lu (key keeps the inherited ACL)", (unsigned long) rc);
 }
 
 /* ── crash forensics ────────────────────────────────────────────────
