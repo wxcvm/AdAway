@@ -431,6 +431,48 @@ static int file_is_zip(const wchar_t *path) {
     return got == 4 && magic[0] == 'P' && magic[1] == 'K';
 }
 
+/* ── archive validation (audit A4) ─────────────────────────────────
+ * An update archive is untrusted data: before extracting anything, every
+ * entry name is checked so that no member can escape the staging directory
+ * (absolute path, drive letter, UNC path, "..", alternate data stream) and
+ * the number of entries is bounded. */
+#define TAR_ENTRY_LIMIT 4000
+
+static int tar_entry_is_safe(const char *line) {
+    const char *p = line;
+    if (!*p) return 1;                                  /* blank line */
+    if (*p == '/' || *p == '\\') return 0;               /* absolute path */
+    if (p[0] == '.' && p[1] == '.') return 0;            /* leading ".." */
+    while (*p) {
+        if (*p == ':') return 0;                        /* C: or file:stream */
+        if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\\')) return 0;
+        if (p[0] == '\\' && p[1] == '\\') return 0;       /* UNC inside the name */
+        p++;
+    }
+    return 1;
+}
+
+/* 1 = listing is safe, 0 = hostile archive, -1 = could not list at all. */
+static int tar_listing_is_safe(const wchar_t *zip, const wchar_t *listfile) {
+    wchar_t cmd[4096];
+    swprintf(cmd, 4096, L"cmd.exe /c tar.exe -tf \"%s\" > \"%s\"", zip, listfile);
+    if (run_and_wait(cmd) != 0) return -1;
+    FILE *fp = _wfopen(listfile, L"rb");
+    if (!fp) return -1;
+    static char line[8192];
+    int count = 0, ok = 1;
+    while (fgets(line, (int) sizeof(line), fp)) {
+        size_t n = strlen(line);
+        int complete = n > 0 && line[n - 1] == '\n';
+        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = 0;
+        if (n == (size_t) sizeof(line) - 1 && !complete) { ok = 0; break; }  /* absurdly long name */
+        if (line[0] == 0) continue;
+        if (++count > TAR_ENTRY_LIMIT || !tar_entry_is_safe(line)) { ok = 0; break; }
+    }
+    fclose(fp);
+    return ok && count > 0 ? 1 : 0;
+}
+
 /* Does this directory contain webserver.exe? */
 static int dir_has_exe(const wchar_t *dir) {
     wchar_t probe[MAX_PATH];
@@ -469,9 +511,10 @@ static int find_extracted_dir(const wchar_t *root, wchar_t *out, size_t cap) {
 
 static DWORD WINAPI apply_thread(LPVOID param) {
     struct update_info *info = (struct update_info *) param;
-    wchar_t temp[MAX_PATH], zip[MAX_PATH], dir[MAX_PATH], src[MAX_PATH];
+    wchar_t temp[MAX_PATH], zip[MAX_PATH], list[MAX_PATH], dir[MAX_PATH], src[MAX_PATH];
     wchar_t appdir[MAX_PATH], exe[MAX_PATH], cmd[4096], script[8192], bat[MAX_PATH];
     DWORD pid = GetCurrentProcessId();
+    DWORD stamp = GetTickCount();
 
     GetTempPathW(MAX_PATH, temp);
     /*
@@ -488,10 +531,14 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         /* Unpredictable name: a fixed %TEMP% target could be pre-created by
            another process of the same user (audit P0-1). */
         swprintf(zip, MAX_PATH, L"%sadblock-update-%lu-%lu%s", temp,
-                 (unsigned long) GetCurrentProcessId(), (unsigned long) GetTickCount(), ext);
+                 (unsigned long) pid, (unsigned long) stamp, ext);
     }
-    swprintf(dir, MAX_PATH, L"%sadblock-update", temp);
-    swprintf(bat, MAX_PATH, L"%sadblock-update.bat", temp);
+    /* Unique staging paths as well (audit A6). A fixed "%TEMP%\adblock-update"
+       could be pre-created by another process, and it was never removed: the
+       batch script now deletes it after the file copy. */
+    swprintf(dir, MAX_PATH, L"%sadblock-update-%lu-%lu", temp, (unsigned long) pid, (unsigned long) stamp);
+    swprintf(list, MAX_PATH, L"%sadblock-update-%lu-%lu.list", temp, (unsigned long) pid, (unsigned long) stamp);
+    swprintf(bat, MAX_PATH, L"%sadblock-update-%lu-%lu.bat", temp, (unsigned long) pid, (unsigned long) stamp);
 
     if (!http_download_to_file(info->url, zip)) {
         /* github.com 的下载服务器（*.githubusercontent.com）在部分网络下不可达，
@@ -503,6 +550,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
             ShellExecuteW(NULL, L"open", L"https://github.com/wxcvm/AdAway/releases",
                           NULL, NULL, SW_SHOWNORMAL);
         }
+        DeleteFileW(zip);          /* no half-downloaded package in %TEMP% */
         free(info);
         return 0;
     }
@@ -540,13 +588,10 @@ static DWORD WINAPI apply_thread(LPVOID param) {
      * the shortcuts and restarts the server - no batch script needed.
      */
     if (file_is_exe(zip)) {
-        wchar_t run[2048];
-        swprintf(run, 2048, L"\"%s\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART", zip);
         wchar_t params[256];
         swprintf(params, 256, L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PID=%lu",
-                 (unsigned long) GetCurrentProcessId());
+                 (unsigned long) pid);
         ShellExecuteW(NULL, L"open", zip, params, NULL, SW_SHOWNORMAL);
-        (void) run;
         free(info);
         if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_APP_EXIT, 0, 0);   /* WM_CLOSE only hides the window: a helper batch waiting for the PID would wait forever */
         return 0;
@@ -558,20 +603,38 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         free(info);
         return 0;
     }
+    /* Audit A4: validate the archive listing before extracting a single byte. */
+    int listing = tar_listing_is_safe(zip, list);
+    DeleteFileW(list);
+    if (listing < 0) {
+        MessageBoxW(NULL, L"无法校验更新包内容（本机缺少 tar.exe，需要 Windows 10 1803 或更高版本）。\n\n请到 Releases 页面手动下载安装包。",
+                    L"更新", MB_OK | MB_ICONWARNING);
+        free(info);
+        return 0;
+    }
+    if (listing == 0) {
+        DeleteFileW(zip);
+        MessageBoxW(NULL, L"更新包校验失败：压缩包内含越权路径（绝对路径或 ..），已拒绝执行。",
+                    L"更新", MB_OK | MB_ICONERROR);
+        free(info);
+        return 0;
+    }
     swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%s\"", dir);
     run_and_wait(cmd);
     swprintf(cmd, 4096, L"cmd.exe /c mkdir \"%s\"", dir);
     run_and_wait(cmd);
     swprintf(cmd, 4096, L"tar.exe -xf \"%s\" -C \"%s\"", zip, dir);
     int rc = run_and_wait(cmd);
-    if (rc != 0 && !find_extracted_dir(dir, src, MAX_PATH)) {
-        MessageBoxW(NULL, L"解压更新包失败，请手动下载 zip 覆盖安装。", L"更新", MB_OK | MB_ICONWARNING);
+    DeleteFileW(zip);              /* the batch script only needs the extracted tree */
+    if (rc != 0 || !find_extracted_dir(dir, src, MAX_PATH)) {
+        /* The archive must really contain the server: the old fallback copied
+           whatever was there and closed the app without installing anything. */
+        swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%s\"", dir);
+        run_and_wait(cmd);
+        MessageBoxW(NULL, L"解压更新包失败或包内缺少 webserver.exe，未做任何改动。\n\n请手动下载 zip 覆盖安装。",
+                    L"更新", MB_OK | MB_ICONWARNING);
         free(info);
         return 0;
-    }
-    if (!find_extracted_dir(dir, src, MAX_PATH)) {
-        wcsncpy(src, dir, MAX_PATH - 1);
-        src[MAX_PATH - 1] = 0;
     }
     GetModuleFileNameW(NULL, exe, MAX_PATH);
     wcsncpy(appdir, exe, MAX_PATH - 1);
@@ -590,9 +653,10 @@ static DWORD WINAPI apply_thread(LPVOID param) {
              L"  goto waitloop\r\n"
              L")\r\n"
              L"xcopy /E /I /Y \"%s\\*\" \"%s\\\" >nul\r\n"
+             L"rmdir /S /Q \"%s\" >nul 2>&1\r\n"
              L"start \"\" \"%s\\webserver.exe\" --minimized\r\n"
              L"del \"%%~f0\"\r\n",
-             (unsigned long) pid, src, appdir, appdir);
+             (unsigned long) pid, src, appdir, dir, appdir);
     if (!write_ansi_file(bat, script)) {
         free(info);
         return 0;
@@ -609,6 +673,11 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     if (CreateProcessW(NULL, mutable_cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
+    } else {
+        DeleteFileW(bat);
+        MessageBoxW(NULL, L"无法启动更新脚本，未做任何改动。", L"更新", MB_OK | MB_ICONERROR);
+        free(info);
+        return 0;
     }
     free(info);
     if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_APP_EXIT, 0, 0);   /* WM_CLOSE only hides the window: a helper batch waiting for the PID would wait forever */
