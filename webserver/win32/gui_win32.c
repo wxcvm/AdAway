@@ -1319,6 +1319,9 @@ static void draw_sidebar(HDC hdc) {
 /* ── system tray icon ──────────────────────────────────────────── */
 #define WM_APP_TRAY (WM_USER + 1)
 #define WM_APP_EXIT (WM_USER + 2)
+/* Broadcast sent by a duplicate instance so the running one surfaces its
+   dashboard instead of the user seeing two server processes. */
+static UINT g_show_dashboard_msg;
 
 static NOTIFYICONDATAW g_nid;
 static bool g_tray_initialized = false;
@@ -1453,6 +1456,15 @@ static void policy_apply(HWND hwnd) {
 static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (g_taskbar_created != 0 && msg == g_taskbar_created) {
         tray_add(hwnd);
+        return 0;
+    }
+    if (g_show_dashboard_msg == 0) {
+        g_show_dashboard_msg = RegisterWindowMessageW(L"ADBlockShowDashboard");
+    }
+    if (g_show_dashboard_msg != 0 && msg == g_show_dashboard_msg) {
+        ShowWindow(hwnd, SW_SHOW);
+        ShowWindow(hwnd, SW_RESTORE);
+        SetForegroundWindow(hwnd);
         return 0;
     }
     switch (msg) {

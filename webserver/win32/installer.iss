@@ -47,10 +47,17 @@ Source: "dist\resources\*"; DestDir: "{app}\resources"; Excludes: "localhost-241
 Name: "{group}\ADBlock 仪表盘"; Filename: "{app}\webserver.exe"
 Name: "{group}\卸载 ADBlock"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\ADBlock"; Filename: "{app}\webserver.exe"; Tasks: desktopicon
-Name: "{userstartup}\ADBlock"; Filename: "{app}\webserver.exe"; Parameters: "--minimized"; Tasks: autostart
+
 
 [Run]
+; Register autostart through the application's own HKCU Run key. A Startup
+; folder shortcut (as before) plus that Run key meant TWO autostart entries and
+; therefore two server processes after logon.
+Filename: "{app}\webserver.exe"; Parameters: "--install-autostart"; Tasks: autostart; Flags: runhidden skipifsilent
 Filename: "{app}\webserver.exe"; Description: "立即启动 ADBlock"; Flags: nowait skipifsilent
+
+[UninstallRun]
+Filename: "{app}\webserver.exe"; Parameters: "--uninstall-autostart"; Flags: runhidden skipifdoesntexist
 
 [Code]
 function InitializeSetup(): Boolean;

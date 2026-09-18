@@ -3724,6 +3724,22 @@ int main(int argc, char *argv[]) {
        different class of bug than anything inside main()'s own logic. */
     LOG_INFO("main() entered, argc=%d", argc);
 
+#ifdef _WIN32
+    /*
+     * Single instance. Autostart (HKCU Run) plus a manual start - or a previous
+     * instance that has not exited yet - used to leave two identical
+     * webserver.exe processes fighting for the same ports. The duplicate asks
+     * the running instance to show its dashboard and exits immediately.
+     */
+    HANDLE single = CreateMutexW(NULL, FALSE, L"Local\\ADBlockWebServer_Singleton");
+    if (single != NULL && GetLastError() == ERROR_ALREADY_EXISTS) {
+        UINT show = RegisterWindowMessageW(L"ADBlockShowDashboard");
+        if (show != 0) PostMessageW(HWND_BROADCAST, show, 0, 0);
+        LOG_INFO("ADBlock: another instance is already running - exiting.");
+        CloseHandle(single);
+        return 0;
+    }
+#endif
     struct settings s = parse_cli_parameters(argc, argv);
     if (!s.init) {
         LOG_FATAL("Bad parameters.");
