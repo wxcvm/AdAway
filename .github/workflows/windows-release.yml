@@ -17,6 +17,11 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # Single source of truth for the release tag: the installer attach step
+      # used to hardcode the tag, so every version bump uploaded the new
+      # installer onto the PREVIOUS release and the new one shipped zip-only.
+      TAG: win11-webserver-v1.18
     steps:
       - uses: actions/checkout@v6
 
@@ -30,6 +35,17 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-pkg-config
+
+      - name: Assert version consistency (header / installer / TAG)
+        shell: bash
+        run: |
+          HDR_VER=$(sed -n 's/.*#define ADBLOCK_APP_VERSION "\([^"]*\)".*/\1/p' webserver/win32/gui_win32.h | head -1)
+          ISS_VER=$(sed -n 's/^AppVersion=\(.*\)$/\1/p' webserver/win32/installer.iss | head -1)
+          TAG_VER="${TAG#win11-webserver-v}"
+          echo "gui_win32.h=$HDR_VER installer.iss=$ISS_VER TAG=$TAG"
+          if [ -z "$HDR_VER" ] || [ "$HDR_VER" != "$ISS_VER" ] || [ "$HDR_VER" != "$TAG_VER" ]; then
+            echo "::error::version mismatch (header=$HDR_VER installer=$ISS_VER tag=$TAG_VER)"; exit 1
+          fi
 
       - name: Prepare resources (convert block placeholder images to webp)
         shell: bash
@@ -287,7 +303,7 @@ jobs:
       - name: Create GitHub Release (draft)
         shell: bash
         run: |
-          TAG="win11-webserver-v1.18"
+          : "${TAG:?TAG env var missing}"
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" --clobber || true
             echo "uploaded to existing release"
@@ -312,7 +328,7 @@ jobs:
             echo "DOH_ECH_TOKEN is not configured - skipping public feed publish."
             exit 0
           fi
-          TAG="win11-webserver-v1.18"
+          : "${TAG:?TAG env var missing}"
           ZIP=$(find . -name 'adblock-webserver-win64.zip' | head -1)
           if [ -z "$ZIP" ]; then echo "no zip found"; exit 0; fi
           export GH_TOKEN="$FEED_TOKEN"
@@ -338,4 +354,6 @@ jobs:
         run: |
           $exe = "webserver/win32/dist-installer/adblock-webserver-setup.exe"
           if (-not (Test-Path $exe)) { Write-Host "installer not built - skipped"; exit 0 }
-          gh release upload "win11-webserver-v1.17" $exe --repo "${{ github.repository }}" --clobber
+          if (-not $env:TAG) { Write-Error "TAG env var missing"; exit 1 }
+          gh release upload "$env:TAG" $exe --repo "${{ github.repository }}" --clobber
+          Write-Host "attached $exe to $env:TAG"
