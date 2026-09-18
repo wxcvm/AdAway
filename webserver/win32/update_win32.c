@@ -653,10 +653,17 @@ static DWORD WINAPI apply_thread(LPVOID param) {
              L"  goto waitloop\r\n"
              L")\r\n"
              L"xcopy /E /I /Y \"%s\\*\" \"%s\\\" >nul\r\n"
+             L"if errorlevel 1 goto :failed\r\n"
              L"rmdir /S /Q \"%s\" >nul 2>&1\r\n"
              L"start \"\" \"%s\\webserver.exe\" --minimized\r\n"
-             L"del \"%%~f0\"\r\n",
-             (unsigned long) pid, src, appdir, dir, appdir);
+             L"del \"%%~f0\" >nul 2>&1\r\n"
+             L":failed\r\n"
+             L"rem xcopy failed (locked file or no permission): restart the old build\r\n"
+             L"rem instead of leaving a half-updated installation behind.\r\n"
+             L"rmdir /S /Q \"%s\" >nul 2>&1\r\n"
+             L"start \"\" \"%s\\webserver.exe\" --minimized\r\n"
+             L"del \"%%~f0\" >nul 2>&1\r\n",
+             (unsigned long) pid, src, appdir, dir, appdir, dir, appdir);
     if (!write_ansi_file(bat, script)) {
         free(info);
         return 0;
