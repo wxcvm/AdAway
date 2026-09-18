@@ -1523,6 +1523,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
      */
 
     /* Fast path: cache lookup under lock (also reaps expired retired ctxs) */
+    int expired_slot = -1;
     pthread_mutex_lock(&s_sni_mutex);
     sni_retire_drain(mg_millis());
     for (int i = 0; i < SNI_CACHE_SIZE; i++) {
@@ -1556,7 +1557,12 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
     pthread_mutex_lock(&s_sni_mutex);
     uint64_t evict_ms = mg_millis();
     sni_retire_drain(evict_ms);
-    int pos = s_sni_pos % SNI_CACHE_SIZE;
+    int pos;
+    if (expired_slot >= 0) {
+        pos = expired_slot;          /* refresh the expired entry in place (D3) */
+    } else {
+        pos = (int) (s_sni_pos % SNI_CACHE_SIZE);
+    }
     if (s_sni_cache[pos].ctx) sni_retire(s_sni_cache[pos].ctx, evict_ms);
     strncpy(s_sni_cache[pos].hostname, host, 255);
     s_sni_cache[pos].issued_at = mg_millis();
