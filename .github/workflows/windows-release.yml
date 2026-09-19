@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.24
+      TAG: win11-webserver-v1.25
     steps:
       - uses: actions/checkout@v6
 
@@ -361,20 +361,62 @@ jobs:
       # The in-app updater reads this fixed-tag manifest instead of the REST API
       # (60 requests/hour per IP) - see UPDATE_MANIFEST_PATH in update_win32.c.
       - name: Publish windows-manifest.json (fixed tag win11-latest)
-        continue-on-error: true
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           EXE=webserver/win32/dist-installer/adblock-webserver-setup.exe
           ZIP="$GITHUB_WORKSPACE/adblock-webserver-win64.zip"
-          if [ ! -f "$EXE" ]; then echo "installer missing - manifest skipped"; exit 0; fi
-          EXE_SHA=$(sha256sum "$EXE" | cut -d' ' -f1)
-          ZIP_SHA=$(sha256sum "$ZIP" | cut -d' ' -f1)
+          # GNU coreutils prefixes the digest line with '\' (and escapes the
+          # name) when the path contains a backslash, which a Windows runner's
+          # $GITHUB_WORKSPACE always does. "cut -f1" kept that marker, so the
+          # published manifest carried "sha256:\<hex>" - not valid JSON (strict
+          # parsers reject the whole file) and not a usable digest either.
+          sha_of() { sha256sum -- "$1" | awk '{print $1}' | tr -d '\\'; }
+          ZIP_SHA=""
+          if [ -f "$ZIP" ]; then ZIP_SHA=$(sha_of "$ZIP"); fi
+          EXE_SHA=""
+          if [ -f "$EXE" ]; then EXE_SHA=$(sha_of "$EXE"); fi
+          if [ -z "$ZIP_SHA" ]; then
+            echo "::error::portable zip missing - refusing to publish a manifest"; exit 1
+          fi
+          # A failed Inno build used to abort this step silently, so the fixed
+          # tag kept advertising the PREVIOUS version and every client reported
+          # "已是最新" while a newer build existed. Publish zip-only instead:
+          # the updater falls back to the portable package.
+          if [ -z "$EXE_SHA" ]; then
+            echo "::warning::installer missing - publishing a zip-only manifest"
+          fi
           VER="${TAG#win11-webserver-v}"
           BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
-          printf '{\n  "tag": "%s",\n  "version": "%s",\n  "exe": "adblock-webserver-setup.exe",\n  "exe_url": "%s/adblock-webserver-setup.exe",\n  "exe_sha256": "sha256:%s",\n  "zip_url": "%s/adblock-webserver-win64.zip",\n  "zip_sha256": "sha256:%s",\n  "published_at": "%s"\n}\n' \
-            "$TAG" "$VER" "$BASE" "$EXE_SHA" "$BASE" "$ZIP_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > windows-manifest.json
+          python3 - "$TAG" "$VER" "$BASE" "$EXE_SHA" "$ZIP_SHA" > windows-manifest.json <<'PYEOF'
+          import datetime, json, sys
+          tag, ver, base, exe_sha, zip_sha = sys.argv[1:6]
+          doc = {
+              "tag": tag,
+              "version": ver,
+              "exe": "adblock-webserver-setup.exe" if exe_sha else "",
+              "exe_url": "%s/adblock-webserver-setup.exe" % base if exe_sha else "",
+              "exe_sha256": "sha256:%s" % exe_sha if exe_sha else "",
+              "zip_url": "%s/adblock-webserver-win64.zip" % base,
+              "zip_sha256": "sha256:%s" % zip_sha,
+              "published_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }
+          json.dump(doc, sys.stdout, indent=2)
+          sys.stdout.write("\n")
+          PYEOF
+          # Parse it with a strict JSON reader before publishing, so a corrupt
+          # manifest fails the run instead of stranding every installed client.
+          python3 - <<'PYEOF'
+          import json
+          doc = json.load(open("windows-manifest.json", encoding="utf-8"))
+          assert doc["zip_sha256"].startswith("sha256:") and len(doc["zip_sha256"]) == 71, doc
+          if doc["exe_sha256"]:
+              assert len(doc["exe_sha256"]) == 71, doc
+          print("manifest verified: version=%s zip=%s exe=%s" % (
+              doc["version"], doc["zip_sha256"][:14], doc["exe_sha256"][:14] or "none"))
+          PYEOF
           cat windows-manifest.json
           gh release view win11-latest --repo "${{ github.repository }}" >/dev/null 2>&1 \
             || gh release create win11-latest --repo "${{ github.repository }}" \

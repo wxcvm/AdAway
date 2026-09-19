@@ -4,8 +4,18 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.11`）。
-  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.25`）；
+  工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
+ 程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
+
+## 应用内更新链路（2026-09-19 起）
+- 检查更新：优先读固定标签 `win11-latest` 上的 `windows-manifest.json`（纯下载链接，不经过 REST API，
+  因此不受 60 次/小时限流）；失败才回退 API，并带本地答案缓存与限流冷却。
+- 装机优先级：清单里有 `exe_url` 时下载 Inno 安装器，缺失时自动回退 `zip_url` 便携包。
+- 静默安装必须自己拉起程序：安装器给更新用的 `/VERYSILENT` 会跳过 `[Run]` 里带 `skipifsilent` 的条目，
+  而 `RestartApplications=no` 也不会替我们重启，所以 `installer.iss` 增加了一条 `Check: WizardSilent` 的启动项。
+- 清单必须能被严格 JSON 解析：CI 用 Python 生成并校验后才上传（历史缺陷：`sha256sum` 对含反斜杠的
+  Windows 路径会在行首加 `\`，`cut -f1` 把这个标记带进了摘要，清单因此不是合法 JSON）。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），

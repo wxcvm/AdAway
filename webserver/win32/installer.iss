@@ -5,7 +5,7 @@
 ; folder as the default) instead of installing side by side.
 AppId={{8F2A61D4-6C0B-4B3E-9E77-ADB10C1A5F27}
 AppName=ADBlock 拦截服务器
-AppVersion=1.24
+AppVersion=1.25
 AppPublisher=wxcvm
 DefaultDirName={autopf}\ADBlock
 DefaultGroupName=ADBlock
@@ -55,6 +55,11 @@ Name: "{autodesktop}\ADBlock"; Filename: "{app}\webserver.exe"; Tasks: desktopic
 ; therefore two server processes after logon.
 Filename: "{app}\webserver.exe"; Parameters: "--install-autostart"; Tasks: autostart; Flags: runhidden skipifsilent
 Filename: "{app}\webserver.exe"; Description: "立即启动 ADBlock"; Flags: nowait skipifsilent
+; The in-app updater installs with /VERYSILENT. Every entry above is skipped in
+; that mode (skipifsilent) and RestartApplications=no keeps Inno from bringing
+; the server back either, so the update killed the running dashboard and left
+; nothing behind - it looked like "更新失败". Start it again for the silent path.
+Filename: "{app}\webserver.exe"; Flags: nowait; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{app}\webserver.exe"; Parameters: "--uninstall-autostart"; Flags: runhidden skipifdoesntexist

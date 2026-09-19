@@ -166,17 +166,29 @@ static int manifest_check(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out, si
     char *json = http_get(UPDATE_MANIFEST_HOST, UPDATE_MANIFEST_PATH, &len, &st);
     if (status) *status = st;
     if (!json) return -1;
-    char tag[128] = "", ver[64] = "", exe_url[1024] = "", sha[128] = "";
+    char tag[128] = "", ver[64] = "";
+    char exe_url[1024] = "", exe_sha[128] = "";
+    char zip_url[1024] = "", zip_sha[128] = "";
     json_string(json, "\"tag\"", json, tag, sizeof(tag));
     json_string(json, "\"version\"", json, ver, sizeof(ver));
     json_string(json, "\"exe_url\"", json, exe_url, sizeof(exe_url));
-    json_string(json, "\"exe_sha256\"", json, sha, sizeof(sha));
+    json_string(json, "\"exe_sha256\"", json, exe_sha, sizeof(exe_sha));
+    json_string(json, "\"zip_url\"", json, zip_url, sizeof(zip_url));
+    json_string(json, "\"zip_sha256\"", json, zip_sha, sizeof(zip_sha));
     free(json);
     if (!ver[0]) return -1;
-    if (version_cmp(ver, ADBLOCK_APP_VERSION) > 0 && exe_url[0]) {
+    /*
+     * Prefer the Inno Setup installer and fall back to the portable zip. A
+     * release whose installer build failed used to publish no usable manifest
+     * at all, and the fixed tag kept advertising the previous version, so every
+     * client answered "already up to date" while a newer build existed.
+     */
+    const char *pick_url = exe_url[0] ? exe_url : zip_url;
+    const char *pick_sha = exe_url[0] ? exe_sha : zip_sha;
+    if (version_cmp(ver, ADBLOCK_APP_VERSION) > 0 && pick_url[0]) {
         utf8_to_wide(tag[0] ? tag : ver, tag_out, tag_cap);
-        utf8_to_wide(exe_url, url_out, url_cap);
-        if (digest_out && digest_cap) snprintf(digest_out, digest_cap, "%s", sha);
+        utf8_to_wide(pick_url, url_out, url_cap);
+        if (digest_out && digest_cap) snprintf(digest_out, digest_cap, "%s", pick_sha);
         return 1;
     }
     return 0;
