@@ -1953,6 +1953,26 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 /* Forward declaration (ws_push_broadcast below calls it). */
 static int build_stats_json(struct settings *s, char *out, size_t out_sz);
 
+/* Copy a CLIENT supplied string (TLS SNI) into a JSON string literal.
+   The SNI is arbitrary bytes chosen by whoever opens the TLS connection, so an
+   unescaped '"' or '\' used to end/escape the value and make the whole
+   /internal-stats document unparsable - one crafted handshake blanked the
+   statistics page in the app and the dashboard. Control characters are illegal
+   inside a JSON string too, hence the same treatment. */
+static void json_safe_copy(char *dst, size_t cap, const char *src) {
+    size_t d = 0;
+    if (!dst || cap == 0) return;
+    if (src) {
+        for (size_t i = 0; src[i] && d + 1 < cap; i++) {
+            unsigned char c = (unsigned char) src[i];
+            if (c == 0x22 || c == 0x5c) dst[d++] = '_';        /* " and \ */
+            else if (c < 0x20 || c == 0x7f) dst[d++] = '?';    /* control chars */
+            else dst[d++] = (char) c;
+        }
+    }
+    dst[d] = 0;
+}
+
 /* WebSocket push subscribers: connections that upgraded to /internal-ws.
    Registered on MG_EV_WS_OPEN, removed on MG_EV_CLOSE; broadcast after
    every counted request so clients get real-time updates. */
@@ -2034,9 +2054,11 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     for (int k = 0; k < total && k < 20 && off < (int)sizeof(tls_json) - 256; k++) {
         struct tls_host_rec *r = &s_recent_tls[(start + k) % RECENT_TLS_MAX];
         if (!r->host[0]) continue;
+        char host_safe[400];
+        json_safe_copy(host_safe, sizeof(host_safe), r->host);
         int n = snprintf(tls_json + off, sizeof(tls_json) - (size_t)off,
             "%s{\"uid\":%d,\"host\":\"%s\"}",
-            off ? "," : "", (int)r->uid, r->host);
+            off ? "," : "", (int)r->uid, host_safe);
         if (n > 0) off += n;
     }
     char hist_json[4096] = "";
