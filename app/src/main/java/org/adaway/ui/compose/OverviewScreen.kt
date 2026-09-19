@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.adaway.R
 import org.adaway.ui.prefs.PrefsActivity
@@ -83,15 +84,20 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var wsEnabled by remember {
-        mutableStateOf(org.adaway.util.WebServerUtils.isWebServerRunning())
-    }
-    // 进程检测可能假阴性：探活成功即视为运行中（后台线程，避免主线程网络）
+    val uiScope = androidx.compose.runtime.rememberCoroutineScope()
+    // 进程检测会执行 root shell（su pgrep / ps / grep），既不能在组合期做，
+    // 也不能在主线程做：旧代码是 remember { isWebServerRunning() }，进页面
+    // 就阻塞主线程，慢机器上还会 ANR。这里只给保守初值，真实状态在 IO 线程解析。
+    var wsEnabled by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        val reachable = withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val running = withContext(Dispatchers.IO) {
+            org.adaway.util.WebServerUtils.isWebServerRunning()
+        }
+        // 进程检测可能假阴性：探活成功即视为运行中（后台线程，避免主线程网络）
+        val reachable = running || withContext(Dispatchers.IO) {
             org.adaway.util.WebServerUtils.isWebServerReachable(context)
         }
-        if (reachable) wsEnabled = true
+        wsEnabled = reachable
     }
     // 证书状态：getWebServerState() 内部含 OkHttp HTTP 探活，
     // 禁止在主线程调用（否则 NetworkOnMainThreadException 崩溃），
@@ -175,7 +181,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
 
             // Web server card
             WebServerCard(
-                running = viewModel.webServerRunning,
+                running = wsEnabled,
                 stats = serverStats,
             )
 
@@ -188,12 +194,21 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 certStateRes = certStateRes,
                 startLog = startLog,
                 onToggle = { enable ->
+                    // 乐观更新：start/stop 之后的进程检测同样要走 root shell，
+                    // 放后台复核，避免点一下卡一下。
+                    wsEnabled = enable
                     if (enable) {
                         org.adaway.util.WebServerUtils.startWebServer(context)
                     } else {
                         org.adaway.util.WebServerUtils.stopWebServer()
                     }
-                    wsEnabled = org.adaway.util.WebServerUtils.isWebServerRunning()
+                    uiScope.launch {
+                        val running = withContext(Dispatchers.IO) {
+                            org.adaway.util.WebServerUtils.isWebServerRunning() ||
+                                org.adaway.util.WebServerUtils.isWebServerReachable(context)
+                        }
+                        wsEnabled = running
+                    }
                 },
                 onTest = {
                     try {

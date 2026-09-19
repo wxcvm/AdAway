@@ -34,7 +34,28 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q ccache
+          # Pin the cache directory (ccache 4.x moved the Linux default to
+          # ~/.cache/ccache) so the cache step below always finds it.
+          echo "CCACHE_DIR=$HOME/.ccache" >> "$GITHUB_ENV"
           echo "NDK_CCACHE=$(which ccache)" >> "$GITHUB_ENV"
+
+      # webserver.c + mongoose + OpenSSL and libpcap/tcpdump are rebuilt by
+      # ndk-build on every run, and nothing cached the compiler output before:
+      # that is the bulk of the ~3.5 min "Run tests & build release" step.
+      # ccache hashes sources and flags itself, so a per-run key with the
+      # newest previous cache as fallback is the right pattern.
+      - name: Restore / save ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      - name: Configure ccache
+        run: |
+          ccache --max-size=1500M
+          ccache --version | head -1
 
       # Run unit tests and build release in a single Gradle invocation so the
       # daemon + dependency resolution + Kotlin compile phases are shared
@@ -42,7 +63,9 @@ jobs:
       # repeated ndk-build of the large webserver.c / mongoose / openssl.
       - name: Compress oversized block images (assets -> webp)
         run: |
-          pip3 install pillow -q --break-system-packages
+          # Only install when Pillow is really missing (saves ~10 s per run).
+          python3 -c "import PIL" 2>/dev/null \
+            || pip3 install pillow -q --break-system-packages
 
           python3 - <<'PYEOF'
 

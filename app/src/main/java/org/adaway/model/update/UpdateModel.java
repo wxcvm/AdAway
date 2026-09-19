@@ -416,15 +416,26 @@ public class UpdateModel {
         if (manifest == null) {
             return -1;
         }
-        // Check previous broadcast receiver
+        // Drop the previous one-shot receiver. It unregisters itself as soon as
+        // its own download finished, so unregistering it again is expected to
+        // fail with IllegalArgumentException.
         if (this.receiver != null) {
-            this.context.unregisterReceiver(this.receiver);
+            try {
+                this.context.unregisterReceiver(this.receiver);
+            } catch (IllegalArgumentException ignored) {
+                // already unregistered by the receiver itself
+            }
+            this.receiver = null;
         }
         // Queue download
         long downloadId = download(manifest);
         // Register new broadcast receiver
         this.receiver = new ApkDownloadReceiver(downloadId);
-        this.context.registerReceiver(this.receiver, new IntentFilter(ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED);
+        // RECEIVER_NOT_EXPORTED: ACTION_DOWNLOAD_COMPLETE is sent by the system
+        // DownloadManager, so no other app needs (or gets) access to this
+        // receiver. EXPORTED also let any app wake the process at will.
+        ContextCompat.registerReceiver(this.context, this.receiver,
+                new IntentFilter(ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_NOT_EXPORTED);
         // Return download identifier
         return downloadId;
     }

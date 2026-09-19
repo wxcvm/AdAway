@@ -11,6 +11,8 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.widget.Toast;
 
 import org.adaway.R;
@@ -45,21 +47,44 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
         //Fetching the download id received with the broadcast
         long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
         //Checking if the received broadcast is for our enqueued download by matching download id
-        if (this.downloadId == id) {
-            DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
-            Uri apkUri = downloadManager.getUriForDownloadedFile(id);
-            if (apkUri == null) {
-                Timber.w("Failed to download id: %s.", id);
-            } else {
-                int problem = verify(context, apkUri);
-                if (problem == 0) {
-                    installApk(context, apkUri);
-                } else {
-                    String reason = context.getString(problem);
-                    Timber.w("Refusing downloaded update: %s.", reason);
-                    Toast.makeText(context, context.getString(R.string.update_verify_failed, reason), Toast.LENGTH_LONG).show();
-                }
-            }
+        if (this.downloadId != id) {
+            return;
+        }
+        // One-shot receiver: unregister before the slow verification below so
+        // the app keeps no registered receiver around (UpdateModel tolerates
+        // the second unregister attempt).
+        try {
+            context.unregisterReceiver(this);
+        } catch (IllegalArgumentException ignored) {
+            // already unregistered
+        }
+        Context appContext = context.getApplicationContext();
+        // onReceive runs on the main thread and has ~10 s before the system
+        // considers the receiver unresponsive. Verifying an update means
+        // copying a multi-megabyte APK through the ContentResolver and parsing
+        // it, so it must not happen here - only the install dialog is posted
+        // back to the main thread.
+        Thread worker = new Thread(() -> verifyAndInstall(appContext, id), "apk-update-verify");
+        worker.start();
+    }
+
+    private void verifyAndInstall(Context context, long id) {
+        DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
+        Uri apkUri = downloadManager.getUriForDownloadedFile(id);
+        if (apkUri == null) {
+            Timber.w("Failed to download id: %s.", id);
+            return;
+        }
+        int problem = verify(context, apkUri);
+        Handler main = new Handler(Looper.getMainLooper());
+        if (problem == 0) {
+            main.post(() -> installApk(context, apkUri));
+        } else {
+            String reason = context.getString(problem);
+            Timber.w("Refusing downloaded update: %s.", reason);
+            main.post(() -> Toast.makeText(context,
+                    context.getString(R.string.update_verify_failed, reason),
+                    Toast.LENGTH_LONG).show());
         }
     }
 

@@ -220,10 +220,6 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** True when the web server executable is running. */
-    val webServerRunning: Boolean
-        get() = org.adaway.util.WebServerUtils.isWebServerRunning()
-
     init {
         refreshServerStats()
         startPolling()
