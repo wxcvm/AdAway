@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.26`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.27`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 

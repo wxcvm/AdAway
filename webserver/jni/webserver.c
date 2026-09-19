@@ -617,6 +617,26 @@ static void qlog_add(uid_t uid, int action, struct mg_http_message *hm) {
 }
 
 /* Newest first, bounded (QLOG_RENDER_MAX entries / QLOG_JSON_MAX bytes). */
+/* Copy a CLIENT supplied string (Host header, TLS SNI) into a JSON string.
+   An unescaped '"' or '\' would end/escape the value and make the entire
+   /internal-stats document unparsable for the dashboard and the Android app;
+   control characters are illegal inside a JSON string as well. Anyone who can
+   reach the listener can put arbitrary bytes into the SNI, so this is not
+   theoretical: one crafted handshake used to blank the statistics page. */
+static void json_safe_copy(char *dst, size_t cap, const char *src) {
+    size_t d = 0;
+    if (!dst || cap == 0) return;
+    if (src) {
+        for (size_t i = 0; src[i] && d + 1 < cap; i++) {
+            unsigned char c = (unsigned char) src[i];
+            if (c == 0x22 || c == 0x5c) dst[d++] = '_';        /* " and \ */
+            else if (c < 0x20 || c == 0x7f) dst[d++] = '?';    /* control chars */
+            else dst[d++] = (char) c;
+        }
+    }
+    dst[d] = 0;
+}
+
 static void qlog_render(char *out, size_t cap) {
     if (!out || cap == 0) return;
     out[0] = 0;
@@ -626,12 +646,7 @@ static void qlog_render(char *out, size_t cap) {
         uint32_t idx = (s_qlog_pos + QLOG_MAX - 1 - k) % QLOG_MAX;
         struct qlog_entry *e = &s_qlog[idx];
         char host[400];
-        size_t h = 0;
-        for (size_t i = 0; e->host[i] && h + 1 < sizeof(host); i++) {
-            char c = e->host[i];
-            host[h++] = (c == 0x22 || c == 0x5c) ? 0x5f : c;
-        }
-        host[h] = 0;
+        json_safe_copy(host, sizeof(host), e->host);
         int n = snprintf(out + off, cap - off,
                          "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"host\":\"%s\"}",
                          off ? "," : "", (unsigned long long) e->ts,
@@ -2481,9 +2496,11 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     for (int k = 0; k < total && k < 20 && off < (int)sizeof(tls_json) - 256; k++) {
         struct tls_host_rec *r = &s_recent_tls[(start + k) % RECENT_TLS_MAX];
         if (!r->host[0]) continue;
+        char host_safe[400];
+        json_safe_copy(host_safe, sizeof(host_safe), r->host);
         int n = snprintf(tls_json + off, sizeof(tls_json) - (size_t)off,
             "%s{\"uid\":%d,\"host\":\"%s\"}",
-            off ? "," : "", (int)r->uid, r->host);
+            off ? "," : "", (int)r->uid, host_safe);
         if (n > 0) off += n;
     }
     char hist_json[4096] = "";
