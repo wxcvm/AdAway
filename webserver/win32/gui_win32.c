@@ -508,6 +508,7 @@ static void *stats_poll_thread(void *arg) {
 }
 
 #define IDC_POL0      1110
+#define IDC_SUBRELOAD 1130
 
 /* Block reply policy toggles: label, block_config.json key, control id. */
 struct policy_item { const wchar_t *label; const char *key; const char *mode_key; int id; };
@@ -620,23 +621,34 @@ static void policy_read(const char *dir, bool *vals) {
         vals[i] = policy_get(dir, g_policy[i].key, true);
 }
 
-static void policy_save(const char *dir, const bool *vals) {
+/* modes[i]: 0 = placeholder reply, 1 = 204 deny, 2 = allow (no blocking).
+   reply_* is kept in sync for compatibility with older servers. */
+static void policy_save_modes(const char *dir, const int *modes) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/block_config.json", dir);
     FILE *f = fopen(path, "w");
     if (!f) return;
     fprintf(f, "{\n");
     for (int i = 0; i < POLICY_COUNT; i++)
-        fprintf(f, "  \"%s\": %s,\n", g_policy[i].key, vals[i] ? "true" : "false");
-    /* The per-type blocking method ("mode_*", 0=占位 1=204 2=放行) is preserved:
-       until the tri-state control lands it is edited in block_config.json and
-       the dashboard must not silently drop it while saving the switches. */
+        fprintf(f, "  \"%s\": %s,\n", g_policy[i].key, modes[i] != 2 ? "true" : "false");
     for (int i = 0; i < POLICY_COUNT; i++)
-        fprintf(f, "  \"%s\": %d%s\n", g_policy[i].mode_key,
-                policy_get_int(dir, g_policy[i].mode_key, vals[i] ? 0 : 1),
+        fprintf(f, "  \"%s\": %d%s\n", g_policy[i].mode_key, modes[i],
                 i + 1 < POLICY_COUNT ? "," : "");
     fprintf(f, "}\n");
     fclose(f);
+}
+
+/* Push the stored modes into the tri-state controls (called whenever the
+   settings page becomes visible, so an external edit is picked up too). */
+static void policy_sync_controls(HWND hwnd) {
+    for (int i = 0; i < POLICY_COUNT; i++) {
+        int m = policy_get_int(g_res, g_policy[i].mode_key,
+                               policy_get(g_res, g_policy[i].key, true) ? 0 : 1);
+        HWND w = GetDlgItem(hwnd, IDC_POL0 + i);
+        if (w)
+            SendMessageW(w, BM_SETCHECK,
+                         m == 2 ? BST_CHECKED : (m == 0 ? BST_INDETERMINATE : BST_UNCHECKED), 0);
+    }
 }
 
 /* POST /control (cmd=reload_config | flush_stats | shutdown) */
@@ -1442,12 +1454,31 @@ static const struct ctl_desc g_clayout[] = {
     { IDM_TEST,       422, 424, 110, 28, L"BUTTON", L"打开测试页", BS_PUSHBUTTON },
     { IDC_FLUSH,      542, 424, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
     { IDC_DIAG,       844, 434, 170, 26, L"BUTTON", L"导出诊断信息", BS_PUSHBUTTON },
+    { IDC_SUBRELOAD,  664, 456, 170, 26, L"BUTTON", L"重新加载订阅", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 426, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
     /* Below the "导出诊断信息" button (which sits at 844,434): the two used to
        overlap in x 844-948 / y 434-452. */
     { IDM_UPDATE,     844, 466, 170, 26, L"BUTTON", L"检查更新", BS_PUSHBUTTON },
 };
 #define CL_MAIN 14
+
+/* The dashboard is painted in a fixed 1000x678 logical canvas (sidebar
+   0..190, content to x=1000, status bar to y=678). Deriving g_scale from the
+   DPI alone left that canvas at design size in the top-left corner of a
+   maximized window; the scale must follow the CLIENT size instead. */
+#define DASH_W 1000.0
+#define DASH_H 678.0
+static void update_layout_scale(HWND hwnd) {
+    RECT rc;
+    if (!hwnd || !GetClientRect(hwnd, &rc)) return;
+    int cw = rc.right - rc.left, ch = rc.bottom - rc.top;
+    if (cw < 200 || ch < 200) return;                 /* minimized / mid-resize */
+    double sx = (double) cw / DASH_W, sy = (double) ch / DASH_H;
+    double s = sx < sy ? sx : sy;
+    if (s < 0.5) s = 0.5;
+    if (s > 3.0) s = 3.0;
+    g_scale = s;
+}
 
 static void layout_controls(HWND hwnd) {
     for (int i = 0; i < CL_MAIN; i++)
@@ -1465,6 +1496,7 @@ static void layout_controls(HWND hwnd) {
 
 static void show_controls(HWND hwnd, int tab) {
     bool show = (tab == 1);
+    if (show) policy_sync_controls(hwnd);
     for (int i = 0; i < CL_MAIN; i++)
         ShowWindow(GetDlgItem(hwnd, g_clayout[i].id), show ? SW_SHOW : SW_HIDE);
     for (int i = 0; i < POLICY_COUNT; i++)
@@ -1472,13 +1504,15 @@ static void show_controls(HWND hwnd, int tab) {
 }
 
 static void policy_apply(HWND hwnd) {
-    bool vals[POLICY_COUNT];
-    for (int i = 0; i < POLICY_COUNT; i++)
-        vals[i] = SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_GETCHECK, 0, 0) == BST_CHECKED;
-    policy_save(g_res, vals);
+    int modes[POLICY_COUNT];
+    for (int i = 0; i < POLICY_COUNT; i++) {
+        LRESULT chk = SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_GETCHECK, 0, 0);
+        modes[i] = (chk == BST_CHECKED) ? 2 : (chk == BST_INDETERMINATE ? 0 : 1);
+    }
+    policy_save_modes(g_res, modes);
     wchar_t st[128];
     control_post(mgmt_port(), "reload_config", st, 128);
-    swprintf(g_status, 4096, L"拦截策略已更新（%ls）", st);
+    swprintf(g_status, 4096, L"拦截方式已更新（未选=204 拒绝 / 半选=占位 / 选中=放行）（%ls）", st);
     InvalidateRect(hwnd, NULL, FALSE);
 }
 
@@ -1545,7 +1579,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             int cx = (i % 2 == 0) ? 210 : 440;
             int cy = 208 + (i / 2) * 28;
             s_ctrls[s_ctrl_count++] = CreateWindowExW(0, L"BUTTON", g_policy[i].label,
-                WS_CHILD | BS_AUTOCHECKBOX, S(cx), S(cy), S(200), S(24), hwnd,
+                /* BS_AUTO3STATE: unchecked = 204 deny, indeterminate =
+                   placeholder reply (default), checked = allow (no blocking) */
+                WS_CHILD | BS_AUTO3STATE, S(cx), S(cy), S(200), S(24), hwnd,
                 (HMENU)(INT_PTR)g_policy[i].id, hinst, NULL);
         }
         g_ctl_font = mfont(13, FW_NORMAL);
@@ -1661,7 +1697,12 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 cert_refresh(true);   /* trust state changed - drop the cache */
                 MessageBoxW(hwnd, msg, L"证书", MB_OK | MB_ICONINFORMATION);
                 InvalidateRect(hwnd, NULL, FALSE);
-            } else if (id == IDM_UPDATE) {
+            } else if (id == IDC_SUBRELOAD) {
+            wchar_t st[128];
+            control_post(mgmt_port(), "reload_subscriptions", st, 128);
+            swprintf(g_status, 4096, L"规则订阅已重新加载（%ls）", st);
+            InvalidateRect(hwnd, NULL, FALSE);
+        } else if (id == IDM_UPDATE) {
                 swprintf(g_status, 4096, L"正在检查更新…");
                 update_check_async(hwnd);
                 InvalidateRect(hwnd, NULL, FALSE);
@@ -1748,8 +1789,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_ERASEBKGND:
         return 1;   /* handled in WM_PAINT - no erase flicker */
     case WM_SIZE:
-        /* Maximize / resize: put the controls back where they belong and
-           repaint the dashboard. */
+        /* Maximize / resize: rescale the whole canvas (see
+           update_layout_scale), then put the controls back and repaint. */
+        update_layout_scale(hwnd);
         layout_controls(hwnd);
         if (g_ui_visible) InvalidateRect(hwnd, NULL, FALSE);
         return 0;
