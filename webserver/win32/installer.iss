@@ -5,7 +5,7 @@
 ; folder as the default) instead of installing side by side.
 AppId={{8F2A61D4-6C0B-4B3E-9E77-ADB10C1A5F27}
 AppName=ADBlock 拦截服务器
-AppVersion=1.27
+AppVersion=1.28
 AppPublisher=wxcvm
 DefaultDirName={autopf}\ADBlock
 DefaultGroupName=ADBlock
@@ -41,7 +41,7 @@ Name: "autostart"; Description: "开机自动启动"; GroupDescription: "附加�
 ; any custom block image. Never overwrite those on an upgrade
 ; (onlyifdoesntexist), so updating keeps the certificate and the statistics.
 Source: "dist\*"; DestDir: "{app}"; Excludes: "resources\*"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "dist\resources\*"; DestDir: "{app}\resources"; Excludes: "localhost-2410.*,*.dat,webserver.log,webserver.log.1,crash.log,allowlist.txt,blocklist.txt,cosmetic.css"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist
+Source: "dist\resources\*"; DestDir: "{app}\resources"; Excludes: "localhost-2410.*,*.dat,update_cache.json,webserver.log,webserver.log.1,crash.log,allowlist.txt,blocklist.txt,cosmetic.css"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist
 
 [Icons]
 Name: "{group}\ADBlock 仪表盘"; Filename: "{app}\webserver.exe"

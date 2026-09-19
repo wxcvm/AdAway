@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.27
+      TAG: win11-webserver-v1.28
     steps:
       - uses: actions/checkout@v6
 
@@ -379,12 +379,14 @@ jobs:
           rm -f webserver/win32/dist/resources/localhost-2410.key \
                 webserver/win32/dist/resources/localhost-2410.crt \
                 webserver/win32/dist/resources/*.dat \
+                webserver/win32/dist/resources/update_cache.json \
                 webserver/win32/dist/resources/allowlist.txt \
                 webserver/win32/dist/resources/blocklist.txt \
                 webserver/win32/dist/resources/cosmetic.css \
                 webserver/win32/dist/webserver.log webserver/win32/dist/webserver.log.1 \
                 webserver/win32/dist/crash.log webserver/win32/dist/resources/crash.log
-          if ls webserver/win32/dist/resources/localhost-2410.key webserver/win32/dist/resources/*.dat 2>/dev/null | grep -q .; then
+          if ls webserver/win32/dist/resources/localhost-2410.key webserver/win32/dist/resources/*.dat \
+                webserver/win32/dist/resources/update_cache.json 2>/dev/null | grep -q .; then
             echo "::error::release package still contains CA key or runtime state"; exit 1
           fi
           powershell -NoProfile -Command "Compress-Archive -Path .\* -DestinationPath '$GITHUB_WORKSPACE\adblock-webserver-win64.zip' -Force"
