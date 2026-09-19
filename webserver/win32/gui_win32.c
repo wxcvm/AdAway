@@ -510,18 +510,18 @@ static void *stats_poll_thread(void *arg) {
 #define IDC_POL0      1110
 
 /* Block reply policy toggles: label, block_config.json key, control id. */
-struct policy_item { const wchar_t *label; const char *key; int id; };
+struct policy_item { const wchar_t *label; const char *key; const char *mode_key; int id; };
 static const struct policy_item g_policy[] = {
-    { L"图片",       "reply_images",     IDC_POL0 + 0 },
-    { L"脚本",       "reply_scripts",    IDC_POL0 + 1 },
-    { L"样式表",     "reply_styles",     IDC_POL0 + 2 },
-    { L"字体",       "reply_fonts",      IDC_POL0 + 3 },
-    { L"媒体/音频",  "reply_media",      IDC_POL0 + 4 },
-    { L"页面结构",   "reply_structures", IDC_POL0 + 5 },
-    { L"API 请求",   "reply_api",        IDC_POL0 + 6 },
-    { L"遥测/统计",  "reply_telemetry",  IDC_POL0 + 7 },
-    { L"配置文件",   "reply_config",     IDC_POL0 + 8 },
-    { L"WebSocket",  "reply_ws_sse",     IDC_POL0 + 9 },
+    { L"图片", "reply_images", "mode_images", IDC_POL0 + 0 },
+    { L"脚本", "reply_scripts", "mode_scripts", IDC_POL0 + 1 },
+    { L"样式表", "reply_styles", "mode_styles", IDC_POL0 + 2 },
+    { L"字体", "reply_fonts", "mode_fonts", IDC_POL0 + 3 },
+    { L"媒体/音频", "reply_media", "mode_media", IDC_POL0 + 4 },
+    { L"页面结构", "reply_structures", "mode_struct", IDC_POL0 + 5 },
+    { L"API 请求", "reply_api", "mode_api", IDC_POL0 + 6 },
+    { L"遥测/统计", "reply_telemetry", "mode_tele", IDC_POL0 + 7 },
+    { L"配置文件", "reply_config", "mode_conf", IDC_POL0 + 8 },
+    { L"WebSocket", "reply_ws_sse", "mode_ws", IDC_POL0 + 9 },
 };
 #define POLICY_COUNT ((int)(sizeof(g_policy) / sizeof(g_policy[0])))
 
@@ -594,6 +594,27 @@ static bool policy_get(const char *dir, const char *key, bool def) {
     return strncmp(p, "true", 4) == 0;
 }
 
+/* Integer reader used for the mode_* keys (see the server's load_block_modes). */
+static int policy_get_int(const char *dir, const char *key, int def) {
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/block_config.json", dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return def;
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = 0;
+    fclose(f);
+    char pat[96];
+    int pl = snprintf(pat, sizeof(pat), "\"%s\":", key);
+    if (pl <= 0 || (size_t) pl >= sizeof(pat)) return def;
+    const char *p = strstr(buf, pat);
+    if (!p) return def;
+    p += pl;
+    while (*p == ' ') p++;
+    if (*p < '0' || *p > '9') return def;
+    return atoi(p);
+}
+
 static void policy_read(const char *dir, bool *vals) {
     for (int i = 0; i < POLICY_COUNT; i++)
         vals[i] = policy_get(dir, g_policy[i].key, true);
@@ -606,8 +627,14 @@ static void policy_save(const char *dir, const bool *vals) {
     if (!f) return;
     fprintf(f, "{\n");
     for (int i = 0; i < POLICY_COUNT; i++)
-        fprintf(f, "  \"%s\": %s%s\n", g_policy[i].key,
-                vals[i] ? "true" : "false", i + 1 < POLICY_COUNT ? "," : "");
+        fprintf(f, "  \"%s\": %s,\n", g_policy[i].key, vals[i] ? "true" : "false");
+    /* The per-type blocking method ("mode_*", 0=占位 1=204 2=放行) is preserved:
+       until the tri-state control lands it is edited in block_config.json and
+       the dashboard must not silently drop it while saving the switches. */
+    for (int i = 0; i < POLICY_COUNT; i++)
+        fprintf(f, "  \"%s\": %d%s\n", g_policy[i].mode_key,
+                policy_get_int(dir, g_policy[i].mode_key, vals[i] ? 0 : 1),
+                i + 1 < POLICY_COUNT ? "," : "");
     fprintf(f, "}\n");
     fclose(f);
 }
