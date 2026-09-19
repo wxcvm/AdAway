@@ -28,7 +28,10 @@
 #include <wchar.h>
 
 #define UPDATE_API_HOST L"api.github.com"
-#define UPDATE_API_PATH L"/repos/wxcvm/AdAway/releases?per_page=30"
+/* 100 instead of 30: the repository also carries the Android releases, and a
+   Windows release that fell outside the first page was simply "not found",
+   which the dashboard then reported as "already up to date". */
+#define UPDATE_API_PATH L"/repos/wxcvm/AdAway/releases?per_page=100"
 #define UPDATE_MAX_BYTES (8u * 1024u * 1024u)   /* API JSON answer only */
 /* Hard cap for the downloaded update package: without it a hostile or broken
    release could stream until the disk is full (phase-2 audit, item A). */
@@ -83,7 +86,8 @@ static int version_cmp(const char *a, const char *b) {
 }
 
 /* HTTP(S) GET (system proxy aware, follows redirects). Caller frees. */
-static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len) {
+static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len,
+                      DWORD *out_status) {
     HINTERNET session = NULL, connect = NULL, request = NULL;
     char *body = NULL;
     size_t total = 0, cap = 0;
@@ -108,6 +112,7 @@ static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len)
     if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                              WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen, WINHTTP_NO_HEADER_INDEX))
         goto done;
+    if (out_status) *out_status = status;   /* tell "403 rate limit" from "no update" */
     if (status != 200) goto done;
     for (;;) {
         DWORD avail = 0, read = 0;
@@ -223,12 +228,18 @@ static void asset_id_from(const char *marker, char *out, size_t cap) {
 }
 
 /* Newest release shipping a zip, when it is newer than this build. */
+/* 1 = newer release found, 0 = the API answered and there is none,
+   -1 = the check itself failed (network/TLS/proxy/rate limit). The old code
+   returned 0 for both, which is why a failed check looked like "up to date". */
 static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out, size_t url_cap,
                               char *digest_out, size_t digest_cap,
-                              wchar_t *api_url_out, size_t api_url_cap) {
+                              wchar_t *api_url_out, size_t api_url_cap,
+                              DWORD *http_status) {
     size_t len = 0;
-    char *json = http_get(UPDATE_API_HOST, UPDATE_API_PATH, &len);
-    if (!json) return 0;
+    DWORD st = 0;
+    char *json = http_get(UPDATE_API_HOST, UPDATE_API_PATH, &len, &st);
+    if (http_status) *http_status = st;
+    if (!json) return -1;
     int found = 0;
     const char *p = json;
     while (!found && (p = strstr(p, "\"tag_name\"")) != NULL) {
@@ -318,15 +329,31 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
         p += 10;
     }
     free(json);
-    return found;
+    return found ? 1 : 0;
 }
+
+/* Last failure reason, shown by the dashboard (see update_last_error()). */
+static wchar_t s_check_error[192] = L"";
+
+const wchar_t *update_last_error(void) { return s_check_error; }
 
 static DWORD WINAPI check_thread(LPVOID param) {
     HWND hwnd = (HWND) param;
     wchar_t tag[128] = L"", url[1024] = L"", api_url[1024] = L"";
     char digest[128] = "";
     struct update_info *info = NULL;
-    if (find_latest_update(tag, 128, url, 1024, digest, sizeof(digest), api_url, 1024)) {
+    DWORD st = 0;
+    int rc = find_latest_update(tag, 128, url, 1024, digest, sizeof(digest),
+                                api_url, 1024, &st);
+    if (rc < 0) {
+        /* One retry: a transient DNS/TLS/proxy hiccup or a GitHub API rate
+           limit must never be reported as "already up to date". */
+        Sleep(1500);
+        st = 0;
+        rc = find_latest_update(tag, 128, url, 1024, digest, sizeof(digest),
+                                api_url, 1024, &st);
+    }
+    if (rc > 0) {
         info = (struct update_info *) calloc(1, sizeof(*info));
         if (info) {
             wcsncpy(info->tag, tag, 127);
@@ -334,8 +361,17 @@ static DWORD WINAPI check_thread(LPVOID param) {
             wcsncpy(info->api_url, api_url, 1023);
             utf8_to_wide(digest, info->sha256, 128);
         }
+    } else if (rc < 0) {
+        if (st == 403 || st == 429)
+            swprintf(s_check_error, 192, L"GitHub API 限流（HTTP %lu），请稍后再试", (unsigned long) st);
+        else if (st > 0)
+            swprintf(s_check_error, 192, L"GitHub API 返回 HTTP %lu", (unsigned long) st);
+        else
+            wcsncpy(s_check_error, L"无法连接 api.github.com（DNS/TLS/代理）", 191);
+    } else {
+        s_check_error[0] = 0;
     }
-    PostMessageW(hwnd, WM_APP_UPDATE_FOUND, info ? 1 : 0, (LPARAM) info);
+    PostMessageW(hwnd, WM_APP_UPDATE_FOUND, rc > 0 ? 1 : (rc == 0 ? 0 : 2), (LPARAM) info);
     return 0;
 }
 

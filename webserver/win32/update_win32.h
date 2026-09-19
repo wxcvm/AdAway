@@ -20,5 +20,7 @@ void update_check_async(HWND hwnd);
 /* Download + extract the release and restart the executable afterwards. */
 void update_apply_async(HWND hwnd, const struct update_info *info);
 void update_info_free(struct update_info *info);
+/* Reason of the last failed check (empty when the last check succeeded). */
+const wchar_t *update_last_error(void);
 
 #endif

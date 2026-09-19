@@ -1910,6 +1910,11 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             } else {
                 swprintf(g_status, 4096, L"已忽略新版本 %ls", info->tag);
             }
+        } else if (wp == 2) {
+            /* A failed check used to be displayed as "已是最新版本" - exactly
+               the "它经常检测不到更新" report. */
+            swprintf(g_status, 4096, L"检查更新失败：%ls", update_last_error());
+            MessageBoxW(hwnd, g_status, L"检查更新", MB_OK | MB_ICONWARNING);
         } else {
             swprintf(g_status, 4096, L"已是最新版本（v" L"" ADBLOCK_APP_VERSION L"）");
         }

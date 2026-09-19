@@ -5,7 +5,7 @@
 ; folder as the default) instead of installing side by side.
 AppId={{8F2A61D4-6C0B-4B3E-9E77-ADB10C1A5F27}
 AppName=ADBlock 拦截服务器
-AppVersion=1.20
+AppVersion=1.21
 AppPublisher=wxcvm
 DefaultDirName={autopf}\ADBlock
 DefaultGroupName=ADBlock
