@@ -158,39 +158,131 @@ static void update_cache_save(const struct update_cache *c) {
     fclose(f);
 }
 
+/* One release as published: the installer is the normal package, the portable
+   zip is both the fallback and the in-place update of a hand-extracted copy. */
+struct release_pick {
+    char tag[128];
+    char ver[64];
+    char exe_url[1024];
+    char exe_sha[128];
+    char exe_api_url[512];   /* /releases/assets/<id> endpoint (API answer only) */
+    char zip_url[1024];
+    char zip_sha[128];
+    char zip_api_url[512];
+};
+
+/* Folder the running executable lives in. */
+static int exe_dir(wchar_t *out, size_t cap) {
+    wchar_t exe[MAX_PATH];
+    if (cap == 0) return 0;
+    out[0] = 0;
+    if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return 0;
+    wchar_t *slash = wcsrchr(exe, L'\\');
+    if (slash) *slash = 0;
+    wcsncpy(out, exe, cap - 1);
+    out[cap - 1] = 0;
+    return out[0] != 0;
+}
+
+/* Compare two folders: case-insensitive, '/' == '\', trailing separators
+   ignored (Inno records the folder without one, GetModuleFileName has none
+   either, but a hand-edited registry value may). */
+static int dir_same(const wchar_t *a, const wchar_t *b) {
+    for (;;) {
+        while (*a == L'/') a++;
+        while (*b == L'/') b++;
+        wchar_t ca = *a, cb = *b;
+        if (ca == L'\\') ca = 0;
+        if (cb == L'\\') cb = 0;
+        if (ca >= L'a' && ca <= L'z') ca = (wchar_t) (ca - 32);
+        if (cb >= L'a' && cb <= L'z') cb = (wchar_t) (cb - 32);
+        if (ca != cb) return 0;
+        if (ca == 0) return 1;
+        a++;
+        b++;
+    }
+}
+
+static int read_install_location(REGSAM view, wchar_t *out, size_t cap) {
+    static const wchar_t *sub =
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
+        L"{8F2A61D4-6C0B-4B3E-9E77-ADB10C1A5F27}_is1";
+    HKEY key = NULL;
+    DWORD type = 0, size = (DWORD) (cap * sizeof(wchar_t));
+    LONG rc;
+    out[0] = 0;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, sub, 0, KEY_QUERY_VALUE | view, &key) != ERROR_SUCCESS)
+        return 0;
+    rc = RegQueryValueExW(key, L"InstallLocation", NULL, &type, (LPBYTE) out, &size);
+    RegCloseKey(key);
+    if (rc != ERROR_SUCCESS || type != REG_SZ || size < sizeof(wchar_t)) {
+        out[0] = 0;
+        return 0;
+    }
+    out[cap - 1] = 0;
+    return out[0] != 0;
+}
+
+/*
+ * Did the Inno Setup installer create the copy we are running from?
+ *
+ * The installer records its destination in
+ * HKCU\...\Uninstall\<AppId>_is1\InstallLocation. When the running exe lives
+ * somewhere else the user is using the portable zip: letting the installer
+ * "update" would install a SECOND copy under %LOCALAPPDATA%\Programs\ADBlock
+ * and leave the folder the user actually runs completely untouched - the
+ * classic "updated but still the old version" report.
+ */
+static int running_copy_is_installed(void) {
+    wchar_t installed[MAX_PATH] = L"", here[MAX_PATH] = L"";
+    if (!exe_dir(here, MAX_PATH)) return 1;   /* cannot tell: keep the old path */
+    if (!read_install_location(0, installed, MAX_PATH) &&
+        !read_install_location(KEY_WOW64_64KEY, installed, MAX_PATH) &&
+        !read_install_location(KEY_WOW64_32KEY, installed, MAX_PATH)) {
+        return 0;                              /* no install record: portable */
+    }
+    return dir_same(installed, here);
+}
+
+/*
+ * Pick the package for THIS machine and hand back the plain download URL, the
+ * published digest and (when the API answered) the /releases/assets/<id>
+ * fallback URL.
+ */
+static void release_pick_choose(const struct release_pick *p, wchar_t *url, size_t url_cap,
+                                char *sha, size_t sha_cap, wchar_t *api_url, size_t api_cap) {
+    int portable = p->zip_url[0] && !running_copy_is_installed();
+    const char *u = portable ? p->zip_url : (p->exe_url[0] ? p->exe_url : p->zip_url);
+    const char *s = portable ? p->zip_sha : (p->exe_url[0] ? p->exe_sha : p->zip_sha);
+    const char *a = portable ? p->zip_api_url : (p->exe_url[0] ? p->exe_api_url : p->zip_api_url);
+    if (url && url_cap) url[0] = 0;
+    if (api_url && api_cap) api_url[0] = 0;
+    if (sha && sha_cap) sha[0] = 0;
+    if (u && u[0] && url && url_cap) utf8_to_wide(u, url, url_cap);
+    if (a && a[0] && api_url && api_cap) utf8_to_wide(a, api_url, api_cap);
+    if (s && s[0] && sha && sha_cap) snprintf(sha, sha_cap, "%s", s);
+}
+
 /* Fixed-tag manifest: 1 newer, 0 up to date (no API needed), -1 unavailable. */
-static int manifest_check(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out, size_t url_cap,
-                          char *digest_out, size_t digest_cap, DWORD *status) {
+static int manifest_check(struct release_pick *p, DWORD *status) {
     size_t len = 0;
     DWORD st = 0;
+    memset(p, 0, sizeof(*p));
     char *json = http_get(UPDATE_MANIFEST_HOST, UPDATE_MANIFEST_PATH, &len, &st);
     if (status) *status = st;
     if (!json) return -1;
-    char tag[128] = "", ver[64] = "";
-    char exe_url[1024] = "", exe_sha[128] = "";
-    char zip_url[1024] = "", zip_sha[128] = "";
-    json_string(json, "\"tag\"", json, tag, sizeof(tag));
-    json_string(json, "\"version\"", json, ver, sizeof(ver));
-    json_string(json, "\"exe_url\"", json, exe_url, sizeof(exe_url));
-    json_string(json, "\"exe_sha256\"", json, exe_sha, sizeof(exe_sha));
-    json_string(json, "\"zip_url\"", json, zip_url, sizeof(zip_url));
-    json_string(json, "\"zip_sha256\"", json, zip_sha, sizeof(zip_sha));
+    json_string(json, "\"tag\"", json, p->tag, sizeof(p->tag));
+    json_string(json, "\"version\"", json, p->ver, sizeof(p->ver));
+    json_string(json, "\"exe_url\"", json, p->exe_url, sizeof(p->exe_url));
+    json_string(json, "\"exe_sha256\"", json, p->exe_sha, sizeof(p->exe_sha));
+    json_string(json, "\"zip_url\"", json, p->zip_url, sizeof(p->zip_url));
+    json_string(json, "\"zip_sha256\"", json, p->zip_sha, sizeof(p->zip_sha));
     free(json);
-    if (!ver[0]) return -1;
-    /*
-     * Prefer the Inno Setup installer and fall back to the portable zip. A
-     * release whose installer build failed used to publish no usable manifest
-     * at all, and the fixed tag kept advertising the previous version, so every
-     * client answered "already up to date" while a newer build existed.
-     */
-    const char *pick_url = exe_url[0] ? exe_url : zip_url;
-    const char *pick_sha = exe_url[0] ? exe_sha : zip_sha;
-    if (version_cmp(ver, ADBLOCK_APP_VERSION) > 0 && pick_url[0]) {
-        utf8_to_wide(tag[0] ? tag : ver, tag_out, tag_cap);
-        utf8_to_wide(pick_url, url_out, url_cap);
-        if (digest_out && digest_cap) snprintf(digest_out, digest_cap, "%s", pick_sha);
-        return 1;
-    }
+    if (!p->ver[0]) return -1;
+    /* Neither package published: treat the manifest as unusable so the REST
+       API (with its cache) still gets a chance to answer. */
+    if (!p->exe_url[0] && !p->zip_url[0]) return -1;
+    if (version_cmp(p->ver, ADBLOCK_APP_VERSION) > 0) return 1;
     return 0;
 }
 
@@ -336,23 +428,21 @@ static void asset_id_from(const char *marker, char *out, size_t cap) {
     out[k] = 0;
 }
 
-/* Newest release shipping a zip, when it is newer than this build. */
-/* 1 = newer release found, 0 = the API answered and there is none,
+/* Newest release publishing a Windows package, when it is newer than this
+   build. 1 = newer release found, 0 = the API answered and there is none,
    -1 = the check itself failed (network/TLS/proxy/rate limit). The old code
    returned 0 for both, which is why a failed check looked like "up to date". */
-static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out, size_t url_cap,
-                              char *digest_out, size_t digest_cap,
-                              wchar_t *api_url_out, size_t api_url_cap,
-                              DWORD *http_status) {
+static int find_latest_update(struct release_pick *pick, DWORD *http_status) {
     size_t len = 0;
     DWORD st = 0;
+    int found = 0;
+    memset(pick, 0, sizeof(*pick));
     char *json = http_get(UPDATE_API_HOST, UPDATE_API_PATH, &len, &st);
     if (http_status) *http_status = st;
     if (!json) return -1;
-    int found = 0;
     const char *p = json;
     while (!found && (p = strstr(p, "\"tag_name\"")) != NULL) {
-        char tag[128] = "", url[1024] = "";
+        char tag[128] = "";
         const char *next = strstr(p + 10, "\"tag_name\"");
         if (json_string(json, "\"tag_name\"", p, tag, sizeof(tag))) {
             /* Walk every asset of this release: the Inno Setup installer is
@@ -367,9 +457,8 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
              * the dashboard reported "network is fine but it will not update".
              * name + digest + url are now read from the same asset object.
              */
-            char candidate[1024] = "", fallback[1024] = "";
-            char candidate_digest[128] = "", fallback_digest[128] = "";
-            char candidate_id[32] = "", fallback_id[32] = "";
+            char exe_url[1024] = "", exe_sha[128] = "", exe_api[512] = "";
+            char zip_url[1024] = "", zip_sha[128] = "", zip_api[512] = "";
             const char *chunk = p;
             for (;;) {
                 const char *a = strstr(chunk, "releases/assets/");
@@ -387,33 +476,26 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
                 size_t l = strlen(one);
                 int is_exe = l > 4 && _stricmp(one + l - 4, ".exe") == 0;
                 int is_zip = l > 4 && _stricmp(one + l - 4, ".zip") == 0;
-                if (is_exe && candidate[0] == 0) {
-                    snprintf(candidate, sizeof(candidate), "%s", one);
-                    snprintf(candidate_digest, sizeof(candidate_digest), "%s", dig);
-                    asset_id_from(a + 16, candidate_id, sizeof(candidate_id));
-                } else if (is_zip && fallback[0] == 0) {
-                    snprintf(fallback, sizeof(fallback), "%s", one);
-                    snprintf(fallback_digest, sizeof(fallback_digest), "%s", dig);
-                    asset_id_from(a + 16, fallback_id, sizeof(fallback_id));
+                if (is_exe && exe_url[0] == 0) {
+                    char id[32] = "";
+                    snprintf(exe_url, sizeof(exe_url), "%s", one);
+                    snprintf(exe_sha, sizeof(exe_sha), "%s", dig);
+                    asset_id_from(a + 16, id, sizeof(id));
+                    if (id[0])
+                        snprintf(exe_api, sizeof(exe_api),
+                                 "https://api.github.com/repos/wxcvm/AdAway/releases/assets/%s", id);
+                } else if (is_zip && zip_url[0] == 0) {
+                    char id[32] = "";
+                    snprintf(zip_url, sizeof(zip_url), "%s", one);
+                    snprintf(zip_sha, sizeof(zip_sha), "%s", dig);
+                    asset_id_from(a + 16, id, sizeof(id));
+                    if (id[0])
+                        snprintf(zip_api, sizeof(zip_api),
+                                 "https://api.github.com/repos/wxcvm/AdAway/releases/assets/%s", id);
                 }
                 chunk = a + 16;
             }
-            snprintf(url, sizeof(url), "%s", candidate[0] ? candidate : fallback);
-            if (digest_out && digest_cap) {
-                snprintf(digest_out, digest_cap, "%s",
-                         candidate[0] ? candidate_digest : fallback_digest);
-            }
-            if (api_url_out && api_url_cap) {
-                const char *id = candidate[0] ? candidate_id : fallback_id;
-                api_url_out[0] = 0;
-                if (id[0]) {
-                    char api_narrow[512];
-                    snprintf(api_narrow, sizeof(api_narrow),
-                             "https://api.github.com/repos/wxcvm/AdAway/releases/assets/%s", id);
-                    utf8_to_wide(api_narrow, api_url_out, api_url_cap);
-                }
-            }
-            if (url[0]) {
+            if (exe_url[0] || zip_url[0]) {
                 const char *v = strrchr(tag, 'v');
                 v = v ? v + 1 : tag;
                 /*
@@ -423,14 +505,17 @@ static int find_latest_update(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out
                  * is what made an earlier build offer the Android APK).
                  */
                 int is_win_release = strncmp(tag, "win11-webserver-", 16) == 0 ||
-                                     strstr(url, "adblock-webserver") != NULL;
-                size_t ulen = strlen(url);
-                int is_pkg = ulen > 4 &&
-                             (_stricmp(url + ulen - 4, ".zip") == 0 ||
-                              _stricmp(url + ulen - 4, ".exe") == 0);
-                if (is_win_release && is_pkg && version_cmp(v, ADBLOCK_APP_VERSION) > 0) {
-                    utf8_to_wide(tag, tag_out, tag_cap);
-                    utf8_to_wide(url, url_out, url_cap);
+                                     strstr(exe_url, "adblock-webserver") != NULL ||
+                                     strstr(zip_url, "adblock-webserver") != NULL;
+                if (is_win_release && version_cmp(v, ADBLOCK_APP_VERSION) > 0) {
+                    snprintf(pick->tag, sizeof(pick->tag), "%s", tag);
+                    snprintf(pick->ver, sizeof(pick->ver), "%s", v);
+                    snprintf(pick->exe_url, sizeof(pick->exe_url), "%s", exe_url);
+                    snprintf(pick->exe_sha, sizeof(pick->exe_sha), "%s", exe_sha);
+                    snprintf(pick->exe_api_url, sizeof(pick->exe_api_url), "%s", exe_api);
+                    snprintf(pick->zip_url, sizeof(pick->zip_url), "%s", zip_url);
+                    snprintf(pick->zip_sha, sizeof(pick->zip_sha), "%s", zip_sha);
+                    snprintf(pick->zip_api_url, sizeof(pick->zip_api_url), "%s", zip_api);
                     found = 1;
                 }
             }
@@ -448,12 +533,19 @@ const wchar_t *update_last_error(void) { return s_check_error; }
 
 static DWORD WINAPI check_thread(LPVOID param) {
     HWND hwnd = (HWND) param;
+    struct release_pick pick;
     wchar_t tag[128] = L"", url[1024] = L"", api_url[1024] = L"";
     char digest[128] = "";
     struct update_info *info = NULL;
     DWORD st = 0;
     /* 1) fixed-tag manifest: no REST API, therefore no rate limit at all. */
-    int rc = manifest_check(tag, 128, url, 1024, digest, sizeof(digest), &st);
+    int rc = manifest_check(&pick, &st);
+    if (rc > 0) {
+        /* The manifest itself is the release: choose the package for this
+           machine (installer copy vs. hand-extracted portable copy). */
+        utf8_to_wide(pick.tag[0] ? pick.tag : pick.ver, tag, 128);
+        release_pick_choose(&pick, url, 1024, digest, sizeof(digest), api_url, 1024);
+    }
     if (rc < 0) {
         /* 2) API fallback, always mediated by the on-disk answer cache. */
         struct update_cache c;
@@ -471,15 +563,17 @@ static DWORD WINAPI check_thread(LPVOID param) {
             snprintf(digest, sizeof(digest), "%s", c.sha256);
         } else {
             st = 0;
-            rc = find_latest_update(tag, 128, url, 1024, digest, sizeof(digest),
-                                    api_url, 1024, &st);
+            rc = find_latest_update(&pick, &st);
             if (rc < 0 && st != 403 && st != 429) {
                 /* retry only non-rate-limit failures: a 403 already consumed one
                    of the 60 requests/hour, a retry would waste another. */
                 Sleep(1500);
                 st = 0;
-                rc = find_latest_update(tag, 128, url, 1024, digest, sizeof(digest),
-                                        api_url, 1024, &st);
+                rc = find_latest_update(&pick, &st);
+            }
+            if (rc > 0) {
+                utf8_to_wide(pick.tag[0] ? pick.tag : pick.ver, tag, 128);
+                release_pick_choose(&pick, url, 1024, digest, sizeof(digest), api_url, 1024);
             }
             struct update_cache nc;
             char narrow[1024] = "";
@@ -487,10 +581,12 @@ static DWORD WINAPI check_thread(LPVOID param) {
             nc.rc = rc;
             nc.status = st;
             nc.checked_at = (DWORD) (GetTickCount64() / 1000ULL);
+            /* Cache the decision, not the raw answer: it already says which
+               package this copy of the program needs. */
             if (tag[0]) { WideCharToMultiByte(CP_UTF8, 0, tag, -1, narrow, sizeof(narrow), NULL, NULL); snprintf(nc.tag, sizeof(nc.tag), "%s", narrow); }
             if (url[0]) { WideCharToMultiByte(CP_UTF8, 0, url, -1, narrow, sizeof(narrow), NULL, NULL); snprintf(nc.url, sizeof(nc.url), "%s", narrow); }
             if (api_url[0]) { WideCharToMultiByte(CP_UTF8, 0, api_url, -1, narrow, sizeof(narrow), NULL, NULL); snprintf(nc.api_url, sizeof(nc.api_url), "%s", narrow); }
-            snprintf(nc.sha256, sizeof(nc.sha256), "%s", digest);
+            if (digest[0]) snprintf(nc.sha256, sizeof(nc.sha256), "%s", digest);
             update_cache_save(&nc);
         }
     }

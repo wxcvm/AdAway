@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.25`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.26`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -12,6 +12,9 @@
 - 检查更新：优先读固定标签 `win11-latest` 上的 `windows-manifest.json`（纯下载链接，不经过 REST API，
   因此不受 60 次/小时限流）；失败才回退 API，并带本地答案缓存与限流冷却。
 - 装机优先级：清单里有 `exe_url` 时下载 Inno 安装器，缺失时自动回退 `zip_url` 便携包。
+- 便携副本就地更新：运行目录与安装器记录的 `InstallLocation` 不一致时（用户自己解压 zip），
+  改用 zip 就地覆盖，避免安装器在 `%LOCALAPPDATA%\Programs\ADBlock` 装出第二份、
+  而用户实际运行的那个目录永远停在旧版本。
 - 静默安装必须自己拉起程序：安装器给更新用的 `/VERYSILENT` 会跳过 `[Run]` 里带 `skipifsilent` 的条目，
   而 `RestartApplications=no` 也不会替我们重启，所以 `installer.iss` 增加了一条 `Check: WizardSilent` 的启动项。
 - 清单必须能被严格 JSON 解析：CI 用 Python 生成并校验后才上传（历史缺陷：`sha256sum` 对含反斜杠的
@@ -50,3 +53,11 @@
 - 深色主题下原生子控件（EDIT/BUTTON）用 `SetWindowTheme` 尽力而为，个别系统版本仍可能显示浅色边框。
 - GDI 字体/画刷未做对象缓存：重绘只在数据更新或 2 秒定时器时发生，证书存储与文件 I/O 已缓存/节流，收益有限。
 - 按应用统计在 Windows 上显示 unknown（没有 /proc 等价物）。
+
+## CI 时长（2026-09-19 优化）
+- MSYS2 步骤去掉 `update: true`（每次 `pacman -Syu` 约 56 s），依赖动作自带的缓存 +
+  `--needed` 安装；Pillow 只在真的缺失时才 pip 安装。
+- 冒烟/GUI/端口冲突/自启动各测试改成轮询就绪状态，不再用固定 `Start-Sleep`
+  （原来共约 49 s 的死等）。
+- 发布类步骤（Release、公共更新源、安装器上传、清单）加 `if: github.event_name != 'pull_request'`，
+  PR 构建只做验证，绝不发布。

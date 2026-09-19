@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.25
+      TAG: win11-webserver-v1.26
     steps:
       - uses: actions/checkout@v6
 
@@ -29,7 +29,11 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
-          update: true
+          # update: true runs a full "pacman -Syu" and cost 56 s per run; the
+          # action's cache (on by default) already carries the toolchain, and
+          # the packages below are installed with --needed. Flip this back to
+          # true if a run ever fails on a stale package database.
+          update: false
           install: >-
             git
             mingw-w64-x86_64-gcc
@@ -50,7 +54,11 @@ jobs:
       - name: Prepare resources (convert block placeholder images to webp)
         shell: bash
         run: |
-          pip3 install --quiet pillow || python -m pip install --quiet pillow
+          # Only install when Pillow is really missing: this step used to pay
+          # ~10 s of pip resolution on every run.
+          python3 -c "import PIL" 2>/dev/null \
+            || python3 -m pip install --quiet pillow \
+            || pip3 install --quiet pillow
           python3 - <<'PYEOF'
           import glob, os
           from PIL import Image
@@ -110,17 +118,28 @@ jobs:
         run: |
           $res = (Resolve-Path "webserver\win32\dist\resources").Path
           $proc = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res,"--http-port","18080","--https-port","18443","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server.log" -RedirectStandardError "server.err"
-          Start-Sleep -Seconds 7
-          if ($proc.HasExited) {
-            Write-Output ("SERVER EXITED with code " + $proc.ExitCode)
-            Write-Output "---- stdout tail ----"
-            Get-Content "server.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
-            Write-Output "---- stderr tail ----"
-            Get-Content "server.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
-            throw "webserver exited before smoke test"
+          # Poll for the first answer instead of sleeping a fixed 7 s: the
+          # server binds in well under a second, so the old wait was dead time
+          # (and still failed on a slow runner).
+          $stats = $null
+          $deadline = (Get-Date).AddSeconds(25)
+          while (-not $stats -and (Get-Date) -lt $deadline) {
+            if ($proc.HasExited) {
+              Write-Output ("SERVER EXITED with code " + $proc.ExitCode)
+              Write-Output "---- stdout tail ----"
+              Get-Content "server.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
+              Write-Output "---- stderr tail ----"
+              Get-Content "server.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
+              throw "webserver exited before smoke test"
+            }
+            try {
+              $stats = Invoke-WebRequest -Uri "http://127.0.0.1:18080/internal-stats" -UseBasicParsing -TimeoutSec 5
+            } catch {
+              Start-Sleep -Milliseconds 250
+            }
           }
+          if (-not $stats) { throw "no answer on http://127.0.0.1:18080/internal-stats within 25s" }
           try {
-            $stats = Invoke-WebRequest -Uri "http://127.0.0.1:18080/internal-stats" -UseBasicParsing -TimeoutSec 10
             Write-Output "internal-stats HTTP $($stats.StatusCode): $($stats.Content.Substring(0, [Math]::Min(180, $stats.Content.Length)))"
             $test = Invoke-WebRequest -Uri "http://127.0.0.1:18080/internal-test" -UseBasicParsing -TimeoutSec 10
             Write-Output "internal-test HTTP $($test.StatusCode)"
@@ -151,15 +170,23 @@ jobs:
           # the "resources" folder next to the exe, auto-created), only
           # explicit free ports so the test never collides with the first one.
           $p2 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--http-port","18081","--https-port","18444","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server2.log" -RedirectStandardError "server2.err"
-          Start-Sleep -Seconds 7
-          try {
+          $s2 = $null
+          $deadline2 = (Get-Date).AddSeconds(25)
+          while (-not $s2 -and (Get-Date) -lt $deadline2) {
             if ($p2.HasExited) {
               Write-Output ("NO-ARGS SERVER EXITED with code " + $p2.ExitCode)
               Get-Content "server2.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
               Get-Content "server2.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
               throw "no-args webserver exited"
             }
-            $s2 = Invoke-WebRequest -Uri "http://127.0.0.1:18081/internal-stats" -UseBasicParsing -TimeoutSec 10
+            try {
+              $s2 = Invoke-WebRequest -Uri "http://127.0.0.1:18081/internal-stats" -UseBasicParsing -TimeoutSec 5
+            } catch {
+              Start-Sleep -Milliseconds 250
+            }
+          }
+          try {
+            if (-not $s2) { throw "no-args server never answered on 18081" }
             Write-Output ("no-args mode internal-stats HTTP " + $s2.StatusCode)
             if ($s2.StatusCode -ne 200) { throw "no-args smoke test failed" }
           } catch {
@@ -176,15 +203,30 @@ jobs:
         run: |
           $res3 = (Resolve-Path "webserver\win32\dist\resources").Path
           $p3 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res3,"--http-port","18083","--https-port","18446") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server3.log" -RedirectStandardError "server3.err"
-          Start-Sleep -Seconds 8
-          try {
+          # Wait for the GUI process to serve its main port, then make sure it
+          # is still alive a moment later: proves the dashboard thread and the
+          # server thread coexist, without the old fixed 8 s wait.
+          $alive = $null
+          $deadline3 = (Get-Date).AddSeconds(25)
+          while (-not $alive -and (Get-Date) -lt $deadline3) {
             if ($p3.HasExited) {
               Write-Output ("GUI SERVER EXITED with code " + $p3.ExitCode)
               Get-Content "server3.log" -ErrorAction SilentlyContinue | Select-Object -Last 25
               Get-Content "server3.err" -ErrorAction SilentlyContinue | Select-Object -Last 25
               throw "gui-mode server exited"
             }
-            Write-Output "gui-mode process alive after 8s OK"
+            try {
+              $alive = Invoke-WebRequest -Uri "http://127.0.0.1:18083/internal-stats" -UseBasicParsing -TimeoutSec 5
+            } catch {
+              Start-Sleep -Milliseconds 250
+            }
+          }
+          try {
+            if (-not $alive) { throw "gui-mode server never answered on 18083" }
+            Start-Sleep -Seconds 2
+            $p3.Refresh()
+            if ($p3.HasExited) { throw "gui-mode server died after serving its first request" }
+            Write-Output "gui-mode process alive and serving 18083 OK"
           } finally {
             Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           }
@@ -199,14 +241,48 @@ jobs:
             $l.Start()
             Start-Sleep -Seconds 90
           }
-          Start-Sleep -Seconds 5
+          # Wait until the blocker really listens (the job needs a moment to
+          # start) instead of a flat 5 s.
+          $blocked = $false
+          $deadlineB = (Get-Date).AddSeconds(15)
+          while (-not $blocked -and (Get-Date) -lt $deadlineB) {
+            try {
+              $probe = [System.Net.Sockets.TcpClient]::new()
+              $probe.Connect("127.0.0.1", 18084)
+              $probe.Close()
+              $blocked = $true
+            } catch {
+              Start-Sleep -Milliseconds 200
+            }
+          }
+          if (-not $blocked) { throw "port 18084 was never taken by the blocker job" }
           # GUI mode on purpose: the dashboard must stay alive and keep the
           # loopback management port serving even when the main port is taken
           # (headless --no-gui exits fast instead, which is checked at the end).
           $p4 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18084","--https-port","18447") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server4.log" -RedirectStandardError "server4.err"
-          Start-Sleep -Seconds 12
+          # The dashboard must come up with bind_ok=false; poll for that state
+          # instead of sleeping 12 s and hoping.
+          $s4 = $null
+          $deadline4 = (Get-Date).AddSeconds(25)
+          while (-not $s4 -and (Get-Date) -lt $deadline4) {
+            if ($p4.HasExited) {
+              Get-Content "server4.log" -ErrorAction SilentlyContinue | Select-Object -Last 30
+              Get-Content "server4.err" -ErrorAction SilentlyContinue | Select-Object -Last 30
+              throw "dashboard exited instead of surviving the busy main port"
+            }
+            try {
+              $probe4 = Invoke-WebRequest -Uri "http://127.0.0.1:8686/internal-stats" -UseBasicParsing -TimeoutSec 5
+              if ($probe4.StatusCode -eq 200 -and $probe4.Content -match '"bind_ok"\s*:\s*false') {
+                $s4 = $probe4
+              } else {
+                Start-Sleep -Milliseconds 250
+              }
+            } catch {
+              Start-Sleep -Milliseconds 250
+            }
+          }
           try {
-            $s4 = Invoke-WebRequest -Uri "http://127.0.0.1:8686/internal-stats" -UseBasicParsing -TimeoutSec 10
+            if (-not $s4) { throw "management port never reported bind_ok=false on a busy main port" }
             Write-Output ("busy-main-port: management /internal-stats HTTP " + $s4.StatusCode)
             if ($s4.StatusCode -ne 200) { throw "management port is dead while the main port is busy" }
             if ($s4.Content -notmatch '"bind_ok"\s*:\s*false') { throw "expected bind_ok=false when the main HTTP port is taken" }
@@ -227,7 +303,7 @@ jobs:
           # Headless mode is expected to fail fast when the port is taken
           # (a scheduled task should report the problem instead of idling).
           $p5 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18084","--https-port","18447","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server5.log" -RedirectStandardError "server5.err"
-          Start-Sleep -Seconds 8
+          $null = $p5.WaitForExit(20000)
           Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           if (-not $p5.HasExited) { throw "headless mode should exit when the main port is taken" }
           Write-Output ("headless mode exited as expected with code " + $p5.ExitCode)
@@ -300,7 +376,10 @@ jobs:
           path: adblock-webserver-win64.zip
           if-no-files-found: error
 
-      - name: Create GitHub Release (draft)
+      # Publishing is push/dispatch only: a pull_request run must never create
+      # or overwrite a public release.
+      - name: Publish GitHub Release (Windows zip)
+        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           : "${TAG:?TAG env var missing}"
@@ -319,6 +398,7 @@ jobs:
       # private, so its release API cannot be read without a token).
       # Skipped silently when DOH_ECH_TOKEN is not configured.
       - name: Publish zip to the public update feed (wxcvm/Doh-ECH)
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         shell: bash
         env:
@@ -347,6 +427,7 @@ jobs:
           Get-ChildItem webserver/win32/dist-installer
 
       - name: Attach installer to the release
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         shell: pwsh
         env:
@@ -361,6 +442,7 @@ jobs:
       # The in-app updater reads this fixed-tag manifest instead of the REST API
       # (60 requests/hour per IP) - see UPDATE_MANIFEST_PATH in update_win32.c.
       - name: Publish windows-manifest.json (fixed tag win11-latest)
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
