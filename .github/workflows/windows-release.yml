@@ -300,13 +300,34 @@ jobs:
             Stop-Job $blocker -ErrorAction SilentlyContinue
             Remove-Job $blocker -Force -ErrorAction SilentlyContinue
           }
+          # Wait until the loopback management port is really free again: a
+          # lingering listener would make the headless instance below take the
+          # "another instance is already running" path and exit 0, which would
+          # hide a real bind failure.
+          $released = $false
+          $deadlineR = (Get-Date).AddSeconds(10)
+          while (-not $released -and (Get-Date) -lt $deadlineR) {
+            try {
+              $probeR = [System.Net.Sockets.TcpClient]::new()
+              $probeR.Connect("127.0.0.1", 8686)
+              $probeR.Close()
+              Start-Sleep -Milliseconds 200
+            } catch {
+              $released = $true
+            }
+          }
+          if (-not $released) { throw "the management port 8686 stayed busy after stopping the dashboard" }
           # Headless mode is expected to fail fast when the port is taken
           # (a scheduled task should report the problem instead of idling).
+          $sw5 = [System.Diagnostics.Stopwatch]::StartNew()
           $p5 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18084","--https-port","18447","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server5.log" -RedirectStandardError "server5.err"
-          $null = $p5.WaitForExit(20000)
+          $exitedByItself = $p5.WaitForExit(20000)
+          $sw5.Stop()
           Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          if (-not $p5.HasExited) { throw "headless mode should exit when the main port is taken" }
-          Write-Output ("headless mode exited as expected with code " + $p5.ExitCode)
+          # Assert it left on its own: Stop-Process above would otherwise make
+          # HasExited true and the check would pass no matter what.
+          if (-not $exitedByItself) { throw "headless mode did not exit within 20s when the main port was taken" }
+          Write-Output ("headless mode exited by itself after {0:N1}s with code {1}" -f $sw5.Elapsed.TotalSeconds, $p5.ExitCode)
 
       - name: Autostart registry test
         shell: pwsh
