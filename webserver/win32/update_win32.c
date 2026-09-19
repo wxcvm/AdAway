@@ -85,6 +85,9 @@ static int version_cmp(const char *a, const char *b) {
     }
 }
 
+static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len,
+                      DWORD *out_status);
+
 /* ── Zero-API update path + on-disk answer cache ────────────────────
  * The unauthenticated REST API allows 60 requests/hour PER IP and a PC behind
  * NAT shares that budget, so 检查更新 returned 403 although the network was
