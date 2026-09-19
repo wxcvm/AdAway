@@ -565,6 +565,115 @@ static int  mode_ws     = BM_REPLY;
    caller then skips the block reply (and the blocked counter) entirely. */
 static bool s_rb_allow = false;
 
+/* ── Query log (audit/statistics) ───────────────────────────────────
+ * A small ring of the most recent REAL requests with the decision that was
+ * taken for them, so the dashboard and the Android app can show what actually
+ * happened (the counters alone cannot answer "why was this blocked?").
+ * Only the newest entries are exported in /internal-stats (bounded so the
+ * JSON always stays well below the smallest client buffer); the whole ring is
+ * persisted to <resources>/query_log.dat next to the other .dat files. */
+#define QLOG_MAX 4096
+#define QLOG_RENDER_MAX 24
+#define QLOG_JSON_MAX 4096
+enum { QLOG_PROXY = 0, QLOG_BLOCK = 1, QLOG_ALLOW = 2 };
+struct qlog_entry {
+    uint64_t ts;          /* epoch seconds */
+    uint32_t uid;         /* 0xFFFFFFFF when unknown */
+    uint16_t rtype;       /* blocked_* category hint (0 = unknown) */
+    uint8_t  action;      /* QLOG_* */
+    uint8_t  pad;
+    char     host[192];
+};
+static struct qlog_entry s_qlog[QLOG_MAX];
+static uint32_t s_qlog_pos;    /* next slot to write */
+static uint32_t s_qlog_count;  /* valid entries (<= QLOG_MAX) */
+
+static void qlog_clear(void) {
+    s_qlog_pos = 0;
+    s_qlog_count = 0;
+    memset(s_qlog, 0, sizeof(s_qlog));
+}
+
+static void qlog_add(uid_t uid, int action, struct mg_http_message *hm) {
+    struct qlog_entry *e = &s_qlog[s_qlog_pos % QLOG_MAX];
+    memset(e, 0, sizeof(*e));
+    e->ts = (uint64_t) time(NULL);
+    e->uid = (uid == (uid_t) -1) ? 0xFFFFFFFFu : (uint32_t) uid;
+    e->action = (uint8_t) action;
+    struct mg_str *hh = hm ? mg_http_get_header(hm, "Host") : NULL;
+    if (hh && hh->len) {
+        size_t n = hh->len < sizeof(e->host) - 1 ? hh->len : sizeof(e->host) - 1;
+        memcpy(e->host, hh->buf, n);
+        e->host[n] = 0;
+        char *colon = strchr(e->host, ':');
+        if (colon) *colon = 0;
+    } else if (hm && hm->uri.len) {
+        size_t n = hm->uri.len < sizeof(e->host) - 1 ? hm->uri.len : sizeof(e->host) - 1;
+        memcpy(e->host, hm->uri.buf, n);
+        e->host[n] = 0;
+    }
+    s_qlog_pos = (s_qlog_pos + 1) % QLOG_MAX;
+    if (s_qlog_count < QLOG_MAX) s_qlog_count++;
+}
+
+/* Newest first, bounded (QLOG_RENDER_MAX entries / QLOG_JSON_MAX bytes). */
+static void qlog_render(char *out, size_t cap) {
+    if (!out || cap == 0) return;
+    out[0] = 0;
+    size_t off = 0;
+    uint32_t total = s_qlog_count < QLOG_RENDER_MAX ? s_qlog_count : QLOG_RENDER_MAX;
+    for (uint32_t k = 0; k < total; k++) {
+        uint32_t idx = (s_qlog_pos + QLOG_MAX - 1 - k) % QLOG_MAX;
+        struct qlog_entry *e = &s_qlog[idx];
+        char host[400];
+        size_t h = 0;
+        for (size_t i = 0; e->host[i] && h + 1 < sizeof(host); i++) {
+            char c = e->host[i];
+            host[h++] = (c == 0x22 || c == 0x5c) ? 0x5f : c;
+        }
+        host[h] = 0;
+        int n = snprintf(out + off, cap - off,
+                         "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"host\":\"%s\"}",
+                         off ? "," : "", (unsigned long long) e->ts,
+                         (e->uid == 0xFFFFFFFFu) ? -1 : (int) e->uid,
+                         (int) e->action, host);
+        if (n <= 0 || off + (size_t) n >= cap) { out[off] = 0; break; }
+        off += (size_t) n;
+    }
+}
+
+#define QLOG_MAGIC 0x514C4F47u   /* "QLOG" */
+static void qlog_save(const char *resource_dir) {
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/query_log.dat", resource_dir);
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return;
+    uint32_t magic = QLOG_MAGIC;
+    fwrite(&magic, sizeof(magic), 1, fp);
+    fwrite(&s_qlog_pos, sizeof(s_qlog_pos), 1, fp);
+    fwrite(&s_qlog_count, sizeof(s_qlog_count), 1, fp);
+    fwrite(s_qlog, sizeof(s_qlog[0]), s_qlog_count < QLOG_MAX ? s_qlog_count : QLOG_MAX, fp);
+    fclose(fp);
+}
+
+static void qlog_load(const char *resource_dir) {
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/query_log.dat", resource_dir);
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return;
+    uint32_t magic = 0, pos = 0, count = 0;
+    if (fread(&magic, sizeof(magic), 1, fp) == 1 && magic == QLOG_MAGIC &&
+        fread(&pos, sizeof(pos), 1, fp) == 1 &&
+        fread(&count, sizeof(count), 1, fp) == 1 &&
+        count <= QLOG_MAX && pos < QLOG_MAX) {
+        size_t got = fread(s_qlog, sizeof(s_qlog[0]), count, fp);
+        if (got == count) { s_qlog_pos = pos ? pos : (uint32_t) (count % QLOG_MAX); s_qlog_count = count; }
+    }
+    fclose(fp);
+}
+
 /* Sum of every blocked_* counter — used for block_rate metrics. */
 static uint64_t stats_total_blocked(void) {
     return s_stats.blocked_images + s_stats.blocked_scripts + s_stats.blocked_styles +
@@ -2349,6 +2458,9 @@ static void ws_push_broadcast(struct settings *s) {
  */
 static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     char apps_json[4096] = "";
+    /* static: a few KB that must never sit on the 16 KB event-loop stack */
+    static char qlog_json[QLOG_JSON_MAX];
+    qlog_render(qlog_json, sizeof(qlog_json));
     int off = 0;
     for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
         int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
@@ -2449,7 +2561,8 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"apps\":[%s],"
         "\"recent_tls\":[%s],"
         "\"history\":[%s],"
-        "\"daily\":[%s]}",
+        "\"daily\":[%s],"
+        "\"query_log\":[%s]}",
         (unsigned long long)uptime,
         (double)uptime / 86400.0,
         (unsigned long long)req,
@@ -2480,7 +2593,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         s->stats_port,
         s_main_http_bound ? "true" : "false",
         listeners_json,
-        apps_json, tls_json, hist_json, daily_json);
+        apps_json, tls_json, hist_json, daily_json, qlog_json);
         if (n < 0) return 0;
         return n < (int) out_sz ? n : (int) out_sz - 1;
     }
@@ -2642,7 +2755,21 @@ static size_t block_set_load_file(const char *path) {
  * rule set must never silently disable filtering. Only entries pointing at
  * 127.0.0.1, 0.0.0.0, ::1 or :: count as blocked.
  */
+/* Extra rule source: <resources>/subscriptions.txt (one domain per line,
+   "0.0.0.0 domain" / "||domain^" accepted, # and ! comments skipped). The
+   Windows dashboard fetches the URLs and rewrites this file; the Android app
+   writes it from its rule sources. Loaded first so blocklist.txt still wins
+   on duplicates. */
+static void block_set_load_subscriptions(const char *resource_dir) {
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/subscriptions.txt", resource_dir);
+    size_t n = block_set_load_file(path);
+    if (n > 0) LOG_INFO("block set: %zu subscription domains loaded", n);
+}
+
 static void block_set_load(const char *resource_dir) {
+    block_set_load_subscriptions(resource_dir);
     free(s_block_slots);
     s_block_slots = NULL;
     s_block_cap = 0;
@@ -3461,7 +3588,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                        proxying is dropped (the first reply is still
                        streaming back to the client). */
                     if (proxy_busy(c)) return;
-                    if (proxy_start(c, s, hm, phost)) return;
+                    if (proxy_start(c, s, hm, phost)) {
+                        qlog_add(req_uid, QLOG_PROXY, hm);
+                        return;
+                    }
                 }
             }
         }
@@ -3587,6 +3717,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
            endpoint every few seconds, so an unconditional flush here used to
            rewrite ~270 KB (sni_cache.dat) plus three more files per poll. */
         persist_dat_files(s, false);
+        qlog_save(s->resource_dir);
         return;
     }
 
@@ -3632,7 +3763,15 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);
         } else if (mg_strcmp(cmd, mg_str("flush_stats")) == 0) {
             persist_dat_files(s, true);   /* forced full flush */
+        qlog_save(s->resource_dir);
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: stats flushed");
+        } else if (mg_strcmp(cmd, mg_str("reload_subscriptions")) == 0) {
+            block_set_load(s->resource_dir);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: subscriptions reloaded");
+        } else if (mg_strcmp(cmd, mg_str("clear_query_log")) == 0) {
+            qlog_clear();
+            qlog_save(s->resource_dir);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: query log cleared");
         } else if (mg_strcmp(cmd, mg_str("shutdown")) == 0) {
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: shutting down");
             s_sig_num = SIGTERM;  /* trigger main loop exit */
@@ -3646,12 +3785,14 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        realistic "empty" resource - see reply_blocked_by_type(). */
     if (reply_blocked_by_type(c, hm)) {
         if (s_rb_allow) {
+            qlog_add(req_uid, QLOG_ALLOW, hm);
             /* 该类型被设为 BM_ALLOW（放行）：不拦截、不计入拦截统计、不返回
                占位资源，只回一个空的 200，由客户端自行处理。 */
             s_rb_allow = false;
             mg_http_reply(c, 200, CORS_HDR "Cache-Control: no-store\r\n", "");
             return;
         }
+        qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
         hist_add(HIST_BLOCKED);
         struct appstat *ba = app_find_or_add(conn_load_uid(c));
         if (ba) ba->blocked++;
@@ -4062,6 +4203,7 @@ int main(int argc, char *argv[]) {
 
     s_stats.start_time_ms = mg_millis();
     load_stats(&s);  /* lifetime counters survive restarts */
+    qlog_load(s.resource_dir);   /* recent request/decision history */
 #ifdef _WIN32
     harden_ca_key_acl(s.resource_dir);   /* audit D2: key readable by the owner only */
 #endif
