@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.22
+      TAG: win11-webserver-v1.23
     steps:
       - uses: actions/checkout@v6
 
@@ -357,3 +357,27 @@ jobs:
           if (-not $env:TAG) { Write-Error "TAG env var missing"; exit 1 }
           gh release upload "$env:TAG" $exe --repo "${{ github.repository }}" --clobber
           Write-Host "attached $exe to $env:TAG"
+
+      # The in-app updater reads this fixed-tag manifest instead of the REST API
+      # (60 requests/hour per IP) - see UPDATE_MANIFEST_PATH in update_win32.c.
+      - name: Publish windows-manifest.json (fixed tag win11-latest)
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          EXE=webserver/win32/dist-installer/adblock-webserver-setup.exe
+          ZIP="$GITHUB_WORKSPACE/adblock-webserver-win64.zip"
+          if [ ! -f "$EXE" ]; then echo "installer missing - manifest skipped"; exit 0; fi
+          EXE_SHA=$(sha256sum "$EXE" | cut -d' ' -f1)
+          ZIP_SHA=$(sha256sum "$ZIP" | cut -d' ' -f1)
+          VER="${TAG#win11-webserver-v}"
+          BASE="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          printf '{\n  "tag": "%s",\n  "version": "%s",\n  "exe": "adblock-webserver-setup.exe",\n  "exe_url": "%s/adblock-webserver-setup.exe",\n  "exe_sha256": "sha256:%s",\n  "zip_url": "%s/adblock-webserver-win64.zip",\n  "zip_sha256": "sha256:%s",\n  "published_at": "%s"\n}\n' \
+            "$TAG" "$VER" "$BASE" "$EXE_SHA" "$BASE" "$ZIP_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > windows-manifest.json
+          cat windows-manifest.json
+          gh release view win11-latest --repo "${{ github.repository }}" >/dev/null 2>&1 \
+            || gh release create win11-latest --repo "${{ github.repository }}" \
+                 --title "Windows 最新版（固定标签）" \
+                 --notes "固定标签：windows-manifest.json 每次发布时由 CI 覆盖，应用内更新直接读它，不经过 GitHub API，因此不受 60 次/小时限流影响。"
+          gh release upload win11-latest windows-manifest.json --repo "${{ github.repository }}" --clobber

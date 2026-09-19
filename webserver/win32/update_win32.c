@@ -85,6 +85,100 @@ static int version_cmp(const char *a, const char *b) {
     }
 }
 
+/* ── Zero-API update path + on-disk answer cache ────────────────────
+ * The unauthenticated REST API allows 60 requests/hour PER IP and a PC behind
+ * NAT shares that budget, so 检查更新 returned 403 although the network was
+ * fine. Fix: (1) the fixed tag win11-latest always carries
+ * windows-manifest.json, fetched as a plain release download (no API at all);
+ * (2) if that is unreachable, the API answer is cached on disk - a successful
+ * one is reused for UPDATE_CACHE_TTL_SEC and a 403/429 is not repeated before
+ * UPDATE_COOLDOWN_SEC. */
+#define UPDATE_MANIFEST_HOST L"github.com"
+#define UPDATE_MANIFEST_PATH L"/wxcvm/AdAway/releases/download/win11-latest/windows-manifest.json"
+#define UPDATE_CACHE_TTL_SEC   (6u * 3600u)
+#define UPDATE_COOLDOWN_SEC    (30u * 60u)
+
+struct update_cache {
+    int   rc;
+    DWORD status;
+    DWORD checked_at;
+    char  tag[128];
+    char  url[1024];
+    char  api_url[1024];
+    char  sha256[128];
+};
+
+static void update_cache_path(char *out, size_t cap) {
+    wchar_t exe[MAX_PATH] = L"";
+    out[0] = 0;
+    if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return;
+    wchar_t *slash = wcsrchr(exe, L'\\');
+    if (slash) *slash = 0;
+    char dir[MAX_PATH * 3] = "";
+    WideCharToMultiByte(CP_UTF8, 0, exe, -1, dir, sizeof(dir), NULL, NULL);
+    snprintf(out, cap, "%s/resources/update_cache.json", dir);
+}
+
+static bool update_cache_load(struct update_cache *c) {
+    char path[MAX_PATH * 3];
+    memset(c, 0, sizeof(*c));
+    update_cache_path(path, sizeof(path));
+    if (!path[0]) return false;
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    char buf[4096];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    buf[n] = 0;
+    fclose(f);
+    char tmp[32] = "";
+    if (json_string(buf, "\"rc\"", buf, tmp, sizeof(tmp))) c->rc = atoi(tmp);
+    if (json_string(buf, "\"status\"", buf, tmp, sizeof(tmp))) c->status = (DWORD) atoi(tmp);
+    if (json_string(buf, "\"checked_at\"", buf, tmp, sizeof(tmp))) c->checked_at = (DWORD) atoi(tmp);
+    json_string(buf, "\"tag\"", buf, c->tag, sizeof(c->tag));
+    json_string(buf, "\"url\"", buf, c->url, sizeof(c->url));
+    json_string(buf, "\"api_url\"", buf, c->api_url, sizeof(c->api_url));
+    json_string(buf, "\"sha256\"", buf, c->sha256, sizeof(c->sha256));
+    return c->checked_at != 0;
+}
+
+static void update_cache_save(const struct update_cache *c) {
+    char path[MAX_PATH * 3];
+    update_cache_path(path, sizeof(path));
+    if (!path[0]) return;
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "{\n  \"rc\": \"%d\",\n  \"status\": \"%lu\",\n  \"checked_at\": \"%lu\",\n"
+               "  \"tag\": \"%s\",\n  \"url\": \"%s\",\n  \"api_url\": \"%s\",\n"
+               "  \"sha256\": \"%s\"\n}\n",
+            c->rc, (unsigned long) c->status, (unsigned long) c->checked_at,
+            c->tag, c->url, c->api_url, c->sha256);
+    fclose(f);
+}
+
+/* Fixed-tag manifest: 1 newer, 0 up to date (no API needed), -1 unavailable. */
+static int manifest_check(wchar_t *tag_out, size_t tag_cap, wchar_t *url_out, size_t url_cap,
+                          char *digest_out, size_t digest_cap, DWORD *status) {
+    size_t len = 0;
+    DWORD st = 0;
+    char *json = http_get(UPDATE_MANIFEST_HOST, UPDATE_MANIFEST_PATH, &len, &st);
+    if (status) *status = st;
+    if (!json) return -1;
+    char tag[128] = "", ver[64] = "", exe_url[1024] = "", sha[128] = "";
+    json_string(json, "\"tag\"", json, tag, sizeof(tag));
+    json_string(json, "\"version\"", json, ver, sizeof(ver));
+    json_string(json, "\"exe_url\"", json, exe_url, sizeof(exe_url));
+    json_string(json, "\"exe_sha256\"", json, sha, sizeof(sha));
+    free(json);
+    if (!ver[0]) return -1;
+    if (version_cmp(ver, ADBLOCK_APP_VERSION) > 0 && exe_url[0]) {
+        utf8_to_wide(tag[0] ? tag : ver, tag_out, tag_cap);
+        utf8_to_wide(exe_url, url_out, url_cap);
+        if (digest_out && digest_cap) snprintf(digest_out, digest_cap, "%s", sha);
+        return 1;
+    }
+    return 0;
+}
+
 /* HTTP(S) GET (system proxy aware, follows redirects). Caller frees. */
 static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len,
                       DWORD *out_status) {
@@ -343,15 +437,47 @@ static DWORD WINAPI check_thread(LPVOID param) {
     char digest[128] = "";
     struct update_info *info = NULL;
     DWORD st = 0;
-    int rc = find_latest_update(tag, 128, url, 1024, digest, sizeof(digest),
-                                api_url, 1024, &st);
+    /* 1) fixed-tag manifest: no REST API, therefore no rate limit at all. */
+    int rc = manifest_check(tag, 128, url, 1024, digest, sizeof(digest), &st);
     if (rc < 0) {
-        /* One retry: a transient DNS/TLS/proxy hiccup or a GitHub API rate
-           limit must never be reported as "already up to date". */
-        Sleep(1500);
-        st = 0;
-        rc = find_latest_update(tag, 128, url, 1024, digest, sizeof(digest),
-                                api_url, 1024, &st);
+        /* 2) API fallback, always mediated by the on-disk answer cache. */
+        struct update_cache c;
+        bool have = update_cache_load(&c);
+        DWORD now = (DWORD) (GetTickCount64() / 1000ULL);
+        bool fresh = have && c.rc >= 0 && (now - c.checked_at) < UPDATE_CACHE_TTL_SEC;
+        bool cooling = have && (c.status == 403 || c.status == 429) &&
+                       (now - c.checked_at) < UPDATE_COOLDOWN_SEC;
+        if (fresh || cooling) {
+            st = c.status;
+            rc = c.rc;
+            utf8_to_wide(c.tag, tag, 128);
+            utf8_to_wide(c.url, url, 1024);
+            utf8_to_wide(c.api_url, api_url, 1024);
+            snprintf(digest, sizeof(digest), "%s", c.sha256);
+        } else {
+            st = 0;
+            rc = find_latest_update(tag, 128, url, 1024, digest, sizeof(digest),
+                                    api_url, 1024, &st);
+            if (rc < 0 && st != 403 && st != 429) {
+                /* retry only non-rate-limit failures: a 403 already consumed one
+                   of the 60 requests/hour, a retry would waste another. */
+                Sleep(1500);
+                st = 0;
+                rc = find_latest_update(tag, 128, url, 1024, digest, sizeof(digest),
+                                        api_url, 1024, &st);
+            }
+            struct update_cache nc;
+            char narrow[1024] = "";
+            memset(&nc, 0, sizeof(nc));
+            nc.rc = rc;
+            nc.status = st;
+            nc.checked_at = (DWORD) (GetTickCount64() / 1000ULL);
+            if (tag[0]) { WideCharToMultiByte(CP_UTF8, 0, tag, -1, narrow, sizeof(narrow), NULL, NULL); snprintf(nc.tag, sizeof(nc.tag), "%s", narrow); }
+            if (url[0]) { WideCharToMultiByte(CP_UTF8, 0, url, -1, narrow, sizeof(narrow), NULL, NULL); snprintf(nc.url, sizeof(nc.url), "%s", narrow); }
+            if (api_url[0]) { WideCharToMultiByte(CP_UTF8, 0, api_url, -1, narrow, sizeof(narrow), NULL, NULL); snprintf(nc.api_url, sizeof(nc.api_url), "%s", narrow); }
+            snprintf(nc.sha256, sizeof(nc.sha256), "%s", digest);
+            update_cache_save(&nc);
+        }
     }
     if (rc > 0) {
         info = (struct update_info *) calloc(1, sizeof(*info));
@@ -363,7 +489,7 @@ static DWORD WINAPI check_thread(LPVOID param) {
         }
     } else if (rc < 0) {
         if (st == 403 || st == 429)
-            swprintf(s_check_error, 192, L"GitHub API 限流（HTTP %lu），请稍后再试", (unsigned long) st);
+            swprintf(s_check_error, 192, L"GitHub API 限流（HTTP %lu）；已改用本地缓存，%lu 分钟后自动重试", (unsigned long) st, (unsigned long) (UPDATE_COOLDOWN_SEC / 60));
         else if (st > 0)
             swprintf(s_check_error, 192, L"GitHub API 返回 HTTP %lu", (unsigned long) st);
         else
