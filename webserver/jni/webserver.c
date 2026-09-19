@@ -2764,7 +2764,1689 @@ static void block_set_load_subscriptions(const char *resource_dir) {
     if (!resource_dir || !resource_dir[0]) return;
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/subscriptions.txt", resource_dir);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return;
+    /* Self-contained parser: block_set_load_file() is platform-specific and is
+       not visible in every build, and the subscription file only ever holds
+       one domain per line. */
+    char line[512];
+    size_t n = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        char *s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s == 0 || *s == '#' || *s == '!' || *s == '\r' || *s == '\n') continue;
+        if (s[0] == '|' && s[1] == '|') {
+            s += 2;                                   /* AdGuard/ABP: ||domain^ */
+        } else {
+            char *sp = strpbrk(s, " \t");            /* hosts: 0.0.0.0 domain */
+            if (sp) { while (*sp == ' ' || *sp == '\t') sp++; s = sp; }
+        }
+        char *end = s;
+        while (*end && *end != ' ' && *end != '\t' && *end != '\r' && *end != '\n' &&
+               *end != '^' && *end != '/' && *end != '
+
+static void block_set_load(const char *resource_dir) {
+    block_set_load_subscriptions(resource_dir);
+    free(s_block_slots);
+    s_block_slots = NULL;
+    s_block_cap = 0;
+    s_block_used = 0;
+#ifndef _WIN32
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/blocklist.txt", resource_dir);
     size_t n = block_set_load_file(path);
+    if (n == 0) {
+        snprintf(path, sizeof(path), "/system/etc/hosts");
+        n = block_set_load_file(path);
+    }
+    LOG_INFO("proxy: %zu blocked hosts loaded from %s", n, path);
+#else
+    (void) resource_dir;
+#endif
+}
+
+static bool host_is_local(const char *h) {
+    if (!h || !*h) return true;
+    if (strcasecmp(h, "localhost") == 0) return true;
+    if (strcasecmp(h, "localhost.localdomain") == 0) return true;
+    if (strncmp(h, "127.", 4) == 0) return true;
+    if (strcmp(h, "::1") == 0) return true;
+    if (strncmp(h, "::ffff:127.", 11) == 0) return true;
+    return false;
+}
+
+/* Element-hiding stylesheet injected into proxied HTML pages. */
+static const char kHideCss[] =
+    "<style id=\"adblock-hide\">"
+    ".adsbygoogle,ins.adsbygoogle,[id^=\"google_ads\"],[id^=\"div-gpt-ad\"],"
+    "[class^=\"ad-\"],[class^=\"ads-\"],[class^=\"advert\"],[id^=\"ad-\"],[id^=\"ads-\"],"
+    "[class*=\" ad-\"],[class*=\" ads-\"],[data-ad-slot],[data-ad-client],"
+    "iframe[src*=\"doubleclick.net\"],iframe[src*=\"googlesyndication.com\"],"
+    "iframe[src*=\"adsystem\"],[class$=\"-ad\"],[class$=\"-ads\"]"
+    "{display:none!important;visibility:hidden!important}"
+    "</style>";
+
+/* Extract the host of an URL and test it against the block list. */
+static bool url_host_blocked(const char *u, size_t n) {
+    size_t i = 0;
+    while (i < n && (u[i] == ' ' || u[i] == '\t')) i++;
+    if (i + 1 < n && u[i] == '/' && u[i + 1] == '/') {
+        i += 2;
+    } else {
+        size_t s = i;
+        while (i < n && u[i] != ':' && u[i] != '/' && u[i] != '?' && u[i] != '#') i++;
+        if (i < n && u[i] == ':') {
+            i++;
+            while (i < n && u[i] == '/') i++;
+        } else {
+            i = s;
+        }
+    }
+    size_t start = i;
+    while (i < n && u[i] != '/' && u[i] != ':' && u[i] != '?' && u[i] != '#' &&
+           u[i] != '"' && u[i] != '\'' && u[i] != ' ' && u[i] != '\t') i++;
+    size_t len = i - start;
+    for (size_t k = start; k < start + len; k++) {
+        if (u[k] == '@') { len -= (k - start + 1); start = k + 1; break; }
+    }
+    return len > 0 && block_set_contains(u + start, len);
+}
+
+/*
+ * Rewrite an HTML body: drop external resource tags that point at a
+ * blocked host and inject the element-hiding stylesheet after <head>.
+ * Returns the new length (may exceed the input by the stylesheet size).
+ */
+/*
+ * Cosmetic filtering: the app exports the AdGuard/adblock element hiding
+ * rules (##selector) it collected from the sources to <resource>/cosmetic.css;
+ * they are injected into every filtered page next to the built-in stylesheet.
+ */
+static char  *s_cosmetic_css;
+static size_t s_cosmetic_len;
+
+static void load_cosmetic_css(const char *resource_dir) {
+    free(s_cosmetic_css);
+    s_cosmetic_css = NULL;
+    s_cosmetic_len = 0;
+#ifndef _WIN32
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/cosmetic.css", resource_dir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > (long) (512 * 1024)) { fclose(f); return; }
+    char *buffer = (char *) malloc((size_t) size + 1);
+    if (!buffer) { fclose(f); return; }
+    size_t got = fread(buffer, 1, (size_t) size, f);
+    fclose(f);
+    buffer[got] = '\0';
+    s_cosmetic_css = buffer;
+    s_cosmetic_len = got;
+    LOG_INFO("cosmetic filter: %zu bytes loaded from %s", got, path);
+#else
+    (void) resource_dir;
+#endif
+}
+
+static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
+    size_t i = 0, o = 0;
+    bool injected = false;
+#define AB_PUT(ch) do { if (o < cap) out[o] = (char) (ch); o++; } while (0)
+    while (i < n) {
+        if (in[i] != '<') { AB_PUT(in[i]); i++; continue; }
+        size_t j = i + 1;
+        bool closing = false;
+        if (j < n && in[j] == '/') { closing = true; j++; }
+        size_t name_at = j;
+        while (j < n && ((in[j] >= 'a' && in[j] <= 'z') || (in[j] >= 'A' && in[j] <= 'Z'))) j++;
+        size_t name_len = j - name_at;
+        if (name_len == 0) { AB_PUT(in[i]); i++; continue; }
+        size_t k = j;
+        bool inq = false;
+        char q = 0;
+        while (k < n) {
+            char ch = in[k];
+            if (inq) { if (ch == q) inq = false; }
+            else if (ch == '"' || ch == '\'') { inq = true; q = ch; }
+            else if (ch == '>') break;
+            k++;
+        }
+        size_t tag_end = (k < n) ? k + 1 : n;
+        if (!closing) {
+            static const char *kRes[] = {"script", "iframe", "img", "link", "embed",
+                                         "object", "source", "ins", "video", "audio", NULL};
+            bool resource = false;
+            for (int t = 0; kRes[t]; t++) {
+                if (name_len == strlen(kRes[t]) &&
+                    strncasecmp(in + name_at, kRes[t], name_len) == 0) { resource = true; break; }
+            }
+            if (resource) {
+                static const char *kAttrs[] = {"src", "href", "data-src", "data-original", "poster", NULL};
+                bool blocked = false;
+                for (int t = 0; kAttrs[t] && !blocked; t++) {
+                    size_t alen = strlen(kAttrs[t]);
+                    for (size_t p = j; p + alen < tag_end; p++) {
+                        if (strncasecmp(in + p, kAttrs[t], alen) != 0) continue;
+                        if (p > j && in[p - 1] != ' ' && in[p - 1] != '\t' && in[p - 1] != '\n' && in[p - 1] != '\r') continue;
+                        size_t v = p + alen;
+                        while (v < tag_end && (in[v] == ' ' || in[v] == '\t')) v++;
+                        if (v >= tag_end || in[v] != '=') continue;
+                        v++;
+                        while (v < tag_end && (in[v] == ' ' || in[v] == '\t')) v++;
+                        char quote = 0;
+                        if (v < tag_end && (in[v] == '"' || in[v] == '\'')) { quote = in[v]; v++; }
+                        size_t vs = v;
+                        while (v < tag_end && (quote ? in[v] != quote
+                                                     : (in[v] != ' ' && in[v] != '>' && in[v] != '\t' && in[v] != '\n'))) v++;
+                        if (url_host_blocked(in + vs, v - vs)) { blocked = true; break; }
+                    }
+                }
+                if (blocked) { i = tag_end; continue; }   /* drop the whole tag */
+            }
+            if (!injected && name_len == 4 && strncasecmp(in + name_at, "head", 4) == 0) {
+                for (size_t p = i; p < tag_end; p++) AB_PUT(in[p]);
+                for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+                for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
+                injected = true;
+                i = tag_end;
+                continue;
+            }
+        }
+        for (size_t p = i; p < tag_end; p++) AB_PUT(in[p]);
+        i = tag_end;
+    }
+    if (!injected) {
+        for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+        for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
+    }
+#undef AB_PUT
+    return o;
+}
+
+/*
+ * Persist the very same JSON snapshot the app polls from /internal-stats, so
+ * the statistics screens keep working when no HTTP port can be reached at all
+ * (30xx port taken, server not running for a moment, ...).
+ */
+static void write_stats_json_file(struct settings *s) {
+    if (!s || !s->init || !s->resource_dir[0]) return;
+    static char body[16384];
+    int n = build_stats_json(s, body, sizeof(body));
+    if (n <= 0) return;
+    char path[PATH_MAX], tmp[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/stats.json", s->resource_dir);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *fp = fopen(tmp, "wb");
+    if (!fp) return;
+    fwrite(body, 1, (size_t) n, fp);
+    fclose(fp);
+    remove(path);
+    rename(tmp, path);
+}
+
+/* ── proxy plumbing ── */
+static void proxy_state_free(struct proxy_state *st) {
+    if (!st) return;
+    for (int i = 0; i < PROXY_MAX; i++) {
+        if (s_proxies[i] == st) { s_proxies[i] = NULL; s_proxy_active--; break; }
+    }
+    if (s_proxy_active < 0) s_proxy_active = 0;
+    free(st->req);
+    free(st->buf);
+    free(st);
+}
+
+static void proxy_drop_for_client(struct mg_connection *c) {
+    for (int i = 0; i < PROXY_MAX; i++) {
+        struct proxy_state *st = s_proxies[i];
+        if (st && st->client == c) {
+            st->client = NULL;
+            if (st->up) st->up->is_closing = 1;
+        }
+    }
+}
+
+static void proxy_send_raw(struct proxy_state *st, const char *data, size_t n) {
+    if (st->client && n) mg_send(st->client, data, n);
+}
+
+static void proxy_fail(struct proxy_state *st, int code, const char *msg) {
+    if (st->replied || !st->client) return;
+    char head[320];
+    int n = snprintf(head, sizeof(head),
+                     "HTTP/1.1 %d %s\r\nContent-Type: text/plain; charset=utf-8\r\n"
+                     "Content-Length: %u\r\nConnection: close\r\n\r\n%s",
+                     code, msg, (unsigned) strlen(msg), msg);
+    if (n > 0) mg_send(st->client, head, (size_t) n);
+    st->replied = true;
+    st->client->is_draining = 1;
+}
+
+static bool proxy_buf_append(struct proxy_state *st, const char *d, size_t n) {
+    size_t need = st->buf_len + n;
+    if (need > PROXY_BUF_MAX) return false;
+    if (need > st->buf_cap) {
+        size_t cap = st->buf_cap ? st->buf_cap : 65536;
+        while (cap < need) cap *= 2;
+        char *p = (char *) realloc(st->buf, cap);
+        if (!p) return false;
+        st->buf = p;
+        st->buf_cap = cap;
+    }
+    memcpy(st->buf + st->buf_len, d, n);
+    st->buf_len += n;
+    return true;
+}
+
+/* Rebuild an HTML response with the filtered body. */
+static void proxy_finish_filtered(struct proxy_state *st) {
+    if (!st->client || !st->buf || !st->headers_done) return;
+    size_t body_off = st->head_len;
+    size_t body_len = st->buf_len > body_off ? st->buf_len - body_off : 0;
+    size_t cap = body_len + 2048 + s_cosmetic_len;
+    char *filtered = (char *) malloc(cap);
+    if (!filtered) { proxy_send_raw(st, st->buf, st->buf_len); st->replied = true; return; }
+    size_t flen = html_filter(st->buf + body_off, body_len, filtered, cap);
+    /* status line first */
+    size_t line_end = 0;
+    while (line_end + 1 < body_off &&
+           !(st->buf[line_end] == '\r' && st->buf[line_end + 1] == '\n')) line_end++;
+    if (line_end + 2 > body_off) line_end = body_off - 2;
+    mg_send(st->client, st->buf, line_end + 2);
+    /* keep the origin headers except the ones we have to own */
+    static const char *kDrop[] = {"content-length:", "transfer-encoding:", "content-encoding:",
+                                  "connection:", "keep-alive:", NULL};
+    size_t p = line_end + 2;
+    while (p + 1 < body_off) {
+        size_t e = p;
+        while (e + 1 < body_off && !(st->buf[e] == '\r' && st->buf[e + 1] == '\n')) e++;
+        size_t llen = e - p;
+        if (llen == 0) break;
+        bool skip = false;
+        for (int t = 0; kDrop[t]; t++) {
+            size_t dl = strlen(kDrop[t]);
+            if (llen >= dl && strncasecmp(st->buf + p, kDrop[t], dl) == 0) { skip = true; break; }
+        }
+        if (!skip) mg_send(st->client, st->buf + p, llen + 2);
+        p = e + 2;
+    }
+    char head[96];
+    int hl = snprintf(head, sizeof(head),
+                      "Content-Length: %u\r\nConnection: close\r\n\r\n", (unsigned) flen);
+    if (hl > 0) mg_send(st->client, head, (size_t) hl);
+    mg_send(st->client, filtered, flen);
+    st->replied = true;
+    st->client->is_draining = 1;
+    free(filtered);
+}
+
+static void proxy_on_data(struct proxy_state *st, const char *data, size_t n) {
+    if (st->headers_done) {
+        if (!st->filter_body) { proxy_send_raw(st, data, n); st->replied = true; return; }
+        if (!proxy_buf_append(st, data, n)) {
+            /* response grew too large: stop filtering, stream what we have */
+            st->filter_body = false;
+            proxy_send_raw(st, st->buf, st->buf_len);
+            st->replied = true;
+            free(st->buf); st->buf = NULL; st->buf_len = 0; st->buf_cap = 0;
+        }
+        return;
+    }
+    if (!proxy_buf_append(st, data, n)) {
+        proxy_fail(st, 502, "Response too large");
+        if (st->up) st->up->is_closing = 1;
+        return;
+    }
+    size_t hend = 0;
+    for (size_t i = 0; i + 3 < st->buf_len; i++) {
+        if (st->buf[i] == '\r' && st->buf[i + 1] == '\n' &&
+            st->buf[i + 2] == '\r' && st->buf[i + 3] == '\n') { hend = i + 4; break; }
+    }
+    if (hend == 0) return;   /* headers still incomplete */
+    char ctype[64];
+    ctype[0] = '\0';
+    bool encoded = false;
+    for (size_t i = 0; i + 13 < hend; i++) {
+        if (ctype[0] == '\0' && strncasecmp(st->buf + i, "content-type:", 13) == 0) {
+            size_t v = i + 13;
+            while (v < hend && (st->buf[v] == ' ' || st->buf[v] == '\t')) v++;
+            size_t c = 0;
+            while (v < hend && c < sizeof(ctype) - 1 &&
+                   st->buf[v] != '\r' && st->buf[v] != '\n' && st->buf[v] != ';') ctype[c++] = st->buf[v++];
+            ctype[c] = '\0';
+        } else if (strncasecmp(st->buf + i, "content-encoding:", 17) == 0 ||
+                   strncasecmp(st->buf + i, "transfer-encoding:", 18) == 0) {
+            /* Compressed or chunked bodies must not be rewritten: stream them. */
+            encoded = true;
+        }
+    }
+    st->headers_done = true;
+    st->head_len = hend;
+    bool html = !encoded &&
+                (strncasecmp(ctype, "text/html", 9) == 0 ||
+                 strncasecmp(ctype, "application/xhtml", 17) == 0);
+    if (html) {
+        st->filter_body = true;
+        return;
+    }
+    /* non-HTML: relay headers + body as they are */
+    proxy_send_raw(st, st->buf, st->buf_len);
+    st->replied = true;
+    free(st->buf);
+    st->buf = NULL;
+    st->buf_len = 0;
+    st->buf_cap = 0;
+}
+
+static void proxy_fn(struct mg_connection *c, int ev, void *ev_data) {
+    (void) ev_data;
+    struct proxy_state *st = (struct proxy_state *) c->fn_data;
+    if (!st) return;
+    if (ev == MG_EV_CONNECT) {
+        if (st->tls) {
+            struct mg_tls_opts o = {0};
+            o.name = mg_str(st->host);
+            o.skip_verification = true;   /* this server is a MITM by design */
+            mg_tls_init(c, &o);
+        }
+        st->connected = true;
+        return;
+    }
+    if (ev == MG_EV_ERROR) {
+        proxy_fail(st, 502, "Bad Gateway");
+        return;
+    }
+    if (ev == MG_EV_READ) {
+        proxy_on_data(st, (const char *) c->recv.buf, c->recv.len);
+        c->recv.len = 0;
+        return;
+    }
+    if (ev == MG_EV_POLL) {
+        uint64_t now = mg_millis();
+        uint64_t limit = st->connected ? PROXY_TIMEOUT_MS : PROXY_CONNECT_TIMEOUT_MS;
+        if (!st->replied && now - st->started_ms > limit) {
+            proxy_fail(st, 504, "Gateway Timeout");
+            c->is_closing = 1;
+        }
+        return;
+    }
+    if (ev == MG_EV_CLOSE) {
+        if (st->filter_body && !st->replied && st->buf) proxy_finish_filtered(st);
+        if (!st->replied) proxy_fail(st, 502, "Bad Gateway");
+        if (st->client) st->client->is_draining = 1;
+        proxy_state_free(st);
+        c->fn_data = NULL;
+    }
+}
+
+/* Is a proxy request currently in flight for this client connection? */
+static bool proxy_busy(struct mg_connection *c) {
+    if (s_proxy_active == 0) return false;   /* fast path: nothing to scan */
+    for (int i = 0; i < PROXY_MAX; i++) {
+        if (s_proxies[i] && s_proxies[i]->client == c) return true;
+    }
+    return false;
+}
+
+static bool proxy_start(struct mg_connection *c, struct settings *s,
+                        struct mg_http_message *hm, const char *host) {
+    (void) s;
+    if (!s_mgr) return false;
+    for (int i = 0; i < PROXY_MAX; i++) {
+        if (s_proxies[i] && s_proxies[i]->client == c) return false;
+    }
+    struct proxy_state *st = (struct proxy_state *) calloc(1, sizeof(*st));
+    if (!st) return false;
+    st->client = c;
+    snprintf(st->host, sizeof(st->host), "%s", host);
+    st->tls = c->is_tls ? true : false;
+    st->port = st->tls ? 443 : 80;
+    st->started_ms = mg_millis();
+
+    size_t cap = 2048 + hm->head.len + hm->body.len;
+    st->req = (char *) malloc(cap);
+    if (!st->req) { free(st); return false; }
+    int n = snprintf(st->req, cap, "%.*s %.*s HTTP/1.0\r\nHost: %s\r\n",
+                     (int) hm->method.len, hm->method.buf,
+                     (int) hm->uri.len, hm->uri.buf, st->host);
+    if (n < 0) { free(st->req); free(st); return false; }
+    size_t off = (size_t) n;
+    /* Forward the client headers except hop-by-hop ones and
+       Accept-Encoding (identity keeps HTML filterable). */
+    const char *hdrs = hm->head.buf;
+    size_t hlen = hm->head.len;
+    size_t first_eol = 0;
+    while (first_eol + 1 < hlen && !(hdrs[first_eol] == '\r' && hdrs[first_eol + 1] == '\n')) first_eol++;
+    size_t p = (first_eol + 2 <= hlen) ? first_eol + 2 : hlen;
+    static const char *kSkip[] = {"host:", "connection:", "proxy-connection:", "keep-alive:",
+                                  "transfer-encoding:", "te:", "trailer:", "upgrade:",
+                                  "accept-encoding:", "proxy-authorization:", "content-length:", NULL};
+    while (p + 1 < hlen) {
+        size_t e = p;
+        while (e + 1 < hlen && !(hdrs[e] == '\r' && hdrs[e + 1] == '\n')) e++;
+        size_t llen = e - p;
+        if (llen == 0) break;
+        bool skip = false;
+        for (int t = 0; kSkip[t]; t++) {
+            size_t sl = strlen(kSkip[t]);
+            if (llen >= sl && strncasecmp(hdrs + p, kSkip[t], sl) == 0) { skip = true; break; }
+        }
+        if (!skip && off + llen + 2 < cap) {
+            memcpy(st->req + off, hdrs + p, llen + 2);
+            off += llen + 2;
+        }
+        p = e + 2;
+    }
+    if (hm->body.len > 0) {
+        int bl = snprintf(st->req + off, cap - off, "Content-Length: %u\r\n\r\n",
+                          (unsigned) hm->body.len);
+        if (bl < 0) { free(st->req); free(st); return false; }
+        off += (size_t) bl;
+        memcpy(st->req + off, hm->body.buf, hm->body.len);
+        off += hm->body.len;
+    } else {
+        memcpy(st->req + off, "\r\n", 2);
+        off += 2;
+    }
+    st->req_len = off;
+
+    char url[320];
+    snprintf(url, sizeof(url), "tcp://%s:%d", st->host, st->port);
+    struct mg_connection *up = mg_connect(s_mgr, url, proxy_fn, st);
+    if (!up) { free(st->req); free(st); return false; }
+    st->up = up;
+    for (int i = 0; i < PROXY_MAX; i++) {
+        if (!s_proxies[i]) { s_proxies[i] = st; s_proxy_active++; break; }
+    }
+    mg_send(up, st->req, st->req_len);
+    if (s->debug) LOG_INFO("[proxy] %s%s", st->tls ? "https://" : "http://", st->host);
+    return true;
+}
+
+static void fn(struct mg_connection *c, int ev, void *ev_data) {
+    if (ev == MG_EV_ACCEPT) {
+        /* Atomic cap check + increment (see the note on
+           s_active_connections above — defensive, not a live race). */
+        for (;;) {
+            int cur = atomic_load(&s_active_connections);
+            if (cur >= MAX_CONNECTIONS) {
+                c->is_closing = 1; return;
+            }
+            if (__atomic_compare_exchange_n(&s_active_connections, &cur,
+                    cur + 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+                break;
+        }
+        /* Connections are counted when the first REAL request arrives (see the
+           accounting block in fn()): the app and the dashboard poll
+           /internal-stats once a second, and counting those accept()s made the
+           connection totals and the hourly chart look like permanent traffic. */
+        uint64_t t = mg_millis();
+        memcpy(c->data, &t, sizeof(t));
+        c->data[sizeof(t)] = 1;
+
+        /* Per-app: the uid is resolved when the first request arrives
+           (the connection is alive and present in /proc then). We just
+           initialize the cached uid to -1 here. */
+        conn_store_uid(c, (uid_t)-1);
+
+        if (c->is_tls && c->fn_data) {
+            struct settings *s = (struct settings *)c->fn_data;
+            mg_tls_init(c, &s->tls_opts);
+
+            /* Register SNI callback so we can issue per-domain certs */
+            SSL_CTX *ctx = mg_conn_ssl_ctx(c);
+            if (ctx) {
+                SSL_CTX_set_tlsext_servername_callback(ctx, sni_callback);
+                SSL_CTX_set_tlsext_servername_arg(ctx, &s->ca);
+            }
+        }
+        return;
+    }
+
+    if (ev == MG_EV_CLOSE) {
+        /* Drop any in-flight transparent-proxy request of this client. */
+        proxy_drop_for_client(c);
+        /* Unregister from the WS push list. */
+        pthread_mutex_lock(&s_sni_mutex);
+        for (int i = 0; i < WS_PUSH_MAX; i++) {
+            if (ws_clients[i] == c) { ws_clients[i] = NULL; break; }
+        }
+        pthread_mutex_unlock(&s_sni_mutex);
+        if (c->data[sizeof(uint64_t)]) atomic_sub_fetch(&s_active_connections, 1);
+        return;
+    }
+
+    /* WebSocket: keep the connection open (client pulls or we push). */
+    if (ev == MG_EV_WS_OPEN) {
+        /* Register this connection as a push subscriber. */
+        pthread_mutex_lock(&s_sni_mutex);  /* reuse cache mutex as a cheap lock */
+        for (int i = 0; i < WS_PUSH_MAX; i++) {
+            if (ws_clients[i] == NULL) { ws_clients[i] = c; break; }
+        }
+        pthread_mutex_unlock(&s_sni_mutex);
+        /* Send a first snapshot immediately so the UI has data. */
+        struct settings *ws_s = (struct settings *)c->fn_data;
+        if (ws_s && ws_s->init) {
+            char body[16384];
+            int n = build_stats_json(ws_s, body, sizeof(body));
+            if (n > 0) mg_ws_send(c, body, (size_t)n, WEBSOCKET_OP_TEXT);
+        }
+        return;
+    }
+    if (ev == MG_EV_WS_MSG) {
+        return;
+    }
+
+    /* TLS handshake outcome statistics (new metric). */
+    if (ev == MG_EV_TLS_HS) {
+        s_stats.tls_handshakes++;
+        return;
+    }
+    if (ev == MG_EV_ERROR && c->is_tls) {
+        s_stats.tls_failures++;
+        return;
+    }
+
+    /* Idle-timeout enforcement */
+    if (ev == MG_EV_POLL && c->data[sizeof(uint64_t)]) {
+        /* A transparent-proxy request may legitimately take longer than the
+           idle timeout, so it is exempt while it is in flight. */
+        if (proxy_busy(c)) return;
+        uint64_t accepted_at; memcpy(&accepted_at, c->data, sizeof(accepted_at));
+        if (mg_millis() - accepted_at > IDLE_TIMEOUT_MS) {
+            c->is_draining = 1; return;
+        }
+    }
+
+    if (ev != MG_EV_HTTP_MSG) return;
+    struct mg_http_message *hm = (struct mg_http_message *)ev_data;
+    struct settings *s = (struct settings *)c->fn_data;
+
+    /* The management port only answers the internal endpoints. */
+    if (s->stats_port != 0 && c->loc.port == (uint16_t) s->stats_port) {
+        bool internal = mg_match(hm->uri, mg_str("/internal-stats"), NULL) ||
+                        mg_match(hm->uri, mg_str("/internal-ws"), NULL) ||
+                        mg_match(hm->uri, mg_str("/internal-test"), NULL) ||
+                        mg_match(hm->uri, mg_str("/control"), NULL);
+        if (!internal) {
+            mg_http_reply(c, 404, "Content-Type: text/plain\r\n", "not found");
+            return;
+        }
+    }
+
+    /*
+     * CAPTIVE PORTAL PROTECTION (Android connectivity check):
+     * Android (and iOS/Windows) periodically probe well-known URLs to
+     * decide whether the current network has real Internet access or is
+     * a captive portal ("Sign in to network" notification). When the
+     * hosts file redirects those probe domains to us, a non-204 reply
+     * would make the OS believe a login page is being served, popping
+     * the "network requires authentication" banner. Answer with 204 No
+     * Content exactly like a healthy network would.
+     *
+     * Probes covered (host match OR path match):
+     *  - connectivitycheck.gstatic.com/generate_204
+     *  - clients3.google.com/generate_204
+     *  - connectivitycheck.android.com/generate_204
+     *  - /generate_204 /gen_204 /generate_204.php etc.
+     *  - www.msftconnecttest.com/connecttest.txt (Windows)
+     *  - captive.apple.com/hotspot-detect.html (iOS/macOS)
+     * The hostname may arrive in the Host header, the SNI name (already
+     * in s_stats), or both; matching by suffix keeps it robust.
+     */
+    static const char *kCaptiveHosts[] = {
+        "connectivitycheck.gstatic.com",
+        "connectivitycheck.android.com",
+        "connectivitycheck.oppomobile.com",
+        "connectivitycheck.platform.hicloud.com",
+        "connectivitycheck.miui.com",
+        "connectivitycheck.vivoglobal.com",
+        "connectivitycheck.vivo.com.cn",
+        "connectivitycheck.samsung.com",
+        "clients3.google.com",
+        "www.msftconnecttest.com",
+        "connecttest.com",
+        "captive.apple.com",
+        "gstatic.com",
+        "detectportal.firefox.com",
+        /* OPPO/ColorOS captive portal probe domains (conn-service-*.allawntech.com) */
+        "allawntech.com",
+        /* Chinese carriers captive portal domains */
+        "wifi.cmcc.com",
+        "portal.cmcc.com",
+        "cmccwifi.com",
+        "wlan.cmcc.com",
+        "wifi.chinaunicom.cn",
+        "portal.chinaunicom.cn",
+        "wifi.189.cn",
+        "portal.189.cn",
+        "wifi.ctc.com.cn",
+        "portal.ctc.com.cn",
+        "cmcc.com",
+        "chinaunicom.cn",
+        "189.cn",
+        "ctc.com.cn",
+        NULL,
+    };
+    static const char *kCaptivePaths[] = {
+        "/generate_204", "/generate204", "/gen_204", "/generate_204.php",
+        "/connecttest.txt", "/hotspot-detect.html", "/hotspot-detect.html",
+        /* CMCC/China Mobile specific captive portal paths */
+        "/wlan/userip", "/wlan/ac_portal", "/wlan/login",
+        "/portal/index.jsp", "/portal/auth.jsp", "/portal/login.jsp",
+        "/eportal/index.jsp", "/eportal/auth.jsp", "/eportal/login.jsp",
+        "/cmcc/wlan", "/cmcc/portal", "/cmcc/login",
+        NULL,
+    };
+    /* Portal hosts that should be FULLY ALLOWED (not blocked) so the
+       actual portal page can load (HTML, CSS, JS, images).
+       These are the domains users visit when they click "Sign in to network". */
+    static const char *kPortalHosts[] = {
+        "wifi.cmcc.com",
+        "portal.cmcc.com",
+        "cmccwifi.com",
+        "wlan.cmcc.com",
+        "wifi.chinaunicom.cn",
+        "portal.chinaunicom.cn",
+        "wifi.189.cn",
+        "portal.189.cn",
+        "wifi.ctc.com.cn",
+        "portal.ctc.com.cn",
+        NULL,
+    };
+    bool captive = false;
+    if (hm->uri.len > 0) {
+        for (int i = 0; kCaptivePaths[i]; i++) {
+            size_t plen = strlen(kCaptivePaths[i]);
+            if (hm->uri.len >= plen &&
+                mg_strcasecmp(mg_str_n(hm->uri.buf, plen), mg_str(kCaptivePaths[i])) == 0) {
+                captive = true; break;
+            }
+        }
+    }
+    if (!captive) {
+        struct mg_str *host_hdr = mg_http_get_header(hm, "Host");
+        if (host_hdr != NULL && host_hdr->len > 0) {
+            char host[256];
+            size_t hl = host_hdr->len < sizeof(host) - 1 ? host_hdr->len : sizeof(host) - 1;
+            memcpy(host, host_hdr->buf, hl); host[hl] = '\0';
+            /* Strip an optional ":port" suffix from the Host header so
+               "connectivitycheck.gstatic.com:80" still matches. */
+            char *colon = strchr(host, ':');
+            if (colon != NULL) *colon = '\0';
+            for (int i = 0; kCaptiveHosts[i]; i++) {
+                size_t klen = strlen(kCaptiveHosts[i]);
+                size_t hlen = strlen(host);
+                if (hlen >= klen && strcasecmp(host + hlen - klen, kCaptiveHosts[i]) == 0) {
+                    captive = true; break;
+                }
+            }
+        }
+    }
+    if (!captive && c->is_tls && c->tls) {
+        /* SNI fallback: some HTTPS clients probe with a missing or
+           odd Host header; the SNI name is authoritative here. */
+        SSL *ssl = ((struct mg_tls_openssl *)c->tls)->ssl;
+        if (ssl) {
+            const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+            if (sni && *sni) {
+                for (int i = 0; kCaptiveHosts[i]; i++) {
+                    size_t klen = strlen(kCaptiveHosts[i]);
+                    size_t hlen = strlen(sni);
+                    if (hlen >= klen && strcasecmp(sni + hlen - klen, kCaptiveHosts[i]) == 0) {
+                        captive = true; break;
+                    }
+                }
+            }
+        }
+    }
+    if (captive) {
+        /* 204 = "network is fine, no portal". Add CORS + no-store.
+           total_requests / hist_add are only incremented after this
+           early-return block, so no counter rollback is needed. */
+        mg_http_reply(c, 204,
+                      "Cache-Control: no-store, max-age=0\r\n"
+                      "Access-Control-Allow-Origin: *\r\n", "");
+        return;
+    }
+
+    /* Per-app request counter + record which TLS (SNI) hostname this
+       app asked us to sign a certificate for. The uid is resolved once
+       per connection (cached in c->data) to avoid /proc scans on every
+       request of a keep-alive connection. */
+    /* Only the uid cached when the connection was first seen. Resolving it
+       scans /proc/net/tcp* for EVERY connection, which under the hijack mode
+       (the whole device traffic) was the dominant CPU cost; blocked requests
+       resolve it further down, where the allowlist decision needs it. */
+    uid_t req_uid = conn_load_uid(c);
+
+    /*
+     * PER-APP ALLOWLIST: the app writes <resource_dir>/allowlist.txt
+     * (one decimal uid per line, from the Settings > App monitoring
+     * "allow" switches). A uid on the list has its traffic forwarded
+     * as-is (200 OK with a tiny body) instead of being blocked, so
+     * e.g. banking apps that need ads SDKs for auth still work.
+     *
+     * WebView renderers run under isolated uids (99000-99999) that are
+     * allocated per renderer instance; map them to their host app first
+     * so an "Allow"-ed app's WebView requests also pass through.
+     */
+    /* Blocked/local request: this is the minority path, so resolving the uid
+       here keeps the per-connection /proc scan out of the proxy hot path. */
+    if (req_uid == (uid_t)-1) {
+        req_uid = conn_uid_by_tuple(c);
+        conn_store_uid(c, req_uid);
+    }
+    uid_t chk_uid = req_uid;
+    if (uid_is_isolated(req_uid)) {
+        uid_t eff = resolve_effective_uid(req_uid);
+        if (eff != req_uid && s_verbose) {
+            LOG_INFO("allowlist: isolated uid %d -> host uid %d",
+                     (int)req_uid, (int)eff);
+        }
+        chk_uid = eff;
+    }
+
+    /*
+     * REQUEST / CONNECTION ACCOUNTING - exactly once per real request, and only
+     * for real traffic. The app and the dashboard poll /internal-stats (plus
+     * /internal-test and /control) once a second; counting that as user traffic
+     * made 请求量 and 连接数 grow on a completely idle device.
+     */
+    bool internal_path = mg_match(hm->uri, mg_str("/internal-*"), NULL) ||
+                         mg_match(hm->uri, mg_str("/control"), NULL);
+    if (!internal_path) {
+        if (c->data[CONN_REQ_OFFSET] == 0) {
+            c->data[CONN_REQ_OFFSET] = 1;
+            s_stats.total_connections++;
+            hist_add(HIST_CONN);
+        }
+        s_stats.total_requests++;
+        hist_add(HIST_REQ);
+    }
+
+    /*
+     * TRANSPARENT FILTERING PROXY (hijack mode, --proxy-filter):
+     * the app redirects the whole TCP 80/443 traffic here, so a request for
+     * a host that is NOT in the block list has to be forwarded to the real
+     * origin server instead of being answered locally. Blocked hosts keep
+     * the placeholder replies below - except for uids the user put on the
+     * per-app allowlist, whose traffic must never be blocked and is proxied
+     * as well (previously such a request got a useless 2-byte "ok" reply).
+     */
+    if (s->proxy_filter) {
+        struct mg_str *phdr = mg_http_get_header(hm, "Host");
+        if (phdr != NULL && phdr->len > 0) {
+            char phost[256];
+            size_t pl = phdr->len < sizeof(phost) - 1 ? phdr->len : sizeof(phost) - 1;
+            memcpy(phost, phdr->buf, pl);
+            phost[pl] = '\0';
+            if (phost[0] == '[') {                 /* IPv6 literal: [::1]:443 */
+                char *b = strrchr(phost, ']');
+                if (b != NULL) *b = '\0';
+                memmove(phost, phost + 1, strlen(phost) + 1);
+            } else {
+                char *colon = strchr(phost, ':');
+                if (colon != NULL) *colon = '\0';
+            }
+            /* Single-label hosts ("adaway", "localhost", printer names) are
+               never proxied: they are local names or simply broken. */
+            if (phost[0] != '\0' && strchr(phost, '.') != NULL && !host_is_local(phost)) {
+                /* Allowlisted apps need no uid lookup here: their traffic is
+                   proxied like every other non-blocked host. */
+                if (!block_set_contains(phost, strlen(phost))) {
+                    /* Already counted above: proxied requests are real traffic,
+                       and counting them here too double-counted every request
+                       whose proxy_start() failed. */
+                    /* A pipelined request on a connection that is already
+                       proxying is dropped (the first reply is still
+                       streaming back to the client). */
+                    if (proxy_busy(c)) return;
+                    if (proxy_start(c, s, hm, phost)) {
+                        qlog_add(req_uid, QLOG_PROXY, hm);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
+        mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
+                              "Cache-Control: no-store\r\n", "ok");
+        return;
+    }
+
+    /* (Request and connection counters are maintained further up, before the
+       proxy branch, so every real request is counted exactly once.) */
+
+    /* Check if this is a known portal host (user clicked "Sign in to network").
+       If so, allow the request through so the portal page loads properly
+       (HTML, CSS, JS, images) instead of being blocked by reply_blocked_by_type. */
+    struct mg_str *host_hdr = mg_http_get_header(hm, "Host");
+    if (host_hdr != NULL && host_hdr->len > 0) {
+        char host[256];
+        size_t hl = host_hdr->len < sizeof(host) - 1 ? host_hdr->len : sizeof(host) - 1;
+        memcpy(host, host_hdr->buf, hl); host[hl] = '\0';
+        char *colon = strchr(host, ':');
+        if (colon != NULL) *colon = '\0';
+        for (int i = 0; kPortalHosts[i]; i++) {
+            size_t klen = strlen(kPortalHosts[i]);
+            size_t hlen = strlen(host);
+            if (hlen >= klen && strcasecmp(host + hlen - klen, kPortalHosts[i]) == 0) {
+                /* Known portal host - serve a minimal page instead of blocking */
+                mg_http_reply(c, 200,
+                              "Content-Type: text/html; charset=utf-8\r\n"
+                              "Cache-Control: no-store\r\n",
+                              "<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head>"
+                              "<body style=\"font-family:sans-serif;padding:20px;text-align:center;\">"
+                              "<h2>ADBlock: Portal Page Allowed</h2>"
+                              "<p>This is a carrier portal domain. The page should load normally.</p>"
+                              "<p>If you see this, the portal page resources are being allowed through.</p>"
+                              "</body></html>");
+                return;
+            }
+        }
+    }
+
+    /* Management traffic is not user traffic: attributing the app's own
+       /internal-stats polls to its uid made the app itself show up as the
+       busiest entry in the per-app statistics. */
+    struct appstat *ra = internal_path ? NULL : app_find_or_add(req_uid);
+    if (ra) {
+        if (!c->data[REC_OFFSET]) {
+            ra->connections++;
+            c->data[REC_OFFSET] = 1;
+        }
+        ra->requests++;
+    }
+    if (c->is_tls && c->tls) {
+        SSL *ssl = ((struct mg_tls_openssl *)c->tls)->ssl;
+        if (ssl) {
+            const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+            if (sni && *sni) app_record_tls_host(req_uid, sni);
+        }
+    }
+
+    /* Debug: log every request so blocked-domain traffic can be
+       inspected (only when started with --debug). */
+    if (s->debug) {
+        LOG_INFO("[req] %.*s %.*s", (int)hm->method.len, hm->method.buf,
+                 (int)hm->uri.len, hm->uri.buf);
+    }
+
+    /* CORS preflight: browsers send OPTIONS + Access-Control-Request-*
+       before any cross-origin XHR with non-simple headers (e.g.
+       Authorization). Answer 204 with permissive CORS headers so the
+       subsequent real request proceeds and the SDK sees a successful
+       exchange. */
+    if (mg_strcasecmp(hm->method, mg_str("OPTIONS")) == 0 &&
+        mg_http_get_header(hm, "Access-Control-Request-Method") != NULL) {
+        mg_http_reply(c, 204,
+                      "Access-Control-Allow-Origin: *\r\n"
+                      "Access-Control-Allow-Methods: GET, HEAD, POST, PUT, DELETE, OPTIONS\r\n"
+                      "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin\r\n"
+                      "Access-Control-Max-Age: 86400\r\n"
+                      "Cache-Control: public, max-age=86400\r\n", "");
+        return;
+    }
+
+    if (mg_match(hm->uri, mg_str("/internal-test"), NULL)) {
+        struct mg_http_serve_opts o = {0};
+        o.mime_types = "html=text/html";
+        mg_http_serve_file(c, hm, s->test_path, &o);
+        return;
+    }
+
+    /* Real-time WebSocket endpoint: upgrade to WS. The app may push
+       requests here to receive a snapshot; on open we send one
+       immediately, then the client keeps polling as fallback. */
+    if (mg_match(hm->uri, mg_str("/internal-ws"), NULL)) {
+        /*
+         * SECURITY (audit H-1): the WS snapshot carries recent_tls[] (browsing
+         * history). WebSocket is not subject to CORS, so a random web page could
+         * read it; only the management port and non-browser callers (the app's
+         * OkHttp client sends no Origin) may connect.
+         */
+        if (mg_http_get_header(hm, "Origin") != NULL ||
+            s->stats_port == 0 || c->loc.port != (uint16_t) s->stats_port) {
+            mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            return;
+        }
+        mg_ws_upgrade(c, hm, NULL);
+        return;
+    }
+
+    /* Internal statistics endpoint: JSON snapshot of the per-process
+       counters (uptime, request totals, blocked-by-type breakdown,
+       SNI certs issued). Like /internal-test it is only reachable on
+       loopback; no auth needed since 127.0.0.1 is this device. */
+    if (mg_match(hm->uri, mg_str("/internal-stats"), NULL)) {
+        char body[16384];
+        int n = build_stats_json(s, body, sizeof(body));
+        mg_http_reply(c, 200,
+                      "Content-Type: application/json\r\n"
+                      "Cache-Control: no-store\r\n", "%.*s", n, body);
+        /* Throttled: see persist_dat_files(). The dashboard polls this
+           endpoint every few seconds, so an unconditional flush here used to
+           rewrite ~270 KB (sni_cache.dat) plus three more files per poll. */
+        persist_dat_files(s, false);
+        qlog_save(s->resource_dir);
+        return;
+    }
+
+    /* Control endpoint: reload resources, flush stats, shutdown. */
+    if (mg_match(hm->uri, mg_str("/control"), NULL)) {
+        /*
+         * SECURITY: /control can reconfigure and shut the server down, and its
+         * replies carry permissive CORS headers. Requests coming from a web
+         * page (any Origin header) are therefore refused, which closes the
+         * drive-by CSRF hole (a plain local caller sends no Origin).
+         */
+        if (mg_http_get_header(hm, "Origin") != NULL) {
+            mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            return;
+        }
+        /*
+         * ... and it is only served on the loopback management port, so a LAN
+         * client of "--bind all" cannot reconfigure or shut the server down.
+         * Both clients (Windows dashboard and the Android app) already talk to
+         * /control on that port.
+         */
+        if (s->stats_port == 0 || c->loc.port != (uint16_t) s->stats_port) {
+            mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            return;
+        }
+        char cmd_buf[32];
+        mg_http_get_var(&hm->body, "cmd", cmd_buf, sizeof(cmd_buf));
+        struct mg_str cmd = mg_str(cmd_buf);
+        if (mg_strcmp(cmd, mg_str("reload_config")) == 0) {
+            load_block_cfg(s->resource_dir);
+            load_block_modes(s->resource_dir);   /* per-type blocking method (mode_* keys) */
+            /* Rules changed: refresh the transparent-proxy block set too. */
+            if (s->proxy_filter) {
+                block_set_load(s->resource_dir);
+                load_cosmetic_css(s->resource_dir);
+            }
+            char hdr[96];
+            int hl = snprintf(hdr, sizeof(hdr), "Content-Type: text/plain%c%c", 0x0d, 0x0a);
+            (void) hl;
+            mg_http_reply(c, 200, hdr, "OK: block config reloaded");
+        } else if (mg_strcmp(cmd, mg_str("reload_images")) == 0) {
+            s->block_image_count = scan_block_images(s->resource_dir, s->block_images);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);
+        } else if (mg_strcmp(cmd, mg_str("flush_stats")) == 0) {
+            persist_dat_files(s, true);   /* forced full flush */
+        qlog_save(s->resource_dir);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: stats flushed");
+        } else if (mg_strcmp(cmd, mg_str("reload_subscriptions")) == 0) {
+            block_set_load(s->resource_dir);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: subscriptions reloaded");
+        } else if (mg_strcmp(cmd, mg_str("clear_query_log")) == 0) {
+            qlog_clear();
+            qlog_save(s->resource_dir);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: query log cleared");
+        } else if (mg_strcmp(cmd, mg_str("shutdown")) == 0) {
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: shutting down");
+            s_sig_num = SIGTERM;  /* trigger main loop exit */
+        } else {
+            mg_http_reply(c, 400, "Content-Type: text/plain\r\n", "Usage: cmd=reload_images|flush_stats|shutdown");
+        }
+        return;
+    }
+
+    /* Classify blocked requests by type and reply with the most
+       realistic "empty" resource - see reply_blocked_by_type(). */
+    if (reply_blocked_by_type(c, hm)) {
+        if (s_rb_allow) {
+            qlog_add(req_uid, QLOG_ALLOW, hm);
+            /* 该类型被设为 BM_ALLOW（放行）：不拦截、不计入拦截统计、不返回
+               占位资源，只回一个空的 200，由客户端自行处理。 */
+            s_rb_allow = false;
+            mg_http_reply(c, 200, CORS_HDR "Cache-Control: no-store\r\n", "");
+            return;
+        }
+        qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
+        hist_add(HIST_BLOCKED);
+        struct appstat *ba = app_find_or_add(conn_load_uid(c));
+        if (ba) ba->blocked++;
+        ws_push_broadcast(s);  /* real-time push to WS subscribers */
+        return;
+    }
+
+
+    /* Random block image - serve whichever actual filename was found at
+       scan time (see scan_block_images()), not a reconstructed
+       img_%02d.webp - deleting/adding images doesn't require renaming
+       the rest to stay contiguous. */
+    uint64_t t; memcpy(&t, c->data, sizeof(t));
+    int idx = (int)(t % (uint64_t)s->block_image_count);
+    char img_path[PATH_MAX];
+    snprintf(img_path, sizeof(img_path), "%s/%s", s->resource_dir, s->block_images[idx]);
+    s_stats.blocked_images++;
+    hist_add(HIST_BLOCKED);
+    struct appstat *ba = app_find_or_add(conn_load_uid(c));
+    if (ba) ba->blocked++;
+    ws_push_broadcast(s);  /* real-time push to WS subscribers */
+    struct mg_http_serve_opts o = {0};
+    o.mime_types = "webp=image/webp";
+    /*
+     * OPTIMIZATION: every blocked ad slot on every page load re-requests
+     * this same placeholder image from the local server with no caching
+     * hint at all, so the client re-fetches it every single time instead
+     * of ever reusing a cached copy — needless disk I/O and CPU work on
+     * a mobile device that may be handling this dozens of times a
+     * minute. These images are static build resources that never change
+     * at runtime, so let clients cache them.
+     *
+     * BUG FIX: this used to be "public, max-age=86400" - fine for the
+     * built-in defaults, which really don't change at runtime, but the
+     * app also lets a user replace them at any time via
+     * WebServerUtils#setCustomBlockImage()/resetBlockImagesToDefault(),
+     * which overwrite the same filenames in place. A client that had
+     * already cached the old bytes under max-age=86400 won't even send
+     * a new request - let alone a conditional one - for up to a day,
+     * so a picked custom image (or a reset back to the default) could
+     * silently not show up for hours. mg_http_serve_file() already
+     * generates an ETag from each file's size+mtime and honors
+     * If-None-Match (see mg_http_etag() in mongoose.c), so "no-cache"
+     * keeps the win this header was added for - clients still cache the
+     * bytes and, on every use, get back a cheap 304 with no body as
+     * long as the file is actually unchanged - while making sure a
+     * genuine content change (different size/mtime → different ETag) is
+     * always picked up on the very next request instead of being stuck
+     * behind a stale cache.
+     */
+    o.extra_headers = "Cache-Control: no-cache\r\n";
+    mg_http_serve_file(c, hm, img_path, &o);
+}
+
+/* ── CLI parsing ──────────────────────────────────────────────── */
+/*
+ * Prepare the resource directory (CA, localhost leaf cert, block
+ * images, paths). Creates the directory when it does not exist, so a
+ * plain double-click works out of the box, and logs a clear reason
+ * when the directory cannot be used. Returns true on success.
+ */
+static bool setup_resources_dir(struct settings *s, const char *rpath) {
+    LOG_INFO("Resources dir: %s", rpath);
+#ifdef _WIN32
+    snprintf(s_crash_dir, sizeof(s_crash_dir), "%s", rpath);
+    SetUnhandledExceptionFilter(crash_filter);   /* crash.log forensics */
+#endif
+
+    struct stat st;
+    if (stat(rpath, &st) != 0 || (st.st_mode & S_IFDIR) == 0) {
+        LOG_INFO("Resources dir '%s' not present — creating it…", rpath);
+#ifdef _WIN32
+        if (_mkdir(rpath) != 0) {
+#else
+        if (mkdir(rpath, 0755) != 0) {
+#endif
+            LOG_FATAL("Cannot create resources dir '%s' (errno %d). "
+                      "Run: webserver --resources <writable directory>", rpath, errno);
+            return false;
+        }
+    }
+
+    char cert_path[PATH_MAX], key_path[PATH_MAX];
+    snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", rpath);
+    snprintf(key_path,  sizeof(key_path),  "%s/localhost-2410.key", rpath);
+
+    /* Generate CA cert on first use */
+    bool missing = (access(cert_path, F_OK) != 0 || access(key_path, F_OK) != 0);
+    LOG_INFO("CA cert missing=%d (cert=%s key=%s)", missing, cert_path, key_path);
+    if (missing) {
+        LOG_INFO("Generating root CA…");
+        if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
+            LOG_FATAL("CA generation failed (dir '%s'): make sure the directory is writable", rpath);
+            return false;
+        }
+        LOG_INFO("Root CA generated OK");
+    }
+
+    /* Load CA into memory for SNI signing */
+    if (load_ca(cert_path, key_path, &s->ca) != EXIT_SUCCESS) {
+        LOG_FATAL("Failed to load CA");
+        return false;
+    }
+
+    /* Cert rotation: regenerate when the CA nears expiry (30d). */
+    if (maybe_rotate_ca(cert_path, key_path, &s->ca)) {
+        LOG_INFO("CA rotated — app will prompt to reinstall");
+    }
+    LOG_INFO("CA loaded OK");
+
+    /* TLS opts for the localhost listener: a leaf cert issued
+       specifically for "localhost"/127.0.0.1, not the raw CA
+       cert (see make_localhost_leaf() for why). */
+    if (make_localhost_leaf(&s->ca, &s->tls_opts) != EXIT_SUCCESS) {
+        LOG_FATAL("Failed to issue localhost leaf cert");
+        return false;
+    }
+    LOG_INFO("localhost leaf cert issued OK");
+    snprintf(s->resource_dir, sizeof(s->resource_dir), "%s", rpath);
+    snprintf(s->test_path,    sizeof(s->test_path),    "%s/test.html", rpath);
+    s->block_image_count = scan_block_images(rpath, s->block_images);
+    s->init = true;
+    return true;
+}
+
+static struct settings parse_cli_parameters(int argc, char *argv[]) {
+    struct settings s = {0};
+    /* Double-click friendly defaults (unprivileged ports; the Android
+       app always passes --http-port/--https-port explicitly). */
+    s.http_port = 8080;
+    s.https_port = 8443;
+    s.bind_all = false;
+    const char *rpath = NULL;
+    char resolved[PATH_MAX];
+    memset(resolved, 0, sizeof(resolved));
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--resources") == 0 && i < argc-1) {
+            rpath = argv[++i];
+        } else if (strcmp(argv[i], "--debug") == 0) {
+            s.debug = true;
+        } else if (strcmp(argv[i], "--proxy-filter") == 0) {
+            /* Transparent hijack proxy: forward non-blocked hosts to the
+               real origin and filter the answer (see proxy_start()). */
+            s.proxy_filter = true;
+        } else if (strcmp(argv[i], "--stats-port") == 0 && i < argc-1) {
+            /* Loopback management port: /internal-stats and /control are
+               served there too, so the app can always read statistics even
+               when the user facing 80/443 ports are taken by another app. */
+            s.stats_port = atoi(argv[++i]);
+            s.cli_stats_port_set = true;
+        } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
+            s.bind_all = strcmp(argv[++i], "all") == 0;
+            s.cli_bind_set = true;
+            LOG_INFO("Bind mode: %s", s.bind_all ? "all interfaces" : "loopback");
+        } else if (strcmp(argv[i], "--http-port") == 0 && i < argc-1) {
+            s.http_port = atoi(argv[++i]);
+            s.cli_http_port_set = true;
+            LOG_INFO("HTTP port: %d", s.http_port);
+        } else if (strcmp(argv[i], "--https-port") == 0 && i < argc-1) {
+            s.https_port = atoi(argv[++i]);
+            s.cli_https_port_set = true;
+            LOG_INFO("HTTPS port: %d", s.https_port);
+        } else if (strcmp(argv[i], "--no-gui") == 0) {
+            s.no_gui = true;
+        } else if (strcmp(argv[i], "--minimized") == 0) {
+            s.minimized = true;
+        } else if (strcmp(argv[i], "--install-autostart") == 0) {
+            s.autostart = 1;
+        } else if (strcmp(argv[i], "--uninstall-autostart") == 0) {
+            s.autostart = 2;
+        }
+    }
+
+    /* Default / path-resolution: a plain double-click must work, so
+       fall back to a 'resources' folder next to the executable and
+       resolve relative --resources paths against the exe directory. */
+    char default_dir[PATH_MAX];
+    memset(default_dir, 0, sizeof(default_dir));
+#ifdef _WIN32
+    {
+        char exe_path[PATH_MAX];
+        memset(exe_path, 0, sizeof(exe_path));
+        if (get_module_path_utf8(exe_path, (DWORD)sizeof(exe_path) - 1) > 0) {
+            char *slash = strrchr(exe_path, '\\');
+            if (slash) *slash = '\0';
+            if (rpath != NULL && rpath[0] != '\\' && rpath[0] != '/' && strchr(rpath, ':') == NULL) {
+                /* relative --resources: resolve against the exe dir */
+                snprintf(resolved, sizeof(resolved), "%s\\%s", exe_path, rpath);
+                rpath = resolved;
+            } else if (rpath == NULL) {
+                snprintf(default_dir, sizeof(default_dir), "%s\\resources", exe_path);
+                rpath = default_dir;
+                LOG_INFO("No --resources given — using %s", rpath);
+            }
+        }
+    }
+#endif
+    if (rpath == NULL) {
+        snprintf(default_dir, sizeof(default_dir), "resources");
+        rpath = default_dir;
+        LOG_INFO("No --resources given — using %s", rpath);
+    }
+
+    setup_resources_dir(&s, rpath);
+    return s;
+}
+
+#ifndef ADBLOCK_APP_VERSION
+#define ADBLOCK_APP_VERSION "1.15"
+#endif
+
+/* autostart entry location (same key as gui_win32.c) */
+#define RUN_KEY_W L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define RUN_VALUE_W L"ADBlockWebServer"
+
+/* ── main ─────────────────────────────────────────────────────── */
+static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s);
+
+/* Read by the Windows dashboard: 0 = the server loop has returned. */
+static volatile int s_server_alive = 1;
+bool win32_server_alive(void) { return s_server_alive != 0; }
+
+#ifdef _WIN32
+struct server_thread_arg { struct mg_mgr *mgr; struct settings *s; };
+static void *server_thread_main(void *p) {
+    struct server_thread_arg *a = (struct server_thread_arg *)p;
+    server_loop_and_cleanup(a->mgr, a->s);
+    return NULL;
+}
+#endif
+
+int main(int argc, char *argv[]) {
+#ifndef _WIN32
+    setsid();   /* no-op on Windows: there is no controlling session */
+#endif
+    /* NOTE: do NOT redirect stdin/stdout/stderr to /dev/null here even
+       though setsid() detaches us from the controlling terminal.
+       ShellUtils.runBundledExecutable() launches this binary with
+       `> logfile 2>&1` and relies on that file to diagnose startup
+       failures (bad args, CA generation failure, port bind failure,
+       ...) via LOG_FATAL/LOG_WARN/LOG_INFO, which write to both logcat
+       and stdio. dup2()-ing the std fds to /dev/null would make that
+       capture file permanently empty and silently defeat the
+       diagnostic mechanism. The launching shell has already redirected
+       our std fds, so there is no tty-sharing hazard to fix here. */
+
+    /* DIAGNOSTIC CHECKPOINT 1: if this line never shows up in the log,
+       the process is crashing during dynamic linking / static
+       initialization (loading libssl.so/libcrypto.so/libc++_shared.so)
+       before main() itself ever runs any of our code — a completely
+       different class of bug than anything inside main()'s own logic. */
+    LOG_INFO("main() entered, argc=%d", argc);
+
+#ifdef _WIN32
+    /*
+     * Single instance. Autostart (HKCU Run) plus a manual start - or a previous
+     * instance that has not exited yet - used to leave two identical
+     * webserver.exe processes fighting for the same ports. The duplicate asks
+     * the running instance to show its dashboard and exits immediately.
+     */
+    HANDLE single = CreateMutexW(NULL, FALSE, L"Local\\ADBlockWebServer_Singleton");
+    if (single != NULL && GetLastError() == ERROR_ALREADY_EXISTS) {
+        UINT show = RegisterWindowMessageW(L"ADBlockShowDashboard");
+        if (show != 0) PostMessageW(HWND_BROADCAST, show, 0, 0);
+        LOG_INFO("ADBlock: another instance is already running - exiting.");
+        CloseHandle(single);
+        return 0;
+    }
+#endif
+    struct settings s = parse_cli_parameters(argc, argv);
+    if (!s.init) {
+        LOG_FATAL("Bad parameters.");
+        return EXIT_FAILURE;
+    }
+
+    /* Mirror every LOG_* line into <resources>/webserver.log. The Windows
+       build is a GUI-subsystem app (no console), so this file is the only place
+       a failed bind / autostart problem can be diagnosed after the fact. */
+    log_file_open(s.resource_dir);
+    if (s.stats_port == 0) s.stats_port = 8686;
+
+#ifdef _WIN32
+    /* Settings persistence: webserver.ini next to the exe (written by
+       the dashboard settings page); command-line flags still win. */
+    {
+        char exe[MAX_PATH];
+        if (get_module_path_utf8(exe, sizeof(exe)) > 0) {
+            char *slash = strrchr(exe, '\\');
+            if (slash) *slash = '\0';
+            char path[MAX_PATH + 32];
+            snprintf(path, sizeof(path), "%s\\webserver.ini", exe);
+            FILE *f = fopen(path, "r");
+            if (f) {
+                char line[128];
+                while (fgets(line, sizeof(line), f)) {
+                    int v;
+                    if (sscanf(line, "http_port=%d", &v) == 1 && !s.cli_http_port_set)
+                        s.http_port = v;
+                    else if (sscanf(line, "https_port=%d", &v) == 1 && !s.cli_https_port_set)
+                        s.https_port = v;
+                    else if (sscanf(line, "bind_all=%d", &v) == 1 && !s.cli_bind_set)
+                        s.bind_all = (v != 0);
+                    else if (sscanf(line, "stats_port=%d", &v) == 1 && !s.cli_stats_port_set)
+                        s.stats_port = v;
+                }
+                fclose(f);
+                LOG_INFO("Loaded webserver.ini settings (ports %d/%d, bind_all=%d, stats_port=%d).",
+                         s.http_port, s.https_port, s.bind_all ? 1 : 0, s.stats_port);
+            }
+        }
+    }
+
+    /* Autostart entry self-heal: older versions registered
+       "--no-gui" (headless - no tray icon at all). Rewrite such entries
+       to "--minimized" so the tray icon appears after logon. */
+    {
+        DWORD sz = 0;
+        if (RegGetValueW(HKEY_CURRENT_USER, RUN_KEY_W, RUN_VALUE_W,
+                RRF_RT_REG_SZ, NULL, NULL, &sz) == ERROR_SUCCESS && sz > 4) {
+            wchar_t *val = (wchar_t *)malloc(sz);
+            if (val) {
+                if (RegGetValueW(HKEY_CURRENT_USER, RUN_KEY_W, RUN_VALUE_W,
+                        RRF_RT_REG_SZ, NULL, val, &sz) == ERROR_SUCCESS) {
+                    wchar_t *p = wcsstr(val, L"--no-gui");
+                    if (p) {
+                        wchar_t *newVal = (wchar_t *)malloc((wcslen(val) + 8) * sizeof(wchar_t));
+                        if (newVal) {
+                            wchar_t *d = newVal;
+                            size_t pre = (size_t)(p - val);
+                            memcpy(d, val, pre * sizeof(wchar_t));
+                            d += pre;
+                            wcscpy(d, L"--minimized");
+                            d += wcslen(L"--minimized");
+                            wcscpy(d, p + wcslen(L"--no-gui"));
+                            HKEY hk2 = NULL;
+                            if (RegOpenKeyExW(HKEY_CURRENT_USER, RUN_KEY_W, 0,
+                                    KEY_SET_VALUE, &hk2) == ERROR_SUCCESS) {
+                                RegSetValueExW(hk2, RUN_VALUE_W, 0, REG_SZ,
+                                    (const BYTE *)newVal,
+                                    (DWORD)((wcslen(newVal) + 1) * sizeof(wchar_t)));
+                                RegCloseKey(hk2);
+                            }
+                            LOG_INFO("Autostart entry upgraded: --no-gui -> --minimized (tray icon after logon).");
+                            free(newVal);
+                        }
+                    }
+                }
+                free(val);
+            }
+        }
+    }
+
+    /* One-shot autostart registration (GUI toggle / CI) - do it before
+       binding so the command never needs a port to be free. */
+    if (s.autostart != 0) {
+        char exe[MAX_PATH];
+        if (get_module_path_utf8(exe, sizeof(exe)) == 0) {
+            LOG_FATAL("Cannot resolve executable path.");
+            return EXIT_FAILURE;
+        }
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd), "\"%s\" --resources \"%s\" --http-port %d --https-port %d "
+                 "--stats-port %d --minimized",
+                 exe, s.resource_dir, s.http_port, s.https_port, s.stats_port);
+        bool enable = (s.autostart == 1);
+        int rc = win32_autostart_set(enable, cmd);
+        LOG_INFO("Autostart %s %s (entry=%s).", enable ? "enabled" : "disabled",
+                 rc == 0 ? "OK" : "FAILED",
+                 win32_autostart_installed() ? "installed" : "absent");
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+#endif
+
+    /* If a server instance is already listening on the HTTP port (a
+       previous launch, autostart, ...) do not bind again - open only the
+       dashboard and poll the running instance, instead of silently
+       exiting. */
+    bool server_already_running = false;
+#ifdef _WIN32
+    if (s.stats_port == 0) s.stats_port = 8686;
+    server_already_running = adblock_instance_running(s.stats_port);
+    if (server_already_running) {
+        if (s.no_gui) {
+            LOG_INFO("Web server already running on port %d - nothing to do.", s.http_port);
+            return EXIT_SUCCESS;
+        }
+        struct adblock_gui_args args;
+        args.resource_dir = s.resource_dir;
+        args.http_port = s.http_port;
+        args.https_port = s.https_port;
+        args.bind_all = s.bind_all;
+        args.start_minimized = s.minimized;
+        args.stats_port = s.stats_port;
+        args.owns_server = false;    /* attached to the instance above */
+        args.startup_warning = NULL;
+        LOG_INFO("A web server is already running on port %d - dashboard only mode.", s.http_port);
+        int rc = adblock_gui_run(&args);
+        if (rc != 0)
+            LOG_FATAL("Dashboard window could not be created (exit code %d).", rc);
+        return rc == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
+#endif
+
+    s_verbose = s.debug;
+    /* Without --debug, keep only errors: mongoose would otherwise log every
+       connection/read/send, which is the main CPU cost under hijack mode. */
+    mg_log_set(s.debug ? MG_LL_DEBUG : MG_LL_ERROR);
+
+    s_stats.start_time_ms = mg_millis();
+    load_stats(&s);  /* lifetime counters survive restarts */
+    qlog_load(s.resource_dir);   /* recent request/decision history */
+#ifdef _WIN32
+    harden_ca_key_acl(s.resource_dir);   /* audit D2: key readable by the owner only */
+#endif
+    load_hist(&s);   /* chart buckets survive restarts (reboot-proof) */
+    sni_cache_load(s.resource_dir);  /* SNI cert cache survives restarts */
+    apps_load(s.resource_dir);       /* per-app stats survive restarts */
+
+    oom_adjust_setup();
+
+    struct mg_mgr mgr;
+    mg_mgr_init(&mgr);
+    /* Transparent proxy support: remember the event loop and load the
+       blocked-host set from the system hosts file (Android). */
+    s_mgr = &mgr;
+    if (s.proxy_filter) {
+        block_set_load(s.resource_dir);
+        load_cosmetic_css(s.resource_dir);
+    }
+    /* Dedicated loopback management listener (statistics + control). */
+    if (s.stats_port == 0) s.stats_port = 8686;
+    {
+        char su[64], su6[64];
+        snprintf(su, sizeof(su), "http://127.0.0.1:%d", s.stats_port);
+        snprintf(su6, sizeof(su6), "http://[::1]:%d", s.stats_port);
+        if (bind_try(&mgr, su, fn, &s, "mgmt") == NULL) {
+            LOG_FATAL("Management port %d is not available on 127.0.0.1 - "
+                      "the dashboard cannot read statistics.", s.stats_port);
+        }
+        bind_try(&mgr, su6, fn, &s, "mgmt6");
+    }
+
+    /* Build listen URLs from the configured bind mode + ports. */
+    char http_url[128], https_url[128], http_url6[128], https_url6[128];
+    const char *v4 = s.bind_all ? "0.0.0.0" : "127.0.0.1";
+    const char *v6 = s.bind_all ? "[::]" : "[::1]";
+    snprintf(http_url, sizeof(http_url), "http://%s:%d", v4, s.http_port);
+    snprintf(https_url, sizeof(https_url), "https://%s:%d", v4, s.https_port);
+    snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);
+    snprintf(https_url6, sizeof(https_url6), "https://%s:%d", v6, s.https_port);
+
+    char startup_warning[512] = {0};
+    bool http_ok = (bind_try(&mgr, http_url, fn, &s, "http") != NULL);
+    s_main_http_bound = http_ok;
+    if (!http_ok) {
+        LOG_FATAL("HTTP bind failed (%s): the port is probably already in use.", http_url);
+        snprintf(startup_warning, sizeof(startup_warning),
+                 "Port %d is already in use - the server could not bind. "
+                 "Showing the dashboard anyway; close other instances or "
+                 "change the port in Settings (Apply & Restart).", s.http_port);
+#ifdef _WIN32
+        if (s.no_gui) {
+            mg_mgr_free(&mgr);
+            return EXIT_FAILURE;
+        }
+#else
+        mg_mgr_free(&mgr);
+        return EXIT_FAILURE;
+#endif
+    }
+    if (bind_try(&mgr, https_url, fn, &s, "https") == NULL) {
+        LOG_WARN("HTTPS bind failed (%s) - continuing without HTTPS.", https_url);
+    }
+    /*
+     * IPv6 loopback listeners (::1) - optional. Devices with IPv6
+     * disabled fail to bind these; that is fine, the IPv4 listeners
+     * above still serve. Both must succeed for ipv6_ok so the ready
+     * log reflects the actual state.
+     */
+    bool ipv6_ok = true;
+    if (bind_try(&mgr, http_url6, fn, &s, "http6") == NULL) {
+        LOG_WARN("HTTP IPv6 bind failed (%s) — continuing with IPv4 only.", http_url6);
+        ipv6_ok = false;
+    }
+    if (bind_try(&mgr, https_url6, fn, &s, "https6") == NULL) {
+        LOG_WARN("HTTPS IPv6 bind failed (%s) — continuing with IPv4 only.", https_url6);
+        ipv6_ok = false;
+    }
+
+    /* Extra ad-block monitoring: the hosts-file redirect targets ports
+       80 (HTTP) and 443 (HTTPS). Always try to monitor them in addition
+       to the configured ports. Binding them needs Administrator on
+       Windows (or the port must be free); failures are only warnings -
+       the configured ports keep working. */
+    {
+        char u[128];
+        if (s.http_port != 80) {
+            snprintf(u, sizeof(u), "http://127.0.0.1:80");
+            if (bind_try(&mgr, u, fn, &s, "mon80") == NULL)
+                LOG_WARN("Monitoring http://127.0.0.1:80 failed (admin needed or port in use).");
+            snprintf(u, sizeof(u), "http://[::1]:80");
+            if (bind_try(&mgr, u, fn, &s, "mon80-6") == NULL)
+                LOG_WARN("Monitoring http://[::1]:80 failed (admin needed or port in use).");
+        }
+        if (s.https_port != 443) {
+            snprintf(u, sizeof(u), "https://127.0.0.1:443");
+            if (bind_try(&mgr, u, fn, &s, "mon443") == NULL)
+                LOG_WARN("Monitoring https://127.0.0.1:443 failed (admin needed or port in use).");
+            snprintf(u, sizeof(u), "https://[::1]:443");
+            if (bind_try(&mgr, u, fn, &s, "mon443-6") == NULL)
+                LOG_WARN("Monitoring https://[::1]:443 failed (admin needed or port in use).");
+        }
+    }
+
+    load_block_cfg(s.resource_dir);
+    load_block_modes(s.resource_dir);   /* per-type blocking method (mode_* keys) */
+    setup_signal_handler();
+    /* Stay alive under memory pressure and log native crashes. */
+    setup_crash_handler(s.resource_dir);
+    harden_process();
+
+    LOG_INFO("ADBlock Web Server v" ADBLOCK_APP_VERSION " ready — Mongoose " MG_VERSION
+        ", SNI cert issuance enabled, IPv6 loopback %s.",
+        ipv6_ok ? "on" : "off");
+
+#ifdef _WIN32
+    if (!s.no_gui) {
+        /* Native dashboard: the server runs on a worker thread and the
+           main thread hosts the dashboard window. */
+        struct adblock_gui_args args;
+        args.resource_dir = s.resource_dir;
+        args.http_port = s.http_port;
+        args.https_port = s.https_port;
+        args.bind_all = s.bind_all;
+        args.start_minimized = s.minimized;
+        args.stats_port = s.stats_port;
+        args.owns_server = true;     /* this process runs the server thread */
+        args.startup_warning = startup_warning[0] ? startup_warning : NULL;
+        struct server_thread_arg targ;
+        targ.mgr = &mgr;
+        targ.s = &s;
+        pthread_t srv_thread;
+        if (pthread_create(&srv_thread, NULL, server_thread_main, &targ) != 0) {
+            LOG_FATAL("Failed to start server thread.");
+            mg_mgr_free(&mgr);
+            return EXIT_FAILURE;
+        }
+        LOG_INFO("Dashboard opened — close the window to shut down.");
+        int rc = adblock_gui_run(&args);
+        if (rc != 0) {
+            /* Window creation failed (rare): keep the server running
+               headless instead of dying silently. */
+            LOG_FATAL("Dashboard window failed to start (exit code %d) - running headless. Press Ctrl+C to stop.", rc);
+            while (s_sig_num == 0) Sleep(500);
+            pthread_join(srv_thread, NULL);
+            return 0;
+        }
+        s_sig_num = 1;   /* stop the poll loop */
+        pthread_join(srv_thread, NULL);
+        LOG_INFO("Server shut down (exit code %d).", rc);
+#ifdef _WIN32
+        if (win32_restart_requested()) {
+            LOG_INFO("Restart requested - relaunching with the new settings...");
+            wchar_t exeW[MAX_PATH], argsW[2048];
+            if (GetModuleFileNameW(NULL, exeW, MAX_PATH) > 0) {
+                swprintf(argsW, 2048, L"--resources \"%hs\"", s.resource_dir);
+                ShellExecuteW(NULL, L"open", exeW, argsW, NULL, SW_SHOWNORMAL);
+            }
+        }
+#endif
+        return 0;
+    }
+#endif
+    return server_loop_and_cleanup(&mgr, &s);
+}
+
+/* Run the mongoose poll loop until a stop signal, then persist + free.
+   Used directly by the Android/headless builds and from a worker thread
+   when the Windows dashboard window is shown. */
+static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
+    /* Snapshot once at startup, then only when something actually changed and
+       at most every 20 s (5 min when idle): writing 16 KB every few seconds for
+       nothing would cost flash I/O and CPU on a phone. */
+    write_stats_json_file(s);
+    uint64_t last_json_ms = mg_millis();
+    uint64_t last_json_counter = s_stats.total_requests + s_stats.total_connections;
+    while (s_sig_num == 0) {
+        mg_mgr_poll(mgr, 1000);
+        uint64_t now_ms = mg_millis();
+        uint64_t counter = s_stats.total_requests + s_stats.total_connections;
+        if (now_ms - last_json_ms > 300000 ||
+            (counter != last_json_counter && now_ms - last_json_ms > 20000)) {
+            last_json_ms = now_ms;
+            last_json_counter = counter;
+            write_stats_json_file(s);
+        }
+    }
+    save_stats(s);
+    save_hist(s);   /* final flush of chart buckets on exit */
+    sni_cache_save(s->resource_dir);  /* persist SNI cache (max hit rate) */
+    apps_save(s->resource_dir);       /* persist per-app stats on exit */
+    s_server_alive = 0;
+    LOG_INFO("ADBlock webserver exiting (signal %d), stats saved", s_sig_num);
+
+    LOG_INFO("Signal %d — shutting down.", s_sig_num);
+    mg_mgr_free(mgr);
+
+    /* Free SNI cache.
+       BUG FIX: take the mutex before freeing so no concurrent
+       sni_callback() thread is still walking the cache while we destroy
+       it. After mg_mgr_free() all connections are closed and no new
+       callbacks can be dispatched, but an abundance of caution is cheap. */
+    pthread_mutex_lock(&s_sni_mutex);
+    for (int i = 0; i < SNI_CACHE_SIZE; i++)
+        if (s_sni_cache[i].ctx) SSL_CTX_free(s_sni_cache[i].ctx);
+    pthread_mutex_unlock(&s_sni_mutex);
+    pthread_mutex_destroy(&s_sni_mutex);
+
+    /* Free CA in-memory objects */
+    if (s->ca.cert) X509_free(s->ca.cert);
+    if (s->ca.key)  EVP_PKEY_free(s->ca.key);
+
+    free((void *)s->tls_opts.cert.buf);
+    free((void *)s->tls_opts.key.buf);
+
+    LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
+    return EXIT_SUCCESS;
+}
+
+ && *end != '|') end++;
+        size_t len = (size_t) (end - s);
+        if (len == 0 || len > 253 || s[0] == '.' ) continue;
+        if (memchr(s, '.', len) == NULL) continue;    /* single labels are not real hosts */
+        block_set_add_hash(fnv1a_lower(s, len));
+        n++;
+    }
+    fclose(fp);
     if (n > 0) LOG_INFO("block set: %zu subscription domains loaded", n);
 }
 
