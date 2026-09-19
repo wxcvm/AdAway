@@ -319,11 +319,37 @@ jobs:
           if (-not $released) { throw "the management port 8686 stayed busy after stopping the dashboard" }
           # Headless mode is expected to fail fast when the port is taken
           # (a scheduled task should report the problem instead of idling).
+          #
+          # NOTE: the blocker above was already stopped by the finally block and
+          # 18084 is free again, so this check needs its OWN busy port. Without
+          # it the server binds normally, keeps running, and "it exited" can
+          # only be asserted by killing it first - which is what the original
+          # test did, making the assertion pass no matter what.
+          $blocker2 = Start-Job -ScriptBlock {
+            $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 18085)
+            $l.Start()
+            Start-Sleep -Seconds 90
+          }
+          $blocked2 = $false
+          $deadlineB2 = (Get-Date).AddSeconds(15)
+          while (-not $blocked2 -and (Get-Date) -lt $deadlineB2) {
+            try {
+              $probe2 = [System.Net.Sockets.TcpClient]::new()
+              $probe2.Connect("127.0.0.1", 18085)
+              $probe2.Close()
+              $blocked2 = $true
+            } catch {
+              Start-Sleep -Milliseconds 200
+            }
+          }
+          if (-not $blocked2) { throw "port 18085 was never taken by the second blocker job" }
           $sw5 = [System.Diagnostics.Stopwatch]::StartNew()
-          $p5 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18084","--https-port","18447","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server5.log" -RedirectStandardError "server5.err"
+          $p5 = Start-Process -FilePath "webserver\win32\dist\webserver.exe" -ArgumentList @("--resources",$res4,"--http-port","18085","--https-port","18448","--no-gui") -PassThru -WorkingDirectory "webserver\win32\dist" -RedirectStandardOutput "server5.log" -RedirectStandardError "server5.err"
           $exitedByItself = $p5.WaitForExit(20000)
           $sw5.Stop()
           Get-Process -Name webserver -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Stop-Job $blocker2 -ErrorAction SilentlyContinue
+          Remove-Job $blocker2 -Force -ErrorAction SilentlyContinue
           # Assert it left on its own: Stop-Process above would otherwise make
           # HasExited true and the check would pass no matter what.
           if (-not $exitedByItself) { throw "headless mode did not exit within 20s when the main port was taken" }
