@@ -116,6 +116,12 @@ jobs:
           echo "$VERSION_NAME|$VERSION_CODE" > version.txt
           ./gradlew test assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
 
+      # Keep the native-build cache honest: without the hit rate the ccache
+      # cache above cannot be told apart from dead weight in CI timing.
+      - name: ccache statistics
+        if: always()
+        run: ccache --show-stats || true
+
       - name: Sign release APK with release key
         run: |
           echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
