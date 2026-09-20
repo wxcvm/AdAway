@@ -141,6 +141,8 @@ struct app_row {
 struct qlog_row {
     long long ts;
     int action;              /* 0 = proxied, 1 = blocked, 2 = allowed */
+    int type;                /* blocked policy type index, -1 = unknown */
+    int mode;                /* 0 = placeholder, 1 = 204, 2 = passthrough */
     wchar_t host[128];
 };
 
@@ -383,6 +385,10 @@ static void json_qlog(const char *body, struct snapshot *sn) {
         memset(r, 0, sizeof(*r));
         r->ts = json_num(item, "ts");
         r->action = (int) json_num(item, "action");
+        /* An older server does not publish "type" at all - that must show as
+           "unknown", not as type 0 (图片). */
+        r->type = strstr(item, "\"type\":") != NULL ? (int) json_num(item, "type") : -1;
+        r->mode = (int) json_num(item, "mode");
         q = strstr(item, "\"host\":\"");
         if (q != NULL) {
             q += 8;
@@ -1590,7 +1596,11 @@ static const struct ctl_desc g_clayout[] = {
        overlap in x 844-948 / y 434-452. */
     { IDM_UPDATE,     844, 466, 170, 26, L"BUTTON", L"检查更新", BS_PUSHBUTTON },
 };
-#define CL_MAIN 14
+/* Number of controls in g_clayout: derive it from the array itself. It used to
+   be a hand-kept constant, and when IDM_UPDATE (检查更新) was appended the
+   constant stayed at 14 - so the button was never created and simply vanished
+   from the settings page. */
+#define CL_MAIN ((int) (sizeof(g_clayout) / sizeof(g_clayout[0])))
 
 /* The dashboard is painted in a fixed 1000x678 logical canvas (sidebar
    0..190, content to x=1000, status bar to y=678). Deriving g_scale from the
@@ -1646,6 +1656,20 @@ static void policy_apply(HWND hwnd) {
     InvalidateRect(hwnd, NULL, FALSE);
 }
 
+/* Policy type / reply mode of a query-log row: "脚本 · 204" answers both
+   questions the dashboard user has - which rule matched and how it answered. */
+static const wchar_t *log_type_label(int t) {
+    static const wchar_t *names[] = {
+        L"图片", L"脚本", L"样式表", L"字体", L"媒体",
+        L"页面结构", L"API", L"遥测", L"配置", L"WebSocket"
+    };
+    return (t >= 0 && t < (int) (sizeof(names) / sizeof(names[0]))) ? names[t] : L"—";
+}
+
+static const wchar_t *log_mode_label(int m) {
+    return m == 1 ? L"204" : (m == 2 ? L"放行" : L"占位");
+}
+
 /* ── "应用日志" page ──────────────────────────────────────────────
  * Everything the server knows about WHO talks to it: the per-app counters
  * (Windows attributes them through the TCP owner-PID table, see
@@ -1657,6 +1681,16 @@ static void draw_activity_page(HDC hdc) {
     HFONT hf = mfont(15, FW_SEMIBOLD);
     HFONT lf = mfont(12, FW_NORMAL);
     HFONT old;
+    /* Kept as named constants so every TextOutW() gets the real length -
+       a hand-counted cchString that is one too large makes GDI read past the
+       end of the literal. */
+    static const wchar_t *HINT_APPS =
+        L"按请求数排序 - Windows 侧按连接所属进程统计（PID → 进程名）";
+    static const wchar_t *HINT_LOG =
+        L"最新在最上 · 方式列 = 命中的策略类型 + 该类型的处理方式（占位 / 204 / 放行）";
+    static const wchar_t *WAIT = L"等待服务器统计数据 ...";
+    static const wchar_t *NO_APPS = L"暂无数据：还没有可归属的客户端连接经过拦截端口。";
+    static const wchar_t *NO_LOG = L"暂无请求记录。";
     SetBkMode(hdc, TRANSPARENT);
 
     /* per-app card */
@@ -1666,13 +1700,11 @@ static void draw_activity_page(HDC hdc) {
     TextOutW(hdc, S(218), S(24), L"按应用统计", 5);
     SelectObject(hdc, lf);
     SetTextColor(hdc, g_pal.muted);
-    TextOutW(hdc, S(218), S(48),
-             L"按请求数排序 - Windows 侧按连接所属进程统计（PID → 进程名）", 36);
+    TextOutW(hdc, S(218), S(48), HINT_APPS, (int) wcslen(HINT_APPS));
     if (sn == NULL || !sn->valid) {
-        TextOutW(hdc, S(222), S(100), L"等待服务器统计数据 ...", 11);
+        TextOutW(hdc, S(222), S(100), WAIT, (int) wcslen(WAIT));
     } else if (sn->app_count == 0) {
-        TextOutW(hdc, S(222), S(100),
-                 L"暂无数据：还没有可归属的客户端连接经过拦截端口。", 25);
+        TextOutW(hdc, S(222), S(100), NO_APPS, (int) wcslen(NO_APPS));
     } else {
         int rows = sn->app_count > 9 ? 9 : sn->app_count;
         SetTextColor(hdc, g_pal.muted);
@@ -1701,26 +1733,26 @@ static void draw_activity_page(HDC hdc) {
     }
 
     /* query log card */
-    rounded_card(hdc, 202, 324, 812, 306, 12, g_pal.card, g_pal.border);
+    rounded_card(hdc, 202, 324, 812, 296, 12, g_pal.card, g_pal.border);
     SelectObject(hdc, hf);
     SetTextColor(hdc, g_pal.text);
     TextOutW(hdc, S(218), S(336), L"最近请求", 4);
     SelectObject(hdc, lf);
     SetTextColor(hdc, g_pal.muted);
-    TextOutW(hdc, S(218), S(360),
-             L"最新在最上 - 结果列：拦截 / 放行 / 代理（服务器查询日志）", 30);
+    TextOutW(hdc, S(218), S(360), HINT_LOG, (int) wcslen(HINT_LOG));
     if (sn == NULL || !sn->valid) {
-        TextOutW(hdc, S(222), S(412), L"等待服务器统计数据 ...", 11);
+        TextOutW(hdc, S(222), S(412), WAIT, (int) wcslen(WAIT));
     } else if (sn->qlog_count == 0) {
-        TextOutW(hdc, S(222), S(412), L"暂无请求记录。", 7);
+        TextOutW(hdc, S(222), S(412), NO_LOG, (int) wcslen(NO_LOG));
     } else {
         int rows = sn->qlog_count > 11 ? 11 : sn->qlog_count;
         TextOutW(hdc, S(222), S(388), L"时间", 2);
-        TextOutW(hdc, S(320), S(388), L"结果", 2);
-        TextOutW(hdc, S(400), S(388), L"主机", 2);
+        TextOutW(hdc, S(300), S(388), L"结果", 2);
+        TextOutW(hdc, S(372), S(388), L"方式", 2);
+        TextOutW(hdc, S(500), S(388), L"主机", 2);
         for (int i = 0; i < rows; i++) {
             struct qlog_row *r = &sn->qlog[i];
-            wchar_t tb[32] = L"--:--:--", hb[48];
+            wchar_t tb[32] = L"--:--:--", hb[48], way[64] = L"—";
             const wchar_t *act;
             int y = 412 + i * 19;
             time_t t = (time_t) r->ts;
@@ -1729,6 +1761,8 @@ static void draw_activity_page(HDC hdc) {
                 swprintf(tb, 32, L"%02d:%02d:%02d", tmv->tm_hour, tmv->tm_min, tmv->tm_sec);
             wcsncpy(hb, r->host, 44);
             hb[44] = 0;
+            if (r->action == 1 || r->action == 2)
+                swprintf(way, 64, L"%ls · %ls", log_type_label(r->type), log_mode_label(r->mode));
             SetTextColor(hdc, g_pal.muted);
             TextOutW(hdc, S(222), S(y), tb, (int) wcslen(tb));
             if (r->action == 1) {
@@ -1741,9 +1775,11 @@ static void draw_activity_page(HDC hdc) {
                 SetTextColor(hdc, g_pal.text);
                 act = L"代理";
             }
-            TextOutW(hdc, S(320), S(y), act, 2);
+            TextOutW(hdc, S(300), S(y), act, 2);
+            SetTextColor(hdc, g_pal.muted);
+            TextOutW(hdc, S(372), S(y), way, (int) wcslen(way));
             SetTextColor(hdc, g_pal.text);
-            TextOutW(hdc, S(400), S(y), hb, (int) wcslen(hb));
+            TextOutW(hdc, S(500), S(y), hb, (int) wcslen(hb));
         }
     }
 
@@ -2023,6 +2059,27 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
         }
         return 0;
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN:
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX: {
+        /* Native child controls do not follow the palette on their own: on the
+           dark card a checkbox or the port edit boxes stayed white with black
+           text. Handing back a card-coloured brush plus matching text/bk
+           colours is the documented fix (no owner-draw needed). */
+        static HBRUSH s_ctl_brush = NULL;
+        static COLORREF s_ctl_brush_color = 0xFFFFFFFFu;
+        HDC dc = (HDC) wp;
+        if (s_ctl_brush == NULL || s_ctl_brush_color != g_pal.card) {
+            if (s_ctl_brush != NULL) DeleteObject(s_ctl_brush);
+            s_ctl_brush = CreateSolidBrush(g_pal.card);
+            s_ctl_brush_color = g_pal.card;
+        }
+        SetBkMode(dc, OPAQUE);
+        SetBkColor(dc, g_pal.card);
+        SetTextColor(dc, g_pal.text);
+        return (LRESULT) s_ctl_brush;
+    }
     case WM_ERASEBKGND:
         return 1;   /* handled in WM_PAINT - no erase flicker */
     case WM_SIZE:
