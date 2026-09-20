@@ -73,6 +73,9 @@
     <string name="compose_stats_recent_action_blocked">拦截</string>
     <string name="compose_stats_recent_action_allowed">放行</string>
     <string name="compose_stats_recent_action_proxied">代理</string>
+    <string name="compose_stats_mode_placeholder">占位</string>
+    <string name="compose_stats_mode_204">204</string>
+    <string name="compose_stats_mode_allowed">放行</string>
     <string name="compose_settings_title">设置</string>
     <string name="compose_settings_apps_title">应用监控</string>
     <string name="compose_settings_apps_hint">选择要在应用统计中显示的应用</string>

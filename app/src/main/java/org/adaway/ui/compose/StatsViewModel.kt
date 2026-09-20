@@ -44,6 +44,10 @@ data class QueryLogEntry(
     val ts: Long = 0,
     val uid: Int = -1,
     val action: Int = 0,
+    /** Matched policy type (LT_* order), -1 = unknown / not a blocked request. */
+    val type: Int = -1,
+    /** How that type answers: 0 = placeholder, 1 = 204, 2 = passthrough. */
+    val mode: Int = 0,
     val host: String = "",
 )
 
@@ -154,6 +158,10 @@ data class ServerStats(
                         ts = o.optLong("ts", 0),
                         uid = o.optInt("uid", -1),
                         action = o.optInt("action", 0),
+                        // An older server publishes neither field: keep -1 so the
+                        // UI shows "unknown" rather than guessing "图片".
+                        type = if (o.has("type")) o.optInt("type", -1) else -1,
+                        mode = o.optInt("mode", 0),
                         host = o.optString("host", ""),
                     )
                 }

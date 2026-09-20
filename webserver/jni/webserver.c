@@ -347,6 +347,26 @@ static bool cfg_tele = true;
 static bool cfg_conf = true;
 static bool cfg_ws = true;
 
+/*
+ * Which policy type the last reply_blocked_by_type() matched, and how that type
+ * is configured to answer. The query log stores both, so the app can show WHY
+ * and HOW a request was handled ("拦截 · 脚本 · 204") instead of a bare
+ * "blocked". Indices match the order of the policy list in the app's settings.
+ *
+ * Reply mode: 0 = placeholder/silent reply, 1 = 204 quick deny. (The Windows
+ * branch additionally has 2 = 放行, hence the shared numbering.)
+ */
+enum {
+    LT_IMAGES = 0, LT_SCRIPTS, LT_STYLES, LT_FONTS, LT_MEDIA,
+    LT_STRUCT, LT_API, LT_TELEMETRY, LT_CONFIG, LT_WS, LT_COUNT
+};
+#define RB_REPLY 0
+#define RB_DENY  1
+static int s_last_type = -1;
+static int s_last_mode = RB_REPLY;
+#define RB_TYPE(t, enabled) \
+    do { s_last_type = (t); s_last_mode = (enabled) ? RB_REPLY : RB_DENY; } while (0)
+
 /* Sum of every blocked_* counter — used for block_rate metrics. */
 static uint64_t stats_total_blocked(void) {
     return s_stats.blocked_images + s_stats.blocked_scripts + s_stats.blocked_styles +
@@ -1697,6 +1717,10 @@ static bool deny_quick(uint64_t *c, struct mg_connection *co) {
 
 static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
     struct mg_str u = hm->uri;
+    /* Cleared per request so a caller that falls through to the generic
+       placeholder does not inherit the previous request's type. */
+    s_last_type = -1;
+    s_last_mode = RB_REPLY;
 
     /* Images & video thumbnails: fall through to the user-configured
        placeholder images (they're meant to be seen). */
@@ -1705,6 +1729,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_ends_with_ci(u, ".webp") || uri_ends_with_ci(u, ".avif") ||
         uri_ends_with_ci(u, ".svg") || uri_ends_with_ci(u, ".ico") ||
         uri_ends_with_ci(u, ".bmp")) {
+        RB_TYPE(LT_IMAGES, cfg_images);
         if (!cfg_images) return deny_quick(&s_stats.blocked_images, c);
         return false;
     }
@@ -1714,6 +1739,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        re-requesting it after the first time (saves battery/bandwidth
        on every page load). */
     if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
+        RB_TYPE(LT_SCRIPTS, cfg_scripts);
         if (!cfg_scripts) return deny_quick(&s_stats.blocked_scripts, c);
         s_stats.blocked_scripts++;
         mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
@@ -1724,6 +1750,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Stylesheets: empty CSS, HTTP 200. Cached like JS above. */
     if (uri_ends_with_ci(u, ".css")) {
+        RB_TYPE(LT_STYLES, cfg_styles);
         if (!cfg_styles) return deny_quick(&s_stats.blocked_styles, c);
         s_stats.blocked_styles++;
         mg_http_reply(c, 200, "Content-Type: text/css\r\n"
@@ -1736,6 +1763,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
         uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
         uri_ends_with_ci(u, ".eot")) {
+        RB_TYPE(LT_FONTS, cfg_fonts);
         if (!cfg_fonts) return deny_quick(&s_stats.blocked_fonts, c);
         s_stats.blocked_fonts++;
         mg_http_reply(c, 204, CORS_HDR
@@ -1757,6 +1785,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_ends_with_ci(u, ".ts") || uri_ends_with_ci(u, ".m3u8") ||
         uri_ends_with_ci(u, ".mpd") || uri_ends_with_ci(u, ".flv") ||
         uri_ends_with_ci(u, ".mov") || uri_ends_with_ci(u, ".wav")) {
+        RB_TYPE(LT_MEDIA, cfg_media);
         if (!cfg_media) return deny_quick(&s_stats.blocked_media, c);
         s_stats.blocked_media++;
         mg_http_reply(c, 204, CORS_HDR
@@ -1769,6 +1798,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".xml") || uri_ends_with_ci(u, ".txt") ||
         uri_ends_with_ci(u, ".map") || uri_ends_with_ci(u, ".wasm") ||
         uri_ends_with_ci(u, ".webmanifest") || uri_ends_with_ci(u, ".jsonp")) {
+        RB_TYPE(LT_STRUCT, cfg_struct);
         if (!cfg_struct) return deny_quick(&s_stats.blocked_other, c);
         s_stats.blocked_other++;
         mg_http_reply(c, 200, "Content-Type: application/octet-stream\r\n"
@@ -1784,6 +1814,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/stratum") || uri_contains_ci(u, "/worker") ||
         uri_contains_ci(u, "/mining") || uri_contains_ci(u, "/hashrate") ||
         uri_contains_ci(u, "/pool")) {
+        RB_TYPE(LT_STRUCT, cfg_struct);   /* 挖矿池 归入 页面结构 策略 */
         if (!cfg_struct) return deny_quick(&s_stats.blocked_crypto, c);
         s_stats.blocked_crypto++;
         mg_http_reply(c, 204, CORS_HDR
@@ -1793,6 +1824,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/click") || uri_contains_ci(u, "/track") ||
         uri_contains_ci(u, "/pixel") || uri_contains_ci(u, "/beacon") ||
         uri_contains_ci(u, "/impression")) {
+        RB_TYPE(LT_TELEMETRY, cfg_tele);  /* 点击/像素追踪 归入 遥测/统计 策略 */
         if (!cfg_tele) return deny_quick(&s_stats.blocked_clickbait, c);
         s_stats.blocked_clickbait++;
         mg_http_reply(c, 204, CORS_HDR
@@ -1804,6 +1836,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        gateway. Decline politely with 204 instead of serving an image. */
     struct mg_str *upgrade = mg_http_get_header(hm, "Upgrade");
     if (upgrade != NULL && mg_strcasecmp(*upgrade, mg_str("websocket")) == 0) {
+        RB_TYPE(LT_WS, cfg_ws);
         if (!cfg_ws) return deny_quick(&s_stats.blocked_ws_sse, c);
         s_stats.blocked_ws_sse++;
         mg_http_reply(c, 204, CORS_HDR
@@ -1815,6 +1848,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        clean "closed" stream (204) rather than a corrupt body. */
     struct mg_str *accept_hdr = mg_http_get_header(hm, "Accept");
     if (accept_hdr != NULL && uri_contains_ci(*accept_hdr, "text/event-stream")) {
+        RB_TYPE(LT_WS, cfg_ws);
         if (!cfg_ws) return deny_quick(&s_stats.blocked_ws_sse, c);
         s_stats.blocked_ws_sse++;
         mg_http_reply(c, 204, CORS_HDR
@@ -1832,10 +1866,12 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     struct mg_str *dest = mg_http_get_header(hm, "Sec-Fetch-Dest");
     if (dest != NULL && dest->len > 0) {
         if (mg_strcasecmp(*dest, mg_str("image")) == 0) {
+        RB_TYPE(LT_IMAGES, cfg_images);
         if (!cfg_images) return deny_quick(&s_stats.blocked_images, c);
             return false;  /* image request without extension → placeholder image */
         }
         if (mg_strcasecmp(*dest, mg_str("script")) == 0) {
+        RB_TYPE(LT_SCRIPTS, cfg_scripts);
         if (!cfg_scripts) return deny_quick(&s_stats.blocked_scripts, c);
             s_stats.blocked_scripts++;
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
@@ -1844,6 +1880,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("style")) == 0) {
+        RB_TYPE(LT_STYLES, cfg_styles);
         if (!cfg_styles) return deny_quick(&s_stats.blocked_styles, c);
             s_stats.blocked_styles++;
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
@@ -1852,6 +1889,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("font")) == 0) {
+        RB_TYPE(LT_FONTS, cfg_fonts);
         if (!cfg_fonts) return deny_quick(&s_stats.blocked_fonts, c);
             s_stats.blocked_fonts++;
             mg_http_reply(c, 204, CORS_HDR
@@ -1927,10 +1965,12 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (accept != NULL && accept->len > 0) {
         if (uri_contains_ci(*accept, "image/") ||
             uri_contains_ci(*accept, "image/*")) {
+        RB_TYPE(LT_IMAGES, cfg_images);
         if (!cfg_images) return deny_quick(&s_stats.blocked_images, c);
             return false;  /* image request → placeholder image */
         }
         if (uri_contains_ci(*accept, "text/css")) {
+        RB_TYPE(LT_STYLES, cfg_styles);
         if (!cfg_styles) return deny_quick(&s_stats.blocked_styles, c);
         s_stats.blocked_styles++;
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
@@ -1940,6 +1980,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         }
         if (uri_contains_ci(*accept, "application/javascript") ||
             uri_contains_ci(*accept, "text/javascript")) {
+        RB_TYPE(LT_SCRIPTS, cfg_scripts);
         if (!cfg_scripts) return deny_quick(&s_stats.blocked_scripts, c);
         s_stats.blocked_scripts++;
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
@@ -2017,6 +2058,15 @@ static void qlog_add(uid_t uid, int action, struct mg_http_message *hm) {
     e->ts = (uint64_t) time(NULL);
     e->uid = (uid == (uid_t) -1) ? 0xFFFFFFFFu : (uint32_t) uid;
     e->action = (uint8_t) action;
+    /* "Why and how": a blocked row carries the policy type that matched and the
+       mode that type is configured with (0xFFFF = nothing matched). */
+    if (action == QLOG_BLOCK) {
+        e->rtype = (uint16_t) (s_last_type < 0 ? 0xFFFF : s_last_type);
+        e->pad = (uint8_t) s_last_mode;
+    } else {
+        e->rtype = 0xFFFF;
+        e->pad = 0;
+    }
     struct mg_str *hh = hm ? mg_http_get_header(hm, "Host") : NULL;
     if (hh != NULL && hh->len > 0) {
         size_t n = hh->len < sizeof(e->host) - 1 ? hh->len : sizeof(e->host) - 1;
@@ -2047,10 +2097,13 @@ static void qlog_render(char *out, size_t cap) {
         if (e->ts == 0) continue;
         json_safe_copy(host, sizeof(host), e->host);
         n = snprintf(out + off, cap - off,
-                     "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"host\":\"%s\"}",
+                     "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"type\":%d,"
+                     "\"mode\":%d,\"host\":\"%s\"}",
                      off ? "," : "", (unsigned long long) e->ts,
                      (e->uid == 0xFFFFFFFFu) ? -1 : (int) e->uid,
-                     (int) e->action, host);
+                     (int) e->action,
+                     (e->rtype == 0xFFFF) ? -1 : (int) e->rtype,
+                     (int) e->pad, host);
         if (n <= 0 || off + (size_t) n >= cap) { out[off] = '\0'; break; }
         off += (size_t) n;
     }
@@ -3450,6 +3503,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     hist_add(HIST_BLOCKED);
     struct appstat *ba = app_find_or_add(conn_load_uid(c));
     if (ba) ba->blocked++;
+    /* The generic placeholder is a block as well: log it too, otherwise the
+       most common case ("could not classify") would be the one entry type
+       missing from the query log. */
+    RB_TYPE(LT_IMAGES, cfg_images);
     qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
     ws_push_broadcast(s);  /* real-time push to WS subscribers */
     struct mg_http_serve_opts o = {0};

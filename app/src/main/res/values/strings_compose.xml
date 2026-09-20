@@ -73,6 +73,9 @@
     <string name="compose_stats_recent_action_blocked">Blocked</string>
     <string name="compose_stats_recent_action_allowed">Allowed</string>
     <string name="compose_stats_recent_action_proxied">Proxied</string>
+    <string name="compose_stats_mode_placeholder">placeholder</string>
+    <string name="compose_stats_mode_204">204</string>
+    <string name="compose_stats_mode_allowed">allowed</string>
     <string name="compose_settings_title">Settings</string>
     <string name="compose_settings_apps_title">App monitoring</string>
     <string name="compose_settings_apps_hint">Choose which apps appear in the per-app statistics</string>

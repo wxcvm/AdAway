@@ -1436,6 +1436,30 @@ private fun queryActionLabel(action: Int): String = when (action) {
     else -> stringResource(R.string.compose_stats_recent_action_proxied)
 }
 
+/** 命中的策略类型（与服务端 LT_* 顺序一致），未知则返回空串。 */
+@Composable
+private fun queryTypeLabel(type: Int): String = when (type) {
+    0 -> stringResource(R.string.compose_stats_type_images)
+    1 -> stringResource(R.string.compose_stats_type_scripts)
+    2 -> stringResource(R.string.compose_stats_type_styles)
+    3 -> stringResource(R.string.compose_stats_type_fonts)
+    4 -> stringResource(R.string.compose_stats_type_media)
+    5 -> stringResource(R.string.compose_stats_type_other)
+    6 -> stringResource(R.string.compose_stats_type_api)
+    7 -> stringResource(R.string.compose_stats_type_telemetry)
+    8 -> stringResource(R.string.compose_stats_type_config)
+    9 -> stringResource(R.string.compose_stats_type_ws)
+    else -> ""
+}
+
+/** 该类型当前的处理方式：占位 / 204 / 放行。 */
+@Composable
+private fun queryModeLabel(mode: Int): String = when (mode) {
+    1 -> stringResource(R.string.compose_stats_mode_204)
+    2 -> stringResource(R.string.compose_stats_mode_allowed)
+    else -> stringResource(R.string.compose_stats_mode_placeholder)
+}
+
 private fun queryTimeText(ts: Long): String =
     if (ts <= 0L) "--:--:--"
     else java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(java.util.Date(ts * 1000L))
@@ -1489,6 +1513,13 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>) {
             )
             Spacer(Modifier.height(8.dp))
             shown.forEach { entry ->
+                // 结果列直接给出"怎么拦的"：拦截 · 脚本 · 204
+                val typeText = queryTypeLabel(entry.type)
+                val modeText = queryModeLabel(entry.mode)
+                val detail = if (typeText.isEmpty()) modeText else "$typeText · $modeText"
+                val actionText = if (entry.action == 1 || entry.action == 2)
+                    queryActionLabel(entry.action) + " · " + detail
+                else queryActionLabel(entry.action)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1502,7 +1533,7 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>) {
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        queryActionLabel(entry.action),
+                        actionText,
                         style = MaterialTheme.typography.bodySmall,
                         color = when (entry.action) {
                             1 -> MaterialTheme.colorScheme.error
