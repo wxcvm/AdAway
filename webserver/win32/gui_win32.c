@@ -1043,7 +1043,7 @@ static int g_http_port = 8080;
 static int g_https_port = 8443;
 static bool g_bind_all = false;
 static bool g_start_minimized = false;
-static int g_tab = 0;               /* 0 = statistics, 1 = settings */
+static int g_tab = 0;               /* 0 = statistics, 1 = 应用日志, 2 = settings */
 static wchar_t g_status[4096] = L"";
 static HWND s_ctrls[64];
 static int s_ctrl_count = 0;
@@ -1635,7 +1635,9 @@ static void layout_controls(HWND hwnd) {
 }
 
 static void show_controls(HWND hwnd, int tab) {
-    bool show = (tab == 1);
+    /* Native controls belong to the settings page, which is tab 2 now that
+       "应用日志" sits in the middle (tab 1). */
+    bool show = (tab == 2);
     if (show) policy_sync_controls(hwnd);
     for (int i = 0; i < CL_MAIN; i++)
         ShowWindow(GetDlgItem(hwnd, g_clayout[i].id), show ? SW_SHOW : SW_HIDE);
@@ -2109,7 +2111,8 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
         draw_sidebar(hdc);
 
-        if (g_tab == 1) {
+        if (g_tab == 2) {
+            /* settings page */
             /* grouped card backgrounds behind the native controls */
             int pol_bottom = 208 + ((POLICY_COUNT + 1) / 2) * 28;
             rounded_card(hdc, 202, 12, 812, 156, 12, g_pal.card, g_pal.border);
@@ -2151,7 +2154,8 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
 
-        if (g_tab == 2) {
+        if (g_tab == 1) {
+            /* 应用日志 page */
             draw_activity_page(hdc);
             BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
             SelectObject(mem, oldbmp);
