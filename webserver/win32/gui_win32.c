@@ -2246,6 +2246,18 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         EndPaint(hwnd, &ps);
         return 0;
     }
+    case WM_APP_UPDATE_PROGRESS: {
+        /* Download progress (wParam = percent, -1 = gave up). On a slow line the
+           4 MB package takes minutes and used to look like a frozen window. */
+        int pct = (int) wp;
+        if (pct < 0)
+            swprintf(g_status, 4096, L"更新包下载失败（已自动重试 5 次并支持断点续传）");
+        else
+            swprintf(g_status, 4096,
+                     L"正在下载更新包 … %d%%（网络慢时请稍候，断线会自动续传）", pct);
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+    }
     case WM_APP_UPDATE_FOUND: {
         struct update_info *info = (struct update_info *) lp;
         if (wp && info) {

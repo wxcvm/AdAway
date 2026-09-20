@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.31`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.32`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -17,6 +17,9 @@
   而用户实际运行的那个目录永远停在旧版本。
 - 静默安装必须自己拉起程序：安装器给更新用的 `/VERYSILENT` 会跳过 `[Run]` 里带 `skipifsilent` 的条目，
   而 `RestartApplications=no` 也不会替我们重启，所以 `installer.iss` 增加了一条 `Check: WizardSilent` 的启动项。
+- 慢线路必须能下载完（v1.32）：实测本机到 GitHub 资源节点只有约 16 KB/s（4 MB 包 ≈ 4 分钟）。
+  更新包下载改为**断点续传 + 最多 5 次重试 + 20s/120s 超时**，仪表盘状态栏显示百分比；
+  主包（安装器 5.3 MB）取不回来时自动改用便携包（4.1 MB），并用对应包的摘要校验。
 - 清单必须能被严格 JSON 解析：CI 用 Python 生成并校验后才上传（历史缺陷：`sha256sum` 对含反斜杠的
   Windows 路径会在行首加 `\`，`cut -f1` 把这个标记带进了摘要，清单因此不是合法 JSON）。
 

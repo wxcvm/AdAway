@@ -69,6 +69,10 @@ Windows SmartScreen / 杀毒软件：
     生效，Windows 上不会启用。
 
 故障排查：
+  * 更新很慢或者一直失败：这条线路到 GitHub 资源节点（release-assets.githubusercontent.com）
+    的下载速度实测可能只有十几 KB/s，4 MB 的包需要四分钟左右。更新器现在会
+    自动重试最多 5 次、并且断点续传（仪表盘状态栏显示百分比），请让它跑完；
+    主包（安装器）实在取不回来时会自动改用体积更小的便携包。
   * "无法创建 resources 目录" / "CA 生成失败" - 目录不可写：换到用户目录，
     或用 --resources 指定其它位置。
   * 仪表盘一直显示"等待服务器 ..." - 等几秒；仍不行请查看 webserver.log，

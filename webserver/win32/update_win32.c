@@ -250,17 +250,32 @@ static int running_copy_is_installed(void) {
  * fallback URL.
  */
 static void release_pick_choose(const struct release_pick *p, wchar_t *url, size_t url_cap,
-                                char *sha, size_t sha_cap, wchar_t *api_url, size_t api_cap) {
+                                char *sha, size_t sha_cap, wchar_t *api_url, size_t api_cap,
+                                wchar_t *alt_url, size_t alt_url_cap,
+                                char *alt_sha, size_t alt_sha_cap,
+                                wchar_t *alt_api, size_t alt_api_cap) {
     int portable = p->zip_url[0] && !running_copy_is_installed();
     const char *u = portable ? p->zip_url : (p->exe_url[0] ? p->exe_url : p->zip_url);
     const char *s = portable ? p->zip_sha : (p->exe_url[0] ? p->exe_sha : p->zip_sha);
     const char *a = portable ? p->zip_api_url : (p->exe_url[0] ? p->exe_api_url : p->zip_api_url);
+    /* The other package of the same release, as a second chance when the first
+       one cannot be fetched at all. */
+    int alt_is_exe = portable && p->exe_url[0];
+    const char *au = alt_is_exe ? p->exe_url : (!portable && p->zip_url[0] ? p->zip_url : NULL);
+    const char *as = alt_is_exe ? p->exe_sha : (!portable && p->zip_url[0] ? p->zip_sha : NULL);
+    const char *aa = alt_is_exe ? p->exe_api_url : (!portable && p->zip_url[0] ? p->zip_api_url : NULL);
     if (url && url_cap) url[0] = 0;
     if (api_url && api_cap) api_url[0] = 0;
     if (sha && sha_cap) sha[0] = 0;
+    if (alt_url && alt_url_cap) alt_url[0] = 0;
+    if (alt_api && alt_api_cap) alt_api[0] = 0;
+    if (alt_sha && alt_sha_cap) alt_sha[0] = 0;
     if (u && u[0] && url && url_cap) utf8_to_wide(u, url, url_cap);
     if (a && a[0] && api_url && api_cap) utf8_to_wide(a, api_url, api_cap);
     if (s && s[0] && sha && sha_cap) snprintf(sha, sha_cap, "%s", s);
+    if (au && au[0] && alt_url && alt_url_cap) utf8_to_wide(au, alt_url, alt_url_cap);
+    if (aa && aa[0] && alt_api && alt_api_cap) utf8_to_wide(aa, alt_api, alt_api_cap);
+    if (as && as[0] && alt_sha && alt_sha_cap) snprintf(alt_sha, alt_sha_cap, "%s", as);
 }
 
 /* Fixed-tag manifest: 1 newer, 0 up to date (no API needed), -1 unavailable. */
@@ -340,9 +355,33 @@ done:
     return body;
 }
 
-/* Download a (redirecting) release asset to a local file. "extra_headers" is
-   optional (e.g. "Accept: application/octet-stream\r\n" for the API endpoint,
-   which answers in networks where github.com's download host does not). */
+/* Bytes already sitting in an interrupted download (0 when there is none). */
+static unsigned long long partial_size(const wchar_t *path) {
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) return 0;
+    return ((unsigned long long) fad.nFileSizeHigh << 32) | (unsigned long long) fad.nFileSizeLow;
+}
+
+/* Tell the dashboard how far the download got (wParam = percent). */
+static void post_progress(int percent) {
+    if (s_update_hwnd != NULL) PostMessageW(s_update_hwnd, WM_APP_UPDATE_PROGRESS, (WPARAM) percent, 0);
+}
+
+/*
+ * Download a (redirecting) release asset to a local file.
+ *
+ * This is the step that decides whether "update" works at all on a slow line.
+ * Measured from the maintainer's network GitHub's asset CDN delivered ~16 KB/s,
+ * i.e. four minutes for the 4 MB portable package; the old code opened a fresh
+ * connection, always wrote from byte zero and gave up on the first stall, so a
+ * slow line ended in "download failed" no matter how often the user retried.
+ * Now a partial file is kept and continued with a Range request (the CDN does
+ * answer 206 for those), with up to UPDATE_DOWNLOAD_ATTEMPTS tries, 20 s
+ * connect / 120 s receive timeouts and a percentage in the dashboard instead of
+ * a frozen status line. The caller still verifies the published SHA-256 of the
+ * finished file, so a resumed download is never trusted on size alone.
+ */
+#define UPDATE_DOWNLOAD_ATTEMPTS 5
 static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                                  const wchar_t *extra_headers) {
     wchar_t host[256] = L"", path[1024] = L"";
@@ -357,63 +396,83 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
     wcsncpy(path, slash, 1023);
     path[1023] = 0;
 
-    HINTERNET session = WinHttpOpen(L"ADBlock-WebServer", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                                    WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!session) return 0;
-    WinHttpSetTimeouts(session, 8000, 8000, 15000, 60000);
-    DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
-    HINTERNET connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
-    HINTERNET request = connect
-        ? WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER,
-                             WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
-        : NULL;
-    int ok = 0;
-    FILE *out = NULL;
-    if (request) {
-        WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
-        if (WinHttpSendRequest(request,
-                               extra_headers ? extra_headers : WINHTTP_NO_ADDITIONAL_HEADERS,
-                               extra_headers ? (DWORD) -1L : 0,
-                               WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
-            WinHttpReceiveResponse(request, NULL)) {
-            DWORD status = 0, slen = sizeof(status);
-            WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                                WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen, WINHTTP_NO_HEADER_INDEX);
-            /* Refuse an oversized package before writing a single byte, and
-               keep counting while streaming (a server may lie about or omit
-               Content-Length). */
-            int too_big = 0;
-            unsigned long long declared = 0;
-            DWORD clen_size = sizeof(declared);
-            if (WinHttpQueryHeaders(request,
-                    WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
-                    WINHTTP_HEADER_NAME_BY_INDEX, &declared, &clen_size,
-                    WINHTTP_NO_HEADER_INDEX) &&
-                declared > (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES) {
-                too_big = 1;
+    unsigned long long have = partial_size(file);
+    for (int attempt = 1; attempt <= UPDATE_DOWNLOAD_ATTEMPTS; attempt++) {
+        HINTERNET session = NULL, connect = NULL, request = NULL;
+        FILE *out = NULL;
+        unsigned long long declared = 0;
+        int complete = 0;
+
+        session = WinHttpOpen(L"ADBlock-WebServer", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                              WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (session == NULL) return 0;
+        WinHttpSetTimeouts(session, 20000, 20000, 30000, 120000);
+        connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
+        request = connect != NULL
+            ? WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER,
+                                 WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
+            : NULL;
+        if (request != NULL) {
+            DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+            wchar_t hdrs[512] = L"";
+            WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
+            if (have > 0) swprintf(hdrs, 512, L"Range: bytes=%llu-\r\n", have);
+            if (extra_headers != NULL && extra_headers[0] != 0) {
+                size_t n = wcslen(hdrs);
+                if (n < 480) wcsncat(hdrs + n, extra_headers, 511 - n);
             }
-            if (status == 200 && !too_big) out = _wfopen(file, L"wb");
-            if (out) {
-                ok = 1;
-                unsigned long long total = 0;
-                for (;;) {
-                    DWORD avail = 0, read = 0;
-                    char buffer[65536];
-                    if (!WinHttpQueryDataAvailable(request, &avail) || avail == 0) break;
-                    if (avail > sizeof(buffer)) avail = (DWORD) sizeof(buffer);
-                    if (!WinHttpReadData(request, buffer, avail, &read) || read == 0) { ok = 0; break; }
-                    total += read;
-                    if (total > (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES) { ok = 0; break; }
-                    if (fwrite(buffer, 1, read, out) != read) { ok = 0; break; }
+            if (WinHttpSendRequest(request, hdrs[0] ? hdrs : WINHTTP_NO_ADDITIONAL_HEADERS,
+                                   hdrs[0] ? (DWORD) -1L : 0,
+                                   WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+                WinHttpReceiveResponse(request, NULL)) {
+                DWORD status = 0, slen = sizeof(status);
+                DWORD clen_size = sizeof(declared);
+                WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                                    WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen, WINHTTP_NO_HEADER_INDEX);
+                WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                                    WINHTTP_HEADER_NAME_BY_INDEX, &declared, &clen_size,
+                                    WINHTTP_NO_HEADER_INDEX);
+                /* A server that ignores our Range header restarts the file. */
+                if (status == 200) have = 0;
+                if ((status == 200 || status == 206) &&
+                    have + declared <= (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES) {
+                    out = _wfopen(file, have > 0 ? L"ab" : L"wb");
+                    if (out != NULL) {
+                        /* When the server omits Content-Length, "have" alone has
+                           to represent the total, so a clean EOF means done. */
+                        unsigned long long total = declared > 0 ? have + declared : 0;
+                        int io_ok = 1;
+                        for (;;) {
+                            DWORD avail = 0, read = 0;
+                            char buffer[65536];
+                            if (!WinHttpQueryDataAvailable(request, &avail) || avail == 0) break;
+                            if (avail > sizeof(buffer)) avail = (DWORD) sizeof(buffer);
+                            if (!WinHttpReadData(request, buffer, avail, &read) || read == 0) { io_ok = 0; break; }
+                            have += read;
+                            if (have > (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES ||
+                                fwrite(buffer, 1, read, out) != read) { io_ok = 0; break; }
+                            if (total > 0) post_progress((int) (have * 100ULL / total));
+                        }
+                        complete = io_ok && (declared == 0 || have >= total);
+                    }
                 }
             }
         }
+        if (out != NULL) fclose(out);
+        if (request != NULL) WinHttpCloseHandle(request);
+        if (connect != NULL) WinHttpCloseHandle(connect);
+        WinHttpCloseHandle(session);
+
+        if (complete) {
+            post_progress(100);
+            return 1;
+        }
+        /* Keep whatever arrived and try to continue it after a short pause. */
+        have = partial_size(file);
+        if (attempt < UPDATE_DOWNLOAD_ATTEMPTS) Sleep(1000 * attempt);
     }
-    if (out) fclose(out);
-    if (request) WinHttpCloseHandle(request);
-    if (connect) WinHttpCloseHandle(connect);
-    WinHttpCloseHandle(session);
-    return ok;
+    post_progress(-1);   /* -1 = give up (dashboard clears the percentage) */
+    return 0;
 }
 
 /* Decimal id after ".../releases/assets/" (the /releases/assets/<id> endpoint). */
@@ -535,7 +594,9 @@ static DWORD WINAPI check_thread(LPVOID param) {
     HWND hwnd = (HWND) param;
     struct release_pick pick;
     wchar_t tag[128] = L"", url[1024] = L"", api_url[1024] = L"";
+    wchar_t alt_url[1024] = L"", alt_api[1024] = L"";
     char digest[128] = "";
+    char alt_digest[128] = "";
     struct update_info *info = NULL;
     DWORD st = 0;
     /* 1) fixed-tag manifest: no REST API, therefore no rate limit at all. */
@@ -544,7 +605,8 @@ static DWORD WINAPI check_thread(LPVOID param) {
         /* The manifest itself is the release: choose the package for this
            machine (installer copy vs. hand-extracted portable copy). */
         utf8_to_wide(pick.tag[0] ? pick.tag : pick.ver, tag, 128);
-        release_pick_choose(&pick, url, 1024, digest, sizeof(digest), api_url, 1024);
+        release_pick_choose(&pick, url, 1024, digest, sizeof(digest), api_url, 1024,
+                            alt_url, 1024, alt_digest, sizeof(alt_digest), alt_api, 1024);
     }
     if (rc < 0) {
         /* 2) API fallback, always mediated by the on-disk answer cache. */
@@ -573,7 +635,8 @@ static DWORD WINAPI check_thread(LPVOID param) {
             }
             if (rc > 0) {
                 utf8_to_wide(pick.tag[0] ? pick.tag : pick.ver, tag, 128);
-                release_pick_choose(&pick, url, 1024, digest, sizeof(digest), api_url, 1024);
+                release_pick_choose(&pick, url, 1024, digest, sizeof(digest), api_url, 1024,
+                                    alt_url, 1024, alt_digest, sizeof(alt_digest), alt_api, 1024);
             }
             struct update_cache nc;
             char narrow[1024] = "";
@@ -597,6 +660,9 @@ static DWORD WINAPI check_thread(LPVOID param) {
             wcsncpy(info->url, url, 1023);
             wcsncpy(info->api_url, api_url, 1023);
             utf8_to_wide(digest, info->sha256, 128);
+            wcsncpy(info->alt_url, alt_url, 1023);
+            wcsncpy(info->alt_api_url, alt_api, 1023);
+            utf8_to_wide(alt_digest, info->alt_sha256, 128);
         }
     } else if (rc < 0) {
         if (st == 403 || st == 429)
@@ -826,6 +892,17 @@ static int find_extracted_dir(const wchar_t *root, wchar_t *out, size_t cap) {
     return found;
 }
 
+/* Unique temp file for one candidate package; the extension must follow the
+   URL because it decides later whether the result is run as an installer or
+   unpacked as a portable package. */
+static void update_temp_file(const wchar_t *temp, DWORD pid, DWORD stamp,
+                             const wchar_t *url, wchar_t *out, size_t cap) {
+    size_t ulen = wcslen(url);
+    const wchar_t *ext = (ulen > 4 && _wcsicmp(url + ulen - 4, L".exe") == 0) ? L".exe" : L".zip";
+    swprintf(out, cap, L"%sadblock-update-%lu-%lu%s", temp,
+             (unsigned long) pid, (unsigned long) stamp, ext);
+}
+
 static DWORD WINAPI apply_thread(LPVOID param) {
     struct update_info *info = (struct update_info *) param;
     wchar_t temp[MAX_PATH], zip[MAX_PATH], list[MAX_PATH], dir[MAX_PATH], src[MAX_PATH];
@@ -839,17 +916,11 @@ static DWORD WINAPI apply_thread(LPVOID param) {
      * the Inno Setup installer (.exe) or the portable zip. Naming everything
      * "adblock-update.zip" made file_is_exe() always false, so an installer
      * download then failed the PK check and reported "download failed" even
-     * though the network was fine.
+     * though the network was fine. The name also has to be unpredictable: a
+     * fixed %TEMP% target could be pre-created by another process of the same
+     * user (audit P0-1).
      */
-    {
-        size_t ulen = wcslen(info->url);
-        const wchar_t *ext = (ulen > 4 && _wcsicmp(info->url + ulen - 4, L".exe") == 0)
-                             ? L".exe" : L".zip";
-        /* Unpredictable name: a fixed %TEMP% target could be pre-created by
-           another process of the same user (audit P0-1). */
-        swprintf(zip, MAX_PATH, L"%sadblock-update-%lu-%lu%s", temp,
-                 (unsigned long) pid, (unsigned long) stamp, ext);
-    }
+    update_temp_file(temp, pid, stamp, info->url, zip, MAX_PATH);
     /* Unique staging paths as well (audit A6). A fixed "%TEMP%\adblock-update"
        could be pre-created by another process, and it was never removed: the
        batch script now deletes it after the file copy. */
@@ -858,16 +929,41 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     swprintf(bat, MAX_PATH, L"%sadblock-update-%lu-%lu.bat", temp, (unsigned long) pid, (unsigned long) stamp);
 
     /*
-     * First the plain release URL, then the API asset endpoint
-     * (/releases/assets/<id> with Accept: application/octet-stream): the
+     * Chance 1: the package this machine normally wants (installer for an
+     * installed copy, portable zip for a hand-extracted one), first via the
+     * plain release URL and then via the API asset endpoint
+     * (/releases/assets/<id> with Accept: application/octet-stream) - the
      * download host (*.githubusercontent.com) is unreachable on some networks
      * while api.github.com answers fine.
+     * Chance 2: the release's OTHER package. The installer is ~5.3 MB and the
+     * portable zip ~4.1 MB; on a slow line that difference decides whether the
+     * download finishes inside the timeout.
      */
-    if (!http_download_to_file(info->url, zip, NULL) &&
-        !(info->api_url[0] &&
-          http_download_to_file(info->api_url, zip, L"Accept: application/octet-stream\r\n"))) {
+    const wchar_t *sha_used = info->sha256;
+    int got = 0;
+    if (http_download_to_file(info->url, zip, NULL) ||
+        (info->api_url[0] &&
+         http_download_to_file(info->api_url, zip, L"Accept: application/octet-stream\r\n"))) {
+        got = 1;
+    } else if (info->alt_url[0]) {
+        wchar_t alt[MAX_PATH];
+        DeleteFileW(zip);
+        update_temp_file(temp, pid, stamp, info->alt_url, alt, MAX_PATH);
+        if (http_download_to_file(info->alt_url, alt, NULL) ||
+            (info->alt_api_url[0] &&
+             http_download_to_file(info->alt_api_url, alt, L"Accept: application/octet-stream\r\n"))) {
+            wcscpy(zip, alt);
+            sha_used = info->alt_sha256;
+            got = 1;
+        } else {
+            DeleteFileW(alt);
+        }
+    }
+    if (!got) {
         if (MessageBoxW(NULL,
-                        L"下载更新失败：无法访问 GitHub 的下载服务器（常见于网络受限）。\n\n"
+                        L"下载更新失败：已重试 5 次并尝试断点续传，仍无法从 GitHub 的下载服务器取回更新包。\n\n"
+                        L"提示：这条线路到 GitHub 资源节点可能只有十几 KB/s，4 MB 的包需要几分钟；\n"
+                        L"如果一直失败，请检查代理设置，或改用浏览器手动下载。\n\n"
                         L"是否用浏览器打开下载页，手动下载安装？",
                         L"更新", MB_YESNO | MB_ICONWARNING) == IDYES) {
             ShellExecuteW(NULL, L"open", L"https://github.com/wxcvm/AdAway/releases",
@@ -890,8 +986,8 @@ static DWORD WINAPI apply_thread(LPVOID param) {
      * and the signature check is really executed here (it used to be dead
      * code).
      */
-    if (info->sha256[0] != 0) {
-        if (!digest_matches(zip, info->sha256)) {
+    if (sha_used[0] != 0) {
+        if (!digest_matches(zip, sha_used)) {
             DeleteFileW(zip);
             MessageBoxW(NULL, L"更新包校验失败（SHA-256 与发布信息不一致），已删除，未执行。",
                         L"更新", MB_OK | MB_ICONERROR);
