@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.28
+      TAG: win11-webserver-v1.29
     steps:
       - uses: actions/checkout@v6
 
@@ -156,6 +156,18 @@ jobs:
             $mgmt = Invoke-WebRequest -Uri "http://127.0.0.1:8686/internal-stats" -UseBasicParsing -TimeoutSec 10
             Write-Output ("management port /internal-stats HTTP " + $mgmt.StatusCode)
             if ($mgmt.StatusCode -ne 200) { throw "management port not reachable" }
+            # v1.29 per-app attribution: /internal-* traffic is excluded from the
+            # counters by design, so send one normal request first. The client is
+            # this PowerShell process, so its name must resolve to an .exe and the
+            # request must show up in apps[].
+            $null = Invoke-WebRequest -Uri "http://127.0.0.1:18080/ci-probe" -UseBasicParsing -TimeoutSec 10
+            $json2 = (Invoke-WebRequest -Uri "http://127.0.0.1:18080/internal-stats" -UseBasicParsing -TimeoutSec 10).Content
+            if ($json2 -notmatch '"apps":\[\{') { throw "internal-stats apps[] is empty" }
+            if ($json2 -notmatch '"name":"[^"]*\.exe","connections":\d+,"requests":[1-9]') {
+              throw "apps[] has no process-attributed request (per-app attribution broken)"
+            }
+            if ($json2 -notmatch '"query_log":\[') { throw "internal-stats has no query_log[] array" }
+            Write-Output ("per-app attribution OK: " + ([regex]::Match($json2, '"apps":\[\{[^}]*\}')).Value)
           } catch {
             Write-Output "SMOKE TEST ERROR: $($_.Exception.Message)"
             Write-Output "---- stdout tail ----"

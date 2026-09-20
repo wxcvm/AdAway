@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.28`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.29`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -33,6 +33,11 @@
 
 ## Windows 层改动清单（便于将来一次性移植）
 `webserver/jni/webserver.c`
+0. 按应用归属（v1.29）：`conn_uid_by_tuple()` 在 Windows 上不再直接返回 -1，而是用
+   `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)` 找到客户端 socket 的所属 PID
+   （行匹配方向与 /proc 扫描一致：行的 local/remote 对调），PID 放进原来 uid 的字段；
+   `win32_process_name()` 再把 PID 变成进程名并加进 /internal-stats 的 apps[]。
+   仪表盘新增"应用日志"页（第 3 个页签）展示 apps[] 与 query_log[]。
 1. 可移植性 shim：`#ifdef __ANDROID__` 包裹 logcat/linux 头；Windows 走 `win32_dirent.h`、
    `strcasecmp -> _stricmp`、`uid_t` 定义；`conn_uid_by_tuple()` 在 Windows 返回 -1（无 /proc）。
 2. `webserver.log` 镜像：`log_file_line()`，1 MB 轮转，所有 LOG_* 同步落盘（GUI 子系统无控制台）。

@@ -73,4 +73,7 @@ Windows SmartScreen / 杀毒软件：
     或用 --resources 指定其它位置。
   * 仪表盘一直显示"等待服务器 ..." - 等几秒；仍不行请查看 webserver.log，
     并看"监听状态"卡片（红色 = 该端口没有绑定成功）。
-  * 按应用统计在 Windows 上显示 unknown（没有 /proc 等价物）。
+* 按应用统计：Windows 没有 /proc，改用 IP Helper 的 TCP 表（GetExtendedTcpTable）
+  把每条连接映射到所属进程，再取进程名。侧边栏"应用日志"页显示
+  「进程 / 连接数 / 请求数 / 拦截数」排行与最近请求（拦截 / 放行 / 代理 + 主机名）；
+  查不到所属进程时显示 `id <PID>`。

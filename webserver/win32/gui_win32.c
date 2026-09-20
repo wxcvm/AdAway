@@ -111,6 +111,9 @@ static void utf8_to_wide(const char *src, wchar_t *dst, size_t n) {
 #define HIST_MAX 48
 #define STEAL_JSON_BUF 16384
 #define LISTENER_MAX_GUI 14
+/* Rows shown on the "应用 / 日志" page. */
+#define GUI_APP_MAX 12
+#define GUI_QLOG_MAX 14
 
 /* One socket the server reported through /internal-stats. */
 struct listener_info {
@@ -122,6 +125,23 @@ struct listener_info {
 struct histogram {
     long long requests;
     long long blocked;
+};
+
+/* One row of the server's per-app statistics. On Windows uid is a PID and name
+   is the executable that owns the connection; on Android the uid is the app id
+   (the app itself maps it to a package name, so name stays empty there). */
+struct app_row {
+    wchar_t name[64];
+    long long connections;
+    long long requests;
+    long long blocked;
+};
+
+/* One entry of the server's query log ring buffer (newest first). */
+struct qlog_row {
+    long long ts;
+    int action;              /* 0 = proxied, 1 = blocked, 2 = allowed */
+    wchar_t host[128];
 };
 
 struct snapshot {
@@ -144,6 +164,11 @@ struct snapshot {
     int stats_port;
     int listener_count;
     struct listener_info listeners[LISTENER_MAX_GUI];
+    /* v1.29 activity page (absent -> zeros) */
+    int app_count;
+    struct app_row apps[GUI_APP_MAX];
+    int qlog_count;
+    struct qlog_row qlog[GUI_QLOG_MAX];
 };
 
 /* ── shared dashboard state ─────────────────────────────────────────
@@ -283,6 +308,93 @@ static void json_listeners(const char *body, struct snapshot *sn) {
     }
 }
 
+/* apps[] and query_log[] - what the "应用 / 日志" page shows. Both arrays are
+   additive in the server's JSON, so an older server that does not emit them
+   simply leaves the page empty instead of failing. */
+static void json_apps(const char *body, struct snapshot *sn) {
+    const char *p = strstr(body, "\"apps\":[");
+    sn->app_count = 0;
+    if (p == NULL) return;
+    p = strchr(p, '[');
+    if (p == NULL) return;
+    p++;
+    while (sn->app_count < GUI_APP_MAX) {
+        const char *open = strchr(p, '{');
+        const char *close = open ? strchr(open, '}') : NULL;
+        char item[512];
+        size_t il;
+        struct app_row *a;
+        const char *q, *e;
+        if (open == NULL || close == NULL) break;
+        il = (size_t)(close - open) + 1;
+        if (il >= sizeof(item)) il = sizeof(item) - 1;
+        memcpy(item, open, il);
+        item[il] = '\0';
+        a = &sn->apps[sn->app_count];
+        memset(a, 0, sizeof(*a));
+        a->connections = json_num(item, "connections");
+        a->requests = json_num(item, "requests");
+        a->blocked = json_num(item, "blocked");
+        q = strstr(item, "\"name\":\"");
+        if (q != NULL) {
+            q += 8;
+            e = strchr(q, '"');
+            if (e != NULL && e > q)
+                MultiByteToWideChar(CP_UTF8, 0, q, (int)(e - q), a->name, 63);
+        }
+        if (a->name[0] == 0)
+            swprintf(a->name, 64, L"id %d", (int) json_num(item, "uid"));
+        sn->app_count++;
+        p = close + 1;
+    }
+    /* Busiest first: the server keeps insertion order, the dashboard wants a
+       ranking (12 rows max, so an insertion sort is plenty). */
+    for (int i = 1; i < sn->app_count; i++) {
+        struct app_row key = sn->apps[i];
+        int j = i - 1;
+        while (j >= 0 && sn->apps[j].requests < key.requests) {
+            sn->apps[j + 1] = sn->apps[j];
+            j--;
+        }
+        sn->apps[j + 1] = key;
+    }
+}
+
+static void json_qlog(const char *body, struct snapshot *sn) {
+    const char *p = strstr(body, "\"query_log\":[");
+    sn->qlog_count = 0;
+    if (p == NULL) return;
+    p = strchr(p, '[');
+    if (p == NULL) return;
+    p++;
+    while (sn->qlog_count < GUI_QLOG_MAX) {
+        const char *open = strchr(p, '{');
+        const char *close = open ? strchr(open, '}') : NULL;
+        char item[512];
+        size_t il;
+        struct qlog_row *r;
+        const char *q, *e;
+        if (open == NULL || close == NULL) break;
+        il = (size_t)(close - open) + 1;
+        if (il >= sizeof(item)) il = sizeof(item) - 1;
+        memcpy(item, open, il);
+        item[il] = '\0';
+        r = &sn->qlog[sn->qlog_count];
+        memset(r, 0, sizeof(*r));
+        r->ts = json_num(item, "ts");
+        r->action = (int) json_num(item, "action");
+        q = strstr(item, "\"host\":\"");
+        if (q != NULL) {
+            q += 8;
+            e = strchr(q, '"');
+            if (e != NULL && e > q)
+                MultiByteToWideChar(CP_UTF8, 0, q, (int)(e - q), r->host, 127);
+        }
+        sn->qlog_count++;
+        p = close + 1;
+    }
+}
+
 static int http_get(int port, const char *path, char *out, size_t outsz) {
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == INVALID_SOCKET) return -1;
@@ -332,6 +444,8 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->hist_count = json_hist(buf, "history", sn->hist, HIST_MAX);
     sn->daily_count = json_hist(buf, "daily", sn->daily, HIST_MAX);
     json_listeners(buf, sn);
+    json_apps(buf, sn);
+    json_qlog(buf, sn);
     sn->valid = 1;
 }
 
@@ -1263,7 +1377,7 @@ static void draw_statusbar(HDC hdc) {
 
 /* sidebar nav hit areas (logical units; callers pass physical coords) */
 static bool nav_hit(int x, int y, int which) {
-    int top = which == 0 ? 96 : 148;
+    int top = 96 + which * 52;   /* statistics / activity / settings */
     return x >= S(16) && x <= S(176) && y >= S(top) && y <= S(top + 40);
 }
 
@@ -1301,8 +1415,8 @@ static void draw_sidebar(HDC hdc) {
     DeleteObject(sf);
 
     /* nav items */
-    for (int t = 0; t < 2; t++) {
-        int ny = t == 0 ? 96 : 148;
+    for (int t = 0; t < 3; t++) {
+        int ny = 96 + t * 52;
         bool active = (g_tab == t);
         rounded_card(hdc, 16, ny, 160, 40, 10,
                      active ? g_pal.nav_active : g_pal.sidebar,
@@ -1313,7 +1427,7 @@ static void draw_sidebar(HDC hdc) {
             FillRect(hdc, &bar, ab);
             DeleteObject(ab);
         }
-        /* icon: bars (statistics) / sliders (settings) */
+        /* icon: bars (statistics) / list rows (activity) / sliders (settings) */
         if (t == 0) {
             HBRUSH ib = CreateSolidBrush(active ? C_ACCENT : g_pal.nav_text);
             HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
@@ -1324,6 +1438,19 @@ static void draw_sidebar(HDC hdc) {
             SelectObject(hdc, op);
             SelectObject(hdc, ob);
             DeleteObject(ib);
+        } else if (t == 1) {
+            HPEN ip = CreatePen(PS_SOLID, S(2), active ? C_ACCENT : g_pal.nav_text);
+            HGDIOBJ op = SelectObject(hdc, ip);
+            HGDIOBJ ob2 = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            for (int k = 0; k < 3; k++) {
+                int ly = S(ny + 13 + k * 7);
+                MoveToEx(hdc, S(40), ly, NULL);
+                LineTo(hdc, S(58), ly);
+                Ellipse(hdc, S(34) - S(2), ly - S(2), S(34) + S(2), ly + S(2));
+            }
+            SelectObject(hdc, ob2);
+            SelectObject(hdc, op);
+            DeleteObject(ip);
         } else {
             HPEN ip = CreatePen(PS_SOLID, S(2), active ? C_ACCENT : g_pal.nav_text);
             HGDIOBJ op = SelectObject(hdc, ip);
@@ -1342,7 +1469,10 @@ static void draw_sidebar(HDC hdc) {
         HFONT nf = mfont(14, active ? FW_SEMIBOLD : FW_NORMAL);
         SelectObject(hdc, nf);
         SetTextColor(hdc, active ? RGB(255, 255, 255) : g_pal.nav_text);
-        TextOutW(hdc, S(70), S(ny + 10), t == 0 ? L"统计" : L"设置", 2);
+        {
+            const wchar_t *label = t == 0 ? L"统计" : (t == 1 ? L"应用日志" : L"设置");
+            TextOutW(hdc, S(70), S(ny + 10), label, (int) wcslen(label));
+        }
         SelectObject(hdc, old);
         DeleteObject(nf);
     }
@@ -1516,6 +1646,113 @@ static void policy_apply(HWND hwnd) {
     InvalidateRect(hwnd, NULL, FALSE);
 }
 
+/* ── "应用日志" page ──────────────────────────────────────────────
+ * Everything the server knows about WHO talks to it: the per-app counters
+ * (Windows attributes them through the TCP owner-PID table, see
+ * win32_pid_for_tuple) and the query log ring buffer that answers "why was
+ * this blocked?". Unlike the settings page this one has no child controls, so
+ * the layout below is self contained and cannot overlap them. */
+static void draw_activity_page(HDC hdc) {
+    struct snapshot *sn = g_sn;
+    HFONT hf = mfont(15, FW_SEMIBOLD);
+    HFONT lf = mfont(12, FW_NORMAL);
+    HFONT old;
+    SetBkMode(hdc, TRANSPARENT);
+
+    /* per-app card */
+    rounded_card(hdc, 202, 12, 812, 300, 12, g_pal.card, g_pal.border);
+    old = (HFONT) SelectObject(hdc, hf);
+    SetTextColor(hdc, g_pal.text);
+    TextOutW(hdc, S(218), S(24), L"按应用统计", 5);
+    SelectObject(hdc, lf);
+    SetTextColor(hdc, g_pal.muted);
+    TextOutW(hdc, S(218), S(48),
+             L"按请求数排序 - Windows 侧按连接所属进程统计（PID → 进程名）", 36);
+    if (sn == NULL || !sn->valid) {
+        TextOutW(hdc, S(222), S(100), L"等待服务器统计数据 ...", 11);
+    } else if (sn->app_count == 0) {
+        TextOutW(hdc, S(222), S(100),
+                 L"暂无数据：还没有可归属的客户端连接经过拦截端口。", 25);
+    } else {
+        int rows = sn->app_count > 9 ? 9 : sn->app_count;
+        SetTextColor(hdc, g_pal.muted);
+        TextOutW(hdc, S(222), S(74), L"进程 / 应用", 7);
+        TextOutW(hdc, S(690), S(74), L"连接", 2);
+        TextOutW(hdc, S(780), S(74), L"请求", 2);
+        TextOutW(hdc, S(880), S(74), L"拦截", 2);
+        for (int i = 0; i < rows; i++) {
+            wchar_t nm[40], num[32];
+            int y = 100 + i * 24;
+            size_t nl = wcslen(sn->apps[i].name);
+            wcsncpy(nm, sn->apps[i].name, 26);
+            nm[26] = 0;
+            if (nl > 26) wcscat(nm, L"...");
+            SetTextColor(hdc, g_pal.text);
+            TextOutW(hdc, S(222), S(y), nm, (int) wcslen(nm));
+            SetTextColor(hdc, g_pal.muted);
+            fmt_num(num, 32, sn->apps[i].connections);
+            TextOutW(hdc, S(690), S(y), num, (int) wcslen(num));
+            fmt_num(num, 32, sn->apps[i].requests);
+            TextOutW(hdc, S(780), S(y), num, (int) wcslen(num));
+            if (sn->apps[i].blocked > 0) SetTextColor(hdc, C_RED);
+            fmt_num(num, 32, sn->apps[i].blocked);
+            TextOutW(hdc, S(880), S(y), num, (int) wcslen(num));
+        }
+    }
+
+    /* query log card */
+    rounded_card(hdc, 202, 324, 812, 306, 12, g_pal.card, g_pal.border);
+    SelectObject(hdc, hf);
+    SetTextColor(hdc, g_pal.text);
+    TextOutW(hdc, S(218), S(336), L"最近请求", 4);
+    SelectObject(hdc, lf);
+    SetTextColor(hdc, g_pal.muted);
+    TextOutW(hdc, S(218), S(360),
+             L"最新在最上 - 结果列：拦截 / 放行 / 代理（服务器查询日志）", 30);
+    if (sn == NULL || !sn->valid) {
+        TextOutW(hdc, S(222), S(412), L"等待服务器统计数据 ...", 11);
+    } else if (sn->qlog_count == 0) {
+        TextOutW(hdc, S(222), S(412), L"暂无请求记录。", 7);
+    } else {
+        int rows = sn->qlog_count > 11 ? 11 : sn->qlog_count;
+        TextOutW(hdc, S(222), S(388), L"时间", 2);
+        TextOutW(hdc, S(320), S(388), L"结果", 2);
+        TextOutW(hdc, S(400), S(388), L"主机", 2);
+        for (int i = 0; i < rows; i++) {
+            struct qlog_row *r = &sn->qlog[i];
+            wchar_t tb[32] = L"--:--:--", hb[48];
+            const wchar_t *act;
+            int y = 412 + i * 19;
+            time_t t = (time_t) r->ts;
+            struct tm *tmv = localtime(&t);
+            if (tmv != NULL)
+                swprintf(tb, 32, L"%02d:%02d:%02d", tmv->tm_hour, tmv->tm_min, tmv->tm_sec);
+            wcsncpy(hb, r->host, 44);
+            hb[44] = 0;
+            SetTextColor(hdc, g_pal.muted);
+            TextOutW(hdc, S(222), S(y), tb, (int) wcslen(tb));
+            if (r->action == 1) {
+                SetTextColor(hdc, C_RED);
+                act = L"拦截";
+            } else if (r->action == 2) {
+                SetTextColor(hdc, C_GREEN_TXT);
+                act = L"放行";
+            } else {
+                SetTextColor(hdc, g_pal.text);
+                act = L"代理";
+            }
+            TextOutW(hdc, S(320), S(y), act, 2);
+            SetTextColor(hdc, g_pal.text);
+            TextOutW(hdc, S(400), S(y), hb, (int) wcslen(hb));
+        }
+    }
+
+    SelectObject(hdc, old);
+    DeleteObject(hf);
+    DeleteObject(lf);
+    draw_statusbar(hdc);
+}
+
 static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (g_taskbar_created != 0 && msg == g_taskbar_created) {
         tray_add(hwnd);
@@ -1669,8 +1906,8 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_LBUTTONUP: {
         int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
-        if (nav_hit(x, y, 0) || nav_hit(x, y, 1)) {
-            int new_tab = nav_hit(x, y, 0) ? 0 : 1;
+        if (nav_hit(x, y, 0) || nav_hit(x, y, 1) || nav_hit(x, y, 2)) {
+            int new_tab = nav_hit(x, y, 0) ? 0 : (nav_hit(x, y, 1) ? 1 : 2);
             if (new_tab != g_tab) {
                 g_tab = new_tab;
                 show_controls(hwnd, g_tab);
@@ -1849,6 +2086,16 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             DeleteObject(lf);
             draw_listener_card(hdc, 202, 474, 812, 142, g_sn, 1);
             draw_statusbar(hdc);
+            BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
+            SelectObject(mem, oldbmp);
+            DeleteObject(bmp);
+            DeleteDC(mem);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
+        if (g_tab == 2) {
+            draw_activity_page(hdc);
             BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
             SelectObject(mem, oldbmp);
             DeleteObject(bmp);

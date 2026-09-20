@@ -1189,13 +1189,143 @@ static void addr_to_proc_v6(const struct mg_addr *a, char *out, size_t sz) {
    We run as root, so every row is visible. */
 #endif  /* !_WIN32 - /proc address formatters above */
 
+#ifdef _WIN32
+#include <iphlpapi.h>   /* GetExtendedTcpTable - Windows per-app attribution */
+
+/*
+ * Windows per-app attribution.
+ *
+ * Android answers "which app made this request?" from /proc/net/tcp (uid) and
+ * then asks its PackageManager for the package name. Windows has neither, so
+ * the same two questions are answered with the IP Helper API instead:
+ *
+ *   - GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL) lists every TCP endpoint of
+ *     the machine together with the PID that owns it;
+ *   - QueryFullProcessImageName() turns that PID into an executable name.
+ *
+ * The PID is carried in the very same uid_t field the rest of the code already
+ * uses, so the counters, their persistence and the /internal-stats "apps"
+ * array keep working unchanged - the ids are simply PIDs on Windows. Only
+ * unmapped (unknown) results still degrade to -1.
+ */
+
+/* Normalised 16 byte form of a mongoose address: IPv6 as-is, IPv4 mapped to
+   ::ffff:a.b.c.d the way a dual-stack TCP table reports it. */
+static void win32_addr_bytes(const struct mg_addr *a, unsigned char out[16]) {
+    if (a->is_ip6) {
+        memcpy(out, a->addr.ip, 16);
+    } else {
+        memset(out, 0, 16);
+        out[10] = 0xff;
+        out[11] = 0xff;
+        memcpy(out + 12, a->addr.ip, 4);
+    }
+}
+
+/* The row whose LOCAL end is our peer and whose REMOTE end is our listener is
+   the client's own socket - the same orientation the /proc scan compares. */
+static int win32_row_matches(unsigned char l[16], unsigned char r[16],
+                             unsigned short lport, unsigned short rport,
+                             unsigned short row_lport, unsigned short row_rport) {
+    return lport == (unsigned short) ntohs(row_lport) &&
+           rport == (unsigned short) ntohs(row_rport);
+}
+
+static DWORD win32_pid_for_tuple(const struct mg_addr *loc, const struct mg_addr *rem) {
+    unsigned char want_l[16], want_r[16];
+    DWORD pid = 0;
+    win32_addr_bytes(rem, want_l);   /* client's local address/port  */
+    win32_addr_bytes(loc, want_r);   /* our listener = its remote   */
+
+    /* IPv4 table: plain 4 byte addresses, ports in network order. */
+    {
+        DWORD size = 0;
+        if (GetExtendedTcpTable(NULL, &size, FALSE, AF_INET,
+                                TCP_TABLE_OWNER_PID_ALL, 0) == ERROR_INSUFFICIENT_BUFFER) {
+            MIB_TCPTABLE_OWNER_PID *t = (MIB_TCPTABLE_OWNER_PID *) malloc(size);
+            if (t) {
+                if (GetExtendedTcpTable(t, &size, FALSE, AF_INET,
+                                        TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+                    for (DWORD i = 0; i < t->dwNumEntries && pid == 0; i++) {
+                        MIB_TCPROW_OWNER_PID *row = &t->table[i];
+                        unsigned char a[16], b[16];
+                        if (!win32_row_matches(want_l, want_r,
+                                               rem->port, loc->port,
+                                               (unsigned short) row->dwLocalPort,
+                                               (unsigned short) row->dwRemotePort))
+                            continue;
+                        memset(a, 0, 16);
+                        a[10] = a[11] = 0xff;
+                        memcpy(a + 12, &row->dwLocalAddr, 4);
+                        memset(b, 0, 16);
+                        b[10] = b[11] = 0xff;
+                        memcpy(b + 12, &row->dwRemoteAddr, 4);
+                        if (memcmp(a, want_l, 16) == 0 && memcmp(b, want_r, 16) == 0)
+                            pid = row->dwOwningPid;
+                    }
+                }
+                free(t);
+            }
+        }
+    }
+    /* IPv6 table (also holds IPv4-mapped endpoints of dual-stack sockets). */
+    if (pid == 0) {
+        DWORD size = 0;
+        if (GetExtendedTcpTable(NULL, &size, FALSE, AF_INET6,
+                                TCP_TABLE_OWNER_PID_ALL, 0) == ERROR_INSUFFICIENT_BUFFER) {
+            MIB_TCP6TABLE_OWNER_PID *t = (MIB_TCP6TABLE_OWNER_PID *) malloc(size);
+            if (t) {
+                if (GetExtendedTcpTable(t, &size, FALSE, AF_INET6,
+                                        TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
+                    for (DWORD i = 0; i < t->dwNumEntries && pid == 0; i++) {
+                        MIB_TCP6ROW_OWNER_PID *row = &t->table[i];
+                        if (!win32_row_matches(want_l, want_r,
+                                               rem->port, loc->port,
+                                               (unsigned short) row->dwLocalPort,
+                                               (unsigned short) row->dwRemotePort))
+                            continue;
+                        if (memcmp(row->ucLocalAddr, want_l, 16) == 0 &&
+                            memcmp(row->ucRemoteAddr, want_r, 16) == 0)
+                            pid = row->dwOwningPid;
+                    }
+                }
+                free(t);
+            }
+        }
+    }
+    return pid;
+}
+
+/* Executable name (basename) of a PID, UTF-8, empty when it cannot be read
+   (process gone, protected process, ...). */
+static void win32_process_name(DWORD pid, char *out, size_t cap) {
+    HANDLE h;
+    wchar_t path[MAX_PATH];
+    DWORD n = (DWORD) (sizeof(path) / sizeof(path[0]));
+    if (!out || cap == 0) return;
+    out[0] = 0;
+    if (pid == 0) return;
+    h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return;
+    if (QueryFullProcessImageNameW(h, 0, path, &n) && n > 0) {
+        const wchar_t *base = wcsrchr(path, L'\\');
+        base = base ? base + 1 : path;
+        WideCharToMultiByte(CP_UTF8, 0, base, -1, out, (int) cap, NULL, NULL);
+    }
+    CloseHandle(h);
+}
+#endif  /* _WIN32 per-app attribution */
+
 static uid_t conn_uid_by_tuple(struct mg_connection *c) {
 #ifdef _WIN32
-    /* Windows has no /proc: the tuple and socket-inode lookups below cannot
-       work there, and probing them costs several failing fopen()/fstat()
-       syscalls on EVERY request. Per-app statistics are Android-only by
-       design (an unknown uid is dropped by app_find_or_add()). */
-    (void) c;
+    DWORD pid = win32_pid_for_tuple(&c->loc, &c->rem);
+    /* Our own loopback polls (/internal-stats, /control) are not an "app". */
+    if (pid != 0 && pid != GetCurrentProcessId()) {
+        if (s_verbose)
+            LOG_INFO("conn_uid: peer port %u -> pid=%lu (windows tcp table)",
+                     (unsigned) c->rem.port, (unsigned long) pid);
+        return (uid_t) pid;
+    }
     return (uid_t) -1;
 #else
     char loc_v4[64], rem_v4[64];
@@ -2478,11 +2608,21 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     qlog_render(qlog_json, sizeof(qlog_json));
     int off = 0;
     for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
+        /* Android maps the uid to a package name on the app side; Windows has
+           no such lookup, so the executable name is resolved here (additive
+           field - older clients simply ignore it). */
+        char app_name_raw[128] = "", app_name[160] = "";
+#ifdef _WIN32
+        if (s_apps[i].uid != 0xFFFFFFFFu)
+            win32_process_name((DWORD) s_apps[i].uid, app_name_raw, sizeof(app_name_raw));
+#endif
+        json_safe_copy(app_name, sizeof(app_name), app_name_raw);
         int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
-            "%s{\"uid\":%d,\"connections\":%llu,\"requests\":%llu,"
+            "%s{\"uid\":%d,\"name\":\"%s\",\"connections\":%llu,\"requests\":%llu,"
             "\"blocked\":%llu,\"tls_hosts\":%llu}",
             off ? "," : "",
             (int)s_apps[i].uid,
+            app_name,
             (unsigned long long)s_apps[i].connections,
             (unsigned long long)s_apps[i].requests,
             (unsigned long long)s_apps[i].blocked,
