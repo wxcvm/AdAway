@@ -798,6 +798,12 @@ static void apps_load(const char *resource_dir) {
 static uint64_t s_persist_last_ms = 0;
 static uint64_t s_persist_sni_last_ms = 0;
 
+/* The query log ring lives further down (it needs json_safe_copy() from the
+   statistics section), but the throttled persistence below is what has to
+   flush it. Declare the save side here; qlog_load() is called from main(),
+   which is after the definition. */
+static void qlog_save(const char *resource_dir);
+
 static void persist_dat_files(struct settings *s, bool force) {
     if (!s) return;
     uint64_t now = mg_millis();
