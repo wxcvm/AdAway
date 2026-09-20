@@ -36,6 +36,17 @@ data class TlsHost(
     val host: String,
 )
 
+/**
+ * One entry of the server's query log: what was requested and what the filter
+ * did with it (0 = proxied to the real server, 1 = blocked, 2 = allowed).
+ */
+data class QueryLogEntry(
+    val ts: Long = 0,
+    val uid: Int = -1,
+    val action: Int = 0,
+    val host: String = "",
+)
+
 /** One time bucket of web server activity (hourly or daily series). */
 data class HistPoint(
     val ts: Long = 0,
@@ -94,6 +105,7 @@ data class ServerStats(
     val blockImageCount: Int = 0,
     val apps: List<AppStat> = emptyList(),
     val recentTls: List<TlsHost> = emptyList(),
+    val queryLog: List<QueryLogEntry> = emptyList(),
     val history: List<HistPoint> = emptyList(),
     val daily: List<HistPoint> = emptyList(),
 ) {
@@ -133,6 +145,19 @@ data class ServerStats(
             }
             val history = parseHistArray(json, "history")
             val daily = parseHistArray(json, "daily")
+            val queryLog = mutableListOf<QueryLogEntry>()
+            val qlogArray = json.optJSONArray("query_log")
+            if (qlogArray != null) {
+                for (i in 0 until qlogArray.length()) {
+                    val o = qlogArray.optJSONObject(i) ?: continue
+                    queryLog += QueryLogEntry(
+                        ts = o.optLong("ts", 0),
+                        uid = o.optInt("uid", -1),
+                        action = o.optInt("action", 0),
+                        host = o.optString("host", ""),
+                    )
+                }
+            }
             return ServerStats(
                 uptimeSeconds = json.optLong("uptime_seconds", 0),
                 uptimeDays = json.optDouble("uptime_days", 0.0),
@@ -162,6 +187,7 @@ data class ServerStats(
                 blockImageCount = json.optInt("block_image_count", 0),
                 apps = apps,
                 recentTls = recentTls,
+                queryLog = queryLog,
                 history = history,
                 daily = daily,
             )

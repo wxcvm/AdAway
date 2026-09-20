@@ -144,6 +144,7 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
     val showApps = isChartEnabled(context, "chart_apps")
     val showCerts = isChartEnabled(context, "chart_certs")
     val showConn = isChartEnabled(context, "chart_conn")
+    val showQlog = isChartEnabled(context, "chart_qlog")
 
     Scaffold(
                 topBar = {
@@ -338,6 +339,11 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
             // Per-app activity
             if (showApps && serverStats != null && serverStats!!.apps.isNotEmpty()) {
                 ActiveAppsCard(serverStats!!.apps)
+            }
+
+            // Recent requests: what was asked for and what the filter did with it
+            if (showQlog && serverStats != null && serverStats!!.queryLog.isNotEmpty()) {
+                RecentRequestsCard(serverStats!!.queryLog)
             }
 
             // Top intercepted domains (ranked)
@@ -1419,6 +1425,110 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) 
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/** 查询日志的动作名（0 = 代理到真实服务器，1 = 拦截，2 = 放行）。 */
+@Composable
+private fun queryActionLabel(action: Int): String = when (action) {
+    1 -> stringResource(R.string.compose_stats_recent_action_blocked)
+    2 -> stringResource(R.string.compose_stats_recent_action_allowed)
+    else -> stringResource(R.string.compose_stats_recent_action_proxied)
+}
+
+private fun queryTimeText(ts: Long): String =
+    if (ts <= 0L) "--:--:--"
+    else java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(java.util.Date(ts * 1000L))
+
+/**
+ * 最近请求卡（服务器查询日志环形缓冲）：按时间倒序显示"谁请求了什么、
+ * 被怎么处理"，用来回答"为什么这个请求被拦截"。数据来自
+ * /internal-stats 的 query_log[]，字段为 ts / uid / action / host。
+ */
+@Composable
+private fun RecentRequestsCard(entries: List<QueryLogEntry>) {
+    var expanded by remember { mutableStateOf(false) }
+    val shown = if (expanded) entries else entries.take(5)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+            ) {
+                Text(
+                    stringResource(R.string.compose_stats_recent_requests),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    stringResource(R.string.compose_stats_recent_requests_count, entries.size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    imageVector = if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess
+                    else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.compose_stats_recent_requests_hint),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            shown.forEach { entry ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        queryTimeText(entry.ts),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        queryActionLabel(entry.action),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = when (entry.action) {
+                            1 -> MaterialTheme.colorScheme.error
+                            2 -> Color(0xFF16A34A)
+                            else -> MaterialTheme.colorScheme.primary
+                        },
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        entry.host.ifEmpty { "-" },
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+            if (!expanded && entries.size > shown.size) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(R.string.compose_stats_recent_requests_more, entries.size - shown.size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
     }
 }
 

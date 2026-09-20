@@ -26,6 +26,7 @@ object PrefsKeys {
     const val CHART_CONN = "chart_conn"
     const val CHART_APPS = "chart_apps"
     const val CHART_CERTS = "chart_certs"
+    const val CHART_QLOG = "chart_qlog"
 
     // ── Web 服务器 ──
     const val WS_BIND_ALL = "bind_all"

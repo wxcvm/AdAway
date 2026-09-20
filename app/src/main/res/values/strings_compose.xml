@@ -66,6 +66,13 @@
     <string name="compose_stats_app_sub">%1$d conn · %2$d req · %3$d blocked</string>
     <string name="compose_stats_recent_certs">Recently issued certs</string>
     <string name="compose_stats_certs_hint">Domains apps asked us to sign (SNI)</string>
+    <string name="compose_stats_recent_requests">Recent requests</string>
+    <string name="compose_stats_recent_requests_count">%1$d entries</string>
+    <string name="compose_stats_recent_requests_hint">Why a request was blocked: the server query log, newest first</string>
+    <string name="compose_stats_recent_requests_more">%1$d more…</string>
+    <string name="compose_stats_recent_action_blocked">Blocked</string>
+    <string name="compose_stats_recent_action_allowed">Allowed</string>
+    <string name="compose_stats_recent_action_proxied">Proxied</string>
     <string name="compose_settings_title">Settings</string>
     <string name="compose_settings_apps_title">App monitoring</string>
     <string name="compose_settings_apps_hint">Choose which apps appear in the per-app statistics</string>
@@ -105,6 +112,8 @@
     <string name="compose_settings_chart_apps_hint">Per-app connection list</string>
     <string name="compose_settings_chart_certs">Recent certs</string>
     <string name="compose_settings_chart_certs_hint">Recently issued SNI certificates</string>
+    <string name="compose_settings_chart_qlog">Recent requests</string>
+    <string name="compose_settings_chart_qlog_hint">Query log: what was blocked or allowed</string>
     <string name="compose_settings_theme_title">Appearance</string>
     <string name="compose_settings_theme_hint">Choose the app color scheme</string>
     <string name="compose_settings_theme_system">System</string>

@@ -66,6 +66,13 @@
     <string name="compose_stats_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
     <string name="compose_stats_recent_certs">最近签发的证书</string>
     <string name="compose_stats_certs_hint">各应用请求签发的域名（SNI）</string>
+    <string name="compose_stats_recent_requests">最近请求</string>
+    <string name="compose_stats_recent_requests_count">%1$d 条</string>
+    <string name="compose_stats_recent_requests_hint">为什么被拦截：服务器查询日志（最新在最上）</string>
+    <string name="compose_stats_recent_requests_more">还有 %1$d 条…</string>
+    <string name="compose_stats_recent_action_blocked">拦截</string>
+    <string name="compose_stats_recent_action_allowed">放行</string>
+    <string name="compose_stats_recent_action_proxied">代理</string>
     <string name="compose_settings_title">设置</string>
     <string name="compose_settings_apps_title">应用监控</string>
     <string name="compose_settings_apps_hint">选择要在应用统计中显示的应用</string>
@@ -84,6 +91,8 @@
     <string name="compose_settings_chart_apps_hint">各应用连接列表</string>
     <string name="compose_settings_chart_certs">最近签发证书</string>
     <string name="compose_settings_chart_certs_hint">最近签发的SNI证书</string>
+    <string name="compose_settings_chart_qlog">最近请求</string>
+    <string name="compose_settings_chart_qlog_hint">查询日志：谁被拦截、谁被放行</string>
     <string name="compose_settings_theme_title">外观</string>
     <string name="compose_settings_theme_hint">选择应用配色方案</string>
     <string name="compose_settings_theme_system">跟随系统</string>

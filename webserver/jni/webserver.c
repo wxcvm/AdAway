@@ -806,6 +806,7 @@ static void persist_dat_files(struct settings *s, bool force) {
         save_stats(s);
         save_hist(s);
         apps_save(s->resource_dir);
+        qlog_save(s->resource_dir);   /* "why was this blocked?" survives restarts */
     }
     if (force || now - s_persist_sni_last_ms >= PERSIST_SNI_INTERVAL_MS) {
         s_persist_sni_last_ms = now;
@@ -1973,6 +1974,117 @@ static void json_safe_copy(char *dst, size_t cap, const char *src) {
     dst[d] = 0;
 }
 
+/* ── Query log ──────────────────────────────────────────────────────
+ * A ring of the most recent REAL requests together with the decision that was
+ * taken for them, so the app can answer "why was this blocked?" instead of
+ * only showing counters (ported from the Windows branch, where it shipped
+ * first). Only the newest entries are exported through /internal-stats -
+ * bounded, so the JSON stays far below the smallest client buffer - while the
+ * whole ring is persisted next to the other .dat files so the answer survives
+ * a server restart.
+ */
+#define QLOG_MAX 4096
+#define QLOG_RENDER_MAX 24
+#define QLOG_JSON_MAX 4096
+enum { QLOG_PROXY = 0, QLOG_BLOCK = 1, QLOG_ALLOW = 2 };
+struct qlog_entry {
+    uint64_t ts;          /* epoch seconds */
+    uint32_t uid;         /* 0xFFFFFFFF when unknown */
+    uint16_t rtype;       /* blocked_* category hint (0 = unknown) */
+    uint8_t  action;      /* QLOG_* */
+    uint8_t  pad;
+    char     host[192];
+};
+static struct qlog_entry s_qlog[QLOG_MAX];
+static uint32_t s_qlog_pos;    /* next slot to write */
+static uint32_t s_qlog_count;  /* valid entries (<= QLOG_MAX) */
+
+static void qlog_clear(void) {
+    s_qlog_pos = 0;
+    s_qlog_count = 0;
+    memset(s_qlog, 0, sizeof(s_qlog));
+}
+
+static void qlog_add(uid_t uid, int action, struct mg_http_message *hm) {
+    struct qlog_entry *e = &s_qlog[s_qlog_pos % QLOG_MAX];
+    memset(e, 0, sizeof(*e));
+    e->ts = (uint64_t) time(NULL);
+    e->uid = (uid == (uid_t) -1) ? 0xFFFFFFFFu : (uint32_t) uid;
+    e->action = (uint8_t) action;
+    struct mg_str *hh = hm ? mg_http_get_header(hm, "Host") : NULL;
+    if (hh != NULL && hh->len > 0) {
+        size_t n = hh->len < sizeof(e->host) - 1 ? hh->len : sizeof(e->host) - 1;
+        memcpy(e->host, hh->buf, n);
+        e->host[n] = '\0';
+        char *colon = strchr(e->host, ':');
+        if (colon != NULL) *colon = '\0';
+    } else if (hm != NULL && hm->uri.len > 0) {
+        size_t n = hm->uri.len < sizeof(e->host) - 1 ? hm->uri.len : sizeof(e->host) - 1;
+        memcpy(e->host, hm->uri.buf, n);
+        e->host[n] = '\0';
+    }
+    s_qlog_pos = (s_qlog_pos + 1) % QLOG_MAX;
+    if (s_qlog_count < QLOG_MAX) s_qlog_count++;
+}
+
+/* Newest first, bounded (QLOG_RENDER_MAX entries / QLOG_JSON_MAX bytes). */
+static void qlog_render(char *out, size_t cap) {
+    size_t off = 0;
+    if (out == NULL || cap == 0) return;
+    out[0] = '\0';
+    uint32_t total = s_qlog_count < QLOG_RENDER_MAX ? s_qlog_count : QLOG_RENDER_MAX;
+    for (uint32_t k = 0; k < total; k++) {
+        uint32_t idx = (s_qlog_pos + QLOG_MAX - 1 - k) % QLOG_MAX;
+        struct qlog_entry *e = &s_qlog[idx];
+        char host[400];
+        int n;
+        if (e->ts == 0) continue;
+        json_safe_copy(host, sizeof(host), e->host);
+        n = snprintf(out + off, cap - off,
+                     "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"host\":\"%s\"}",
+                     off ? "," : "", (unsigned long long) e->ts,
+                     (e->uid == 0xFFFFFFFFu) ? -1 : (int) e->uid,
+                     (int) e->action, host);
+        if (n <= 0 || off + (size_t) n >= cap) { out[off] = '\0'; break; }
+        off += (size_t) n;
+    }
+}
+
+#define QLOG_MAGIC 0x514C4F47u   /* "QLOG" */
+static void qlog_save(const char *resource_dir) {
+    char path[PATH_MAX];
+    if (resource_dir == NULL || resource_dir[0] == '\0') return;
+    snprintf(path, sizeof(path), "%s/query_log.dat", resource_dir);
+    FILE *fp = fopen(path, "wb");
+    if (fp == NULL) return;
+    uint32_t magic = QLOG_MAGIC;
+    fwrite(&magic, sizeof(magic), 1, fp);
+    fwrite(&s_qlog_pos, sizeof(s_qlog_pos), 1, fp);
+    fwrite(&s_qlog_count, sizeof(s_qlog_count), 1, fp);
+    fwrite(s_qlog, sizeof(s_qlog[0]), s_qlog_count < QLOG_MAX ? s_qlog_count : QLOG_MAX, fp);
+    fclose(fp);
+}
+
+static void qlog_load(const char *resource_dir) {
+    char path[PATH_MAX];
+    if (resource_dir == NULL || resource_dir[0] == '\0') return;
+    snprintf(path, sizeof(path), "%s/query_log.dat", resource_dir);
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) return;
+    uint32_t magic = 0, pos = 0, count = 0;
+    if (fread(&magic, sizeof(magic), 1, fp) == 1 && magic == QLOG_MAGIC &&
+        fread(&pos, sizeof(pos), 1, fp) == 1 &&
+        fread(&count, sizeof(count), 1, fp) == 1 &&
+        count <= QLOG_MAX && pos < QLOG_MAX) {
+        size_t got = fread(s_qlog, sizeof(s_qlog[0]), count, fp);
+        if (got == count) {
+            s_qlog_pos = pos ? pos : (uint32_t) (count % QLOG_MAX);
+            s_qlog_count = count;
+        }
+    }
+    fclose(fp);
+}
+
 /* WebSocket push subscribers: connections that upgraded to /internal-ws.
    Registered on MG_EV_WS_OPEN, removed on MG_EV_CLOSE; broadcast after
    every counted request so clients get real-time updates. */
@@ -2047,6 +2159,9 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
             (unsigned long long)s_apps[i].tls_hosts);
         if (n > 0) off += n;
     }
+    /* static: a few KB that must never sit on the event-loop stack */
+    static char qlog_json[QLOG_JSON_MAX];
+    qlog_render(qlog_json, sizeof(qlog_json));
     char tls_json[2048] = "";
     off = 0;
     int total = s_tls_count < RECENT_TLS_MAX ? s_tls_count : RECENT_TLS_MAX;
@@ -2116,7 +2231,8 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"apps\":[%s],"
         "\"recent_tls\":[%s],"
         "\"history\":[%s],"
-        "\"daily\":[%s]}",
+        "\"daily\":[%s],"
+        "\"query_log\":[%s]}",
         (unsigned long long)uptime,
         (double)uptime / 86400.0,
         (unsigned long long)req,
@@ -2144,7 +2260,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         (unsigned long long)s_stats.blocked_clickbait,
         (unsigned long long)s_stats.sni_certs_issued,
         s->block_image_count,
-        apps_json, tls_json, hist_json, daily_json);
+        apps_json, tls_json, hist_json, daily_json, qlog_json);
         if (n < 0) return 0;
         return n < (int) out_sz ? n : (int) out_sz - 1;
     }
@@ -3143,13 +3259,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                        proxying is dropped (the first reply is still
                        streaming back to the client). */
                     if (proxy_busy(c)) return;
-                    if (proxy_start(c, s, hm, phost)) return;
+                    if (proxy_start(c, s, hm, phost)) {
+                        qlog_add(req_uid, QLOG_PROXY, hm);
+                        return;
+                    }
                 }
             }
         }
     }
 
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
+        qlog_add(req_uid, QLOG_ALLOW, hm);
         mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
                               "Cache-Control: no-store\r\n", "ok");
         return;
@@ -3306,6 +3426,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         hist_add(HIST_BLOCKED);
         struct appstat *ba = app_find_or_add(conn_load_uid(c));
         if (ba) ba->blocked++;
+        qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
         ws_push_broadcast(s);  /* real-time push to WS subscribers */
         return;
     }
@@ -3323,6 +3444,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     hist_add(HIST_BLOCKED);
     struct appstat *ba = app_find_or_add(conn_load_uid(c));
     if (ba) ba->blocked++;
+    qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
     ws_push_broadcast(s);  /* real-time push to WS subscribers */
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
@@ -3469,6 +3591,7 @@ int main(int argc, char *argv[]) {
     load_hist(&s);   /* chart buckets survive restarts (reboot-proof) */
     sni_cache_load(s.resource_dir);  /* SNI cert cache survives restarts */
     apps_load(s.resource_dir);       /* per-app stats survive restarts */
+    qlog_load(s.resource_dir);       /* query log ring survives restarts */
 
     oom_adjust_setup();
 

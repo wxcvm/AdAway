@@ -868,6 +868,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         Triple("chart_conn", R.string.compose_settings_chart_conn, R.string.compose_settings_chart_conn_hint),
                         Triple("chart_apps", R.string.compose_settings_chart_apps, R.string.compose_settings_chart_apps_hint),
                         Triple("chart_certs", R.string.compose_settings_chart_certs, R.string.compose_settings_chart_certs_hint),
+                        Triple("chart_qlog", R.string.compose_settings_chart_qlog, R.string.compose_settings_chart_qlog_hint),
                     )
                     chartToggles.forEach { (key, labelRes, hintRes) ->
                         val enabled = remember(refreshKey, key) { isChartEnabled(context, key) }
