@@ -1223,12 +1223,26 @@ static void win32_addr_bytes(const struct mg_addr *a, unsigned char out[16]) {
 }
 
 /* The row whose LOCAL end is our peer and whose REMOTE end is our listener is
-   the client's own socket - the same orientation the /proc scan compares. */
-static int win32_row_matches(unsigned char l[16], unsigned char r[16],
-                             unsigned short lport, unsigned short rport,
+   the client's own socket - the same orientation the /proc scan compares.
+   NOTE: mg_addr.port is kept in NETWORK byte order (mongoose assigns it with
+   mg_htons/mg_ntohs), and MIB_TCPROW dwLocalPort/dwRemotePort are network order
+   in their low 16 bits as well, so both sides are compared raw. Converting the
+   row side with ntohs() (as a first version of this code did) never matches and
+   silently disabled the whole feature. */
+static int win32_row_matches(unsigned short lport, unsigned short rport,
                              unsigned short row_lport, unsigned short row_rport) {
-    return lport == (unsigned short) ntohs(row_lport) &&
-           rport == (unsigned short) ntohs(row_rport);
+    return lport == row_lport && rport == row_rport;
+}
+
+/* Say it once (not per connection) when attribution fails, so a future
+   regression is visible in webserver.log instead of silently showing "-1". */
+static void win32_log_attribution_failure(const struct mg_addr *loc, const struct mg_addr *rem) {
+    static int logged = 0;
+    if (logged) return;
+    logged = 1;
+    LOG_WARN("per-app attribution: no TCP owner row for peer %u -> %u "
+             "(app stats fall back to \"unknown\")",
+             (unsigned) mg_ntohs(rem->port), (unsigned) mg_ntohs(loc->port));
 }
 
 static DWORD win32_pid_for_tuple(const struct mg_addr *loc, const struct mg_addr *rem) {
@@ -1249,8 +1263,8 @@ static DWORD win32_pid_for_tuple(const struct mg_addr *loc, const struct mg_addr
                     for (DWORD i = 0; i < t->dwNumEntries && pid == 0; i++) {
                         MIB_TCPROW_OWNER_PID *row = &t->table[i];
                         unsigned char a[16], b[16];
-                        if (!win32_row_matches(want_l, want_r,
-                                               rem->port, loc->port,
+                        if (!win32_row_matches((unsigned short) rem->port,
+                                               (unsigned short) loc->port,
                                                (unsigned short) row->dwLocalPort,
                                                (unsigned short) row->dwRemotePort))
                             continue;
@@ -1279,8 +1293,8 @@ static DWORD win32_pid_for_tuple(const struct mg_addr *loc, const struct mg_addr
                                         TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR) {
                     for (DWORD i = 0; i < t->dwNumEntries && pid == 0; i++) {
                         MIB_TCP6ROW_OWNER_PID *row = &t->table[i];
-                        if (!win32_row_matches(want_l, want_r,
-                                               rem->port, loc->port,
+                        if (!win32_row_matches((unsigned short) rem->port,
+                                               (unsigned short) loc->port,
                                                (unsigned short) row->dwLocalPort,
                                                (unsigned short) row->dwRemotePort))
                             continue;
@@ -1323,9 +1337,10 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
     if (pid != 0 && pid != GetCurrentProcessId()) {
         if (s_verbose)
             LOG_INFO("conn_uid: peer port %u -> pid=%lu (windows tcp table)",
-                     (unsigned) c->rem.port, (unsigned long) pid);
+                     (unsigned) mg_ntohs(c->rem.port), (unsigned long) pid);
         return (uid_t) pid;
     }
+    if (pid == 0) win32_log_attribution_failure(&c->loc, &c->rem);
     return (uid_t) -1;
 #else
     char loc_v4[64], rem_v4[64];
