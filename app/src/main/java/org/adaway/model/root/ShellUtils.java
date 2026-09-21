@@ -248,6 +248,41 @@ public final class ShellUtils {
         return "";
     }
 
+    /**
+     * Very short identifier of the current root state, used by the boot
+     * receiver's immediate start attempt.
+     *
+     * @return {@code true} when a root shell answers right now.
+     */
+    public static boolean isRootAvailable() {
+        try {
+            return Shell.cmd("true").exec().isSuccess();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * Read the system hosts file ({@code /system/etc/hosts}) through root.
+     *
+     * <p>The rules screen offers "view system hosts" so the user can see what is
+     * really applied on the device - including a systemless Magisk overlay, which
+     * is exactly what {@code cat /system/etc/hosts} resolves to.</p>
+     *
+     * @return the file content, or an empty string when it cannot be read.
+     */
+    public static String readSystemHostsFile() {
+        try {
+            Shell.Result result = Shell.cmd("cat /system/etc/hosts 2>/dev/null").exec();
+            if (result.isSuccess() && result.getOut() != null) {
+                return mergeAllLines(result.getOut());
+            }
+        } catch (Exception ignored) {
+            // fall through: no root / no file
+        }
+        return "";
+    }
+
 
 
     /**

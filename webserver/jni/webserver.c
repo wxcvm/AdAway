@@ -2033,6 +2033,64 @@ static void json_safe_copy(char *dst, size_t cap, const char *src) {
 #define QLOG_MAX 4096
 #define QLOG_RENDER_MAX 24
 #define QLOG_JSON_MAX 4096
+/*
+ * "Top blocked hosts" ranking.
+ *
+ * The card used to be built from recent_tls (the SNI names apps asked us to sign
+ * a certificate for), which is a completely different thing: a domain can be
+ * cert-issued without ever being blocked, and a blocked plain-HTTP domain never
+ * appears there at all. What the user wants to see is which hosts the filter
+ * actually blocked and how often, so the blocked paths count them here.
+ */
+#define TOP_HOSTS_MAX 32
+struct top_host {
+    char host[128];
+    uint32_t count;
+};
+static struct top_host s_top_hosts[TOP_HOSTS_MAX];
+static int s_top_count;
+
+/* Host header of a request (port stripped), or the URI when there is none. */
+static void req_host_of(struct mg_http_message *hm, char *out, size_t cap) {
+    if (out == NULL || cap == 0) return;
+    out[0] = '\0';
+    struct mg_str *hh = hm != NULL ? mg_http_get_header(hm, "Host") : NULL;
+    if (hh != NULL && hh->len > 0) {
+        size_t n = hh->len < cap - 1 ? hh->len : cap - 1;
+        memcpy(out, hh->buf, n);
+        out[n] = '\0';
+        char *colon = strchr(out, ':');
+        if (colon != NULL) *colon = '\0';
+    } else if (hm != NULL && hm->uri.len > 0) {
+        size_t n = hm->uri.len < cap - 1 ? hm->uri.len : cap - 1;
+        memcpy(out, hm->uri.buf, n);
+        out[n] = '\0';
+    }
+}
+
+static void top_host_add(const char *host) {
+    if (host == NULL || host[0] == '\0') return;
+    for (int i = 0; i < s_top_count; i++) {
+        if (strcasecmp(s_top_hosts[i].host, host) == 0) {
+            s_top_hosts[i].count++;
+            return;
+        }
+    }
+    if (s_top_count < TOP_HOSTS_MAX) {
+        snprintf(s_top_hosts[s_top_count].host, sizeof(s_top_hosts[0].host), "%s", host);
+        s_top_hosts[s_top_count].count = 1;
+        s_top_count++;
+        return;
+    }
+    /* Table full: the least frequently blocked host gives up its slot, so a
+       long tail of one-off domains cannot push the real offenders out. */
+    int min = 0;
+    for (int i = 1; i < s_top_count; i++)
+        if (s_top_hosts[i].count < s_top_hosts[min].count) min = i;
+    snprintf(s_top_hosts[min].host, sizeof(s_top_hosts[0].host), "%s", host);
+    s_top_hosts[min].count = 1;
+}
+
 enum { QLOG_PROXY = 0, QLOG_BLOCK = 1, QLOG_ALLOW = 2 };
 struct qlog_entry {
     uint64_t ts;          /* epoch seconds */
@@ -2067,18 +2125,7 @@ static void qlog_add(uid_t uid, int action, struct mg_http_message *hm) {
         e->rtype = 0xFFFF;
         e->pad = 0;
     }
-    struct mg_str *hh = hm ? mg_http_get_header(hm, "Host") : NULL;
-    if (hh != NULL && hh->len > 0) {
-        size_t n = hh->len < sizeof(e->host) - 1 ? hh->len : sizeof(e->host) - 1;
-        memcpy(e->host, hh->buf, n);
-        e->host[n] = '\0';
-        char *colon = strchr(e->host, ':');
-        if (colon != NULL) *colon = '\0';
-    } else if (hm != NULL && hm->uri.len > 0) {
-        size_t n = hm->uri.len < sizeof(e->host) - 1 ? hm->uri.len : sizeof(e->host) - 1;
-        memcpy(e->host, hm->uri.buf, n);
-        e->host[n] = '\0';
-    }
+    req_host_of(hm, e->host, sizeof(e->host));
     s_qlog_pos = (s_qlog_pos + 1) % QLOG_MAX;
     if (s_qlog_count < QLOG_MAX) s_qlog_count++;
 }
@@ -2221,6 +2268,33 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     /* static: a few KB that must never sit on the event-loop stack */
     static char qlog_json[QLOG_JSON_MAX];
     qlog_render(qlog_json, sizeof(qlog_json));
+    /* Top blocked hosts, busiest first (see top_host_add()). */
+    char top_json[2048] = "";
+    {
+        struct top_host sorted[TOP_HOSTS_MAX];
+        int n = s_top_count;
+        memcpy(sorted, s_top_hosts, sizeof(sorted[0]) * (size_t) n);
+        for (int i = 1; i < n; i++) {
+            struct top_host key = sorted[i];
+            int j = i - 1;
+            while (j >= 0 && sorted[j].count < key.count) {
+                sorted[j + 1] = sorted[j];
+                j--;
+            }
+            sorted[j + 1] = key;
+        }
+        int toff = 0;
+        for (int i = 0; i < n && i < 20; i++) {
+            char safe[160];
+            int w;
+            json_safe_copy(safe, sizeof(safe), sorted[i].host);
+            w = snprintf(top_json + toff, sizeof(top_json) - (size_t) toff,
+                         "%s{\"host\":\"%s\",\"count\":%lu}",
+                         toff ? "," : "", safe, (unsigned long) sorted[i].count);
+            if (w <= 0 || toff + w >= (int) sizeof(top_json)) break;
+            toff += w;
+        }
+    }
     char tls_json[2048] = "";
     off = 0;
     int total = s_tls_count < RECENT_TLS_MAX ? s_tls_count : RECENT_TLS_MAX;
@@ -2290,6 +2364,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"apps\":[%s],"
         "\"recent_tls\":[%s],"
         "\"history\":[%s],"
+        "\"top_blocked\":[%s],"
         "\"daily\":[%s],"
         "\"query_log\":[%s]}",
         (unsigned long long)uptime,
@@ -2319,7 +2394,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         (unsigned long long)s_stats.blocked_clickbait,
         (unsigned long long)s_stats.sni_certs_issued,
         s->block_image_count,
-        apps_json, tls_json, hist_json, daily_json, qlog_json);
+        apps_json, tls_json, hist_json, top_json, daily_json, qlog_json);
         if (n < 0) return 0;
         return n < (int) out_sz ? n : (int) out_sz - 1;
     }
@@ -3485,6 +3560,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         hist_add(HIST_BLOCKED);
         struct appstat *ba = app_find_or_add(conn_load_uid(c));
         if (ba) ba->blocked++;
+        {
+            char bh[192];
+            req_host_of(hm, bh, sizeof(bh));
+            top_host_add(bh);
+        }
         qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
         ws_push_broadcast(s);  /* real-time push to WS subscribers */
         return;
@@ -3507,6 +3587,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        most common case ("could not classify") would be the one entry type
        missing from the query log. */
     RB_TYPE(LT_IMAGES, cfg_images);
+    {
+        char bh[192];
+        req_host_of(hm, bh, sizeof(bh));
+        top_host_add(bh);
+    }
     qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
     ws_push_broadcast(s);  /* real-time push to WS subscribers */
     struct mg_http_serve_opts o = {0};

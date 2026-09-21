@@ -25,6 +25,7 @@ import static android.content.Intent.ACTION_BOOT_COMPLETED;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.BroadcastReceiver.PendingResult;
 
 import androidx.work.BackoffPolicy;
 import androidx.work.ExistingWorkPolicy;
@@ -55,11 +56,17 @@ public class BootReceiver extends BroadcastReceiver {
     /** Initial delay before the first start attempt (root boot-up time). */
     private static final long INITIAL_DELAY_SECONDS = 10L;
 
+    /** Budget for the immediate attempt inside the receiver's own 10 s window. */
+    private static final long IMMEDIATE_BUDGET_MS = 6_000L;
+
     /** All boot-completed actions this receiver recognises. */
     private static final java.util.Set<String> BOOT_ACTIONS = new java.util.HashSet<>(java.util.Arrays.asList(
             ACTION_BOOT_COMPLETED,
             "android.intent.action.QUICKBOOT_POWERON",
-            "com.htc.intent.action.QUICKBOOT_POWERON"
+            "com.htc.intent.action.QUICKBOOT_POWERON",
+            // The app update replaces the staged executable's library path and
+            // force-stops the app: make sure the server is up again afterwards.
+            "android.intent.action.MY_PACKAGE_REPLACED"
     ));
 
     @Override
@@ -74,6 +81,46 @@ public class BootReceiver extends BroadcastReceiver {
             Timber.d("BootReceiver: web server not enabled, skipping.");
             return;
         }
+
+        /*
+         * Immediate attempt, bounded by the receiver's own ~10 s window.
+         *
+         * WorkManager is the reliable retry path, but several OEM builds defer
+         * queued work by minutes after boot - which is exactly the "sometimes
+         * the web server does not start after a reboot" report. Root is usually
+         * ready within a second or two, so one quick try here covers the common
+         * case and the queued worker stays the safety net for slow root
+         * initialisation.
+         */
+        final Context appContext = context.getApplicationContext();
+        final PendingResult pending = goAsync();
+        Thread quickStart = new Thread(() -> {
+            try {
+                if (org.adaway.util.WebServerUtils.isWebServerReachable(appContext)) {
+                    Timber.d("BootReceiver: web server already reachable.");
+                    return;
+                }
+                long deadline = System.currentTimeMillis() + IMMEDIATE_BUDGET_MS;
+                while (System.currentTimeMillis() < deadline) {
+                    if (org.adaway.model.root.ShellUtils.isRootAvailable()) {
+                        org.adaway.util.WebServerUtils.startWebServer(appContext);
+                        Timber.i("BootReceiver: immediate start dispatched.");
+                        break;
+                    }
+                    try {
+                        Thread.sleep(500L);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            } catch (Throwable throwable) {
+                Timber.w(throwable, "BootReceiver: immediate start attempt failed.");
+            } finally {
+                pending.finish();
+            }
+        }, "adblock-boot-start");
+        quickStart.start();
 
         OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ServerStartWorker.class)
                 .setInitialDelay(INITIAL_DELAY_SECONDS, TimeUnit.SECONDS)

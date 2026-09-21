@@ -12,14 +12,14 @@ boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
         project.hasProperty('signingKeyPassword')
 
 android {
-    compileSdk 36
+    compileSdk 37
     ndkVersion '28.1.13356709'
     namespace 'org.adaway'
 
     defaultConfig {
         applicationId 'com.wxcvm.Adaway'
         minSdk 30
-        targetSdk 35
+        targetSdk 37
         ndk {
             abiFilters "arm64-v8a"
         }

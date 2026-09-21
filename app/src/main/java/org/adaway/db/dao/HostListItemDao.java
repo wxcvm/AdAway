@@ -46,6 +46,17 @@ public interface HostListItemDao {
     @Query("SELECT * FROM hosts_lists WHERE type = :type ORDER BY host ASC LIMIT :limit")
     List<HostListItem> getListByType(int type, int limit);
 
+    /*
+     * Rule search (the rules screen had no way to find a host in a list of
+     * thousands). LIKE with a caller-supplied %pattern%; GROUP BY host keeps
+     * the same de-duplication the paging query uses.
+     */
+    @Query("SELECT * FROM hosts_lists WHERE type = :type AND host LIKE :query GROUP BY host ORDER BY host ASC LIMIT :limit")
+    List<HostListItem> searchByType(int type, String query, int limit);
+
+    @Query("SELECT COUNT(DISTINCT host) FROM hosts_lists WHERE type = :type AND host LIKE :query")
+    int countSearchByType(int type, String query);
+
     @Query("SELECT COUNT(*) FROM hosts_lists WHERE type = :type")
     int getCountByType(int type);
 

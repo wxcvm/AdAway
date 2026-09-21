@@ -346,9 +346,9 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
                 RecentRequestsCard(serverStats!!.queryLog)
             }
 
-            // Top intercepted domains (ranked)
-            if (showCerts && serverStats != null && serverStats!!.recentTls.isNotEmpty()) {
-                TopHostsCard(serverStats!!.recentTls)
+            // Top intercepted domains (ranked by how often they were blocked)
+            if (showCerts && serverStats != null && serverStats!!.topBlocked.isNotEmpty()) {
+                TopHostsCard(serverStats!!.topBlocked)
             }
             // Recently issued SNI certs
             if (showCerts && serverStats != null && serverStats!!.recentTls.isNotEmpty()) {
@@ -819,14 +819,20 @@ private fun DetailRow(label: String, value: Any) {
     }
 }
 
-/** Map an Android uid to its (first) package label; fall back to "UID n". */
-/** 拦截域名排行 Top 卡：由 recentTls (uid, host) 按域名聚合，取出现最多的域名。 */
+/**
+ * 拦截域名排行 Top 卡：数据来自服务端真正的"被拦截域名"计数
+ * （/internal-stats 的 top_blocked[]），按拦截次数降序展示。
+ *
+ * 旧实现拿 recentTls（应用请求签发 SNI 证书的域名）来凑榜单 —— 那既不是
+ * "被拦截"，也和拦截次数无关，所以榜单一直是错的。
+ */
 @Composable
-private fun TopHostsCard(hosts: List<TlsHost>) {
-    val counts = hosts.groupingBy { it.host }.eachCount()
-    val top = counts.entries.sortedByDescending { it.value }.take(10)
+private fun TopHostsCard(blocked: List<BlockedHost>) {
+    val top = blocked.filter { it.host.isNotEmpty() }
+        .sortedByDescending { it.count }
+        .take(10)
     if (top.isEmpty()) return
-    val maxCount = top.first().value.coerceAtLeast(1)
+    val maxCount = top.first().count.coerceAtLeast(1)
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -842,7 +848,7 @@ private fun TopHostsCard(hosts: List<TlsHost>) {
             Spacer(Modifier.height(8.dp))
             val barBg = MaterialTheme.colorScheme.surfaceVariant
             val barFg = MaterialTheme.colorScheme.primary
-            top.forEachIndexed { index, (host, count) ->
+            top.forEachIndexed { index, entry ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -859,7 +865,7 @@ private fun TopHostsCard(hosts: List<TlsHost>) {
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            host,
+                            entry.host,
                             style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -871,7 +877,7 @@ private fun TopHostsCard(hosts: List<TlsHost>) {
                                 color = barBg,
                                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
                             )
-                            val fraction = (count.toFloat() / maxCount).coerceIn(0f, 1f)
+                            val fraction = (entry.count.toFloat() / maxCount.toFloat()).coerceIn(0f, 1f)
                             drawRoundRect(
                                 color = barFg,
                                 size = androidx.compose.ui.geometry.Size(size.width * fraction, size.height),
@@ -881,7 +887,7 @@ private fun TopHostsCard(hosts: List<TlsHost>) {
                     }
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        ChartUtils.compactNumber(count.toLong()),
+                        ChartUtils.compactNumber(entry.count),
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontFamily = FontFamily.Monospace,
                         ),
@@ -889,10 +895,10 @@ private fun TopHostsCard(hosts: List<TlsHost>) {
                     )
                 }
             }
-            if (top.size < counts.size) {
+            if (blocked.size > top.size) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    stringResource(R.string.compose_stats_top_hosts_more, counts.size - top.size),
+                    stringResource(R.string.compose_stats_top_hosts_more, blocked.size - top.size),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

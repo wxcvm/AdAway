@@ -747,84 +747,15 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    // SHA-256 指纹（可展开查看、复制、分享二维码）
-                    val fingerprint = remember {
-                        org.adaway.util.WebServerUtils.getCertificateFingerprint(context)
-                    }
-                    if (fingerprint != null) {
-                        var showFingerprint by remember { mutableStateOf(true) }
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    stringResource(R.string.compose_settings_cert_fingerprint),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                IconButton(onClick = { showFingerprint = !showFingerprint }) {
-                                    Icon(
-                                        imageVector = if (showFingerprint) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                                        contentDescription = if (showFingerprint) "Collapse" else "Expand"
-                                    )
-                                }
-                            }
-                            AnimatedVisibility(visible = showFingerprint) {
-                                Column(modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            fingerprint,
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                            ),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            IconButton(onClick = {
-                                                (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                                                    .setPrimaryClip(android.content.ClipData.newPlainText("ADBlock CA Fingerprint", fingerprint))
-                                                Toast.makeText(context, "指纹已复制", Toast.LENGTH_SHORT).show()
-                                            }) {
-                                                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy fingerprint")
-                                            }
-                                            IconButton(onClick = {
-                                                // Generate QR code for fingerprint sharing
-                                                val qrData = "ADBlock CA SHA-256 Fingerprint:\n$fingerprint"
-                                                val writer = com.google.zxing.qrcode.QRCodeWriter()
-                                                val hints = mapOf(com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M)
-                                                val bitMatrix = writer.encode(qrData, com.google.zxing.BarcodeFormat.QR_CODE, 256, 256, hints)
-                                                val bitmap = android.graphics.Bitmap.createBitmap(256, 256, android.graphics.Bitmap.Config.ARGB_8888)
-                                                for (x in 0 until 256) {
-                                                    for (y in 0 until 256) {
-                                                        bitmap.setPixel(x, y, if (bitMatrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-                                                    }
-                                                }
-                                                // Share via system share sheet
-                                                val uri = saveBitmapToCache(context, bitmap, "adblock_ca_fingerprint.png")
-                                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                                    type = "image/png"
-                                                    putExtra(Intent.EXTRA_STREAM, uri)
-                                                    putExtra(Intent.EXTRA_TEXT, qrData)
-                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                }
-                                                context.startActivity(Intent.createChooser(shareIntent, "分享证书指纹"))
-                                            }) {
-                                                Icon(Icons.Outlined.QrCode, contentDescription = "Share QR code")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    /*
+                     * NOTE: the SHA-256 fingerprint block (and its QR share
+                     * button) used to sit here. It is not part of installing or
+                     * trusting the CA - it only helped someone compare the
+                     * fingerprint by hand - and it made this card the busiest
+                     * part of the screen. Removed on request: the card now ends
+                     * with the one action that matters, exporting the
+                     * certificate.
+                     */
                     Spacer(Modifier.height(4.dp))
                     // 导出证书到 Download 目录（供其他设备/模块使用）
                     OutlinedButton(

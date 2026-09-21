@@ -37,6 +37,16 @@ data class TlsHost(
 )
 
 /**
+ * One entry of the server's "top blocked hosts" ranking: how often the filter
+ * actually blocked this host. (The old card reused [TlsHost] — the SNI names
+ * apps asked certificates for — which is a different thing entirely.)
+ */
+data class BlockedHost(
+    val host: String = "",
+    val count: Long = 0,
+)
+
+/**
  * One entry of the server's query log: what was requested and what the filter
  * did with it (0 = proxied to the real server, 1 = blocked, 2 = allowed).
  */
@@ -109,6 +119,7 @@ data class ServerStats(
     val blockImageCount: Int = 0,
     val apps: List<AppStat> = emptyList(),
     val recentTls: List<TlsHost> = emptyList(),
+    val topBlocked: List<BlockedHost> = emptyList(),
     val queryLog: List<QueryLogEntry> = emptyList(),
     val history: List<HistPoint> = emptyList(),
     val daily: List<HistPoint> = emptyList(),
@@ -166,6 +177,17 @@ data class ServerStats(
                     )
                 }
             }
+            val topBlocked = mutableListOf<BlockedHost>()
+            val topArray = json.optJSONArray("top_blocked")
+            if (topArray != null) {
+                for (i in 0 until topArray.length()) {
+                    val o = topArray.optJSONObject(i) ?: continue
+                    topBlocked += BlockedHost(
+                        host = o.optString("host", ""),
+                        count = o.optLong("count", 0),
+                    )
+                }
+            }
             return ServerStats(
                 uptimeSeconds = json.optLong("uptime_seconds", 0),
                 uptimeDays = json.optDouble("uptime_days", 0.0),
@@ -195,6 +217,7 @@ data class ServerStats(
                 blockImageCount = json.optInt("block_image_count", 0),
                 apps = apps,
                 recentTls = recentTls,
+                topBlocked = topBlocked,
                 queryLog = queryLog,
                 history = history,
                 daily = daily,
@@ -421,6 +444,26 @@ fun refreshServerStats() {
         viewModelScope.launch {
             val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 hostsListItemDao.getListByType(type, limit) to hostsListItemDao.getCountByType(type)
+            }
+            onResult(result.first, result.second)
+        }
+    }
+
+    /**
+     * Search hosts-list entries of a type by substring (case-insensitive LIKE),
+     * capped at [limit] rows plus the number of matches.
+     */
+    fun searchRules(
+        type: Int,
+        query: String,
+        limit: Int,
+        onResult: (items: List<org.adaway.db.entity.HostListItem>, total: Int) -> Unit,
+    ) {
+        val pattern = "%" + query.trim() + "%"
+        viewModelScope.launch {
+            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                hostsListItemDao.searchByType(type, pattern, limit) to
+                    hostsListItemDao.countSearchByType(type, pattern)
             }
             onResult(result.first, result.second)
         }

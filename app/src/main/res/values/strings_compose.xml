@@ -238,6 +238,12 @@
     <string name="compose_rules_ok">OK</string>
     <string name="compose_rules_source_url_hint">https://example.com/hosts.txt</string>
     <string name="compose_rules_add">Add</string>
+    <string name="compose_rules_search_hint">Search rules (host name)</string>
+    <string name="compose_rules_view_hosts">System hosts file</string>
+    <string name="compose_rules_view_hosts_hint">Read from /system/etc/hosts (a Magisk system-level overlay is included).</string>
+    <string name="compose_rules_view_hosts_failed">Could not read the file - root access is required.</string>
+    <string name="compose_rules_view_hosts_copy">Copy</string>
+    <string name="compose_rules_view_hosts_copied">Copied to the clipboard</string>
     <string name="compose_rules_cancel">Cancel</string>
     <string name="compose_rules_source_size">%1$d items</string>
     <string name="compose_rules_sources_empty">No subscriptions yet — add one to start blocking.</string>

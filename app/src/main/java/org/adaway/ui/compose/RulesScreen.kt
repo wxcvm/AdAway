@@ -13,7 +13,11 @@ package org.adaway.ui.compose
  */
 
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
@@ -26,13 +30,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -42,6 +52,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -145,6 +156,13 @@ fun RulesScreen(viewModel: StatsViewModel) {
         RuleTab(R.string.compose_rules_redirect, ListType.REDIRECTED.value, R.string.compose_rules_empty_redirect),
     )
 
+    // Rule search (a list of thousands without one was unusable).
+    var searchQuery by remember { mutableStateOf("") }
+    // "View the system hosts file" dialog: the rules screen is exactly where a
+    // user asks "what is actually applied on this device?".
+    var showHostsDialog by remember { mutableStateOf(false) }
+    var systemHosts by remember { mutableStateOf<String?>(null) }
+
     fun reloadSources() {
         viewModel.loadSources { sources = it }
     }
@@ -153,10 +171,21 @@ fun RulesScreen(viewModel: StatsViewModel) {
         viewModel.loadSourceLabels { sourceLabels = it }
         reloadSources()
     }
-    LaunchedEffect(selectedTab) {
-        viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items, total ->
-            rules = items
-            totalCount = total
+    LaunchedEffect(selectedTab, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isEmpty()) {
+            viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items, total ->
+                rules = items
+                totalCount = total
+            }
+        } else {
+            // Debounce: this effect restarts on every keystroke, so the delay
+            // only elapses for the query the user stopped typing.
+            kotlinx.coroutines.delay(250)
+            viewModel.searchRules(tabs[selectedTab].type, query, RULES_PAGE_SIZE) { items, total ->
+                rules = items
+                totalCount = total
+            }
         }
     }
 
@@ -164,7 +193,20 @@ fun RulesScreen(viewModel: StatsViewModel) {
                 topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_rules_title)) },
-                actions = { IconButton(onClick = { viewModel.syncHosts() }) { Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.compose_sync_hosts)) } },
+                actions = {
+                    IconButton(onClick = {
+                        systemHosts = null
+                        showHostsDialog = true
+                        scope.launch {
+                            systemHosts = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                org.adaway.model.root.ShellUtils.readSystemHostsFile()
+                            }
+                        }
+                    }) {
+                        Icon(Icons.Outlined.Description, contentDescription = stringResource(R.string.compose_rules_view_hosts))
+                    }
+                    IconButton(onClick = { viewModel.syncHosts() }) { Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.compose_sync_hosts)) }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
@@ -198,6 +240,25 @@ fun RulesScreen(viewModel: StatsViewModel) {
                     )
                 }
             }
+
+            // Rule search box
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Outlined.Close, contentDescription = null)
+                        }
+                    }
+                },
+                placeholder = { Text(stringResource(R.string.compose_rules_search_hint)) },
+            )
 
             // Total count for the active tab
             Row(
@@ -493,6 +554,61 @@ fun RulesScreen(viewModel: StatsViewModel) {
             },
             dismissButton = {
                 TextButton(onClick = { deleteSourceHint = null }) {
+                    Text(stringResource(R.string.compose_rules_cancel))
+                }
+            },
+        )
+    }
+
+    // ── 查看系统 hosts（/system/etc/hosts，含 Magisk 系统级覆盖）──
+    if (showHostsDialog) {
+        AlertDialog(
+            onDismissRequest = { showHostsDialog = false },
+            title = { Text(stringResource(R.string.compose_rules_view_hosts)) },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.compose_rules_view_hosts_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    val body = systemHosts
+                    when {
+                        body == null -> CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        body.isEmpty() -> Text(
+                            stringResource(R.string.compose_rules_view_hosts_failed),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        else -> Text(
+                            body,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            modifier = Modifier
+                                .heightIn(max = 320.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !systemHosts.isNullOrEmpty(),
+                    onClick = {
+                        val body = systemHosts ?: return@TextButton
+                        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                            .setPrimaryClip(ClipData.newPlainText("/system/etc/hosts", body))
+                        Toast.makeText(context, R.string.compose_rules_view_hosts_copied, Toast.LENGTH_SHORT).show()
+                    },
+                ) {
+                    Text(stringResource(R.string.compose_rules_view_hosts_copy))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showHostsDialog = false }) {
                     Text(stringResource(R.string.compose_rules_cancel))
                 }
             },

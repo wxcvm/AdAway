@@ -224,6 +224,12 @@
     <string name="compose_rules_ok">确定</string>
     <string name="compose_rules_source_url_hint">https://example.com/hosts.txt</string>
     <string name="compose_rules_add">添加</string>
+    <string name="compose_rules_search_hint">搜索规则（输入域名）</string>
+    <string name="compose_rules_view_hosts">系统 hosts 文件</string>
+    <string name="compose_rules_view_hosts_hint">内容来自 /system/etc/hosts（包含 Magisk 的系统级覆盖）。</string>
+    <string name="compose_rules_view_hosts_failed">读取失败：需要 root 权限。</string>
+    <string name="compose_rules_view_hosts_copy">复制</string>
+    <string name="compose_rules_view_hosts_copied">已复制到剪贴板</string>
     <string name="compose_rules_cancel">取消</string>
     <string name="compose_rules_source_size">%1$d 条</string>
     <string name="compose_rules_sources_empty">暂无订阅，添加一个即可开始拦截。</string>
