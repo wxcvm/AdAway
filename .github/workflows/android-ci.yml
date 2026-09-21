@@ -191,27 +191,26 @@ jobs:
       # for v* tags.
 
       # Publish the freshly built APK to the in-app update feed
-      # (GitHub Releases of wxcvm/Doh-ECH, see UpdateModel.RELEASES_API).
-      # Forks without the secret still build; the canonical repository FAILS the
-      # run instead, because a build that cannot reach the feed is a broken
-      # release pipeline, not a success. (Between run #530 and this fix the step
-      # only printed a warning behind continue-on-error, so five builds in a row
-      # never reached any device while CI stayed green.)
-      - name: Publish to update feed (wxcvm/Doh-ECH)
-        # Fatal for normal pushes (the feed is the only channel installed apps
-        # use), tolerated for tag builds so a GitHub Release is still published.
-        continue-on-error: ${{ startsWith(github.ref, 'refs/tags/') }}
+      # (GitHub Releases of this repository, see UpdateModel.RELEASES_REPO).
+      #
+      # The feed has to be readable WITHOUT a token by the installed apps, so it
+      # has to live in a public repository - this one is public, which makes the
+      # built-in GITHUB_TOKEN enough: no personal access token, no secret to
+      # forget, and the step can be fatal again, because if it fails the feed
+      # really was not updated. (Until now the feed was wxcvm/Doh-ECH only, a
+      # repository this workflow cannot write to without a PAT: without the
+      # DOH_ECH_TOKEN secret every run failed, and before that fix five runs in
+      # a row only warned behind continue-on-error while no device could see the
+      # builds.)
+      #
+      # wxcvm/Doh-ECH is still mirrored when the PAT happens to be configured,
+      # because builds installed before this change look only there.
+      - name: Publish to the in-app update feed
         env:
-          FEED_TOKEN: ${{ secrets.DOH_ECH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LEGACY_FEED_TOKEN: ${{ secrets.DOH_ECH_TOKEN }}
         run: |
-          if [ -z "$FEED_TOKEN" ]; then
-            if [ "${{ github.repository }}" = "wxcvm/AdAway" ]; then
-              echo "::error::DOH_ECH_TOKEN is not configured - the in-app update feed (wxcvm/Doh-ECH) was NOT updated, so no device can see this build."
-              exit 1
-            fi
-            echo "::warning::DOH_ECH_TOKEN is not configured - the in-app update feed (wxcvm/Doh-ECH) was NOT updated."
-            exit 0
-          fi
+          set -euo pipefail
           VERSION_NAME=$(cut -d'|' -f1 version.txt)
           VERSION_CODE=$(cut -d'|' -f2 version.txt)
           APK=app/build/outputs/apk/release/app-release-signed.apk
@@ -219,34 +218,39 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           printf '{"version":"%s","versionCode":%s,"changelog":"Automatic build %s from %s"}' \
             "$VERSION_NAME" "$VERSION_CODE" "$SHORT_SHA" "${{ github.repository }}" > manifest.json
-          export GH_TOKEN="$FEED_TOKEN"
-          if ! gh auth status >/dev/null 2>&1; then
-            echo "::error::DOH_ECH_TOKEN is invalid or expired - the update feed was NOT updated."
-            exit 1
+
+          # Keep the feed tidy: drop CI releases older than the newest 5 (only
+          # tags matching our build scheme, never hand made releases). Rank by
+          # the build number, not by created_at: bulk-recreated CI releases
+          # share one timestamp and the app ranks the feed the same way.
+          prune() {
+            local repo="$1" tag
+            for tag in $(gh release list --repo "$repo" --limit 100 \
+                           --json tagName,isDraft \
+                           --jq '[.[] | select(.isDraft == false) | .tagName
+                                  | select(test("^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$"))]
+                                 | sort_by(split(".") | .[-1] | tonumber) | reverse
+                                 | .[5:][]'); do
+              gh release delete "$tag" --repo "$repo" --cleanup-tag --yes || true
+            done
+          }
+
+          publish() {
+            local repo="$1"
+            gh release create "$VERSION_NAME" ADBlock-latest.apk manifest.json \
+              --repo "$repo" --title "ADBlock $VERSION_NAME" \
+              --notes "Automatic build $VERSION_NAME (versionCode $VERSION_CODE) from ${{ github.repository }}@$SHORT_SHA" \
+              || gh release upload "$VERSION_NAME" ADBlock-latest.apk manifest.json --repo "$repo" --clobber
+            prune "$repo"
+          }
+
+          publish "${{ github.repository }}"
+
+          if [ -n "${LEGACY_FEED_TOKEN:-}" ]; then
+            ( export GH_TOKEN="$LEGACY_FEED_TOKEN"; publish wxcvm/Doh-ECH )
+          else
+            echo "::notice::DOH_ECH_TOKEN is not set - wxcvm/Doh-ECH was not mirrored. Builds from this commit on read ${{ github.repository }} itself."
           fi
-          gh release create "$VERSION_NAME" ADBlock-latest.apk manifest.json \
-            --repo wxcvm/Doh-ECH --title "ADBlock $VERSION_NAME" \
-            --notes "Automatic build $VERSION_NAME (versionCode $VERSION_CODE) from ${{ github.repository }}@$SHORT_SHA" \
-            || gh release upload "$VERSION_NAME" ADBlock-latest.apk manifest.json --repo wxcvm/Doh-ECH --clobber
-          # Keep the feed tidy: drop CI releases older than the newest 5
-          # (only tags matching our build scheme, never manual releases).
-          curl -s -H "Authorization: Bearer $FEED_TOKEN" \
-            "https://api.github.com/repos/wxcvm/Doh-ECH/releases?per_page=100" \
-            | python3 -c "
-          import json, re, sys
-          rels = [r for r in json.load(sys.stdin)
-                  if not r['draft'] and re.fullmatch(r'[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+', r['tag_name'])]
-          # Rank by build number, not by created_at: CI releases can share one
-          # timestamp (bulk recreation) and the app ranks the feed the same way.
-          rels.sort(key=lambda r: int(r['tag_name'].rsplit('.', 1)[1]), reverse=True)
-          print('\n'.join(str(r['id']) for r in rels[5:]))
-          " > /tmp/old-releases.txt
-          while read -r id; do
-            if [ -n "$id" ]; then
-              curl -s -X DELETE -H "Authorization: Bearer $FEED_TOKEN" \
-                "https://api.github.com/repos/wxcvm/Doh-ECH/releases/$id" || true
-            fi
-          done < /tmp/old-releases.txt
 
   release:
     name: Publish GitHub Release

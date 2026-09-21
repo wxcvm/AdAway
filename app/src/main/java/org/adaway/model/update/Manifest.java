@@ -11,7 +11,7 @@ import org.json.JSONObject;
  *     <li>the historic <code>manifest.json</code> release asset
  *     (<code>{"version":…,"versionCode":…,"changelog":…}</code>), which carries an
  *     explicit, authoritative version code;</li>
- *     <li>a plain GitHub release (<code>wxcvm/Doh-ECH</code>), where the version
+ *     <li>a plain GitHub release (<code>wxcvm/AdAway</code>), where the version
  *     comes from the tag name and the changelog from the release body.</li>
  * </ul>
  *

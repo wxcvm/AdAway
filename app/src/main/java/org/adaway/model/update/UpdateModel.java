@@ -33,11 +33,21 @@ import timber.log.Timber;
 /**
  * This class is the model in charge of updating the application.
  *
- * <p>The update feed is the GitHub Releases list of <b>wxcvm/Doh-ECH</b>: the
- * newest published release carrying an APK asset is offered for install. When
- * such a release also ships a <code>manifest.json</code> asset, its explicit
- * version code is authoritative; otherwise the tag name is compared with the
- * running version name, so a release published by hand (APK only) still works.</p>
+ * <p>The update feed is the GitHub Releases list of <b>this repository</b>
+ * (wxcvm/AdAway): the newest published release carrying an APK asset is offered
+ * for install. When such a release also ships a <code>manifest.json</code>
+ * asset, its explicit version code is authoritative; otherwise the tag name is
+ * compared with the running version name, so a release published by hand (APK
+ * only) still works.</p>
+ *
+ * <p>The feed used to be a separate repository (wxcvm/Doh-ECH) because this one
+ * was private; publishing there needed a personal access token, and every CI
+ * run that did not have it either failed or silently stopped updating the feed.
+ * The repository is public now, so CI publishes here with its own
+ * <code>GITHUB_TOKEN</code> and no secret is involved. Releases without an APK
+ * asset - the Windows packages of the same repository - are skipped, and the
+ * ranking is by tag build number, so mixing both kinds in one release list is
+ * safe.</p>
  *
  * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
  */
@@ -45,7 +55,7 @@ public class UpdateModel {
     /**
      * The GitHub repository hosting the release feed (owner/name).
      */
-    private static final String RELEASES_REPO = "wxcvm/Doh-ECH";
+    private static final String RELEASES_REPO = "wxcvm/AdAway";
     /**
      * The GitHub releases API endpoint (newest first, drafts excluded by GitHub).
      */

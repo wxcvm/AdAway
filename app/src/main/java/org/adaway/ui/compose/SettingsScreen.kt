@@ -1084,7 +1084,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
-                    // 检查更新（更新源：GitHub Releases / wxcvm/Doh-ECH）
+                    // 检查更新（更新源：GitHub Releases / wxcvm/AdAway）
                     UpdateCheckRow(viewModel = viewModel, currentVersion = versionName)
                 }
             }
@@ -1401,7 +1401,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
 }
 
 /**
- * 检查更新行：更新源为 GitHub Releases（wxcvm/Doh-ECH）。
+ * 检查更新行：更新源为 GitHub Releases（wxcvm/AdAway）。
  *
  * 显示当前版本与检查结果；发现新版本时提供下载按钮（下载完成后由
  * ApkDownloadReceiver 校验签名/版本再交给系统安装器）。

@@ -739,7 +739,7 @@ fun refreshServerStats() {
     fun currentBlockMode(): Int = org.adaway.util.BlockMode.current(getApplication())
 
     /**
-     * 检查应用更新（更新源：GitHub Releases / wxcvm/Doh-ECH）。
+     * 检查应用更新（更新源：GitHub Releases / wxcvm/AdAway）。
      *
      * @param force 为 true 时忽略 30 分钟的结果缓存
      * @param onResult 回调（新版本对象, 失败原因）；失败时对象为 null

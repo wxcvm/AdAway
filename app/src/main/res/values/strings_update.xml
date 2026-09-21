@@ -20,7 +20,7 @@
     <!-- Notification -->
     <string name="update_notification_description">Downloading latest ADBlock version…</string>
 
-    <!-- Update feed (GitHub Releases: wxcvm/Doh-ECH) -->
+    <!-- Update feed (GitHub Releases: wxcvm/AdAway) -->
     <string name="update_feed_checking">Checking for updates…</string>
     <string name="update_feed_up_to_date">You are up to date (%1$s)</string>
     <string name="update_feed_available">Version %1$s is available</string>
