@@ -42,6 +42,175 @@
 
 static HWND s_update_hwnd;
 
+/* ── proxy selection ────────────────────────────────────────────────
+ * GitHub is not reachable at all on some networks: measured from the
+ * maintainer's line github.com times out (21 s, no route) while
+ * api.github.com answers in 1.7 s - and a local Clash-style proxy on the same
+ * machine does work. WinHTTP's "automatic proxy" only honours the *system*
+ * proxy setting, which is regularly switched off even while such a proxy
+ * runs, so the update path picks its route itself:
+ *   1. no proxy, when github.com answers directly (the normal case),
+ *   2. the system proxy setting (what the dashboard always used before),
+ *   3. webserver.ini [settings] proxy=host:port (manual override),
+ *   4. HTTPS_PROXY / HTTP_PROXY from the environment,
+ *   5. the usual local proxy ports (7890, 7891, 10809, 10808, 1080, 8888).
+ * Every candidate is verified with a real HTTPS request (not just a TCP
+ * connect) and the chosen route is written to webserver.log.
+ *
+ * This file is its own translation unit: the LOG_* macros live inside
+ * webserver.c, so log through the dashboard wrapper declared in gui_win32.h.
+ */
+#define LOG_INFO(...) win32_log_line(__VA_ARGS__)
+#define LOG_WARN(...) win32_log_line(__VA_ARGS__)
+
+#define PROXY_MODE_DIRECT 0   /* straight to the internet */
+#define PROXY_MODE_AUTO   1   /* the system proxy setting (WinHTTP automatic) */
+#define PROXY_MODE_NAMED  2   /* s_proxy below */
+
+static wchar_t s_proxy[64];
+static int s_proxy_mode = PROXY_MODE_DIRECT;
+static int s_proxy_resolved;
+
+/* One real HTTPS request over `access_type`/`proxy`. 1 = github.com answered.
+   A TCP connect alone is not enough: a proxy port can accept the connection
+   and still refuse to forward, which used to look like a working route. */
+static int https_probe(DWORD access_type, const wchar_t *proxy) {
+    HINTERNET session, connect, request;
+    int ok = 0;
+    session = WinHttpOpen(L"ADBlock-WebServer", WINHTTP_ACCESS_TYPE_NO_PROXY,
+                          WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (session == NULL) return 0;
+    WinHttpSetTimeouts(session, 2000, 2000, 2000, 3000);
+    if (access_type != WINHTTP_ACCESS_TYPE_NO_PROXY) {
+        WINHTTP_PROXY_INFO pi;
+        memset(&pi, 0, sizeof(pi));
+        pi.dwAccessType = access_type;
+        /* WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY requires both to stay NULL. */
+        pi.lpszProxy = (LPWSTR) proxy;
+        pi.lpszProxyBypass = proxy != NULL ? L"<local>" : NULL;
+        WinHttpSetOption(session, WINHTTP_OPTION_PROXY, &pi, sizeof(pi));
+    }
+    connect = WinHttpConnect(session, L"github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+    request = connect != NULL
+        ? WinHttpOpenRequest(connect, L"HEAD", L"/robots.txt", NULL, WINHTTP_NO_REFERER,
+                             WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
+        : NULL;
+    if (request != NULL &&
+        WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+        WinHttpReceiveResponse(request, NULL)) {
+        ok = 1;
+    }
+    if (request != NULL) WinHttpCloseHandle(request);
+    if (connect != NULL) WinHttpCloseHandle(connect);
+    WinHttpCloseHandle(session);
+    return ok;
+}
+
+/* 1 when the system proxy setting alone reaches github.com. */
+static int https_probe_system(void) {
+    return https_probe(WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL);
+}
+
+/* [settings] proxy=... from webserver.ini next to the exe ("" when unset). */
+static void proxy_from_ini(wchar_t *out, size_t cap) {
+    wchar_t exe[MAX_PATH], ini[MAX_PATH];
+    out[0] = 0;
+    if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return;
+    wchar_t *slash = wcsrchr(exe, L'\\');
+    if (slash != NULL) *slash = 0;
+    swprintf(ini, MAX_PATH, L"%s\\webserver.ini", exe);
+    GetPrivateProfileStringW(L"settings", L"proxy", L"", out, (DWORD) cap, ini);
+}
+
+/* The log wrapper is a char-based printf, and MinGW's runtime does not
+   reliably understand %ls - convert the route to UTF-8 instead. */
+static void proxy_log(const char *what, const wchar_t *proxy) {
+    char narrow[128];
+    if (WideCharToMultiByte(CP_UTF8, 0, proxy, -1, narrow, (int) sizeof(narrow),
+                            NULL, NULL) <= 0) {
+        narrow[0] = 0;
+    }
+    LOG_INFO("update: %s (%s)", what, narrow);
+}
+
+/* Remember a verified route (always NUL-terminated, whatever the length). */
+static void proxy_set(const wchar_t *value) {
+    wcsncpy(s_proxy, value, 63);
+    s_proxy[63] = 0;
+    s_proxy_mode = PROXY_MODE_NAMED;
+}
+
+static void resolve_update_proxy(void) {
+    static const wchar_t *candidates[] = {
+        L"127.0.0.1:7890", L"127.0.0.1:7891", L"127.0.0.1:10809",
+        L"127.0.0.1:10808", L"127.0.0.1:1080", L"127.0.0.1:8888"
+    };
+    wchar_t configured[64] = L"";
+    if (s_proxy_resolved) return;
+    s_proxy_resolved = 1;
+    s_proxy_mode = PROXY_MODE_DIRECT;
+    s_proxy[0] = 0;
+    /* 1) direct: the common case, one quick probe. */
+    if (https_probe(WINHTTP_ACCESS_TYPE_NO_PROXY, NULL)) return;
+    LOG_INFO("update: github.com is not reachable directly, looking for a proxy");
+    /* 2) the system proxy setting, i.e. exactly what earlier versions used. */
+    if (https_probe_system()) {
+        s_proxy_mode = PROXY_MODE_AUTO;
+        LOG_INFO("update: using the system proxy setting");
+        return;
+    }
+    /* 3) manual override. */
+    proxy_from_ini(configured, 64);
+    if (configured[0] != 0 && https_probe(WINHTTP_ACCESS_TYPE_NAMED_PROXY, configured)) {
+        proxy_set(configured);
+        proxy_log("using the proxy from webserver.ini", s_proxy);
+        return;
+    }
+    /* 4) environment (HTTPS_PROXY / HTTP_PROXY). */
+    {
+        const wchar_t *env = _wgetenv(L"HTTPS_PROXY");
+        if (env == NULL || env[0] == 0) env = _wgetenv(L"HTTP_PROXY");
+        if (env != NULL && env[0] != 0) {
+            const wchar_t *p = wcsstr(env, L"://");
+            wchar_t candidate[64] = L"";
+            p = p != NULL ? p + 3 : env;
+            wcsncpy(candidate, p, 63);
+            candidate[63] = 0;
+            size_t n = wcslen(candidate);
+            while (n > 0 && candidate[n - 1] == L'/') candidate[--n] = 0;
+            if (candidate[0] != 0 &&
+                https_probe(WINHTTP_ACCESS_TYPE_NAMED_PROXY, candidate)) {
+                proxy_set(candidate);
+                proxy_log("using the proxy from the environment", s_proxy);
+                return;
+            }
+        }
+    }
+    /* 5) the usual local proxy ports. */
+    for (int i = 0; i < (int) (sizeof(candidates) / sizeof(candidates[0])); i++) {
+        if (https_probe(WINHTTP_ACCESS_TYPE_NAMED_PROXY, candidates[i])) {
+            proxy_set(candidates[i]);
+            proxy_log("using a detected local proxy", s_proxy);
+            return;
+        }
+    }
+    LOG_WARN("update: no working proxy found - downloads will use a direct connection");
+}
+
+/* Apply the resolved route to a freshly opened WinHTTP session. */
+static void apply_update_proxy(HINTERNET session) {
+    WINHTTP_PROXY_INFO pi;
+    resolve_update_proxy();
+    if (s_proxy_mode == PROXY_MODE_DIRECT) return;
+    memset(&pi, 0, sizeof(pi));
+    pi.dwAccessType = s_proxy_mode == PROXY_MODE_AUTO ? WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
+                                                      : WINHTTP_ACCESS_TYPE_NAMED_PROXY;
+    pi.lpszProxy = s_proxy_mode == PROXY_MODE_AUTO ? NULL : s_proxy;
+    pi.lpszProxyBypass = s_proxy_mode == PROXY_MODE_AUTO ? NULL : L"<local>";
+    WinHttpSetOption(session, WINHTTP_OPTION_PROXY, &pi, sizeof(pi));
+}
+
 /* ── helpers ──────────────────────────────────────────────────── */
 
 static void utf8_to_wide(const char *in, wchar_t *out, size_t cap) {
@@ -285,7 +454,12 @@ static int manifest_check(struct release_pick *p, DWORD *status) {
     memset(p, 0, sizeof(*p));
     char *json = http_get(UPDATE_MANIFEST_HOST, UPDATE_MANIFEST_PATH, &len, &st);
     if (status) *status = st;
-    if (!json) return -1;
+    if (!json) {
+        /* The route may have gone stale (proxy started/stopped since the
+           probe); re-resolve it on the next attempt. */
+        s_proxy_resolved = 0;
+        return -1;
+    }
     json_string(json, "\"tag\"", json, p->tag, sizeof(p->tag));
     json_string(json, "\"version\"", json, p->ver, sizeof(p->ver));
     json_string(json, "\"exe_url\"", json, p->exe_url, sizeof(p->exe_url));
@@ -310,9 +484,10 @@ static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len,
     DWORD status = 0, slen = sizeof(status);
     DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
 
-    session = WinHttpOpen(L"ADBlock-WebServer", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+    session = WinHttpOpen(L"ADBlock-WebServer", WINHTTP_ACCESS_TYPE_NO_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) return NULL;
+    apply_update_proxy(session);
     WinHttpSetTimeouts(session, 8000, 8000, 10000, 30000);
     connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (!connect) goto done;
@@ -403,9 +578,10 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
         unsigned long long declared = 0;
         int complete = 0;
 
-        session = WinHttpOpen(L"ADBlock-WebServer", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        session = WinHttpOpen(L"ADBlock-WebServer", WINHTTP_ACCESS_TYPE_NO_PROXY,
                               WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (session == NULL) return 0;
+        apply_update_proxy(session);
         WinHttpSetTimeouts(session, 20000, 20000, 30000, 120000);
         connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
         request = connect != NULL
@@ -472,6 +648,9 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
         if (attempt < UPDATE_DOWNLOAD_ATTEMPTS) Sleep(1000 * attempt);
     }
     post_progress(-1);   /* -1 = give up (dashboard clears the percentage) */
+    /* A failed download also invalidates the route decision: the proxy may have
+       been started or stopped since it was probed. */
+    s_proxy_resolved = 0;
     return 0;
 }
 
@@ -498,7 +677,10 @@ static int find_latest_update(struct release_pick *pick, DWORD *http_status) {
     memset(pick, 0, sizeof(*pick));
     char *json = http_get(UPDATE_API_HOST, UPDATE_API_PATH, &len, &st);
     if (http_status) *http_status = st;
-    if (!json) return -1;
+    if (!json) {
+        s_proxy_resolved = 0;   /* let the next check re-probe the route */
+        return -1;
+    }
     const char *p = json;
     while (!found && (p = strstr(p, "\"tag_name\"")) != NULL) {
         char tag[128] = "";
@@ -670,7 +852,9 @@ static DWORD WINAPI check_thread(LPVOID param) {
         else if (st > 0)
             swprintf(s_check_error, 192, L"GitHub API 返回 HTTP %lu", (unsigned long) st);
         else
-            wcsncpy(s_check_error, L"无法连接 api.github.com（DNS/TLS/代理）", 191);
+            wcsncpy(s_check_error,
+                    L"无法连接 GitHub（DNS/TLS/代理）：可在 webserver.ini 里写 proxy=127.0.0.1:7890，"
+                    L"线路探测结果见 webserver.log", 191);
     } else {
         s_check_error[0] = 0;
     }

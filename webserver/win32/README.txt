@@ -49,6 +49,12 @@ ADBlock 拦截服务器 - Windows 11 (x64) 独立版
   * webserver.log      与 exe 同目录（超过 1 MB 自动轮转）：绑定失败、
                        证书生成、配置重载等事件都会记录；
   * webserver.ini      保存 http/https 端口、bind_all、theme；
+                       也可手工写 proxy=127.0.0.1:7890 指定更新用的代理；
+                       不写时更新器按顺序自动选线路：直连 → 系统代理设置
+                       → 上面这个 proxy → HTTPS_PROXY/HTTP_PROXY 环境变量
+                       → 本机常用代理端口（7890/7891/10809/10808/1080/
+                       8888），每条线路都真的发一次 HTTPS 请求验证，
+                       选中的线路会写进 webserver.log；
   * block_config.json  拦截策略（界面里勾选即时生效）。
 
 使用 80/443 端口：
