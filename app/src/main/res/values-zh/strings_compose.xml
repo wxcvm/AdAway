@@ -197,6 +197,12 @@
     <string name="compose_logs_filter_blocked">已拦截</string>
     <string name="compose_logs_filter_allowed">已允许</string>
     <string name="compose_logs_filter_redirected">已重定向</string>
+    <string name="compose_logs_title">请求日志</string>
+    <string name="compose_logs_filter_all">全部</string>
+    <string name="compose_logs_hint">最新在最上 · 来自服务器查询日志（最多最新 24 条）</string>
+    <string name="compose_logs_empty">暂无记录。</string>
+    <string name="compose_logs_open_all">查看全部</string>
+    <string name="compose_back">返回</string>
 
     <!-- 规则 -->
     <string name="compose_rules_title">规则</string>

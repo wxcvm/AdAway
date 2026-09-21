@@ -46,6 +46,8 @@ object Destinations {
     const val STATS = "stats"
     const val RULES = "rules"
     const val SETTINGS = "settings"
+    /** Secondary page (not a bottom-bar tab): the full request log. */
+    const val LOGS = "logs"
 }
 
 private data class Destination(
@@ -101,13 +103,16 @@ fun AdAwayApp() {
                 OverviewScreen(viewModel)
             }
             composable(Destinations.STATS) {
-                StatisticsScreen(viewModel)
+                StatisticsScreen(viewModel, onOpenLogs = { navController.navigate(Destinations.LOGS) })
             }
             composable(Destinations.RULES) {
                 RulesScreen(viewModel)
             }
             composable(Destinations.SETTINGS) {
                 SettingsScreen(viewModel)
+            }
+            composable(Destinations.LOGS) {
+                QueryLogScreen(viewModel, onBack = { navController.popBackStack() })
             }
         }
     }

@@ -211,6 +211,12 @@
     <string name="compose_logs_filter_blocked">Blocked</string>
     <string name="compose_logs_filter_allowed">Allowed</string>
     <string name="compose_logs_filter_redirected">Redirected</string>
+    <string name="compose_logs_title">Request log</string>
+    <string name="compose_logs_filter_all">All</string>
+    <string name="compose_logs_hint">Newest first · from the server query log (latest 24 entries)</string>
+    <string name="compose_logs_empty">No entries yet.</string>
+    <string name="compose_logs_open_all">View all</string>
+    <string name="compose_back">Back</string>
 
     <!-- Rules -->
     <string name="compose_rules_title">Rules</string>

@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -127,7 +128,7 @@ internal fun buildCategories(stats: ServerStats): List<BlockCategory> {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatisticsScreen(viewModel: StatsViewModel) {
+fun StatisticsScreen(viewModel: StatsViewModel, onOpenLogs: () -> Unit = {}) {
     // ── 从 ViewModel 收集数据流（每 10s 轮询一次 webserver）──
     val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
@@ -343,7 +344,7 @@ fun StatisticsScreen(viewModel: StatsViewModel) {
 
             // Recent requests: what was asked for and what the filter did with it
             if (showQlog && serverStats != null && serverStats!!.queryLog.isNotEmpty()) {
-                RecentRequestsCard(serverStats!!.queryLog)
+                RecentRequestsCard(serverStats!!.queryLog, onOpenLogs)
             }
 
             // Top intercepted domains (ranked by how often they were blocked)
@@ -1476,7 +1477,7 @@ private fun queryTimeText(ts: Long): String =
  * /internal-stats 的 query_log[]，字段为 ts / uid / action / host。
  */
 @Composable
-private fun RecentRequestsCard(entries: List<QueryLogEntry>) {
+private fun RecentRequestsCard(entries: List<QueryLogEntry>, onOpenLogs: () -> Unit = {}) {
     var expanded by remember { mutableStateOf(false) }
     val shown = if (expanded) entries else entries.take(5)
     Card(
@@ -1564,6 +1565,14 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
+            }
+            // 二级页面入口：完整请求日志（带结果过滤）
+            Spacer(Modifier.height(4.dp))
+            TextButton(
+                onClick = onOpenLogs,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.compose_logs_open_all))
             }
         }
     }
