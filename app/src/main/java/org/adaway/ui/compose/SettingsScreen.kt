@@ -1879,7 +1879,9 @@ private fun enableBootReceiver(context: Context) {
 private fun isBatteryRestricted(context: Context): Boolean {
     return try {
         val power = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-        !power.isIgnoringBatteryOptimizations(context.packageName)
+        // .not() instead of a leading "!": Kotlin's parser rejects a statement
+        // that starts with a prefix operator (CI build #541).
+        power.isIgnoringBatteryOptimizations(context.packageName).not()
     } catch (e: Exception) {
         false
     }
