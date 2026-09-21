@@ -47,14 +47,20 @@ public class ServerStartWorker extends Worker {
         Context context = getApplicationContext();
         if (!PreferenceHelper.getWebServerEnabled(context)) {
             Timber.d("ServerStartWorker: web server not enabled, done.");
+            PreferenceHelper.recordBootEvent(context, PreferenceHelper.getLastBootAction(context),
+                    "自动启动已关闭（设置 → 网络服务器）", false);
             return Result.success();
         }
         Timber.d("ServerStartWorker: probing root and starting the web server...");
         if (startWebServerReliably(context)) {
             Timber.i("ServerStartWorker: web server confirmed running after boot.");
+            PreferenceHelper.recordBootEvent(context, PreferenceHelper.getLastBootAction(context),
+                    "后台任务已确认服务器运行", true);
             return Result.success();
         }
         Timber.w("ServerStartWorker: web server not running after this attempt - will retry.");
+        PreferenceHelper.recordBootEvent(context, PreferenceHelper.getLastBootAction(context),
+                "后台任务启动失败，将自动重试", false);
         return Result.retry();
     }
 

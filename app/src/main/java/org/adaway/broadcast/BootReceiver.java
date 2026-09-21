@@ -79,6 +79,8 @@ public class BootReceiver extends BroadcastReceiver {
 
         if (!PreferenceHelper.getWebServerEnabled(context)) {
             Timber.d("BootReceiver: web server not enabled, skipping.");
+            PreferenceHelper.recordBootEvent(context, action,
+                    "自动启动已关闭（设置 → 网络服务器）", false);
             return;
         }
 
@@ -91,13 +93,20 @@ public class BootReceiver extends BroadcastReceiver {
          * ready within a second or two, so one quick try here covers the common
          * case and the queued worker stays the safety net for slow root
          * initialisation.
+         *
+         * Every outcome is written to the boot diagnostics (settings screen →
+         * network server → auto start), so a failed boot start can be explained
+         * afterwards instead of guessed at.
          */
         final Context appContext = context.getApplicationContext();
         final PendingResult pending = goAsync();
         Thread quickStart = new Thread(() -> {
+            String result;
+            boolean started = false;
             try {
                 if (org.adaway.util.WebServerUtils.isWebServerReachable(appContext)) {
                     Timber.d("BootReceiver: web server already reachable.");
+                    PreferenceHelper.recordBootEvent(appContext, action, "服务器已在运行", true);
                     return;
                 }
                 long deadline = System.currentTimeMillis() + IMMEDIATE_BUDGET_MS;
@@ -105,6 +114,16 @@ public class BootReceiver extends BroadcastReceiver {
                     if (org.adaway.model.root.ShellUtils.isRootAvailable()) {
                         org.adaway.util.WebServerUtils.startWebServer(appContext);
                         Timber.i("BootReceiver: immediate start dispatched.");
+                        /* Confirm it really came up: "dispatched" is not
+                           "running" (the port can be taken, the CA missing). */
+                        try {
+                            Thread.sleep(1_500L);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                        started = org.adaway.util.WebServerUtils.isWebServerReachable(appContext);
+                        result = started ? "开机后立即启动成功" : "已发出启动命令，正在确认";
+                        PreferenceHelper.recordBootEvent(appContext, action, result, started);
                         break;
                     }
                     try {
@@ -114,14 +133,34 @@ public class BootReceiver extends BroadcastReceiver {
                         break;
                     }
                 }
+                if (!started && System.currentTimeMillis() >= deadline) {
+                    /* Root was still not answering: the worker below keeps
+                       retrying, so this is "pending", not "failed". */
+                    PreferenceHelper.recordBootEvent(appContext, action,
+                            "root 未就绪，已交给后台任务重试", false);
+                }
             } catch (Throwable throwable) {
                 Timber.w(throwable, "BootReceiver: immediate start attempt failed.");
+                PreferenceHelper.recordBootEvent(appContext, action,
+                        "启动出错：" + throwable.getClass().getSimpleName(), false);
             } finally {
                 pending.finish();
             }
         }, "adblock-boot-start");
         quickStart.start();
 
+        scheduleStart(appContext, action);
+    }
+
+    /**
+     * Queue the WorkManager safety net that keeps retrying until root is ready
+     * and the server is up. Also used by the settings screen ("重新尝试启动"),
+     * which is why it is public and does not need a broadcast.
+     *
+     * @param context The application context.
+     * @param reason The action that triggered the scheduling (diagnostics only).
+     */
+    public static void scheduleStart(Context context, String reason) {
         OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ServerStartWorker.class)
                 .setInitialDelay(INITIAL_DELAY_SECONDS, TimeUnit.SECONDS)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15L, TimeUnit.SECONDS)
@@ -130,6 +169,6 @@ public class BootReceiver extends BroadcastReceiver {
                 ServerStartWorker.UNIQUE_WORK,
                 ExistingWorkPolicy.REPLACE,
                 request);
-        Timber.d("BootReceiver: web server start scheduled via WorkManager.");
+        Timber.d("BootReceiver: web server start scheduled via WorkManager (%s).", reason);
     }
 }

@@ -293,4 +293,24 @@
     <string name="compose_settings_block_mode_hijack_hint">Hijack + filter (AdGuard-like): the device\'s 80/443 traffic is redirected into the bundled server; hosts that are not blocked are forwarded to the real site and the page is filtered (ad slots hidden, ad scripts removed), with HTTPS decrypted through the local CA. Cost: all web traffic goes through the local server, so CPU/memory are higher than in 127.0.0.1 mode - use 127.0.0.1 mode when you only need ad blocking without in-page element hiding. Switching to another mode removes the hijack rules immediately; apps that pin certificates may lose connectivity.</string>
     <string name="compose_settings_block_mode_hijack_ca">Local CA not trusted yet: trust it under "Network server → certificate", otherwise HTTPS pages will report certificate errors.</string>
     <string name="compose_settings_block_mode_hijack_failed">Hijack not applied: nothing is listening on ports 80/443 (or the ports you configured) - AdGuard or another app may hold them, or root was denied. Switch the network server to 8080/8443 and retry (hijack mode does not depend on 80/443).</string>
+    <!-- Start after reboot and its diagnostics -->
+    <string name="compose_settings_autostart">Start after reboot</string>
+    <string name="compose_settings_autostart_hint">Bring the blocking server back up after a reboot or an app update (needs root)</string>
+    <string name="compose_settings_autostart_diag">Start-up diagnostics</string>
+    <string name="compose_settings_autostart_event">Last boot event</string>
+    <string name="compose_settings_autostart_action_boot">Boot completed</string>
+    <string name="compose_settings_autostart_action_quickboot">Quick boot</string>
+    <string name="compose_settings_autostart_action_replaced">App updated</string>
+    <string name="compose_settings_autostart_result">Last start result</string>
+    <string name="compose_settings_autostart_receiver">Boot receiver</string>
+    <string name="compose_settings_autostart_battery">Battery optimization</string>
+    <string name="compose_settings_autostart_on">Enabled</string>
+    <string name="compose_settings_autostart_off">Disabled</string>
+    <string name="compose_settings_autostart_battery_ok">Ignored (recommended)</string>
+    <string name="compose_settings_autostart_battery_limited">Restricted by the system</string>
+    <string name="compose_settings_autostart_battery_button">Battery settings</string>
+    <string name="compose_settings_autostart_retry">Start the server again</string>
+    <string name="compose_settings_autostart_retry_toast">Queued again - it starts within a few seconds</string>
+    <string name="compose_settings_autostart_never">Nothing recorded yet</string>
+    <string name="compose_settings_autostart_note">If the result says the root shell was not ready or the background job failed: check that this device really granted root (Magisk), then tap "Start the server again". Some systems (MIUI/EMUI/ColorOS) also need this app allowed to auto-start / run in the background, otherwise the boot broadcast never arrives.</string>
 </resources>

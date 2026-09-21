@@ -257,4 +257,103 @@ public final class PreferenceHelper {
         editor.apply();
     }
 
+    /**
+     * Turn the background web server on or off. This is the flag
+     * {@link org.adaway.broadcast.BootReceiver} and the watchdog worker check
+     * before starting it, so switching it off also disables the automatic start
+     * after a reboot.
+     *
+     * @param context The application context.
+     * @param enabled Whether the web server should run in the background.
+     */
+    public static void setWebServerEnabled(Context context, boolean enabled) {
+        SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(
+                Constants.PREFS_NAME,
+                Context.MODE_PRIVATE
+        );
+        prefs.edit()
+                .putBoolean(context.getString(R.string.pref_webserver_enabled_key), enabled)
+                .apply();
+    }
+
+    /*
+     * ── "start after reboot" diagnostics ─────────────────────────────
+     *
+     * "The server sometimes does not start after a reboot" cannot be
+     * diagnosed from a logcat dump on a phone, so the boot receiver and the
+     * WorkManager worker record what happened and the settings screen shows it:
+     * which boot broadcast arrived, when, and what the start attempt ended up
+     * doing. The keys are literals on purpose - they are debug data, not user
+     * settings, and must not be renamed by translation.
+     */
+
+    /** Intent action of the last boot/update broadcast ("" when never seen). */
+    private static final String PREF_BOOT_ACTION = "boot_diag_last_action";
+
+    /** Wall clock time of that broadcast (0 when never seen). */
+    private static final String PREF_BOOT_TIME = "boot_diag_last_time";
+
+    /** Human readable outcome of the start attempt. */
+    private static final String PREF_BOOT_RESULT = "boot_diag_last_result";
+
+    /** Whether the last recorded attempt ended with a running server. */
+    private static final String PREF_BOOT_OK = "boot_diag_last_ok";
+
+    /**
+     * Record one boot start attempt. Must be called from the receiver/worker
+     * threads; {@code apply()} keeps it off the critical path.
+     *
+     * @param context The application context.
+     * @param action The broadcast action that triggered the attempt.
+     * @param result A short outcome text (already localised).
+     * @param started Whether the server was confirmed running afterwards.
+     */
+    public static void recordBootEvent(Context context, String action, String result, boolean started) {
+        SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(
+                Constants.PREFS_NAME,
+                Context.MODE_PRIVATE
+        );
+        prefs.edit()
+                .putString(PREF_BOOT_ACTION, action == null ? "" : action)
+                .putString(PREF_BOOT_RESULT, result == null ? "" : result)
+                .putBoolean(PREF_BOOT_OK, started)
+                .putLong(PREF_BOOT_TIME, System.currentTimeMillis())
+                .apply();
+    }
+
+    /**
+     * @return The action of the last boot broadcast, or an empty string.
+     */
+    public static String getLastBootAction(Context context) {
+        return prefsOf(context).getString(PREF_BOOT_ACTION, "");
+    }
+
+    /**
+     * @return The recorded outcome of the last boot start attempt.
+     */
+    public static String getLastBootResult(Context context) {
+        return prefsOf(context).getString(PREF_BOOT_RESULT, "");
+    }
+
+    /**
+     * @return When the last boot broadcast was handled (0 = never).
+     */
+    public static long getLastBootTime(Context context) {
+        return prefsOf(context).getLong(PREF_BOOT_TIME, 0L);
+    }
+
+    /**
+     * @return Whether the last recorded boot start ended with the server up.
+     */
+    public static boolean isLastBootStartOk(Context context) {
+        return prefsOf(context).getBoolean(PREF_BOOT_OK, false);
+    }
+
+    private static SharedPreferences prefsOf(Context context) {
+        return context.getApplicationContext().getSharedPreferences(
+                Constants.PREFS_NAME,
+                Context.MODE_PRIVATE
+        );
+    }
+
 }

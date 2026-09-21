@@ -663,6 +663,129 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+                    // ── 开机自动启动 + 诊断 ──
+                    Spacer(Modifier.height(8.dp))
+                    var autostart by remember {
+                        mutableStateOf(
+                            org.adaway.helper.PreferenceHelper.getWebServerEnabled(context),
+                        )
+                    }
+                    var showBootDiag by remember { mutableStateOf(false) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_autostart),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_autostart_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = autostart,
+                            onCheckedChange = { v ->
+                                autostart = v
+                                org.adaway.helper.PreferenceHelper
+                                    .setWebServerEnabled(context, v)
+                                if (v) {
+                                    // 打开时顺手修掉两个最常见的“自启动失败”原因：
+                                    // 接收器被系统/清理软件禁用、启动任务没排队。
+                                    enableBootReceiver(context)
+                                    org.adaway.broadcast.BootReceiver
+                                        .scheduleStart(context, "user enabled autostart")
+                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                } else {
+                                    org.adaway.util.WebServerUtils.stopWebServer()
+                                }
+                            },
+                        )
+                    }
+                    TextButton(onClick = { showBootDiag = !showBootDiag }) {
+                        Icon(
+                            if (showBootDiag) Icons.Outlined.ExpandLess
+                            else Icons.Outlined.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.compose_settings_autostart_diag))
+                    }
+                    AnimatedVisibility(visible = showBootDiag) {
+                        Column {
+                            val bootTime = org.adaway.helper.PreferenceHelper
+                                .getLastBootTime(context)
+                            val bootAction = org.adaway.helper.PreferenceHelper
+                                .getLastBootAction(context)
+                            val bootResult = org.adaway.helper.PreferenceHelper
+                                .getLastBootResult(context)
+                            DiagLine(
+                                stringResource(R.string.compose_settings_autostart_event),
+                                if (bootTime == 0L) {
+                                    stringResource(R.string.compose_settings_autostart_never)
+                                } else {
+                                    "${bootActionLabel(bootAction)} · ${formatDiagTime(bootTime)}"
+                                },
+                            )
+                            DiagLine(
+                                stringResource(R.string.compose_settings_autostart_result),
+                                bootResult.ifEmpty {
+                                    stringResource(R.string.compose_settings_autostart_never)
+                                },
+                            )
+                            DiagLine(
+                                stringResource(R.string.compose_settings_autostart_receiver),
+                                if (isBootReceiverEnabled(context)) {
+                                    stringResource(R.string.compose_settings_autostart_on)
+                                } else {
+                                    stringResource(R.string.compose_settings_autostart_off)
+                                },
+                            )
+                            DiagLine(
+                                stringResource(R.string.compose_settings_autostart_battery),
+                                if (isBatteryRestricted(context)) {
+                                    stringResource(R.string.compose_settings_autostart_battery_limited)
+                                } else {
+                                    stringResource(R.string.compose_settings_autostart_battery_ok)
+                                },
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { openBatterySettings(context) },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text(stringResource(R.string.compose_settings_autostart_battery_button))
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        enableBootReceiver(context)
+                                        org.adaway.broadcast.BootReceiver
+                                            .scheduleStart(context, "user retried")
+                                        org.adaway.util.WebServerUtils.startWebServer(context)
+                                        Toast.makeText(
+                                            context,
+                                            R.string.compose_settings_autostart_retry_toast,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Text(stringResource(R.string.compose_settings_autostart_retry))
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                stringResource(R.string.compose_settings_autostart_note),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     // ── 证书管理区 ──
                     Spacer(Modifier.height(12.dp))
                     Text(
@@ -1663,4 +1786,116 @@ private fun saveBitmapToCache(context: Context, bitmap: Bitmap, filename: String
         "${context.packageName}.fileprovider",
         cacheFile
     )
+}
+
+/* ── 开机自启动诊断 ───────────────────────────────────────────────
+ * 手机上没法看 logcat，“重启后服务器有时不启动”只能靠记录：
+ * BootReceiver / ServerStartWorker 把每次开机事件与结果写进偏好，
+ * 这里读出来显示。下面几个函数只服务设置页的这一块。 */
+
+/**
+ * 诊断里的一行：左边名称、右边状态。
+ */
+@Composable
+private fun DiagLine(name: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+    ) {
+        Text(
+            name,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(96.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+/**
+ * 把开机广播的 action 翻译成用户看得懂的名字。
+ */
+@Composable
+private fun bootActionLabel(action: String): String = when {
+    action.isEmpty() -> stringResource(R.string.compose_settings_autostart_never)
+    action.contains("QUICKBOOT") ->
+        stringResource(R.string.compose_settings_autostart_action_quickboot)
+    action.endsWith("MY_PACKAGE_REPLACED") ->
+        stringResource(R.string.compose_settings_autostart_action_replaced)
+    action.endsWith("BOOT_COMPLETED") ->
+        stringResource(R.string.compose_settings_autostart_action_boot)
+    else -> action
+}
+
+/**
+ * 诊断行里的时间：只显示“月-日 时:分”。
+ */
+private fun formatDiagTime(millis: Long): String =
+    java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(millis))
+
+/**
+ * 开机接收器是否启用。有些系统/清理软件会把组件整个禁掉，此时开机广播
+ * 根本不会送到应用（“自启动失败”最常见的原因之一）。
+ */
+private fun isBootReceiverEnabled(context: Context): Boolean {
+    val component = android.content.ComponentName(
+        context,
+        org.adaway.broadcast.BootReceiver::class.java,
+    )
+    return context.packageManager.getComponentEnabledSetting(component) !=
+        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+}
+
+/**
+ * 重新启用开机接收器（用户打开“开机自动启动”或点重试时调用）。
+ */
+private fun enableBootReceiver(context: Context) {
+    try {
+        val component = android.content.ComponentName(
+            context,
+            org.adaway.broadcast.BootReceiver::class.java,
+        )
+        if (!isBootReceiverEnabled(context)) {
+            context.packageManager.setComponentEnabledSetting(
+                component,
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                android.content.pm.PackageManager.DONT_KILL_APP,
+            )
+        }
+    } catch (e: Exception) {
+        Timber.w(e, "Could not re-enable the boot receiver")
+    }
+}
+
+/**
+ * 本应用是否仍受电池优化限制（受限时后台任务/开机广播会被推迟）。
+ */
+private fun isBatteryRestricted(context: Context): Boolean {
+    return try {
+        val power = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        !power.isIgnoringBatteryOptimizations(context.packageName)
+    } catch (e: Exception) {
+        false
+    }
+}
+
+/**
+ * 打开系统的电池优化列表，让用户把本应用设为“不优化”。
+ */
+private fun openBatterySettings(context: Context) {
+    try {
+        context.startActivity(
+            Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (e: Exception) {
+        Timber.w(e, "No battery optimization settings activity")
+        Toast.makeText(context, e.message ?: "unavailable", Toast.LENGTH_SHORT).show()
+    }
 }

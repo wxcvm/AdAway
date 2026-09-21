@@ -279,4 +279,24 @@
     <string name="compose_settings_block_mode_hijack_hint">劫持过滤（类 AdGuard）：把本机 80/443 流量重定向到内置服务器，非拦截域名会转发回真实网站并过滤页面（隐藏广告位、剔除广告脚本），HTTPS 用本机 CA 解密后过滤。代价：整机网页流量都经过本机服务器，CPU/内存比 127.0.0.1 模式高；如果只想拦广告、不需要页面内元素隐藏，建议用 127.0.0.1 模式。切回其它模式会立即撤销劫持规则；个别做证书校验（pinning）的应用可能无法联网。</string>
     <string name="compose_settings_block_mode_hijack_ca">尚未信任本机 CA：请在“网络服务器 → 证书”里信任 CA，否则 HTTPS 页面会报证书错误。</string>
     <string name="compose_settings_block_mode_hijack_failed">劫持未生效：本机 80/443（或你设置的端口）没有监听——可能被 AdGuard 等占用，或未授予 root。可在“网络服务器”里改用 8080/8443 后重试（劫持模式不依赖 80/443）。</string>
+    <!-- 开机自启动与诊断 -->
+    <string name="compose_settings_autostart">开机自动启动</string>
+    <string name="compose_settings_autostart_hint">重启或应用更新后自动拉起拦截服务器（需要 root）</string>
+    <string name="compose_settings_autostart_diag">自启动诊断</string>
+    <string name="compose_settings_autostart_event">上次开机事件</string>
+    <string name="compose_settings_autostart_action_boot">开机完成</string>
+    <string name="compose_settings_autostart_action_quickboot">快速开机</string>
+    <string name="compose_settings_autostart_action_replaced">应用更新后</string>
+    <string name="compose_settings_autostart_result">上次启动结果</string>
+    <string name="compose_settings_autostart_receiver">开机接收器</string>
+    <string name="compose_settings_autostart_battery">电池优化</string>
+    <string name="compose_settings_autostart_on">已启用</string>
+    <string name="compose_settings_autostart_off">已禁用</string>
+    <string name="compose_settings_autostart_battery_ok">已忽略（推荐）</string>
+    <string name="compose_settings_autostart_battery_limited">受系统限制</string>
+    <string name="compose_settings_autostart_battery_button">电池优化设置</string>
+    <string name="compose_settings_autostart_retry">重新启动服务器</string>
+    <string name="compose_settings_autostart_retry_toast">已重新排队，几秒后自动启动</string>
+    <string name="compose_settings_autostart_never">暂无记录</string>
+    <string name="compose_settings_autostart_note">看到“root 未就绪”或“后台任务启动失败”时：先确认本机已授予 root（Magisk），再点“重新启动服务器”。部分系统（MIUI/EMUI/ColorOS）还需要在系统设置里允许本应用“自启动/后台运行”，否则开机广播会被拦掉。</string>
 </resources>
