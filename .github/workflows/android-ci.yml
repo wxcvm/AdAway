@@ -246,6 +246,19 @@ jobs:
 
           publish "${{ github.repository }}"
 
+          # Fixed-tag feed (android-latest): two assets with fixed names that
+          # are overwritten on every build. The app reads manifest.json with a
+          # plain HTTPS GET, so the 60 requests/hour limit of the anonymous
+          # GitHub API cannot break the update check any more (behind a shared
+          # IP the quota is usually already spent, which made every check fail
+          # with HTTP 403 while the network itself was fine).
+          gh release view android-latest --repo "${{ github.repository }}" >/dev/null 2>&1 \
+            || gh release create android-latest --repo "${{ github.repository }}" \
+                 --title "ADBlock 最新版（固定标签）" \
+                 --notes "固定标签：manifest.json 与 ADBlock-latest.apk 每次构建都会被覆盖。应用内更新直接读这两个文件，不经过 REST API，因此不受 60 次/小时限流影响。"
+          gh release upload android-latest ADBlock-latest.apk manifest.json \
+            --repo "${{ github.repository }}" --clobber
+
           if [ -n "${LEGACY_FEED_TOKEN:-}" ]; then
             ( export GH_TOKEN="$LEGACY_FEED_TOKEN"; publish wxcvm/Doh-ECH )
           else

@@ -69,6 +69,30 @@ public class UpdateModel {
      */
     private static final String MANIFEST_ASSET_NAME = "manifest.json";
     /**
+     * The fixed-tag feed: one release whose two assets
+     * (<code>ADBlock-latest.apk</code> and <code>manifest.json</code>) are
+     * overwritten on every build, so the newest version can be read with a plain
+     * HTTPS GET.
+     *
+     * <p>Why this exists: the anonymous GitHub API allows 60 requests per hour
+     * per IP address. Behind an exported address (a proxy, an office NAT) that
+     * quota is usually already spent by other people, and the check then failed
+     * with "HTTP 403" while the network itself was perfectly fine - the app
+     * reported "update check failed" and no device ever saw a new build. The
+     * fixed tag is served as a normal download, so no rate limit is involved.</p>
+     */
+    private static final String LATEST_TAG = "android-latest";
+    /**
+     * URL of the fixed-tag manifest.
+     */
+    private static final String LATEST_MANIFEST_URL =
+            "https://github.com/wxcvm/AdAway/releases/download/" + LATEST_TAG + "/manifest.json";
+    /**
+     * URL of the fixed-tag APK (same asset name in every build).
+     */
+    private static final String LATEST_APK_URL =
+            "https://github.com/wxcvm/AdAway/releases/download/" + LATEST_TAG + "/ADBlock-latest.apk";
+    /**
      * How long a successful check is reused before hitting the API again.
      * The unauthenticated GitHub API is limited to 60 requests per hour per
      * IP, and the check runs on every app start, so results are cached.
@@ -201,6 +225,13 @@ public class UpdateModel {
         if (!this.versionInfo.isValid()) {
             return null;
         }
+        // 1) fixed tag: one small GET, no REST API, therefore no rate limit.
+        Manifest fixedTag = downloadFixedTagManifest();
+        if (fixedTag != null) {
+            return fixedTag;
+        }
+        // 2) REST API listing (60 requests/hour); kept as the fallback for the
+        //    builds published before the fixed tag existed.
         Request request = new Request.Builder()
                 .url(RELEASES_API)
                 .header("Accept", "application/vnd.github+json")
@@ -210,13 +241,50 @@ public class UpdateModel {
              ResponseBody body = response.body()) {
             if (!response.isSuccessful() || body == null) {
                 Timber.w("Update check failed with HTTP %s.", response.code());
-                this.lastError = "HTTP " + response.code();
+                this.lastError = response.code() == 403
+                        ? "HTTP 403（GitHub 接口限流，稍后自动重试）"
+                        : "HTTP " + response.code();
                 return null;
             }
             return parseReleases(new JSONArray(body.string()));
         } catch (IOException | JSONException exception) {
             Timber.e(exception, "Unable to download the release list.");
             this.lastError = exception.getClass().getSimpleName();
+            return null;
+        }
+    }
+
+    /**
+     * Read the fixed-tag manifest, which carries the explicit version code of
+     * the newest build.
+     *
+     * @return The manifest, or {@code null} when the fixed tag is unavailable
+     *         (offline, or a build published before the tag existed).
+     */
+    private Manifest downloadFixedTagManifest() {
+        Request request = new Request.Builder()
+                .url(LATEST_MANIFEST_URL)
+                .header("User-Agent", "ADBlock/" + this.versionInfo.name)
+                .build();
+        try (Response response = this.client.newCall(request).execute();
+             ResponseBody body = response.body()) {
+            if (!response.isSuccessful() || body == null) {
+                Timber.w("Fixed-tag manifest check failed with HTTP %s.", response.code());
+                return null;
+            }
+            JSONObject json = new JSONObject(body.string());
+            int versionCode = json.optInt("versionCode", -1);
+            String version = json.optString("version", "");
+            String changelog = json.optString("changelog", "");
+            if (versionCode <= 0 || version.isEmpty()) {
+                Timber.w("Fixed-tag manifest is missing version/versionCode.");
+                return null;
+            }
+            boolean updateAvailable = versionCode > this.versionInfo.code;
+            return new Manifest(version, versionCode, changelog, LATEST_APK_URL,
+                    updateAvailable);
+        } catch (IOException | JSONException exception) {
+            Timber.w(exception, "Unable to read the fixed-tag manifest.");
             return null;
         }
     }
