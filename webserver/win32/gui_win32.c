@@ -1897,7 +1897,8 @@ static void update_button_refresh(HWND hwnd) {
     const wchar_t *label = L"检查更新";
     if (st == 1) label = L"检查中…";
     else if (st == 2) label = L"下载中…";
-    else if (st == 3) label = L"安装中…";
+    else if (st == 3) label = L"校验中…";
+    else if (st == 4) label = L"安装中…";
     SetWindowTextW(b, label);
     EnableWindow(b, st == 0);
 }

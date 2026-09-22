@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.42`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.43`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -118,6 +118,13 @@
   169.254.x，提示的地址手机根本连不上。现在按分数挑：169.254 与虚拟网卡名
   （Hyper-V/WSL/VirtualBox/VMware/TAP/WireGuard/Tailscale/ZeroTier…）直接排除，
   10/8、172.16/12、192.168/16 优先，其次才是其它可路由地址。
+- 清单绕过 CDN 缓存 + 校验阶段可见（v1.43）：
+  实测发现固定标签的资产走 GitHub CDN，覆盖上传后大约 3 分钟内仍会返回**上一版**
+  清单（1.42 发布后仍读到 1.41），客户端会因此显示“已是最新”。
+  现在 `manifest_check()` 在清单 URL 后加唯一时间戳查询串（`?t=<tick>`），
+  让每次检查都是 CDN 的新 URL——仍是普通资产下载，不消耗 60 次/小时的 REST 配额。
+  同时把更新状态补成五段（空闲/检查中/下载中/**校验中**/安装中），
+  面板按钮会显示“校验中…”，不再让“下载完到安装前”这一段看起来像卡住。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），

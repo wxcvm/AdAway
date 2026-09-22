@@ -61,7 +61,8 @@ static HWND s_update_hwnd;
 #define UPDATE_STATE_IDLE        0
 #define UPDATE_STATE_CHECKING    1
 #define UPDATE_STATE_DOWNLOADING 2
-#define UPDATE_STATE_INSTALLING  3
+#define UPDATE_STATE_VERIFYING   3   /* SHA-256 of the downloaded package */
+#define UPDATE_STATE_INSTALLING  4
 static volatile LONG s_update_state = UPDATE_STATE_IDLE;
 
 /* Current pipeline state (see update_state() in update_win32.h). */
@@ -568,10 +569,22 @@ static void release_pick_choose(const struct release_pick *p, wchar_t *url, size
 static int manifest_check(struct release_pick *p, DWORD *status) {
     size_t len = 0;
     DWORD st = 0;
+    /*
+     * Cache-busted manifest URL. The fixed tag's asset is served through
+     * GitHub's CDN, and a clobbered release asset keeps answering with the
+     * previous copy for a few minutes - measured right after 1.42 was
+     * published: the manifest still said 1.41 for about three minutes, so the
+     * dashboard would have reported "up to date". A unique query string makes
+     * every check a new URL for the CDN while staying a plain asset download
+     * (no REST quota involved).
+     */
+    wchar_t path[600];
+    swprintf(path, 600, L"%ls?t=%llu", UPDATE_MANIFEST_PATH,
+             (unsigned long long) GetTickCount64());
     memset(p, 0, sizeof(*p));
     /* Three attempts: one hiccup on the asset host must not push the check onto
        the rate-limited REST API. */
-    char *json = http_get_retry(UPDATE_MANIFEST_HOST, UPDATE_MANIFEST_PATH, &len, &st,
+    char *json = http_get_retry(UPDATE_MANIFEST_HOST, path, &len, &st,
                                 3, "manifest");
     if (status) *status = st;
     if (!json) {
@@ -1106,7 +1119,8 @@ void update_check_async(HWND hwnd) {
         win32_log_line("update: %s is already running (state=%d) - click ignored",
                        update_state() == UPDATE_STATE_CHECKING ? "a check"
                        : (update_state() == UPDATE_STATE_DOWNLOADING ? "a download"
-                                                                     : "an installation"),
+                       : (update_state() == UPDATE_STATE_VERIFYING ? "a verification"
+                                                                   : "an installation")),
                        update_state());
         s_force_check = 0;
         return;
@@ -1406,6 +1420,9 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         free(info);
         return 0;
     }
+    /* Download finished: the package is verified before anything is replaced
+       (audit items 49/50 - the dashboard shows "校验中…" for this step). */
+    InterlockedExchange(&s_update_state, UPDATE_STATE_VERIFYING);
     /*
      * SECURITY: never execute a downloaded file blindly. The API publishes a
      * per-asset "sha256:<hex>" digest and we refuse anything that does not
