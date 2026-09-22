@@ -773,6 +773,9 @@ static void policy_read(const char *dir, bool *vals) {
    come first in this file). */
 static void control_post(int port, const char *cmd, wchar_t *status, size_t statusn);
 static int mgmt_port(void);
+/* The status line lives in the GUI state block further down; declared here so
+   the policy helpers can write to it. */
+static wchar_t g_status[4096];
 
 /* modes[i]: 0 = placeholder reply, 1 = 204 deny, 2 = allow (no blocking).
    reply_* is kept in sync for compatibility with older servers. */
@@ -838,7 +841,7 @@ static void policy_sync_controls(HWND hwnd) {
 /* Write all ten modes and let the running server pick them up immediately. */
 static void policy_apply_modes(HWND hwnd, const int *modes, const wchar_t *what) {
     policy_save_modes(g_res, modes);
-    char st[128] = "";
+    wchar_t st[128] = L"";
     control_post(mgmt_port(), "reload_config", st, 128);
     policy_sync_controls(hwnd);
     swprintf(g_status, 4096, L"%ls（已生效；点击某个类型可在 占位/空响应/204/不拦截 之间切换）",
