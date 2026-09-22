@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.36`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.37`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -59,6 +59,24 @@
   推荐默认由 `g_policy[].def` 与 `webserver.c` 的 `mode_*` 初值两处保持一致；
   面板里每个类型是一个按钮，点击在四种方式之间循环，另有“恢复推荐默认”。
   查询日志会显示“拦截 · 脚本 · 空响应”，不再只有一个“拦截”。
+- 按外部审计（70 条）修更新链路（v1.37）：
+  1. 并发（第36条）：新增 `s_update_state`（空闲/检查中/下载中/安装中），
+     第二次点击不会另起线程；面板“检查更新”按钮在忙时禁用并显示阶段名；
+  2. 线路探测测错目标（第41条）：探测请求改成真正要取的
+     `win11-latest/windows-manifest.json`（会 302 到 release-assets 主机），
+     一次请求同时验证两个主机，不再用 /robots.txt 假装健康；
+  3. mirror 覆盖不全（第42条）：`mirror_map()` 同时改写
+     `release-assets.githubusercontent.com` / `objects.githubusercontent.com` /
+     `raw.githubusercontent.com`，否则清单能过、5 MB 更新包仍走被墙主机；
+  4. 半截响应当成功（第45条）：`http_get()` 区分“读完 / 读失败 /
+     长度不足”，只有完整读完才返回内容；
+  5. ShellExecute 未检查（第37条）：安装器没起来时**不再退出进程**，
+     弹窗给出返回码与临时包路径；
+  6. 无摘要不再安装（第48条）：发布信息没有 SHA-256 时直接拒绝自动更新，
+     不再“任意有效 Authenticode 签名都算可信”；
+  7. 证书文案（第5/29条）：不再宣称“浏览器显示安全锁”，改为明确说明
+     Chrome/Edge 立即信任、Firefox 需单独导入，并且只写进用户根时给出
+     “其它账户/系统服务仍会报警 + 用管理员再点一次”的提示。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），

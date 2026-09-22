@@ -42,6 +42,25 @@
 
 static HWND s_update_hwnd;
 
+/*
+ * ── update state (audit item 36) ───────────────────────────────────
+ * The updater had no busy flag, so every click started another check thread -
+ * and those threads share s_proxy, s_proxy_mode, s_proxy_resolved,
+ * s_manifest_status and s_force_check without any synchronisation: one click
+ * could reset the route another click was using. The state below serialises
+ * the whole pipeline; the dashboard button follows it.
+ */
+#define UPDATE_STATE_IDLE        0
+#define UPDATE_STATE_CHECKING    1
+#define UPDATE_STATE_DOWNLOADING 2
+#define UPDATE_STATE_INSTALLING  3
+static volatile LONG s_update_state = UPDATE_STATE_IDLE;
+
+/* Current pipeline state (see update_state() in update_win32.h). */
+int update_state(void) {
+    return (int) InterlockedCompareExchange(&s_update_state, 0, 0);
+}
+
 /* ── proxy selection ────────────────────────────────────────────────
  * GitHub is not reachable at all on some networks: measured from the
  * maintainer's line github.com times out (21 s, no route) while
@@ -71,9 +90,17 @@ static wchar_t s_proxy[64];
 static int s_proxy_mode = PROXY_MODE_DIRECT;
 static int s_proxy_resolved;
 
-/* One real HTTPS request over `access_type`/`proxy`. 1 = github.com answered.
-   A TCP connect alone is not enough: a proxy port can accept the connection
-   and still refuse to forward, which used to look like a working route. */
+/*
+ * One real HTTPS request over `access_type`/`proxy`. 1 = the request the update
+ * check actually needs answered.
+ *
+ * It asks for the *manifest asset itself*, not github.com/robots.txt: that
+ * single request covers both hosts the update really uses, because GitHub
+ * answers with a 302 to release-assets.githubusercontent.com and WinHTTP
+ * follows it. Probing /robots.txt only ever proved that github.com answered -
+ * a route that then died on the asset host was still reported as healthy
+ * (audit item 41).
+ */
 static int https_probe(DWORD access_type, const wchar_t *proxy) {
     HINTERNET session, connect, request;
     int ok = 0;
@@ -91,10 +118,13 @@ static int https_probe(DWORD access_type, const wchar_t *proxy) {
         WinHttpSetOption(session, WINHTTP_OPTION_PROXY, &pi, sizeof(pi));
     }
     connect = WinHttpConnect(session, L"github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
+    DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
     request = connect != NULL
-        ? WinHttpOpenRequest(connect, L"HEAD", L"/robots.txt", NULL, WINHTTP_NO_REFERER,
+        ? WinHttpOpenRequest(connect, L"HEAD", UPDATE_MANIFEST_PATH, NULL, WINHTTP_NO_REFERER,
                              WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
         : NULL;
+    if (request != NULL)
+        WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
     if (request != NULL &&
         WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
@@ -171,7 +201,18 @@ static const wchar_t *mirror_map(const wchar_t *host, const wchar_t *path,
                                  wchar_t *path_out, size_t cap) {
     mirror_from_ini();
     if (s_mirror_host[0] == 0) return host;
-    if (_wcsicmp(host, L"github.com") != 0 && _wcsicmp(host, L"api.github.com") != 0)
+    /*
+     * The release *asset* hosts matter as much as github.com: the manifest is a
+     * plain github.com URL, but the multi-megabyte package is served from
+     * release-assets.githubusercontent.com (or objects.githubusercontent.com
+     * for older releases), and a mirror that only rewrote github.com left the
+     * package download on the blocked host (audit item 42).
+     */
+    if (_wcsicmp(host, L"github.com") != 0 &&
+        _wcsicmp(host, L"api.github.com") != 0 &&
+        _wcsicmp(host, L"release-assets.githubusercontent.com") != 0 &&
+        _wcsicmp(host, L"objects.githubusercontent.com") != 0 &&
+        _wcsicmp(host, L"raw.githubusercontent.com") != 0)
         return host;
     swprintf(path_out, cap, L"/https://%ls%ls", host, path);
     return s_mirror_host;
@@ -579,10 +620,22 @@ static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len,
         goto done;
     if (out_status) *out_status = status;   /* tell "403 rate limit" from "no update" */
     if (status != 200) goto done;
+    /*
+     * A truncated body must not look like a complete answer (audit item 45):
+     * the old loop broke on a read error and still returned whatever had
+     * arrived, so half a JSON document was parsed as a manifest. Both failure
+     * kinds mark the result as failed now.
+     */
+    int read_error = 0;
+    unsigned long long declared = 0, declared_size = sizeof(declared);
+    WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                        WINHTTP_HEADER_NAME_BY_INDEX, &declared, &declared_size,
+                        WINHTTP_NO_HEADER_INDEX);
     for (;;) {
         DWORD avail = 0, read = 0;
-        if (!WinHttpQueryDataAvailable(request, &avail) || avail == 0) break;
-        if (total + avail + 1 > UPDATE_MAX_BYTES) break;
+        if (!WinHttpQueryDataAvailable(request, &avail)) { read_error = 1; break; }
+        if (avail == 0) break;                      /* clean end of body */
+        if (total + avail + 1 > UPDATE_MAX_BYTES) { read_error = 1; break; }
         if (total + avail + 1 > cap) {
             size_t want = (total + avail + 1) * 2;
             char *grown = (char *) realloc(body, want);
@@ -590,10 +643,14 @@ static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len,
             body = grown;
             cap = want;
         }
-        if (!WinHttpReadData(request, body + total, avail, &read) || read == 0) break;
+        if (!WinHttpReadData(request, body + total, avail, &read)) { read_error = 1; break; }
+        if (read == 0) { read_error = 1; break; }
         total += read;
     }
-    if (body) {
+    if (read_error || (declared > 0 && total < declared)) {
+        free(body);
+        body = NULL;
+    } else if (body) {
         body[total] = 0;
         if (out_len) *out_len = total;
     }
@@ -1015,6 +1072,8 @@ static DWORD WINAPI check_thread(LPVOID param) {
         s_check_error[0] = 0;
     }
     PostMessageW(hwnd, WM_APP_UPDATE_FOUND, rc > 0 ? 1 : (rc == 0 ? 0 : 2), (LPARAM) info);
+    /* The check is over; the GUI may now start a download (see apply_async). */
+    InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
     return 0;
 }
 
@@ -1029,6 +1088,20 @@ void update_check_async(HWND hwnd) {
     s_proxy_resolved = 0;
     s_mirror_loaded = 0;
     s_force_check = 1;
+    /*
+     * One pipeline at a time: a second click while a check (or a download) is
+     * running is ignored instead of starting a competing thread.
+     */
+    if (InterlockedCompareExchange(&s_update_state, UPDATE_STATE_CHECKING,
+                                   UPDATE_STATE_IDLE) != UPDATE_STATE_IDLE) {
+        win32_log_line("update: %s is already running (state=%d) - click ignored",
+                       update_state() == UPDATE_STATE_CHECKING ? "a check"
+                       : (update_state() == UPDATE_STATE_DOWNLOADING ? "a download"
+                                                                     : "an installation"),
+                       update_state());
+        s_force_check = 0;
+        return;
+    }
     CloseHandle(CreateThread(NULL, 0, check_thread, (LPVOID) hwnd, 0, NULL));
 }
 
@@ -1320,6 +1393,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
                           NULL, NULL, SW_SHOWNORMAL);
         }
         DeleteFileW(zip);          /* no half-downloaded package in %TEMP% */
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
@@ -1341,13 +1415,27 @@ static DWORD WINAPI apply_thread(LPVOID param) {
             DeleteFileW(zip);
             MessageBoxW(NULL, L"更新包校验失败（SHA-256 与发布信息不一致），已删除，未执行。",
                         L"更新", MB_OK | MB_ICONERROR);
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
             free(info);
             return 0;
         }
-    } else if (!file_signature_trusted(zip)) {
+    } else {
+        /*
+         * Audit item 48: without a published digest the old code accepted *any*
+         * Authenticode-signed binary as "trusted", which is far weaker than it
+         * sounds (any validly signed executable passes). The feed always
+         * publishes a SHA-256, so "no digest" now means "do not install
+         * automatically" - the user is pointed at the Releases page instead.
+         * The signature is still checked and logged when present.
+         */
+        if (!file_signature_trusted(zip))
+            win32_log_line("update: package has no valid Authenticode signature "
+                           "(it will not be installed without a digest anyway)");
         DeleteFileW(zip);
-        MessageBoxW(NULL, L"更新包既没有发布方的 SHA-256，也没有有效的数字签名，已删除，未执行。\n\n请在 Releases 页手动下载并自行核对。",
+        MessageBoxW(NULL, L"发布信息里没有 SHA-256 摘要，已拒绝自动更新。\n\n"
+                          L"请在 Releases 页手动下载安装包，并自行核对发布说明里的摘要。",
                     L"更新", MB_OK | MB_ICONERROR);
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
@@ -1360,7 +1448,28 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         wchar_t params[256];
         swprintf(params, 256, L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PID=%lu",
                  (unsigned long) pid);
-        ShellExecuteW(NULL, L"open", zip, params, NULL, SW_SHOWNORMAL);
+        /*
+         * Audit item 37: only quit when the installer really started. The old
+         * code called ShellExecuteW and exited unconditionally, so a failure
+         * (blocked by policy, quarantined by antivirus, no shell association)
+         * left the user with neither the old nor the new program running.
+         */
+        HINSTANCE started = ShellExecuteW(NULL, L"open", zip, params, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR) started <= 32) {
+            wchar_t msg[600];
+            swprintf(msg, 600,
+                     L"安装程序没能启动（ShellExecute 返回 %d）。\n\n"
+                     L"本程序保持运行、没有改动任何文件。\n"
+                     L"可以手动解压这个更新包覆盖当前目录：\n%ls",
+                     (int) (INT_PTR) started, zip);
+            MessageBoxW(NULL, msg, L"更新", MB_OK | MB_ICONERROR);
+            win32_log_line("update: ShellExecuteW(installer) failed, code=%d",
+                           (int) (INT_PTR) started);
+            InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
+            free(info);
+            return 0;
+        }
+        win32_log_line("update: installer started (ShellExecute ok)");
         free(info);
         if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_APP_EXIT, 0, 0);   /* WM_CLOSE only hides the window: a helper batch waiting for the PID would wait forever */
         return 0;
@@ -1369,15 +1478,19 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         DeleteFileW(zip);
         MessageBoxW(NULL, L"下载更新失败，请检查网络后重试（也可手动下载 zip 覆盖）。",
                     L"更新", MB_OK | MB_ICONWARNING);
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
     /* Audit A4: validate the archive listing before extracting a single byte. */
+    /* Digits verified: from here on the package is installed. */
+    InterlockedExchange(&s_update_state, UPDATE_STATE_INSTALLING);
     int listing = tar_listing_is_safe(zip, list);
     DeleteFileW(list);
     if (listing < 0) {
         MessageBoxW(NULL, L"无法校验更新包内容（本机缺少 tar.exe，需要 Windows 10 1803 或更高版本）。\n\n请到 Releases 页面手动下载安装包。",
                     L"更新", MB_OK | MB_ICONWARNING);
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
@@ -1385,6 +1498,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         DeleteFileW(zip);
         MessageBoxW(NULL, L"更新包校验失败：压缩包内含越权路径（绝对路径或 ..），已拒绝执行。",
                     L"更新", MB_OK | MB_ICONERROR);
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
@@ -1402,6 +1516,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         run_and_wait(cmd);
         MessageBoxW(NULL, L"解压更新包失败或包内缺少 webserver.exe，未做任何改动。\n\n请手动下载 zip 覆盖安装。",
                     L"更新", MB_OK | MB_ICONWARNING);
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
@@ -1434,6 +1549,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
              L"del \"%%~f0\" >nul 2>&1\r\n",
              (unsigned long) pid, src, appdir, dir, appdir, dir, appdir);
     if (!write_ansi_file(bat, script)) {
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
@@ -1452,6 +1568,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     } else {
         DeleteFileW(bat);
         MessageBoxW(NULL, L"无法启动更新脚本，未做任何改动。", L"更新", MB_OK | MB_ICONERROR);
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
@@ -1461,6 +1578,12 @@ static DWORD WINAPI apply_thread(LPVOID param) {
 }
 
 void update_apply_async(HWND hwnd, const struct update_info *info) {
+    if (InterlockedCompareExchange(&s_update_state, UPDATE_STATE_DOWNLOADING,
+                                   UPDATE_STATE_IDLE) != UPDATE_STATE_IDLE) {
+        win32_log_line("update: refusing to start a second download (state=%d)",
+                       update_state());
+        return;
+    }
     s_update_hwnd = hwnd;
     struct update_info *copy = (struct update_info *) calloc(1, sizeof(*copy));
     if (!copy) return;

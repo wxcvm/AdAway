@@ -1834,6 +1834,27 @@ static const wchar_t *log_mode_label(int m) {
     }
 }
 
+/*
+ * The "检查更新" button follows the updater state (audit item 36): while a
+ * check, a download or an installation runs it is disabled and names the phase,
+ * so a second click cannot start a competing thread and the user can see where
+ * the pipeline actually is.
+ */
+static void update_button_refresh(HWND hwnd) {
+    HWND b = GetDlgItem(hwnd, IDM_UPDATE);
+    if (b == NULL) return;
+    static int last = -1;
+    int st = update_state();
+    if (st == last) return;
+    last = st;
+    const wchar_t *label = L"检查更新";
+    if (st == 1) label = L"检查中…";
+    else if (st == 2) label = L"下载中…";
+    else if (st == 3) label = L"安装中…";
+    SetWindowTextW(b, label);
+    EnableWindow(b, st == 0);
+}
+
 /* ── "应用日志" page ──────────────────────────────────────────────
  * Everything the server knows about WHO talks to it: the per-app counters
  * (Windows attributes them through the TCP owner-PID table, see
@@ -2067,6 +2088,8 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TIMER: {
         bool vis = IsWindowVisible(hwnd) != 0;
         g_ui_visible = vis ? 1 : 0;
+        /* Keep the update button in sync with the updater pipeline. */
+        update_button_refresh(hwnd);
         if (!vis && !g_hidden_trimmed) {
             /* Only the tray icon is left: hand the pages back to Windows so a
              * background process does not sit on tens of MB. */
@@ -2158,10 +2181,16 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 cert_trust_text(cert_trust_state(cert_path), state_txt, 64);
                 if (rc == 0 && id == IDM_TRUST)
                     swprintf(msg, 512,
-                             L"CA 证书%s。\n\n浏览器访问 https://localhost 将显示安全锁。\n"
-                             L"提示：只写进“用户根”时，以其它账户或系统服务身份运行的程序仍会报警；"
-                             L"以管理员身份运行本程序可同时写入“本机根”。",
-                             state_txt);
+                             L"CA 证书%s。\n\n"
+                             L"Chrome/Edge/系统组件会立即信任它；Firefox 用自己的信任库，需要在"
+                             L"Firefox 的“证书管理器 → 授权机构”里单独导入同一个 .crt 文件。\n\n"
+                             L"%s",
+                             state_txt,
+                             (cert_trust_state(cert_path) & CERT_TRUST_MACHINE)
+                                 ? L"已同时写入“本机根”，其它账户与系统服务也信任它。"
+                                 : L"注意：目前只有“用户根”。以其它账户或系统服务身份运行的程序"
+                                   L"仍会报警——用管理员身份运行本程序再点一次“信任 CA”，"
+                                   L"即可同时写入“本机根”。");
                 else if (rc == 0)
                     swprintf(msg, 512, L"CA 证书已移出信任根（%s）。", state_txt);
                 else
@@ -2415,7 +2444,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HFONT old2 = (HFONT)SelectObject(hdc, lf);
         if (days > 0 && days < 200000)
             swprintf(txt, 256,
-                     trusted ? L"证书：剩余 %lld 天 · %s（浏览器显示安全锁）"
+                     trusted ? L"证书：剩余 %lld 天 · %s"
                              : L"证书：剩余 %lld 天 · %s → 左侧\"设置\"→\"信任 CA\"",
                      days, trust_txt);
         else if (days == -100001)
@@ -2457,6 +2486,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         /* Download progress (wParam = percent, -1 = gave up). On a slow line the
            4 MB package takes minutes and used to look like a frozen window. */
         int pct = (int) wp;
+        update_button_refresh(hwnd);
         if (pct < 0)
             swprintf(g_status, 4096, L"更新包下载失败（已自动重试 5 次并支持断点续传）");
         else
@@ -2467,6 +2497,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     }
     case WM_APP_UPDATE_FOUND: {
         struct update_info *info = (struct update_info *) lp;
+        update_button_refresh(hwnd);
         if (wp && info) {
             wchar_t msg[512];
             swprintf(msg, 512,
