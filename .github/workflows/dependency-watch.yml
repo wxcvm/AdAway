@@ -1,0 +1,39 @@
+name: Dependency watch (mongoose & friends)
+
+# The Android build vendors mongoose as well (webserver/jni/mongoose/*), so the
+# same weekly check as on the Windows branch is needed here: nothing updates a
+# copied-in file by itself. Only this workflow goes red - the Android CI and the
+# release pipeline stay untouched.
+on:
+  schedule:
+    - cron: '27 3 * * 1'      # every Monday 03:27 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mongoose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compare vendored mongoose with upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          file=webserver/jni/mongoose/mongoose.h
+          vendored=$(sed -n 's/^#define MG_VERSION "\(.*\)"$/\1/p' "$file" | head -1)
+          latest=$(gh release view --repo cesanta/mongoose --json tagName \
+                   --jq .tagName 2>/dev/null || true)
+          echo "vendored=$vendored upstream=$latest"
+          if [ -z "$vendored" ] || [ -z "$latest" ]; then
+            echo "::warning::could not determine one of the versions"
+            exit 0
+          fi
+          if [ "$vendored" != "$latest" ]; then
+            echo "::error::vendored mongoose $vendored differs from upstream $latest - replace webserver/jni/mongoose/mongoose.c and mongoose.h with the $latest release and re-run Android CI"
+            exit 1
+          fi
+          echo "mongoose is up to date ($vendored)"
