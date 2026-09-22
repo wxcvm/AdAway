@@ -43,6 +43,14 @@
 static HWND s_update_hwnd;
 
 /*
+ * What the route probe asks for: the exact manifest the update check needs.
+ * Asking for this URL validates github.com *and* the release-assets host the
+ * 302 points at, in one request (audit item 41). Defined here because the probe
+ * is far above UPDATE_MANIFEST_PATH.
+ */
+#define UPDATE_PROBE_PATH L"/wxcvm/AdAway/releases/download/win11-latest/windows-manifest.json"
+
+/*
  * ── update state (audit item 36) ───────────────────────────────────
  * The updater had no busy flag, so every click started another check thread -
  * and those threads share s_proxy, s_proxy_mode, s_proxy_resolved,
@@ -120,7 +128,7 @@ static int https_probe(DWORD access_type, const wchar_t *proxy) {
     connect = WinHttpConnect(session, L"github.com", INTERNET_DEFAULT_HTTPS_PORT, 0);
     DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
     request = connect != NULL
-        ? WinHttpOpenRequest(connect, L"HEAD", UPDATE_MANIFEST_PATH, NULL, WINHTTP_NO_REFERER,
+        ? WinHttpOpenRequest(connect, L"HEAD", UPDATE_PROBE_PATH, NULL, WINHTTP_NO_REFERER,
                              WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
         : NULL;
     if (request != NULL)
@@ -627,7 +635,8 @@ static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len,
      * kinds mark the result as failed now.
      */
     int read_error = 0;
-    unsigned long long declared = 0, declared_size = sizeof(declared);
+    unsigned long long declared = 0;
+    DWORD declared_size = (DWORD) sizeof(declared);
     WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
                         WINHTTP_HEADER_NAME_BY_INDEX, &declared, &declared_size,
                         WINHTTP_NO_HEADER_INDEX);
