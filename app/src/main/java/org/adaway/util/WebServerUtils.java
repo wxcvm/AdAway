@@ -597,6 +597,39 @@ public static void installUserCertificate(Context context) {
     }
 
     /**
+     * Remove the CA again from Android's user-added trust store (root devices).
+     *
+     * <p>Until now the app could only *add* the CA: a user who no longer wanted
+     * it had to find {@code /data/misc/user/0/cacerts-added/<hash>.0} by hand.
+     * The file is deleted through the same root shell used for the install and
+     * the store directory is touched so Android re-scans it.</p>
+     *
+     * @return {@code true} when the file is gone afterwards.
+     */
+    public static boolean uninstallCertificateFromSystemStore(Context context) {
+        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+        if (!Files.isRegularFile(certFile)) return false;
+        String hash;
+        try {
+            hash = computeSubjectHashOld(certFile);
+        } catch (IOException | CertificateException | NoSuchAlgorithmException e) {
+            Timber.w(e, "Failed to compute certificate hash.");
+            return false;
+        }
+        String dest = "/data/misc/user/0/cacerts-added/" + hash + ".0";
+        try {
+            Shell.cmd("rm -f '" + dest + "'").exec();
+            // Touch the directory so the platform trust store re-scans it.
+            Shell.cmd("chmod 644 /data/misc/user/0/cacerts-added").exec();
+        } catch (Exception e) {
+            Timber.w(e, "Root shell removal failed.");
+            return false;
+        }
+        // Verify instead of trusting the shell result.
+        return !isUserCertificateInstalled(context);
+    }
+
+    /**
      * Check whether AdAway's CA is installed as a *user* trust anchor by
      * looking directly at the on-disk file Android's KeyChain writes
      * user-installed CA certs to, rather than performing a live HTTPS

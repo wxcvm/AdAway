@@ -1,5 +1,8 @@
 package org.adaway.ui.compose
 
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -31,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,12 +55,14 @@ import java.util.Locale
  *
  * 入口：统计页「最近请求」卡片的“查看全部”。
  *
- * 说明：服务端目前只在 /internal-stats 里导出最新 24 条（JSON 有硬上限），
- * 所以这一页最多显示 24 条；要更深的历史需要服务端提供分页接口。
+ * 说明：服务端在 /internal-stats 里导出最新 400 条（QLOG_RENDER_MAX），
+ * 环形缓冲本身保留 4096 条并落盘到 query_log.dat。右上角可把当前筛选结果
+ * 导出成 CSV 分享出去（旧版只发 24 条，这一页因此看起来“没几条”）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
     val stats by viewModel.serverStats.collectAsStateWithLifecycle()
     val entries = stats?.queryLog.orEmpty()
     var filter by remember { mutableIntStateOf(FILTER_ALL) }
@@ -70,6 +77,20 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.compose_back),
+                        )
+                    }
+                },
+                actions = {
+                    /* Share the current list as CSV. There was no way to get the
+                       log off the phone at all - the Windows dashboard has an
+                       export, the app had nothing. */
+                    IconButton(
+                        onClick = { shareQueryLogCsv(context, shown) },
+                        enabled = shown.isNotEmpty(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Share,
+                            contentDescription = stringResource(R.string.compose_logs_export),
                         )
                     }
                 },
@@ -217,4 +238,66 @@ private fun queryActionSummary(entry: QueryLogEntry): String {
         else -> stringResource(R.string.compose_stats_mode_placeholder)
     }
     return if (type.isEmpty()) "$action · $mode" else "$action · $type · $mode"
+}
+
+/**
+ * 把当前列表导出成 CSV 并交给系统分享（微信/邮件/文件管理器都行）。
+ *
+ * 之前日志只能在应用里看，出问题没法拿出来对比；Windows 端有“诊断导出”，
+ * 这里补上同样的能力。文件写在 cacheDir，通过 FileProvider 授权读取。
+ */
+private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
+    if (entries.isEmpty()) return
+    try {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+        val file = java.io.File(context.cacheDir, "adblock-query-log-$stamp.csv")
+        val timeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        file.bufferedWriter(Charsets.UTF_8).use { out ->
+            out.write("time,result,type,mode,uid,host\n")
+            entries.forEach { entry ->
+                val time = if (entry.ts > 0) timeFmt.format(Date(entry.ts * 1000L)) else ""
+                val result = when (entry.action) {
+                    ACTION_BLOCK -> "blocked"
+                    ACTION_ALLOW -> "allowed"
+                    else -> "proxied"
+                }
+                out.write(
+                    listOf(
+                        time,
+                        result,
+                        if (entry.type in 0..9) entry.type.toString() else "",
+                        entry.mode.toString(),
+                        if (entry.uid >= 0) entry.uid.toString() else "",
+                        entry.host,
+                    ).joinToString(",") { csvField(it) } + "\n",
+                )
+            }
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, file.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(
+            Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            context.getString(R.string.compose_logs_export_failed, e.message ?: ""),
+            Toast.LENGTH_LONG,
+        ).show()
+    }
+}
+
+/** CSV 里引号、逗号和换行都要转义，否则主机名带逗号就会错列。 */
+private fun csvField(value: String): String {
+    if (value.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return value
+    return '"' + value.replace("\"", "\"\"") + '"'
 }

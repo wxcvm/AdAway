@@ -830,7 +830,26 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 stringResource(R.string.compose_settings_cert_trusted),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f),
                             )
+                            /* The app could only ever *add* the CA; removing it
+                               meant deleting /data/misc/user/0/cacerts-added/
+                               <hash>.0 by hand over a root shell. */
+                            TextButton(
+                                onClick = {
+                                    val removed = org.adaway.util.WebServerUtils
+                                        .uninstallCertificateFromSystemStore(context)
+                                    Toast.makeText(
+                                        context,
+                                        if (removed) R.string.compose_settings_cert_remove_ok
+                                        else R.string.compose_settings_cert_remove_fail,
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                    certTrusted = !removed
+                                },
+                            ) {
+                                Text(stringResource(R.string.compose_settings_cert_remove))
+                            }
                         }
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -838,13 +857,24 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 onClick = {
                                     val ok = org.adaway.util.WebServerUtils
                                         .installCertificateToSystemStore(context)
+                                    /*
+                                     * Verify instead of trusting the return
+                                     * value: the root copy can "succeed" while
+                                     * the store still does not list the CA
+                                     * (wrong hash name, SELinux context, a
+                                     * Magisk module that shadows the file).
+                                     * The user then wonders why HTTPS still
+                                     * warns.
+                                     */
+                                    val verified = ok && org.adaway.util.WebServerUtils
+                                        .isUserCertificateInstalled(context)
                                     Toast.makeText(
                                         context,
-                                        if (ok) R.string.compose_settings_cert_trust_ok
+                                        if (verified) R.string.compose_settings_cert_trust_ok
                                         else R.string.compose_settings_cert_trust_fail,
                                         Toast.LENGTH_LONG
                                     ).show()
-                                    certTrusted = ok
+                                    certTrusted = verified
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {

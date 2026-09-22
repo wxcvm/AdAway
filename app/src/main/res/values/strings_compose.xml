@@ -157,6 +157,9 @@
     <string name="compose_settings_cert_install_manual">Manual install</string>
     <string name="compose_settings_cert_fingerprint">SHA-256 fingerprint</string>
     <string name="compose_settings_cert_export">Export certificate</string>
+    <string name="compose_settings_cert_remove">Remove trust</string>
+    <string name="compose_settings_cert_remove_ok">CA certificate removed from the system trust store</string>
+    <string name="compose_settings_cert_remove_fail">Removal failed: no root, or the CA is not in the user trust store</string>
     <string name="compose_settings_block_image_title">Block placeholder image</string>
     <string name="compose_settings_block_image_choose">Choose custom image</string>
     <string name="compose_settings_block_image_reset">Reset to default</string>
@@ -313,4 +316,7 @@
     <string name="compose_settings_autostart_retry_toast">Queued again - it starts within a few seconds</string>
     <string name="compose_settings_autostart_never">Nothing recorded yet</string>
     <string name="compose_settings_autostart_note">If the result says the root shell was not ready or the background job failed: check that this device really granted root (Magisk), then tap "Start the server again". Some systems (MIUI/EMUI/ColorOS) also need this app allowed to auto-start / run in the background, otherwise the boot broadcast never arrives.</string>
+    <!-- Request log export -->
+    <string name="compose_logs_export">Export log (CSV)</string>
+    <string name="compose_logs_export_failed">Export failed: %1$s</string>
 </resources>
