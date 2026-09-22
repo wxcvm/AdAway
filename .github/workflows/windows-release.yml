@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.43
+      TAG: win11-webserver-v1.44
     steps:
       - uses: actions/checkout@v6
 
@@ -566,3 +566,27 @@ jobs:
                  --title "Windows 最新版（固定标签）" \
                  --notes "固定标签：windows-manifest.json 每次发布时由 CI 覆盖，应用内更新直接读它，不经过 GitHub API，因此不受 60 次/小时限流影响。"
           gh release upload win11-latest windows-manifest.json --repo "${{ github.repository }}" --clobber
+          # ── Remote verification (audit item 68) ───────────────────────────
+          # The job used to stop right here, so "the release is published but
+          # the fixed tag still advertises the previous build" was only ever
+          # noticed by a user pressing 检查更新. Fetch the manifest back
+          # through the CDN - cache-busted exactly like the updater does, since
+          # a clobbered asset answers with the previous copy for a few minutes -
+          # and assert that it really is this tag. Retries instead of failing on
+          # the first attempt, because the CDN needs a moment.
+          URL="https://github.com/${{ github.repository }}/releases/download/win11-latest/windows-manifest.json"
+          verified=0
+          for attempt in 1 2 3 4 5 6 7 8; do
+            payload=$(curl -fsSL "$URL?t=$(date +%s)-$attempt" || true)
+            tag=$(printf '%s' "$payload" | python3 -c \
+                    "import json,sys; print(json.load(sys.stdin).get('tag',''))" \
+                    2>/dev/null || true)
+            if [ "$tag" = "$TAG" ]; then verified=1; break; fi
+            echo "manifest not updated yet (attempt $attempt, tag='$tag')"
+            sleep 20
+          done
+          if [ "$verified" != 1 ]; then
+            echo "::error::the published win11-latest manifest does not advertise $TAG - clients would see the previous build"
+            exit 1
+          fi
+          echo "remote manifest verified: $TAG"
