@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.37`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.38`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -77,6 +77,19 @@
   7. 证书文案（第5/29条）：不再宣称“浏览器显示安全锁”，改为明确说明
      Chrome/Edge 立即信任、Firefox 需单独导入，并且只写进用户根时给出
      “其它账户/系统服务仍会报警 + 用管理员再点一次”的提示。
+- 便携更新的数据安全（v1.38，审计第38/39/40条）：原来的脚本用
+  `xcopy /E /I /Y staging appdir` 直接盖正在运行的目录 —— 中途失败会留下
+  半新半旧且无法回滚，还会覆盖 Inno 安装器明确保留的用户数据
+  （localhost-2410.*、*.dat、allowlist.txt、blocklist.txt、cosmetic.css、
+  webserver.ini 以及用户自己换的占位图）。现在：
+  等待本进程退出 → **把旧目录整名改走**（改名不会半成功）→ 新构建就位 →
+  把用户数据与自定义占位图回填 → 启动并观察 5 秒（进程必须存活）→
+  失败则杀掉、删掉新目录、把备份名改回并启动旧版；旧目录被占用时
+  直接放弃（什么都不改）。成功后才删除备份与 staging。
+- /control 加身份认证（v1.38，审计第33条）：仅回环还不够，本机任何进程都能
+  改配置/关服务。服务器每次启动生成随机令牌，写到 `resources/control_token.txt`，
+  `/control` 必须带 `X-ADBlock-Token`（或 query 里的 `token=`）否则 403 并记日志；
+  仪表盘每次调用前都读该文件（服务器重启后自动跟上）。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），

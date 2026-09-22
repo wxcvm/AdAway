@@ -1535,9 +1535,30 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     wchar_t *slash = wcsrchr(appdir, L'\\');
     if (slash) *slash = 0;
 
+    /*
+     * Portable update, written as the audit asks (items 38/39/40):
+     *
+     *   wait for this process to exit
+     *     -> rename the running installation aside  (one step, same volume)
+     *     -> move the freshly extracted build in place
+     *     -> copy the user's own data back (same list the Inno installer keeps)
+     *     -> start the new build and health-check that it survives
+     *     -> on failure: kill it, drop the directory, restore the backup,
+     *        start the previous build again
+     *
+     * The old script ran "xcopy /E /I /Y staging appdir" over the live
+     * directory: a failure halfway left half the files new and half old (there
+     * was no rollback), and it overwrote the resources the installer is
+     * explicitly told to keep - user certificate, stats, block/allow lists,
+     * cosmetic.css, webserver.ini and the user's own placeholder images.
+     */
     swprintf(script, 8192,
              L"@echo off\r\n"
-             L"setlocal\r\n"
+             L"setlocal enableextensions\r\n"
+             L"set APP=%s\r\n"
+             L"set SRC=%s\r\n"
+             L"set STAGE=%s\r\n"
+             L"set BK=%s.backup-%lu\r\n"
              L"set PID=%lu\r\n"
              L":waitloop\r\n"
              L"tasklist /FI \"PID eq %%PID%%\" 2>nul | find \"%%PID%%\" >nul\r\n"
@@ -1545,18 +1566,44 @@ static DWORD WINAPI apply_thread(LPVOID param) {
              L"  timeout /t 1 /nobreak >nul\r\n"
              L"  goto waitloop\r\n"
              L")\r\n"
-             L"xcopy /E /I /Y \"%s\\*\" \"%s\\\" >nul\r\n"
-             L"if errorlevel 1 goto :failed\r\n"
-             L"rmdir /S /Q \"%s\" >nul 2>&1\r\n"
-             L"start \"\" \"%s\\webserver.exe\" --minimized\r\n"
+             L"rem 1) move the running build aside: a rename cannot half-succeed\r\n"
+             L"rmdir /S /Q \"%%BK%%\" >nul 2>&1\r\n"
+             L"move \"%%APP%%\" \"%%BK%%\" >nul 2>&1\r\n"
+             L"if errorlevel 1 goto :restore_old\r\n"
+             L"rem 2) the extracted build takes its place\r\n"
+             L"move \"%%SRC%%\" \"%%APP%%\" >nul 2>&1\r\n"
+             L"if errorlevel 1 goto :rollback\r\n"
+             L"rem 3) user data comes back (installer exclusion list + own images)\r\n"
+             L"xcopy /E /I /Y \"%%BK%%\\resources\\*.dat\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
+             L"xcopy /Y \"%%BK%%\\resources\\img_*.webp\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
+             L"for %%F in (localhost-2410.crt localhost-2410.key allowlist.txt blocklist.txt cosmetic.css update_cache.json webserver.log webserver.log.1 crash.log) do copy /y \"%%BK%%\\resources\\%%F\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
+             L"copy /y \"%%BK%%\\webserver.ini\" \"%%APP%%\\webserver.ini\" >nul 2>&1\r\n"
+             L"rem 4) start it and see whether it survives the first seconds\r\n"
+             L"start \"\" \"%%APP%%\\webserver.exe\" --minimized\r\n"
+             L"ping -n 6 127.0.0.1 >nul\r\n"
+             L"tasklist /FI \"IMAGENAME eq webserver.exe\" 2>nul | find /I \"webserver.exe\" >nul\r\n"
+             L"if errorlevel 1 goto :rollback\r\n"
+             L"rem 5) done: drop the backup and the staging leftovers\r\n"
+             L"rmdir /S /Q \"%%BK%%\" >nul 2>&1\r\n"
+             L"rmdir /S /Q \"%%STAGE%%\" >nul 2>&1\r\n"
              L"del \"%%~f0\" >nul 2>&1\r\n"
-             L":failed\r\n"
-             L"rem xcopy failed (locked file or no permission): restart the old build\r\n"
-             L"rem instead of leaving a half-updated installation behind.\r\n"
-             L"rmdir /S /Q \"%s\" >nul 2>&1\r\n"
-             L"start \"\" \"%s\\webserver.exe\" --minimized\r\n"
-             L"del \"%%~f0\" >nul 2>&1\r\n",
-             (unsigned long) pid, src, appdir, dir, appdir, dir, appdir);
+             L"exit /b 0\r\n"
+             L":rollback\r\n"
+             L"rem the new build is not healthy: put the previous one back\r\n"
+             L"taskkill /F /IM webserver.exe >nul 2>&1\r\n"
+             L"rmdir /S /Q \"%%APP%%\" >nul 2>&1\r\n"
+             L"move \"%%BK%%\" \"%%APP%%\" >nul 2>&1\r\n"
+             L"start \"\" \"%%APP%%\\webserver.exe\" --minimized\r\n"
+             L"rmdir /S /Q \"%%STAGE%%\" >nul 2>&1\r\n"
+             L"del \"%%~f0\" >nul 2>&1\r\n"
+             L"exit /b 1\r\n"
+             L":restore_old\r\n"
+             L"rem the old directory is locked: nothing was changed, just restart\r\n"
+             L"start \"\" \"%%APP%%\\webserver.exe\" --minimized\r\n"
+             L"rmdir /S /Q \"%%STAGE%%\" >nul 2>&1\r\n"
+             L"del \"%%~f0\" >nul 2>&1\r\n"
+             L"exit /b 2\r\n",
+             appdir, src, dir, appdir, (unsigned long) pid, (unsigned long) pid);
     if (!write_ansi_file(bat, script)) {
         InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);

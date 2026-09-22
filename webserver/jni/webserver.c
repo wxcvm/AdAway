@@ -158,6 +158,32 @@ static FILE *s_log_fp = NULL;
 /* One log writer at a time (audit I-1): the GUI thread appends heartbeat
    lines through win32_log_line() while the server thread logs. */
 static pthread_mutex_t s_log_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/*
+ * Per-run control token (audit item 33). /control is loopback-only, but that
+ * still leaves every local process (of every user) able to reconfigure or shut
+ * the server down. The token is random per run, written next to the resources
+ * as control_token.txt, and required for every /control call.
+ */
+static char s_control_token[33];
+
+static void control_token_init(const char *resource_dir) {
+    unsigned char raw[16];
+    mg_random(raw, sizeof(raw));
+    for (size_t i = 0; i < sizeof(raw); i++)
+        snprintf(s_control_token + i * 2, 3, "%02x", raw[i]);
+    s_control_token[32] = 0;
+    if (resource_dir == NULL || resource_dir[0] == 0) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/control_token.txt", resource_dir);
+    FILE *fp = fopen(path, "w");
+    if (fp != NULL) {
+        fprintf(fp, "%s\n", s_control_token);
+        fclose(fp);
+    }
+    LOG_INFO("control: token %s", fp != NULL ? "written to control_token.txt"
+                                             : "could not be written (dashboard calls will be refused)");
+}
 static long  s_log_bytes = 0;
 static char  s_log_path[PATH_MAX];
 
@@ -4005,6 +4031,34 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
             return;
         }
+        /*
+         * AUDIT item 33: "loopback only" still means *any* process of *any*
+         * user on this machine can reconfigure or shut the server down (and a
+         * local page could try after all, since only the Origin header is
+         * checked above). A random per-run token is therefore required; it is
+         * written next to the exe as control_token.txt and the dashboard reads
+         * it before every call. "token=" in the query string is accepted too,
+         * so a human with a console can still use curl.
+         */
+        if (s_control_token[0] != 0) {
+            char token_buf[64] = "";
+            if (!mg_http_get_var(&hm->body, "token", token_buf, sizeof(token_buf))) {
+                struct mg_str *hdr = mg_http_get_header(hm, "X-ADBlock-Token");
+                if (hdr != NULL) {
+                    size_t n = hdr->len < sizeof(token_buf) - 1 ? hdr->len : sizeof(token_buf) - 1;
+                    memcpy(token_buf, hdr->buf, n);
+                    token_buf[n] = 0;
+                }
+            }
+            if (mg_strcmp(mg_str(token_buf), mg_str(s_control_token)) != 0) {
+                LOG_WARN("control: rejected a request without the control token");
+                mg_http_reply(c, 403, "Content-Type: text/plain\r\n"
+                                      "Cache-Control: no-store\r\n",
+                              "forbidden: missing or wrong control token "
+                              "(see control_token.txt next to the executable)");
+                return;
+            }
+        }
         char cmd_buf[32];
         mg_http_get_var(&hm->body, "cmd", cmd_buf, sizeof(cmd_buf));
         struct mg_str cmd = mg_str(cmd_buf);
@@ -4339,6 +4393,8 @@ int main(int argc, char *argv[]) {
        build is a GUI-subsystem app (no console), so this file is the only place
        a failed bind / autostart problem can be diagnosed after the fact. */
     log_file_open(s.resource_dir);
+    /* /control requires this token; write it where the dashboard can read it. */
+    control_token_init(s.resource_dir);
     if (s.stats_port == 0) s.stats_port = 8686;
 
 #ifdef _WIN32

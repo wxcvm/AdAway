@@ -865,14 +865,31 @@ static void control_post(int port, const char *cmd, wchar_t *status, size_t stat
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
     int ok = -1;
     if (connect(s, (SOCKADDR *)&addr, sizeof(addr)) == 0) {
-        char body[64];
+        char body[128];
         int bl = snprintf(body, sizeof(body), "cmd=%s", cmd);
-        char req[512];
+        /*
+         * Audit item 33: /control now needs the per-run token the server wrote
+         * to control_token.txt next to the resources. Reading it here (instead
+         * of caching it) also picks up a restarted server.
+         */
+        char token[64] = "";
+        char token_path[1024];
+        snprintf(token_path, sizeof(token_path), "%s/control_token.txt", g_res);
+        FILE *tf = fopen(token_path, "rb");
+        if (tf != NULL) {
+            size_t got = fread(token, 1, sizeof(token) - 1, tf);
+            token[got] = 0;
+            fclose(tf);
+            char *nl = strpbrk(token, "\r\n");
+            if (nl) *nl = 0;
+        }
+        char req[768];
         int rl = snprintf(req, sizeof(req),
             "POST /control HTTP/1.0\r\nHost: 127.0.0.1\r\n"
             "Content-Type: application/x-www-form-urlencoded\r\n"
+            "X-ADBlock-Token: %s\r\n"
             "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-            bl, body);
+            token, bl, body);
         if (rl > 0 && send(s, req, rl, 0) == rl) ok = 0;
     }
     closesocket(s);
