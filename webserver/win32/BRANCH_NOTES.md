@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.47`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.48`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -209,3 +209,19 @@
   结果在一次真实的更新里“新版本已安装并启动”的证据（listening/ready 行）留在缓冲区没落盘，
   用户日志看起来像更新没发生。现在恢复为**每行立即 fflush**；心跳仍是 5 分钟一条，
   写入量并不大，日志的可诊断性优先。
+- 安装阶段失败的一次修到底（v1.48，用户现场证据驱动）：
+  现场：检查 ✅（清单 HTTP 200）、下载 ✅（5,429,036 字节 / 11 秒）、**安装阶段 ❌**
+  （用户看到的弹窗属于“安装程序没能启动 / 无法启动更新脚本 / 解压失败”这一类），
+  机器上已装 v1.45，但 1.40–1.46 的 INFO 缓冲把过程日志藏住了。改动：
+  1. `update_mode`（webserver.ini `[settings]`，默认 `auto`）：
+     `auto` = 先试安装器、启动失败自动降级便携包；`portable` = 永不用安装器；
+     `installer` = 只用安装器、失败即报错（企业管控场景）；
+  2. 安装器**不再从 %TEMP% 启动**：先复制到 `<安装目录>\adblock-update-<pid>-<stamp>.exe`，
+     删除 `:Zone.Identifier`（去 Mark-of-the-Web），`/LOG` 也改写到安装目录
+     （`adblock-install-<pid>.log`），避免 TEMP 被策略禁止执行/清理；
+  3. 启动失败时不再只弹窗：auto 模式自动**降级到便携包就地替换**（下载 zip →
+     SHA-256 校验 → 1.38 的“备份改名→就位→回填数据→健康检查→失败回滚”）；
+  4. 新增 `update_fail_report()`：apply 阶段任何失败都写一条**立即落盘的 WARN**
+     （阶段 + 细节 + 诊断：模式、包路径、包是否仍存在、是否签名、Win32 错误码、
+     目录与日志路径），弹窗标题统一为「更新安装失败」并提供“复制诊断信息到剪贴板”；
+  5. 仪表盘新增「用便携包更新」按钮（写入 `update_mode=portable` 后立即检查更新）。

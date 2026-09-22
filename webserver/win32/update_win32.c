@@ -70,6 +70,71 @@ int update_state(void) {
     return (int) InterlockedCompareExchange(&s_update_state, 0, 0);
 }
 
+/*
+ * How a package is applied (webserver.ini [settings] update_mode):
+ *   auto (default) - try the installer, fall back to the portable in-place
+ *                    update when the installer cannot be started;
+ *   installer      - installer only (fail loudly, no fallback);
+ *   portable       - never start the installer, always replace in place.
+ * The dashboard's "用便携包更新" button writes "portable" here, which is the
+ * escape hatch for machines where policy or antivirus blocks executables from
+ * running out of %TEMP%.
+ */
+#define UPDATE_MODE_AUTO 0
+#define UPDATE_MODE_INSTALLER 1
+#define UPDATE_MODE_PORTABLE 2
+
+static int update_mode_pref(void) {
+    wchar_t ini[MAX_PATH], value[32];
+    if (!ini_path(ini, MAX_PATH)) return UPDATE_MODE_AUTO;
+    value[0] = 0;
+    GetPrivateProfileStringW(L"settings", L"update_mode", L"auto", value, 32, ini);
+    if (_wcsicmp(value, L"portable") == 0) return UPDATE_MODE_PORTABLE;
+    if (_wcsicmp(value, L"installer") == 0) return UPDATE_MODE_INSTALLER;
+    return UPDATE_MODE_AUTO;
+}
+
+/* Copy text to the clipboard (used by the failure dialogs' "复制诊断信息"). */
+static void clipboard_set(const wchar_t *text) {
+    if (text == NULL) return;
+    size_t bytes = (wcslen(text) + 1) * sizeof(wchar_t);
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (mem == NULL) return;
+    void *dst = GlobalLock(mem);
+    if (dst != NULL) {
+        memcpy(dst, text, bytes);
+        GlobalUnlock(mem);
+    }
+    if (OpenClipboard(NULL)) {
+        EmptyClipboard();
+        if (SetClipboardData(CF_UNICODETEXT, mem) == NULL) GlobalFree(mem);
+        CloseClipboard();
+    } else {
+        GlobalFree(mem);
+    }
+}
+
+/*
+ * One place for every apply-stage failure: a flushed WARN line (WARN is written
+ * immediately in every build), the dialog, and the option to put the whole
+ * story on the clipboard. The 1.45 report ("安装程序没能启动" with no trace
+ * anywhere) is exactly what this avoids.
+ */
+static void update_fail_report(const wchar_t *stage, const wchar_t *detail,
+                               const wchar_t *diag) {
+    win32_log_line("update: FAILED at %ls%s%s", stage,
+                   detail != NULL && detail[0] != 0 ? ": " : "",
+                   detail != NULL ? detail : "");
+    wchar_t msg[1200];
+    swprintf(msg, 1200,
+             L"更新失败（阶段：%ls）\n\n%ls\n\n"
+             L"诊断信息：\n%ls\n\n"
+             L"要把这些信息复制到剪贴板吗？（可粘贴给我定位）",
+             stage, detail != NULL ? detail : L"", diag != NULL ? diag : L"");
+    if (MessageBoxW(NULL, msg, L"更新安装失败", MB_YESNO | MB_ICONERROR) == IDYES)
+        clipboard_set(msg);
+}
+
 /* ── proxy selection ────────────────────────────────────────────────
  * GitHub is not reachable at all on some networks: measured from the
  * maintainer's line github.com times out (21 s, no route) while
@@ -1471,47 +1536,115 @@ static DWORD WINAPI apply_thread(LPVOID param) {
      * the shortcuts and restarts the server - no batch script needed.
      */
     if (file_is_exe(zip)) {
+        int mode = update_mode_pref();
+        GetModuleFileNameW(NULL, exe, MAX_PATH);
+        wcsncpy(appdir, exe, MAX_PATH - 1);
+        appdir[MAX_PATH - 1] = 0;
+        {
+            wchar_t *slash = wcsrchr(appdir, L'\\');
+            if (slash) *slash = 0;
+        }
         /*
-         * /LOG makes the Inno installer say WHY it failed. The updater used to
-         * start it with no log at all, so "the app closed and nothing changed"
-         * (the report from a 1.35 install: the package downloaded fine, the
-         * installer ran, the version stayed old) could not be explained
-         * afterwards. Inno writes a readable log; its path is shown in the
-         * failure box and printed to webserver.log as well.
+         * update_mode=portable: never start the installer (the escape hatch for
+         * machines where policy or antivirus blocks executables from %TEMP%).
          */
-        wchar_t params[512], ilog[MAX_PATH], tempdir[MAX_PATH];
-        GetTempPathW(MAX_PATH, tempdir);
-        swprintf(ilog, MAX_PATH, L"%sadblock-install-%lu.log", tempdir,
+        if (mode == UPDATE_MODE_PORTABLE) {
+            win32_log_line("update: update_mode=portable - skipping the installer");
+            goto portable_fallback;
+        }
+        /*
+         * Start the installer from the install directory instead of %TEMP%
+         * (application-control policies commonly forbid executing from %TEMP%),
+         * and drop the Mark-of-the-Web stream so SmartScreen does not step in:
+         * the package is already SHA-256 verified at this point.
+         */
+        wchar_t staged[MAX_PATH], params[640], ilog[MAX_PATH];
+        swprintf(staged, MAX_PATH, L"%s\\adblock-update-%lu-%lu.exe", appdir,
+                 (unsigned long) pid, (unsigned long) stamp);
+        wchar_t zone[MAX_PATH + 32];
+        swprintf(zone, MAX_PATH + 32, L"%ls:Zone.Identifier", staged);
+        DeleteFileW(zone);
+        if (!CopyFileW(zip, staged, FALSE)) wcscpy(staged, zip);
+        swprintf(ilog, MAX_PATH, L"%s\\adblock-install-%lu.log", appdir,
                  (unsigned long) pid);
-        swprintf(params, 512,
+        swprintf(params, 640,
                  L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=\"%ls\" /PID=%lu",
                  ilog, (unsigned long) pid);
-        /*
-         * Audit item 37: only quit when the installer really started. The old
-         * code called ShellExecuteW and exited unconditionally, so a failure
-         * (blocked by policy, quarantined by antivirus, no shell association)
-         * left the user with neither the old nor the new program running.
-         */
-        HINSTANCE started = ShellExecuteW(NULL, L"open", zip, params, NULL, SW_SHOWNORMAL);
+        HINSTANCE started = ShellExecuteW(NULL, L"open", staged, params, NULL, SW_SHOWNORMAL);
         if ((INT_PTR) started <= 32) {
-            wchar_t msg[600];
-            swprintf(msg, 600,
-                     L"安装程序没能启动（ShellExecute 返回 %d）。\n\n"
-                     L"本程序保持运行、没有改动任何文件。\n"
-                     L"可以手动解压这个更新包覆盖当前目录：\n%ls",
-                     (int) (INT_PTR) started, zip);
-            MessageBoxW(NULL, msg, L"更新", MB_OK | MB_ICONERROR);
-            win32_log_line("update: ShellExecuteW(installer) failed, code=%d",
-                           (int) (INT_PTR) started);
-            InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
-            free(info);
-            return 0;
+            wchar_t detail[600], diag[700];
+            DWORD last = GetLastError();
+            swprintf(detail, 600, L"安装程序没能启动（ShellExecute 返回 %d）。", (int) (INT_PTR) started);
+            swprintf(diag, 700,
+                     L"模式：%ls\n包路径：%ls\n包仍存在：%ls\n包签名有效：%ls\n"
+                     L"Win32 错误码：%lu\n安装目录：%ls\n更新日志：%ls\\resources\\webserver.log",
+                     mode == UPDATE_MODE_INSTALLER ? L"installer（不降级）" : L"auto",
+                     staged,
+                     GetFileAttributesW(staged) != INVALID_FILE_ATTRIBUTES ? L"是" : L"否（可能被杀软隔离）",
+                     file_signature_trusted(staged) ? L"是" : L"否（未签名或自签名）",
+                     (unsigned long) last, appdir, appdir);
+            if (mode == UPDATE_MODE_INSTALLER) {
+                update_fail_report(L"启动安装器", detail, diag);
+                InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
+                free(info);
+                return 0;
+            }
+            win32_log_line("update: installer could not be started (code=%d) - "
+                           "falling back to the portable package", (int) (INT_PTR) started);
+            InterlockedExchange(&s_update_state, UPDATE_STATE_DOWNLOADING);
+            goto portable_fallback;
         }
         win32_log_line("update: installer started (ShellExecute ok)");
         win32_log_line("update: installer log: %ls", ilog);
         free(info);
         if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_APP_EXIT, 0, 0);   /* WM_CLOSE only hides the window: a helper batch waiting for the PID would wait forever */
         return 0;
+    }
+
+portable_fallback:
+    /*
+     * Portable in-place update. Reached either because update_mode says so, or
+     * because the installer could not be started (policy / antivirus / no
+     * execution from %TEMP%). Downloads the zip from the manifest, verifies its
+     * SHA-256 exactly like the installer, and then uses the 1.38 machinery:
+     * rename the old directory aside, put the new build in place, copy the
+     * user's data back, start it, roll back if it does not survive.
+     */
+    if (!file_is_zip(zip)) {
+        wchar_t altfile[MAX_PATH];
+        if (info->alt_url[0] == 0) {
+            update_fail_report(L"下载便携包",
+                               L"发布信息里没有便携包（zip）地址，无法降级更新。",
+                               L"请到 Releases 页面手动下载 zip 覆盖安装。");
+            InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
+            free(info);
+            return 0;
+        }
+        update_temp_file(temp, pid, stamp + 1, info->alt_url, altfile, MAX_PATH);
+        win32_log_line("update: portable fallback - downloading %ls", info->alt_url);
+        if (!(http_download_to_file(info->alt_url, altfile, NULL) ||
+              (info->alt_api_url[0] &&
+               http_download_to_file(info->alt_api_url, altfile,
+                                     L"Accept: application/octet-stream\r\n")))) {
+            update_fail_report(L"下载便携包", L"便携包取不回来（已重试 5 次）。",
+                               L"可到 Releases 页面手动下载 zip 覆盖安装。");
+            DeleteFileW(altfile);
+            InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
+            free(info);
+            return 0;
+        }
+        if (info->alt_sha256[0] == 0 || !digest_matches(altfile, info->alt_sha256)) {
+            wchar_t diag[300];
+            swprintf(diag, 300, L"期望摘要：%ls\n文件：%ls", info->alt_sha256, altfile);
+            update_fail_report(L"校验便携包", L"SHA-256 与发布信息不一致，已删除。", diag);
+            DeleteFileW(altfile);
+            InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
+            free(info);
+            return 0;
+        }
+        DeleteFileW(zip);
+        wcscpy(zip, altfile);
+        win32_log_line("update: portable fallback verified - applying in place");
     }
     if (!file_is_zip(zip)) {
         DeleteFileW(zip);

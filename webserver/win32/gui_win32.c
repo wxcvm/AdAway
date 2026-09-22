@@ -638,6 +638,7 @@ static void *stats_poll_thread(void *arg) {
 #define IDC_POLDEF    1131   /* 恢复推荐默认 */
 #define IDC_CAROTATE  1132   /* 生成新 CA（并存 90 天） */
 #define IDC_CADROP    1133   /* 撤销旧 CA（90 天后） */
+#define IDC_PORTABLEUPD 1134 /* 用便携包更新（zip 就地替换） */
 
 /*
  * Per-type blocking method: label, block_config.json key, control id and the
@@ -1796,6 +1797,9 @@ static const struct ctl_desc g_clayout[] = {
        button that silently replaced the CA is gone. */
     { IDC_CAROTATE,   410, 424, 210, 26, L"BUTTON", L"生成新 CA（并存 90 天）", BS_PUSHBUTTON },
     { IDC_CADROP,     410, 456, 210, 26, L"BUTTON", L"撤销旧 CA（90 天后）", BS_PUSHBUTTON },
+    /* Escape hatch for machines where policy/antivirus blocks running an
+       installer: switch to the portable in-place path and check right away. */
+    { IDC_PORTABLEUPD, 410, 486, 210, 26, L"BUTTON", L"用便携包更新", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 426, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
     /* Below the "导出诊断信息" button (which sits at 844,434): the two used to
        overlap in x 844-948 / y 434-452. */
@@ -2276,6 +2280,14 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             swprintf(g_status, 4096, L"撤销旧 CA：%ls", st);
             cert_refresh(true);
             InvalidateRect(hwnd, NULL, FALSE);
+        } else if (id == IDC_PORTABLEUPD) {
+            /* webserver.ini: update_mode=portable (auto is the default). */
+            char ini[1024];
+            ini_file_path(ini, sizeof(ini));
+            WritePrivateProfileStringA("settings", "update_mode", "portable", ini);
+            swprintf(g_status, 4096,
+                     L"已切换为便携包更新模式（zip 就地替换，跳过安装器），正在检查更新…");
+            update_check_async(hwnd);
         } else if (id == IDM_UPDATE) {
                 swprintf(g_status, 4096, L"正在检查更新…");
                 update_check_async(hwnd);
