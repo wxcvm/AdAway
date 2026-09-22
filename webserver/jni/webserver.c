@@ -4266,8 +4266,28 @@ static bool setup_resources_dir(struct settings *s, const char *rpath) {
     return true;
 }
 
+/*
+ * Audit items 54/55: ports went through atoi() and --bind through a bare
+ * strcmp(), so "--http-port 0" silently became port 0 and "--bind lan"
+ * silently meant loopback - the process started with a configuration nobody
+ * asked for and the caller had no idea. Invalid values are refused now and the
+ * reason is logged by main().
+ */
+static const char *s_cli_error;
+
+static int cli_parse_port(const char *text, int *out) {
+    if (text == NULL || *text == '\0') return 0;
+    char *end = NULL;
+    long v = strtol(text, &end, 10);
+    if (end == text || *end != '\0' || v < 1 || v > 65535) return 0;
+    *out = (int) v;
+    return 1;
+}
+
 static struct settings parse_cli_parameters(int argc, char *argv[]) {
     struct settings s = {0};
+    /* Set when an argument is invalid; main() logs it. */
+    s_cli_error = NULL;
     /* Double-click friendly defaults (unprivileged ports; the Android
        app always passes --http-port/--https-port explicitly). */
     s.http_port = 8080;
@@ -4289,18 +4309,32 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             /* Loopback management port: /internal-stats and /control are
                served there too, so the app can always read statistics even
                when the user facing 80/443 ports are taken by another app. */
-            s.stats_port = atoi(argv[++i]);
+            if (!cli_parse_port(argv[++i], &s.stats_port)) {
+                s_cli_error = "--stats-port must be a number between 1 and 65535";
+                return s;
+            }
             s.cli_stats_port_set = true;
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
-            s.bind_all = strcmp(argv[++i], "all") == 0;
+            const char *mode = argv[++i];
+            if (strcmp(mode, "all") != 0 && strcmp(mode, "loopback") != 0) {
+                s_cli_error = "--bind must be \"all\" or \"loopback\"";
+                return s;
+            }
+            s.bind_all = strcmp(mode, "all") == 0;
             s.cli_bind_set = true;
             LOG_INFO("Bind mode: %s", s.bind_all ? "all interfaces" : "loopback");
         } else if (strcmp(argv[i], "--http-port") == 0 && i < argc-1) {
-            s.http_port = atoi(argv[++i]);
+            if (!cli_parse_port(argv[++i], &s.http_port)) {
+                s_cli_error = "--http-port must be a number between 1 and 65535";
+                return s;
+            }
             s.cli_http_port_set = true;
             LOG_INFO("HTTP port: %d", s.http_port);
         } else if (strcmp(argv[i], "--https-port") == 0 && i < argc-1) {
-            s.https_port = atoi(argv[++i]);
+            if (!cli_parse_port(argv[++i], &s.https_port)) {
+                s_cli_error = "--https-port must be a number between 1 and 65535";
+                return s;
+            }
             s.cli_https_port_set = true;
             LOG_INFO("HTTPS port: %d", s.https_port);
         } else if (strcmp(argv[i], "--no-gui") == 0) {
@@ -4426,7 +4460,8 @@ int main(int argc, char *argv[]) {
 #endif
     struct settings s = parse_cli_parameters(argc, argv);
     if (!s.init) {
-        LOG_FATAL("Bad parameters.");
+        LOG_FATAL("Bad parameters.%s%s", s_cli_error != NULL ? " " : "",
+                  s_cli_error != NULL ? s_cli_error : "");
         return EXIT_FAILURE;
     }
 

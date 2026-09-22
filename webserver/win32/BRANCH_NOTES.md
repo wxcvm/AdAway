@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.40`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.41`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -105,6 +105,10 @@
   `Local\`；若全局名已存在但当前令牌无权打开（ERROR_ACCESS_DENIED），也判定为
   “已有实例在跑”，不会重复启动。日志不再每行 `fflush()`——只有 WARN/ERROR/FATAL
   立即落盘，INFO（含心跳与每条请求）交给缓冲、轮转和退出路径，磁盘写入明显减少。
+- 命令行参数严格校验（v1.41，审计第54/55条）：端口原来走 atoi（`--http-port 0`
+  静默变 0、`--bind lan` 静默当 loopback），现在 1–65535 之外一律拒绝，
+  `--bind` 只接受 `all` / `loopback`；出错时 main() 会打印具体原因再退出，
+  不再“按另一个配置悄悄启动”。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），
