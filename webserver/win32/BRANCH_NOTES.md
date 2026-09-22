@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.44`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.45`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -134,6 +134,14 @@
   `continue-on-error` 保留在明确设计成“优雅降级”的两处（Inno 构建失败时改为只发
   zip 包、镜像仓库不可达时不影响主发布），其余会掩盖真实失败的入口已在前几版
   收紧（发布源必须成功、清单必须严格 JSON、版本三处一致必须相等）。
+- 安装器带日志（v1.45，现场证据驱动）：用户机器上的实测日志显示
+  13:55:52 清单 HTTP 200（2.7s）→ 13:56:05 **更新包 5,429,036 字节下载完成**
+  （11 秒，约 400 KB/s），随后新版始终没有起来，运行版本仍是 1.35 ——
+  也就是“检查与下载都正常，卡在安装”这一步，而 1.35 的更新器既不检查安装器返回码、
+  也不写任何安装日志，事后无法解释。现在更新器调用安装器时补上 `/LOG="<temp>\adblock-install-<pid>.log"`，
+  并把日志路径写进 webserver.log；安装器启动失败时（ShellExecute ≤32）弹窗里也会给出临时包路径。
+  安装器本身是 `PrivilegesRequired=lowest`（不需要管理员），因此这一卡点与 UAC 无关。
+  注：卡在 1.35 的机器无法通过自身更新器拿到这些修复，需要手动安装一次新版（1.45）。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），

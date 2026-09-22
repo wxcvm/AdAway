@@ -1471,9 +1471,21 @@ static DWORD WINAPI apply_thread(LPVOID param) {
      * the shortcuts and restarts the server - no batch script needed.
      */
     if (file_is_exe(zip)) {
-        wchar_t params[256];
-        swprintf(params, 256, L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PID=%lu",
+        /*
+         * /LOG makes the Inno installer say WHY it failed. The updater used to
+         * start it with no log at all, so "the app closed and nothing changed"
+         * (the report from a 1.35 install: the package downloaded fine, the
+         * installer ran, the version stayed old) could not be explained
+         * afterwards. Inno writes a readable log; its path is shown in the
+         * failure box and printed to webserver.log as well.
+         */
+        wchar_t params[512], ilog[MAX_PATH], tempdir[MAX_PATH];
+        GetTempPathW(MAX_PATH, tempdir);
+        swprintf(ilog, MAX_PATH, L"%sadblock-install-%lu.log", tempdir,
                  (unsigned long) pid);
+        swprintf(params, 512,
+                 L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=\"%ls\" /PID=%lu",
+                 ilog, (unsigned long) pid);
         /*
          * Audit item 37: only quit when the installer really started. The old
          * code called ShellExecuteW and exited unconditionally, so a failure
@@ -1496,6 +1508,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
             return 0;
         }
         win32_log_line("update: installer started (ShellExecute ok)");
+        win32_log_line("update: installer log: %ls", ilog);
         free(info);
         if (s_update_hwnd) PostMessageW(s_update_hwnd, WM_APP_EXIT, 0, 0);   /* WM_CLOSE only hides the window: a helper batch waiting for the PID would wait forever */
         return 0;
