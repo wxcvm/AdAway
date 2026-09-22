@@ -1767,19 +1767,35 @@ static int make_cert(const char  *hostname,
             snprintf(san, sizeof(san), "DNS:%s", hostname);
         }
 
-        /* Key usage depends on role */
+        /*
+         * Key usage depends on role *and* on the key type: an ECDSA leaf must
+         * not claim keyEncipherment (nothing is enciphered with it), which is
+         * what the old profile did for every leaf (audit item 13).
+         */
+        int is_ec = (EVP_PKEY_base_id(pkey) == EVP_PKEY_EC);
         const char *ku = is_ca
             ? "critical,digitalSignature,keyCertSign,cRLSign"
-            : "critical,digitalSignature,keyEncipherment";
+            : (is_ec ? "critical,digitalSignature,keyAgreement"
+                     : "critical,digitalSignature,keyEncipherment");
 
+        /*
+         * Certificate profile (audit items 11/12/14/15):
+         *  - a Root CA carries no Extended Key Usage: "serverAuth" on a root
+         *    both limits it and upsets validators that expect a plain CA;
+         *  - the Root CA gets pathlen:0, so it can only issue end-entity
+         *    certificates (a stolen or leaked CA key cannot mint sub-CAs);
+         *  - leaves say CA:FALSE explicitly instead of relying on the default;
+         *  - leaves carry an Authority Key Identifier, which is what the
+         *    Windows chain builder and Chrome look for.
+         */
         struct { int nid; const char *val; } exts[] = {
-            { NID_subject_alt_name,       san                     },
-            { NID_key_usage,              ku                      },
-            { NID_ext_key_usage,          "serverAuth"            },
-            { NID_subject_key_identifier, "hash"                  },
-            /* CA-only extensions */
-            { is_ca ? NID_basic_constraints : 0,
-              is_ca ? "critical,CA:TRUE"     : NULL               },
+            { NID_subject_alt_name,        san },
+            { NID_key_usage,               ku  },
+            { NID_ext_key_usage,           is_ca ? NULL : "serverAuth" },
+            { NID_subject_key_identifier,  "hash" },
+            { NID_basic_constraints,       is_ca ? "critical,CA:TRUE,pathlen:0"
+                                                 : "critical,CA:FALSE" },
+            { NID_authority_key_identifier, is_ca ? NULL : "keyid,issuer:always" },
         };
         for (int i = 0; i < (int)(sizeof(exts)/sizeof(exts[0])); i++) {
             if (!exts[i].nid || !exts[i].val) continue;

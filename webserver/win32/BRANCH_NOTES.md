@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.38`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.39`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -90,6 +90,15 @@
   改配置/关服务。服务器每次启动生成随机令牌，写到 `resources/control_token.txt`，
   `/control` 必须带 `X-ADBlock-Token`（或 query 里的 `token=`）否则 403 并记日志；
   仪表盘每次调用前都读该文件（服务器重启后自动跟上）。
+- 证书 Profile 规范化（v1.39，审计第11/12/13/14/15条）：
+  根 CA 不再带 `serverAuth` 这类 EKU（根证书带 EKU 既限制了用途，也让部分校验器
+  不满）；根 CA 的 `basicConstraints` 增加 `pathlen:0`（被窃取的 CA 私钥也无法
+  再签出下级 CA）；叶子证书显式写 `critical,CA:FALSE` 并补上
+  `authorityKeyIdentifier=keyid,issuer:always`；EC 叶子的 KeyUsage 改为
+  `digitalSignature,keyAgreement`（ECDSA 证书声称 keyEncipherment 是错的，
+  RSA 叶子仍用 `digitalSignature,keyEncipherment`）。
+  注意：已存在的 `localhost-2410.crt` 不会被自动替换（避免打断已信任的 CA），
+  新版只对“新生成/新轮换”的 CA 与之后签发的 SNI 叶子生效。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），
