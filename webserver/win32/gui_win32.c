@@ -939,11 +939,13 @@ static long long cert_days_left(const char *cert_path) {
 static int lan_ip_score(const IP_ADAPTER_ADDRESSES *a, const SOCKADDR_IN *sin) {
     unsigned long h = ntohl(sin->sin_addr.s_addr);
     if ((h & 0xFFFF0000UL) == 0xA9FE0000UL) return -1;        /* 169.254/16 APIPA */
-    const char *desc = a->Description != NULL ? a->Description : "";
-    const char *names[] = { "Hyper-V", "WSL", "VirtualBox", "VMware", "Loopback",
-                            "Bluetooth", "TAP-", "WireGuard", "Tailscale", "ZeroTier" };
+    /* a->Description is a wide string (PWSTR), so the name list is wide too. */
+    const wchar_t *desc = a->Description != NULL ? a->Description : L"";
+    const wchar_t *names[] = { L"Hyper-V", L"WSL", L"VirtualBox", L"VMware",
+                               L"Loopback", L"Bluetooth", L"TAP-", L"WireGuard",
+                               L"Tailscale", L"ZeroTier" };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-        if (strstr(desc, names[i]) != NULL) return -1;
+        if (wcsstr(desc, names[i]) != NULL) return -1;
     }
     if ((h & 0xFF000000UL) == 0x0A000000UL) return 3;          /* 10/8 */
     if ((h & 0xFFF00000UL) == 0xAC100000UL) return 3;          /* 172.16/12 */
