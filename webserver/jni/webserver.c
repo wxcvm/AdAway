@@ -586,9 +586,19 @@ static bool s_rb_allow = false;
  * Only the newest entries are exported in /internal-stats (bounded so the
  * JSON always stays well below the smallest client buffer); the whole ring is
  * persisted to <resources>/query_log.dat next to the other .dat files. */
+/*
+ * "最近请求" retention. The ring keeps QLOG_MAX entries on disk (survives
+ * restarts); the JSON answer carries QLOG_RENDER_MAX of them, newest first.
+ * Only 24 were sent before, so the dashboard and the Android log page could
+ * never show more than a few seconds of history even though the ring held
+ * thousands of entries.
+ */
 #define QLOG_MAX 4096
-#define QLOG_RENDER_MAX 24
-#define QLOG_JSON_MAX 4096
+#define QLOG_RENDER_MAX 400
+#define QLOG_JSON_MAX 49152
+/* Buffer for the whole /internal-stats document: the query log alone may take
+   QLOG_JSON_MAX bytes, and the listeners/apps/TLS/history arrays add a few KB. */
+#define STATS_JSON_BUF 98304
 enum { QLOG_PROXY = 0, QLOG_BLOCK = 1, QLOG_ALLOW = 2 };
 struct qlog_entry {
     uint64_t ts;          /* epoch seconds */
@@ -2645,7 +2655,7 @@ static struct mg_connection *ws_clients[WS_PUSH_MAX] = {0};
  */
 static void ws_push_broadcast(struct settings *s) {
     if (!s || !s->init) return;
-    char body[16384];
+    char body[STATS_JSON_BUF];
     int n = build_stats_json(s, body, sizeof(body));
     if (n <= 0) return;
     pthread_mutex_lock(&s_sni_mutex);
@@ -3207,7 +3217,7 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
  */
 static void write_stats_json_file(struct settings *s) {
     if (!s || !s->init || !s->resource_dir[0]) return;
-    static char body[16384];
+    static char body[STATS_JSON_BUF];
     int n = build_stats_json(s, body, sizeof(body));
     if (n <= 0) return;
     char path[PATH_MAX], tmp[PATH_MAX];
@@ -3564,7 +3574,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         /* Send a first snapshot immediately so the UI has data. */
         struct settings *ws_s = (struct settings *)c->fn_data;
         if (ws_s && ws_s->init) {
-            char body[16384];
+            char body[STATS_JSON_BUF];
             int n = build_stats_json(ws_s, body, sizeof(body));
             if (n > 0) mg_ws_send(c, body, (size_t)n, WEBSOCKET_OP_TEXT);
         }
@@ -3959,7 +3969,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        SNI certs issued). Like /internal-test it is only reachable on
        loopback; no auth needed since 127.0.0.1 is this device. */
     if (mg_match(hm->uri, mg_str("/internal-stats"), NULL)) {
-        char body[16384];
+        char body[STATS_JSON_BUF];
         int n = build_stats_json(s, body, sizeof(body));
         mg_http_reply(c, 200,
                       "Content-Type: application/json\r\n"
@@ -4677,4 +4687,3 @@ static int server_loop_and_cleanup(struct mg_mgr *mgr, struct settings *s) {
     LOG_LOGCAT(ANDROID_LOG_INFO, "Clean shutdown.");
     return EXIT_SUCCESS;
 }
-

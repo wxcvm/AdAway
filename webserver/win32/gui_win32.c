@@ -109,11 +109,14 @@ static void utf8_to_wide(const char *src, wchar_t *dst, size_t n) {
 /* ── HTTP statistics polling ────────────────────────────────────── */
 
 #define HIST_MAX 48
-#define STEAL_JSON_BUF 16384
+#define STEAL_JSON_BUF 98304
 #define LISTENER_MAX_GUI 14
 /* Rows shown on the "应用 / 日志" page. */
 #define GUI_APP_MAX 12
-#define GUI_QLOG_MAX 14
+/* Rows kept from /internal-stats. The server sends up to 400 newest entries
+   (QLOG_RENDER_MAX); only 11 of them are visible at a time and the card
+   scrolls with the mouse wheel. */
+#define GUI_QLOG_MAX 400
 
 /* One socket the server reported through /internal-stats. */
 struct listener_info {
@@ -197,9 +200,11 @@ static struct snapshot g_snap_next;
 static struct snapshot *g_sn;
 static long long g_cert_days;
 static int  g_cert_trusted_flag;
+static int  g_cert_trust_state;
 static DWORD g_cert_checked_tick;
 static long long cert_days_left(const char *cert_path);
 static int  cert_trusted(const char *cert_path);
+static int  cert_trust_state(const char *cert_path);
 /* Polling + self-measurement state (definitions with initialisers live in the
  * GUI state block further down; these tentative declarations let the helpers
  * that appear above it compile). */
@@ -594,7 +599,8 @@ static void cert_refresh(bool force) {
     char cert_path[1024];
     snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
     g_cert_days = cert_days_left(cert_path);
-    g_cert_trusted_flag = cert_trusted(cert_path);
+    g_cert_trust_state = cert_trust_state(cert_path);
+    g_cert_trusted_flag = g_cert_trust_state != 0;
     g_cert_checked_tick = now;
 }
 
@@ -883,24 +889,37 @@ static int same_cert(PCCERT_CONTEXT a, PCCERT_CONTEXT b) {
     return la == lb && memcmp(ha, hb, la) == 0;
 }
 
-static int cert_trusted(const char *cert_path) {
+/*
+ * Where the CA is trusted: bit 0 = the current user's Root store, bit 1 = the
+ * machine Root store (only writable when the process is elevated).
+ *
+ * History: the dashboard only ever asked "trusted yes/no" and only ever wrote
+ * the *user* store, so a browser or service running under another account (or
+ * an app that reads the machine store) still showed certificate warnings even
+ * though the app claimed the CA was trusted.
+ */
+#define CERT_TRUST_USER   1
+#define CERT_TRUST_MACHINE 2
+
+static int cert_trust_state(const char *cert_path) {
     size_t derlen = 0;
     unsigned char *der = pem_to_der(cert_path, &derlen);
     if (!der) return 0;
     PCERT_CONTEXT ours = (PCERT_CONTEXT)CertCreateCertificateContext(
         X509_ASN_ENCODING, der, (DWORD)derlen);
-    int found = 0;
+    int state = 0;
     if (ours) {
         int tries = 0;
-        while (!found && tries < 2) {
+        while (tries < 2) {
+            DWORD scope = (tries == 0) ? CERT_SYSTEM_STORE_CURRENT_USER
+                                       : CERT_SYSTEM_STORE_LOCAL_MACHINE;
             HCERTSTORE h = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
-                (tries == 0) ? CERT_SYSTEM_STORE_CURRENT_USER : CERT_SYSTEM_STORE_LOCAL_MACHINE,
-                L"Root");
+                                         scope, L"Root");
             if (h) {
                 PCCERT_CONTEXT ctx = NULL;
                 while ((ctx = CertEnumCertificatesInStore(h, ctx)) != NULL) {
                     if (same_cert((PCCERT_CONTEXT)ours, ctx)) {
-                        found = 1;
+                        state |= (tries == 0) ? CERT_TRUST_USER : CERT_TRUST_MACHINE;
                         break;
                     }
                 }
@@ -911,7 +930,23 @@ static int cert_trusted(const char *cert_path) {
         CertFreeCertificateContext(ours);
     }
     free(der);
-    return found;
+    return state;
+}
+
+static int cert_trusted(const char *cert_path) {
+    return cert_trust_state(cert_path) != 0;
+}
+
+/* Short localised description of the trust state, for the status line. */
+static void cert_trust_text(int state, wchar_t *out, size_t cap) {
+    if ((state & CERT_TRUST_USER) && (state & CERT_TRUST_MACHINE))
+        swprintf(out, cap, L"已信任（用户根 + 本机根）");
+    else if (state & CERT_TRUST_MACHINE)
+        swprintf(out, cap, L"已信任（本机根）");
+    else if (state & CERT_TRUST_USER)
+        swprintf(out, cap, L"已信任（用户根）");
+    else
+        swprintf(out, cap, L"未信任");
 }
 
 static int cert_trust_set(const char *cert_path, int enable) {
@@ -922,27 +957,63 @@ static int cert_trust_set(const char *cert_path, int enable) {
     PCERT_CONTEXT ours = (PCERT_CONTEXT)CertCreateCertificateContext(
         X509_ASN_ENCODING, der, (DWORD)derlen);
     if (ours) {
-        HCERTSTORE h = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
-            CERT_SYSTEM_STORE_CURRENT_USER, L"Root");
-        if (h) {
+        /*
+         * Two stores on purpose:
+         *  - the user Root store always works (no elevation needed), which is
+         *    what every browser of this account reads;
+         *  - the machine Root store is what other accounts, services and some
+         *    applications read, so try it as well. Without elevation the write
+         *    fails and is reported, never silently dropped.
+         */
+        const DWORD scopes[2] = { CERT_SYSTEM_STORE_CURRENT_USER,
+                                  CERT_SYSTEM_STORE_LOCAL_MACHINE };
+        int user_ok = 0, machine_ok = 0;
+        for (int i = 0; i < 2; i++) {
+            HCERTSTORE h = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, 0,
+                                         scopes[i], L"Root");
+            if (h == NULL) continue;
+            int ok = 0;
             if (enable) {
                 if (CertAddCertificateContextToStore(h, ours,
-                        CERT_STORE_ADD_REPLACE_EXISTING, NULL)) rc = 0;
+                        CERT_STORE_ADD_REPLACE_EXISTING, NULL)) ok = 1;
             } else {
                 PCCERT_CONTEXT ctx = NULL;
                 while ((ctx = CertEnumCertificatesInStore(h, ctx)) != NULL) {
                     if (same_cert((PCCERT_CONTEXT)ours, ctx)) {
                         PCCERT_CONTEXT dup = CertDuplicateCertificateContext(ctx);
-                        if (dup && CertDeleteCertificateFromStore(dup)) rc = 0;
-                        if (dup) CertFreeCertificateContext(dup);
+                        if (dup != NULL) {
+                            if (CertDeleteCertificateFromStore(dup)) ok = 1;
+                            else CertFreeCertificateContext(dup);
+                        }
                     }
                 }
+                /* Nothing to delete counts as success (idempotent). */
+                if (ok == 0) ok = 1;
             }
             CertCloseStore(h, 0);
+            if (i == 0) user_ok = ok; else machine_ok = ok;
         }
+        /* The user store is the one that must work; the machine store is a
+           bonus that needs administrator rights. */
+        if (user_ok) rc = 0;
+        win32_log_line("cert: %s -> user=%d machine=%d (%s)",
+                       enable ? "trust" : "untrust", user_ok, machine_ok,
+                       enable && !machine_ok
+                           ? "run as administrator to also cover the machine store"
+                           : "ok");
         CertFreeCertificateContext(ours);
     }
     free(der);
+    /* Verify instead of trusting the return value: the store is re-read and the
+       dashboard shows where the CA really is (or is not). */
+    if (enable && rc == 0 && cert_trust_state(cert_path) == 0) {
+        win32_log_line("cert: trust was written but the store does not report it");
+        rc = -1;
+    }
+    if (!enable && cert_trust_state(cert_path) != 0) {
+        win32_log_line("cert: the CA is still in a store after removal");
+        rc = -1;
+    }
     return rc;
 }
 
@@ -1063,9 +1134,15 @@ static pthread_mutex_t g_snap_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct snapshot g_snap_next;
 static long long g_cert_days = -100000;
 static int  g_cert_trusted_flag = 0;
+/* Where the CA is trusted: CERT_TRUST_USER / CERT_TRUST_MACHINE bitmask. */
+static int  g_cert_trust_state = 0;
 static DWORD g_cert_checked_tick = 0;
 static long long g_poll_sig = -1;    /* signature of the last drawn snapshot */
 static DWORD g_poll_last_post = 0;   /* keep-alive post (clock) */
+/* First visible row of the "最近请求" card. The server keeps up to 400 newest
+   entries (QLOG_RENDER_MAX) and only 11 fit into the card, so the card follows
+   the mouse wheel instead of silently dropping everything older. */
+static int g_qlog_scroll = 0;
 
 /* ── resource accounting (shown in the dashboard + diagnose.txt) ────
  * "高消耗" was reported without numbers, so the app now measures itself:
@@ -1355,9 +1432,10 @@ static void draw_statusbar(HDC hdc) {
     snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
     long long days = g_cert_days;   /* cached: see cert_refresh() */
     wchar_t cert[200];
+    wchar_t trust[64];
+    cert_trust_text(g_cert_trust_state, trust, 64);
     if (days > 0 && days < 200000)
-        swprintf(cert, 200, L"CA 证书剩余 %lld 天 · %s", days,
-                 g_cert_trusted_flag ? L"已信任" : L"未信任");
+        swprintf(cert, 200, L"CA 证书剩余 %lld 天 · %s", days, trust);
     else if (days == -100001)
         swprintf(cert, 200, L"CA 证书文件缺失: %hs", cert_path);
     else if (days == -100002)
@@ -1747,13 +1825,24 @@ static void draw_activity_page(HDC hdc) {
     } else if (sn->qlog_count == 0) {
         TextOutW(hdc, S(222), S(412), NO_LOG, (int) wcslen(NO_LOG));
     } else {
-        int rows = sn->qlog_count > 11 ? 11 : sn->qlog_count;
+        const int visible = 11;
+        int max_scroll = sn->qlog_count > visible ? sn->qlog_count - visible : 0;
+        if (g_qlog_scroll > max_scroll) g_qlog_scroll = max_scroll;
+        if (g_qlog_scroll < 0) g_qlog_scroll = 0;
+        int rows = sn->qlog_count - g_qlog_scroll;
+        if (rows > visible) rows = visible;
+        /* How much history is kept, so "为什么只有 11 条" answers itself. */
+        {
+            wchar_t more[64];
+            swprintf(more, 64, L"共 %d 条 · 滚轮查看更多", sn->qlog_count);
+            TextOutW(hdc, S(660), S(360), more, (int) wcslen(more));
+        }
         TextOutW(hdc, S(222), S(388), L"时间", 2);
         TextOutW(hdc, S(300), S(388), L"结果", 2);
         TextOutW(hdc, S(372), S(388), L"方式", 2);
         TextOutW(hdc, S(500), S(388), L"主机", 2);
         for (int i = 0; i < rows; i++) {
-            struct qlog_row *r = &sn->qlog[i];
+            struct qlog_row *r = &sn->qlog[g_qlog_scroll + i];
             wchar_t tb[32] = L"--:--:--", hb[48], way[64] = L"—";
             const wchar_t *act;
             int y = 412 + i * 19;
@@ -1923,6 +2012,22 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (vis) InvalidateRect(hwnd, NULL, FALSE);   /* never paint while hidden */
         return 0;
     }
+    case WM_MOUSEWHEEL: {
+        /*
+         * Scroll the "最近请求" card. The server sends up to 400 newest entries
+         * (QLOG_RENDER_MAX) and the card shows 11, so without this everything
+         * older than the last few seconds was unreachable - the "保留量太少"
+         * report.
+         */
+        int delta = GET_WHEEL_DELTA_WPARAM(wp);
+        int total = (g_sn != NULL && g_sn->valid) ? g_sn->qlog_count : 0;
+        int max_scroll = total > 11 ? total - 11 : 0;
+        g_qlog_scroll += (delta > 0) ? -3 : 3;
+        if (g_qlog_scroll < 0) g_qlog_scroll = 0;
+        if (g_qlog_scroll > max_scroll) g_qlog_scroll = max_scroll;
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+    }
     case WM_APP_STATS:
         if (g_sn) {
             pthread_mutex_lock(&g_snap_mutex);
@@ -1963,12 +2068,22 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 char cert_path[1024];
                 snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
                 int rc = cert_trust_set(cert_path, id == IDM_TRUST);
-                wchar_t msg[256];
-                if (rc == 0)
-                    swprintf(msg, 256, L"CA 证书已%s受信任根存储。浏览器访问 https://localhost 将显示安全锁。",
-                             id == IDM_TRUST ? L"添加至" : L"移出");
+                wchar_t msg[512], state_txt[64];
+                cert_trust_text(cert_trust_state(cert_path), state_txt, 64);
+                if (rc == 0 && id == IDM_TRUST)
+                    swprintf(msg, 512,
+                             L"CA 证书%s。\n\n浏览器访问 https://localhost 将显示安全锁。\n"
+                             L"提示：只写进“用户根”时，以其它账户或系统服务身份运行的程序仍会报警；"
+                             L"以管理员身份运行本程序可同时写入“本机根”。",
+                             state_txt);
+                else if (rc == 0)
+                    swprintf(msg, 512, L"CA 证书已移出信任根（%s）。", state_txt);
                 else
-                    swprintf(msg, 256, L"证书操作失败（请检查 resources 目录）。");
+                    swprintf(msg, 512,
+                             L"证书操作失败（当前状态：%s）。\n\n"
+                             L"若 CA 也存在于“本机根”，请以管理员身份运行后再移除；"
+                             L"详细错误已写入 webserver.log。",
+                             state_txt);
                 cert_refresh(true);   /* trust state changed - drop the cache */
                 MessageBoxW(hwnd, msg, L"证书", MB_OK | MB_ICONINFORMATION);
                 InvalidateRect(hwnd, NULL, FALSE);
@@ -2206,11 +2321,15 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", g_res);
         long long days = g_cert_days;          /* cached (30 s TTL) */
         int trusted = g_cert_trusted_flag;
+        wchar_t trust_txt[64];
+        cert_trust_text(g_cert_trust_state, trust_txt, 64);
         HFONT lf = mfont(13, FW_NORMAL);
         HFONT old2 = (HFONT)SelectObject(hdc, lf);
         if (days > 0 && days < 200000)
-            swprintf(txt, 256, L"证书：剩余 %lld 天 · %s", days,
-                     trusted ? L"已在受信任根中（浏览器绿色锁）" : L"未信任 - 左侧\"设置\"→\"信任 CA\"");
+            swprintf(txt, 256,
+                     trusted ? L"证书：剩余 %lld 天 · %s（浏览器显示安全锁）"
+                             : L"证书：剩余 %lld 天 · %s → 左侧\"设置\"→\"信任 CA\"",
+                     days, trust_txt);
         else if (days == -100001)
             swprintf(txt, 256, L"证书文件缺失：%hs（首次运行时会自动生成）", cert_path);
         else if (days == -100002)

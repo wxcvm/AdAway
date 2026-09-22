@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.34`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.35`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -41,6 +41,16 @@
   4. 失败文案同时给出清单线路与接口的状态，不再只报“限流”；
   5. 新增 `webserver.ini` 的 `mirror=`（GitHub 加速站，如 `https://ghfast.top/`）：
      清单与更新包都改从加速站取，下载后仍强制校验发布方 SHA-256，加速站无法掉包。
+- “最近请求”能看到全部历史（v1.35）：服务端 `/internal-stats` 只发最新 **24** 条
+  （`QLOG_RENDER_MAX`），仪表盘表里又只画 11 行 —— 环形缓冲其实存了 4096 条，
+  用户看到的却只有几秒钟。现在发 400 条（`QLOG_RENDER_MAX 400`、
+  `QLOG_JSON_MAX 48 KB`、统计文档缓冲 96 KB），仪表盘保留 400 条并用**滚轮翻页**，
+  卡片右上角显示“共 N 条”。
+- 证书信任变可信、可解释（v1.35）：原来只写“当前用户根”，且状态只有“已信任/未信任”
+  一个布尔值 —— 用其它账户或系统服务身份运行的程序照样报警。现在
+  `cert_trust_state()` 区分**用户根/本机根**，安装时两个都试（本机根需要管理员，
+  失败会明说而不是静默忽略），改完再回读存储校验一次，状态栏与弹窗显示
+  “已信任（用户根 + 本机根）”这类精确结果，过程写进 webserver.log。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），
