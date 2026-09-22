@@ -590,3 +590,37 @@ jobs:
             exit 1
           fi
           echo "remote manifest verified: $TAG"
+
+      # Keep the release list readable without ever touching what clients read:
+      # only CI-created win11-webserver-v<major>.<minor> releases beyond the
+      # newest five are deleted, win11-latest (the fixed tag the updater reads)
+      # and hand-made releases are never candidates. Best effort on purpose -
+      # the release itself is already published at this point, so a failure here
+      # must not turn a good release red.
+      - name: Prune old Windows releases (keep newest 5)
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          : > /tmp/old-win-releases.txt
+          gh release list --repo "${{ github.repository }}" --limit 100 \
+              --json tagName,isDraft \
+            | python3 -c "
+          import json, re, sys
+          rels = [r for r in json.load(sys.stdin)
+                  if not r['isDraft']
+                  and re.fullmatch(r'win11-webserver-v[0-9]+\.[0-9]+', r['tagName'])]
+          rels.sort(key=lambda r: tuple(int(x) for x in
+                                         r['tagName'].rsplit('v', 1)[1].split('.')),
+                    reverse=True)
+          print('\n'.join(r['tagName'] for r in rels[5:]))
+          " >> /tmp/old-win-releases.txt 2>/dev/null || true
+          while read -r tag; do
+            if [ -n "$tag" ]; then
+              echo "pruning $tag"
+              gh release delete "$tag" --repo "${{ github.repository }}" \
+                --cleanup-tag --yes || true
+            fi
+          done < /tmp/old-win-releases.txt
