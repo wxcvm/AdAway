@@ -636,6 +636,8 @@ static void *stats_poll_thread(void *arg) {
 #define IDC_POL0      1110
 #define IDC_SUBRELOAD 1130
 #define IDC_POLDEF    1131   /* 恢复推荐默认 */
+#define IDC_CAROTATE  1132   /* 生成新 CA（并存 90 天） */
+#define IDC_CADROP    1133   /* 撤销旧 CA（90 天后） */
 
 /*
  * Per-type blocking method: label, block_config.json key, control id and the
@@ -1789,6 +1791,11 @@ static const struct ctl_desc g_clayout[] = {
     { IDC_DIAG,       844, 434, 170, 26, L"BUTTON", L"导出诊断信息", BS_PUSHBUTTON },
     { IDC_SUBRELOAD,  664, 456, 170, 26, L"BUTTON", L"重新加载订阅", BS_PUSHBUTTON },
     { IDC_POLDEF,     664, 486, 170, 26, L"BUTTON", L"恢复推荐默认", BS_PUSHBUTTON },
+    /* Manual, dual-CA rotation: the new CA is created next to the old one and
+       both stay valid for 90 days (devices are migrated by hand), so the old
+       button that silently replaced the CA is gone. */
+    { IDC_CAROTATE,   410, 424, 210, 26, L"BUTTON", L"生成新 CA（并存 90 天）", BS_PUSHBUTTON },
+    { IDC_CADROP,     410, 456, 210, 26, L"BUTTON", L"撤销旧 CA（90 天后）", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 426, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
     /* Below the "导出诊断信息" button (which sits at 844,434): the two used to
        overlap in x 844-948 / y 434-452. */
@@ -2254,6 +2261,20 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             wchar_t st[128];
             control_post(mgmt_port(), "reload_subscriptions", st, 128);
             swprintf(g_status, 4096, L"规则订阅已重新加载（%ls）", st);
+            InvalidateRect(hwnd, NULL, FALSE);
+        } else if (id == IDC_CAROTATE) {
+            wchar_t st[256];
+            control_post(mgmt_port(), "rotate_ca", st, 256);
+            swprintf(g_status, 4096,
+                     L"已生成新 CA：请在每台设备上重新信任它（旧的仍然有效，90 天并存）。%ls",
+                     st);
+            cert_refresh(true);
+            InvalidateRect(hwnd, NULL, FALSE);
+        } else if (id == IDC_CADROP) {
+            wchar_t st[256];
+            control_post(mgmt_port(), "drop_old_ca", st, 256);
+            swprintf(g_status, 4096, L"撤销旧 CA：%ls", st);
+            cert_refresh(true);
             InvalidateRect(hwnd, NULL, FALSE);
         } else if (id == IDM_UPDATE) {
                 swprintf(g_status, 4096, L"正在检查更新…");

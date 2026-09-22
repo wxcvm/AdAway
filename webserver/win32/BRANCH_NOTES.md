@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.45`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.46`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -142,6 +142,21 @@
   并把日志路径写进 webserver.log；安装器启动失败时（ShellExecute ≤32）弹窗里也会给出临时包路径。
   安装器本身是 `PrivilegesRequired=lowest`（不需要管理员），因此这一卡点与 UAC 无关。
   注：卡在 1.35 的机器无法通过自身更新器拿到这些修复，需要手动安装一次新版（1.45）。
+- 双 CA 90 天 + 手动轮换（v1.46，审计第17/31条+用户决策）：
+  原来 `maybe_rotate_ca()` 在 CA 到期前 30 天**原地重签**，等于瞬间作废所有已导入
+  旧 CA 的设备（HTTPS 全线报警、pinning 应用断网），且没有任何准备期。现在：
+  1. 该函数只告警（到期前 90 天开始提示），不再自动替换；
+  2. `/control rotate_ca`：生成 `localhost-2410-new.crt/.key`，旧 CA 原样保留，
+     并把起始时间写进 `ca_rotation.json`；
+  3. 服务端启动时若发现 new 文件存在，就用**新 CA**签发 localhost/SNI 叶子
+     （旧 CA 仍在，只信旧 CA 的设备照常工作）；
+  4. `/control drop_old_ca`：只有并存满 90 天才允许，届时把 new 提升为标准文件名、
+     删除旧对与 `ca_rotation.json`（证书内容不变，只换文件名，已信任新 CA 的设备无感）；
+  5. 面板新增两个按钮“生成新 CA（并存 90 天）”“撤销旧 CA（90 天后）”，
+     后者不到期会被服务端拒绝并回显“还剩 N 天”。
+- 第三方组件看护（v1.46）：新增 `.github/workflows/dependency-watch.yml`，
+  每周一比对内置 mongoose 的 `MG_VERSION`（当前 7.22）与上游最新 release，
+  不一致就让**这个独立工作流**变红并给出升级指引（不影响发布流水线）。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），

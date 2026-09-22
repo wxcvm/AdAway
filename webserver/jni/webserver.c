@@ -1902,20 +1902,24 @@ static int maybe_rotate_ca(const char *cert_path, const char *key_path,
     tm.tm_hour = h; tm.tm_min = m; tm.tm_sec = s;
     time_t expiry = mktime(&tm);
     time_t now = time(NULL);
-    if (expiry - now > 30L * 24 * 3600) return 0; /* still valid */
-    LOG_WARN("CA expires within 30 days (%s) — regenerating", not_after->data);
-    X509_free(ca->cert); ca->cert = NULL;
-    EVP_PKEY_free(ca->key); ca->key = NULL;
-    if (generate_root_ca(cert_path, key_path) != EXIT_SUCCESS) {
-        LOG_FATAL("CA rotation failed");
-        return 0;
-    }
-    if (load_ca(cert_path, key_path, ca) != EXIT_SUCCESS) {
-        LOG_FATAL("Failed to reload rotated CA");
-        return 0;
-    }
-    LOG_INFO("CA rotated; user must reinstall the new certificate");
-    return 1;
+    if (expiry - now > 90L * 24 * 3600) return 0; /* plenty of time left */
+    /*
+     * AUDIT item 17 + the policy chosen for this fork: the CA is NEVER replaced
+     * in place any more. The old code regenerated the root as soon as it was
+     * within 30 days of expiry, which instantly invalidated every device and
+     * application that had imported the previous root - HTTPS warnings
+     * everywhere, pinned apps offline - with no way to prepare for it.
+     *
+     * Rotation is manual and dual-CA now (see /control rotate_ca and
+     * drop_old_ca): the dashboard offers "生成新 CA（并存 90 天）", the new CA is
+     * written next to the old one as localhost-2410-new.*, both remain valid for
+     * 90 days while devices are migrated, and only after that window can the old
+     * one be dropped. Until then this function only warns.
+     */
+    LOG_WARN("CA expires on %s - rotate it from 设置→证书 (生成新 CA，并存 90 天), "
+             "the old CA stays valid until then", not_after->data);
+    (void) cert_path; (void) key_path;
+    return 0;
 }
 
 /* Serialize an X509 cert / private key to PEM into a freshly malloc'd
@@ -4185,8 +4189,84 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);
         } else if (mg_strcmp(cmd, mg_str("flush_stats")) == 0) {
             persist_dat_files(s, true);   /* forced full flush */
-        qlog_save(s->resource_dir);
+            qlog_save(s->resource_dir);
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: stats flushed");
+        /*
+         * ── manual, dual-CA rotation (90-day coexistence) ──────────────
+         * rotate_ca   : create localhost-2410-new.{crt,key} (the old CA stays
+         *               in place and keeps working) and stamp the rotation time
+         *               into ca_rotation.json.
+         * drop_old_ca : only allowed 90 days later; promotes the new CA to the
+         *               standard file names and removes the old pair, so the
+         *               trust anchor the user already installed stays valid
+         *               (the certificate itself does not change, only its file
+         *               name).
+         */
+        } else if (mg_strcmp(cmd, mg_str("rotate_ca")) == 0) {
+            char nc[PATH_MAX], nk[PATH_MAX], meta[PATH_MAX];
+            snprintf(nc, sizeof(nc), "%s/localhost-2410-new.crt", s->resource_dir);
+            snprintf(nk, sizeof(nk), "%s/localhost-2410-new.key", s->resource_dir);
+            snprintf(meta, sizeof(meta), "%s/ca_rotation.json", s->resource_dir);
+            int rc = generate_root_ca(nc, nk);
+            if (rc == EXIT_SUCCESS) {
+                FILE *fp = fopen(meta, "w");
+                if (fp != NULL) {
+                    fprintf(fp, "{\"created_at\": %lld}\n", (long long) time(NULL));
+                    fclose(fp);
+                }
+                LOG_INFO("CA rotation: new CA written to localhost-2410-new.crt "
+                         "(old CA stays valid - install the new one on your devices)");
+                mg_http_reply(c, 200, "Content-Type: text/plain\r\n",
+                              "OK: new CA created (dual-CA window started, 90 days)");
+            } else {
+                LOG_WARN("CA rotation: generate_root_ca failed");
+                mg_http_reply(c, 500, "Content-Type: text/plain\r\n",
+                              "ERROR: could not create the new CA");
+            }
+        } else if (mg_strcmp(cmd, mg_str("drop_old_ca")) == 0) {
+            char oc[PATH_MAX], ok_[PATH_MAX], nc[PATH_MAX], nk[PATH_MAX], meta[PATH_MAX];
+            snprintf(oc, sizeof(oc), "%s/localhost-2410.crt", s->resource_dir);
+            snprintf(ok_, sizeof(ok_), "%s/localhost-2410.key", s->resource_dir);
+            snprintf(nc, sizeof(nc), "%s/localhost-2410-new.crt", s->resource_dir);
+            snprintf(nk, sizeof(nk), "%s/localhost-2410-new.key", s->resource_dir);
+            snprintf(meta, sizeof(meta), "%s/ca_rotation.json", s->resource_dir);
+            long long created = 0;
+            FILE *fp = fopen(meta, "rb");
+            if (fp != NULL) {
+                char buf[256] = "";
+                size_t got = fread(buf, 1, sizeof(buf) - 1, fp);
+                buf[got] = 0;
+                fclose(fp);
+                const char *p = strstr(buf, "created_at");
+                if (p != NULL) created = atoll(strchr(p, ':') != NULL ? strchr(p, ':') + 1 : "0");
+            }
+            if (created <= 0) {
+                mg_http_reply(c, 400, "Content-Type: text/plain\r\n",
+                              "ERROR: no rotation in progress (ca_rotation.json missing)");
+            } else {
+                long long age_days = ((long long) time(NULL) - created) / 86400;
+                if (age_days < 90) {
+                    char msg[160];
+                    snprintf(msg, sizeof(msg),
+                             "WAIT: dual-CA window ends in %lld day(s) - the old CA is "
+                             "still needed by devices that only trust it", 90 - age_days);
+                    mg_http_reply(c, 409, "Content-Type: text/plain\r\n", "%s", msg);
+                } else {
+                    remove(oc);
+                    remove(ok_);
+                    int moved = (rename(nc, oc) == 0);
+                    if (moved && rename(nk, ok_) == 0) {
+                        remove(meta);
+                        LOG_INFO("CA rotation: old CA removed, the new one is now the only anchor");
+                        mg_http_reply(c, 200, "Content-Type: text/plain\r\n",
+                                      "OK: old CA dropped, new CA promoted");
+                    } else {
+                        LOG_WARN("CA rotation: could not promote the new CA");
+                        mg_http_reply(c, 500, "Content-Type: text/plain\r\n",
+                                      "ERROR: could not promote the new CA (see webserver.log)");
+                    }
+                }
+            }
         } else if (mg_strcmp(cmd, mg_str("reload_subscriptions")) == 0) {
             block_set_load(s->resource_dir);
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: subscriptions reloaded");
@@ -4305,6 +4385,29 @@ static bool setup_resources_dir(struct settings *s, const char *rpath) {
     char cert_path[PATH_MAX], key_path[PATH_MAX];
     snprintf(cert_path, sizeof(cert_path), "%s/localhost-2410.crt", rpath);
     snprintf(key_path,  sizeof(key_path),  "%s/localhost-2410.key", rpath);
+    /*
+     * Dual-CA coexistence: while a rotation is running (localhost-2410-new.*
+     * exists) the leaves are signed by the NEW CA, so newly migrated devices
+     * validate; the previous CA stays in place so devices that only trust it
+     * keep working until the 90-day window closes and drop_old_ca promotes the
+     * new pair to the standard names.
+     */
+    {
+        char nc[PATH_MAX], nk[PATH_MAX];
+        FILE *tc, *tk;
+        snprintf(nc, sizeof(nc), "%s/localhost-2410-new.crt", rpath);
+        snprintf(nk, sizeof(nk), "%s/localhost-2410-new.key", rpath);
+        tc = fopen(nc, "rb");
+        tk = fopen(nk, "rb");
+        if (tc != NULL) fclose(tc);
+        if (tk != NULL) fclose(tk);
+        if (tc != NULL && tk != NULL) {
+            snprintf(cert_path, sizeof(cert_path), "%s", nc);
+            snprintf(key_path, sizeof(key_path), "%s", nk);
+            LOG_INFO("CA rotation in progress: signing with the new CA "
+                     "(the previous CA stays valid until it is dropped)");
+        }
+    }
 
     /* Generate CA cert on first use */
     bool missing = (access(cert_path, F_OK) != 0 || access(key_path, F_OK) != 0);

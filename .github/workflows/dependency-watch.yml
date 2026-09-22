@@ -1,0 +1,40 @@
+name: Dependency watch (mongoose & friends)
+
+# Keeps the vendored third-party code honest: mongoose is copied into the tree
+# (webserver/jni/mongoose/*), so nothing updates it by itself and the version in
+# the tree quietly ages. This runs on a schedule, compares the vendored
+# MG_VERSION with the latest upstream release and fails *only this workflow*
+# when they differ - the release pipeline stays untouched.
+on:
+  schedule:
+    - cron: '17 3 * * 1'      # every Monday 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mongoose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compare vendored mongoose with upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          file=webserver/jni/mongoose/mongoose.h
+          vendored=$(sed -n 's/^#define MG_VERSION "\(.*\)"$/\1/p' "$file" | head -1)
+          latest=$(gh release view --repo cesanta/mongoose --json tagName \
+                   --jq .tagName 2>/dev/null || true)
+          echo "vendored=$vendored upstream=$latest"
+          if [ -z "$vendored" ] || [ -z "$latest" ]; then
+            echo "::warning::could not determine one of the versions"
+            exit 0
+          fi
+          if [ "$vendored" != "$latest" ]; then
+            echo "::error::vendored mongoose $vendored differs from upstream $latest - update webserver/jni/mongoose/ (mongoose.c and mongoose.h from the $latest release) and re-run the release CI"
+            exit 1
+          fi
+          echo "mongoose is up to date ($vendored)"
