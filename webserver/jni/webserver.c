@@ -167,22 +167,25 @@ static pthread_mutex_t s_log_mutex = PTHREAD_MUTEX_INITIALIZER;
  */
 static char s_control_token[33];
 
-static void control_token_init(const char *resource_dir) {
+/* Returns non-zero when the token file was written (the caller logs it: the
+   LOG_* macros are defined further down, below this function). */
+static int control_token_init(const char *resource_dir) {
     unsigned char raw[16];
     mg_random(raw, sizeof(raw));
     for (size_t i = 0; i < sizeof(raw); i++)
         snprintf(s_control_token + i * 2, 3, "%02x", raw[i]);
     s_control_token[32] = 0;
-    if (resource_dir == NULL || resource_dir[0] == 0) return;
+    if (resource_dir == NULL || resource_dir[0] == 0) return 0;
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/control_token.txt", resource_dir);
     FILE *fp = fopen(path, "w");
+    int ok = 0;
     if (fp != NULL) {
         fprintf(fp, "%s\n", s_control_token);
         fclose(fp);
+        ok = 1;
     }
-    LOG_INFO("control: token %s", fp != NULL ? "written to control_token.txt"
-                                             : "could not be written (dashboard calls will be refused)");
+    return ok;
 }
 static long  s_log_bytes = 0;
 static char  s_log_path[PATH_MAX];
@@ -4394,7 +4397,11 @@ int main(int argc, char *argv[]) {
        a failed bind / autostart problem can be diagnosed after the fact. */
     log_file_open(s.resource_dir);
     /* /control requires this token; write it where the dashboard can read it. */
-    control_token_init(s.resource_dir);
+    if (control_token_init(s.resource_dir))
+        LOG_INFO("control: token written to resources/control_token.txt");
+    else
+        LOG_WARN("control: could not write resources/control_token.txt - "
+                 "dashboard /control calls will be refused");
     if (s.stats_port == 0) s.stats_port = 8686;
 
 #ifdef _WIN32
