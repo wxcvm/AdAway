@@ -112,15 +112,69 @@ static int https_probe_system(void) {
     return https_probe(WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, NULL);
 }
 
-/* [settings] proxy=... from webserver.ini next to the exe ("" when unset). */
-static void proxy_from_ini(wchar_t *out, size_t cap) {
-    wchar_t exe[MAX_PATH], ini[MAX_PATH];
-    out[0] = 0;
-    if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return;
+/* webserver.ini next to the exe (the dashboard writes it). */
+static int ini_path(wchar_t *out, size_t cap) {
+    wchar_t exe[MAX_PATH];
+    if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return 0;
     wchar_t *slash = wcsrchr(exe, L'\\');
     if (slash != NULL) *slash = 0;
-    swprintf(ini, MAX_PATH, L"%s\\webserver.ini", exe);
+    swprintf(out, cap, L"%s\\webserver.ini", exe);
+    return 1;
+}
+
+/* [settings] proxy=... from webserver.ini ("" when unset). */
+static void proxy_from_ini(wchar_t *out, size_t cap) {
+    wchar_t ini[MAX_PATH];
+    out[0] = 0;
+    if (!ini_path(ini, MAX_PATH)) return;
     GetPrivateProfileStringW(L"settings", L"proxy", L"", out, (DWORD) cap, ini);
+}
+
+/* ── optional download mirror ───────────────────────────────────────
+ * Some networks cannot reach github.com or its asset hosts at all, while a
+ * public GitHub accelerator (ghfast.top, gh-proxy.com, ...) can. webserver.ini
+ * may therefore name one:
+ *     [settings]
+ *     mirror=https://ghfast.top/
+ * Every github.com URL is then fetched as <mirror>/https://github.com/... .
+ * A mirror cannot inject a different binary: the published SHA-256 is still
+ * verified before anything is executed.
+ */
+static wchar_t s_mirror_host[128];
+static int s_mirror_loaded;
+
+static void mirror_from_ini(void) {
+    wchar_t ini[MAX_PATH], raw[512];
+    if (s_mirror_loaded) return;
+    s_mirror_loaded = 1;
+    s_mirror_host[0] = 0;
+    if (!ini_path(ini, MAX_PATH)) return;
+    GetPrivateProfileStringW(L"settings", L"mirror", L"", raw, 512, ini);
+    if (raw[0] == 0) return;
+    const wchar_t *p = wcsstr(raw, L"://");
+    p = p != NULL ? p + 3 : raw;
+    wcsncpy(s_mirror_host, p, 127);
+    s_mirror_host[127] = 0;
+    for (wchar_t *q = s_mirror_host; *q != 0; q++) {
+        if (*q == L'/') {                 /* keep only "host[:port]" */
+            *q = 0;
+            break;
+        }
+    }
+    if (s_mirror_host[0] != 0)
+        LOG_INFO("update: release downloads go through the mirror from webserver.ini");
+}
+
+/* Rewrite a github.com request for the mirror; other hosts are left alone.
+   Returns the host to connect to and fills path_out. */
+static const wchar_t *mirror_map(const wchar_t *host, const wchar_t *path,
+                                 wchar_t *path_out, size_t cap) {
+    mirror_from_ini();
+    if (s_mirror_host[0] == 0) return host;
+    if (_wcsicmp(host, L"github.com") != 0 && _wcsicmp(host, L"api.github.com") != 0)
+        return host;
+    swprintf(path_out, cap, L"/https://%ls%ls", host, path);
+    return s_mirror_host;
 }
 
 /* The log wrapper is a char-based printf, and MinGW's runtime does not
@@ -152,7 +206,13 @@ static void resolve_update_proxy(void) {
     s_proxy_mode = PROXY_MODE_DIRECT;
     s_proxy[0] = 0;
     /* 1) direct: the common case, one quick probe. */
-    if (https_probe(WINHTTP_ACCESS_TYPE_NO_PROXY, NULL)) return;
+    if (https_probe(WINHTTP_ACCESS_TYPE_NO_PROXY, NULL)) {
+        /* Logged even on success: the route a check used is the first thing
+           anyone asks about when an update fails, and this line used to be
+           missing for the direct case. */
+        LOG_INFO("update: github.com is reachable directly");
+        return;
+    }
     LOG_INFO("update: github.com is not reachable directly, looking for a proxy");
     /* 2) the system proxy setting, i.e. exactly what earlier versions used. */
     if (https_probe_system()) {
@@ -212,6 +272,14 @@ static void apply_update_proxy(HINTERNET session) {
 }
 
 /* ── helpers ──────────────────────────────────────────────────── */
+
+/* Declared here because http_get() below logs its own outcome (the request
+   helpers themselves come right after it). */
+static void log_http_line(const char *what, const wchar_t *host, const wchar_t *path,
+                          DWORD status, unsigned long long ms, int attempt);
+static void log_http_failure(const wchar_t *host, const wchar_t *path, DWORD status);
+static char *http_get_retry(const wchar_t *host, const wchar_t *path, size_t *out_len,
+                            DWORD *out_status, int attempts, const char *what);
 
 static void utf8_to_wide(const char *in, wchar_t *out, size_t cap) {
     if (cap == 0) return;
@@ -452,7 +520,10 @@ static int manifest_check(struct release_pick *p, DWORD *status) {
     size_t len = 0;
     DWORD st = 0;
     memset(p, 0, sizeof(*p));
-    char *json = http_get(UPDATE_MANIFEST_HOST, UPDATE_MANIFEST_PATH, &len, &st);
+    /* Three attempts: one hiccup on the asset host must not push the check onto
+       the rate-limited REST API. */
+    char *json = http_get_retry(UPDATE_MANIFEST_HOST, UPDATE_MANIFEST_PATH, &len, &st,
+                                3, "manifest");
     if (status) *status = st;
     if (!json) {
         /* The route may have gone stale (proxy started/stopped since the
@@ -483,15 +554,18 @@ static char *http_get(const wchar_t *host, const wchar_t *path, size_t *out_len,
     size_t total = 0, cap = 0;
     DWORD status = 0, slen = sizeof(status);
     DWORD policy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    wchar_t mapped[1200];
+    const wchar_t *connect_host = mirror_map(host, path, mapped, 1200);
+    const wchar_t *connect_path = connect_host == host ? path : mapped;
 
     session = WinHttpOpen(L"ADBlock-WebServer", WINHTTP_ACCESS_TYPE_NO_PROXY,
                           WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session) return NULL;
     apply_update_proxy(session);
     WinHttpSetTimeouts(session, 8000, 8000, 10000, 30000);
-    connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
+    connect = WinHttpConnect(session, connect_host, INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (!connect) goto done;
-    request = WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER,
+    request = WinHttpOpenRequest(connect, L"GET", connect_path, NULL, WINHTTP_NO_REFERER,
                                  WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
     if (!request) goto done;
     WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY, &policy, sizeof(policy));
@@ -527,7 +601,56 @@ done:
     if (request) WinHttpCloseHandle(request);
     if (connect) WinHttpCloseHandle(connect);
     if (session) WinHttpCloseHandle(session);
+    if (body == NULL) log_http_failure(host, path, status);
     return body;
+}
+
+/* One log line per request outcome. Both this and the failure line below are
+   needed: "检查更新失败" used to leave nothing at all in webserver.log, so a
+   failed check could not be explained afterwards. */
+static void log_http_line(const char *what, const wchar_t *host, const wchar_t *path,
+                          DWORD status, unsigned long long ms, int attempt) {
+    char narrow[512];
+    wchar_t wide[512];
+    swprintf(wide, 512, L"https://%ls%ls", host, path);
+    if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, narrow, (int) sizeof(narrow),
+                            NULL, NULL) <= 0) {
+        narrow[0] = 0;
+    }
+    win32_log_line("update: %s %s -> HTTP %lu in %llu ms (attempt %d)",
+                   what, narrow, (unsigned long) status, ms, attempt);
+}
+
+static void log_http_failure(const wchar_t *host, const wchar_t *path, DWORD status) {
+    log_http_line("GET failed", host, path, status, 0ULL, 0);
+    win32_log_line("update: last WinHTTP error %lu", (unsigned long) GetLastError());
+}
+
+/*
+ * http_get with retries. The release asset host occasionally answers 503/429 or
+ * drops the connection; the old code treated the very first failure as "no
+ * manifest", fell through to the REST API and - because that one is limited to
+ * 60 requests/hour per IP - reported a rate limit as the reason for an update
+ * failure, with nothing in the log explaining it.
+ */
+static char *http_get_retry(const wchar_t *host, const wchar_t *path, size_t *out_len,
+                            DWORD *out_status, int attempts, const char *what) {
+    char *body = NULL;
+    if (attempts < 1) attempts = 1;
+    for (int attempt = 1; attempt <= attempts; attempt++) {
+        DWORD st = 0;
+        ULONGLONG started = GetTickCount64();
+        body = http_get(host, path, out_len, &st);
+        unsigned long long ms = (unsigned long long) (GetTickCount64() - started);
+        if (body != NULL) {
+            log_http_line(what, host, path, st, ms, attempt);
+            if (out_status) *out_status = st;
+            return body;
+        }
+        if (out_status) *out_status = st;
+        if (attempt < attempts) Sleep(1000u * (unsigned) attempt);
+    }
+    return NULL;
 }
 
 /* Bytes already sitting in an interrupted download (0 when there is none). */
@@ -559,7 +682,7 @@ static void post_progress(int percent) {
 #define UPDATE_DOWNLOAD_ATTEMPTS 5
 static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                                  const wchar_t *extra_headers) {
-    wchar_t host[256] = L"", path[1024] = L"";
+    wchar_t host[256] = L"", path[1024] = L"", mapped[1200] = L"";
     const wchar_t *p = wcsstr(url, L"://");
     p = p ? p + 3 : url;
     const wchar_t *slash = wcschr(p, L'/');
@@ -570,6 +693,8 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
     host[hostlen] = 0;
     wcsncpy(path, slash, 1023);
     path[1023] = 0;
+    const wchar_t *connect_host = mirror_map(host, path, mapped, 1200);
+    const wchar_t *connect_path = connect_host == host ? path : mapped;
 
     unsigned long long have = partial_size(file);
     for (int attempt = 1; attempt <= UPDATE_DOWNLOAD_ATTEMPTS; attempt++) {
@@ -583,9 +708,9 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
         if (session == NULL) return 0;
         apply_update_proxy(session);
         WinHttpSetTimeouts(session, 20000, 20000, 30000, 120000);
-        connect = WinHttpConnect(session, host, INTERNET_DEFAULT_HTTPS_PORT, 0);
+        connect = WinHttpConnect(session, connect_host, INTERNET_DEFAULT_HTTPS_PORT, 0);
         request = connect != NULL
-            ? WinHttpOpenRequest(connect, L"GET", path, NULL, WINHTTP_NO_REFERER,
+            ? WinHttpOpenRequest(connect, L"GET", connect_path, NULL, WINHTTP_NO_REFERER,
                                  WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
             : NULL;
         if (request != NULL) {
@@ -641,10 +766,14 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
 
         if (complete) {
             post_progress(100);
+            win32_log_line("update: package downloaded (%llu bytes, attempt %d)",
+                           have, attempt);
             return 1;
         }
         /* Keep whatever arrived and try to continue it after a short pause. */
         have = partial_size(file);
+        win32_log_line("update: download attempt %d/%d incomplete (%llu bytes on disk)",
+                       attempt, UPDATE_DOWNLOAD_ATTEMPTS, have);
         if (attempt < UPDATE_DOWNLOAD_ATTEMPTS) Sleep(1000 * attempt);
     }
     post_progress(-1);   /* -1 = give up (dashboard clears the percentage) */
@@ -772,6 +901,15 @@ static wchar_t s_check_error[192] = L"";
 
 const wchar_t *update_last_error(void) { return s_check_error; }
 
+/* Set by update_check_async(): a check the user asked for must not be answered
+   from the "HTTP 403, do not ask again for 30 minutes" cooldown cache. */
+static int s_force_check;
+
+/* HTTP status of the last manifest attempt (0 = the download itself failed);
+   the dashboard message names both routes, which is what made "检查更新失败"
+   impossible to explain before. */
+static DWORD s_manifest_status;
+
 static DWORD WINAPI check_thread(LPVOID param) {
     HWND hwnd = (HWND) param;
     struct release_pick pick;
@@ -781,8 +919,11 @@ static DWORD WINAPI check_thread(LPVOID param) {
     char alt_digest[128] = "";
     struct update_info *info = NULL;
     DWORD st = 0;
+    int force = s_force_check;
+    s_force_check = 0;
     /* 1) fixed-tag manifest: no REST API, therefore no rate limit at all. */
     int rc = manifest_check(&pick, &st);
+    s_manifest_status = st;
     if (rc > 0) {
         /* The manifest itself is the release: choose the package for this
            machine (installer copy vs. hand-extracted portable copy). */
@@ -795,8 +936,9 @@ static DWORD WINAPI check_thread(LPVOID param) {
         struct update_cache c;
         bool have = update_cache_load(&c);
         DWORD now = (DWORD) (GetTickCount64() / 1000ULL);
-        bool fresh = have && c.rc >= 0 && (now - c.checked_at) < UPDATE_CACHE_TTL_SEC;
-        bool cooling = have && (c.status == 403 || c.status == 429) &&
+        bool fresh = !force && have && c.rc >= 0 &&
+                     (now - c.checked_at) < UPDATE_CACHE_TTL_SEC;
+        bool cooling = !force && have && (c.status == 403 || c.status == 429) &&
                        (now - c.checked_at) < UPDATE_COOLDOWN_SEC;
         if (fresh || cooling) {
             st = c.status;
@@ -847,14 +989,28 @@ static DWORD WINAPI check_thread(LPVOID param) {
             utf8_to_wide(alt_digest, info->alt_sha256, 128);
         }
     } else if (rc < 0) {
-        if (st == 403 || st == 429)
-            swprintf(s_check_error, 192, L"GitHub API 限流（HTTP %lu）；已改用本地缓存，%lu 分钟后自动重试", (unsigned long) st, (unsigned long) (UPDATE_COOLDOWN_SEC / 60));
-        else if (st > 0)
-            swprintf(s_check_error, 192, L"GitHub API 返回 HTTP %lu", (unsigned long) st);
-        else
-            wcsncpy(s_check_error,
-                    L"无法连接 GitHub（DNS/TLS/代理）：可在 webserver.ini 里写 proxy=127.0.0.1:7890，"
-                    L"线路探测结果见 webserver.log", 191);
+        if (st == 403 || st == 429) {
+            /* Rate limited: the manifest line is the one that must carry the
+               check, so say which of the two failed and how. */
+            if (s_manifest_status == 0)
+                swprintf(s_check_error, 192,
+                         L"更新清单下载失败（网络/代理），GitHub 接口也已限流（HTTP %lu）；"
+                         L"稍后重试，或在 webserver.ini 里加 proxy= / mirror=",
+                         (unsigned long) st);
+            else
+                swprintf(s_check_error, 192,
+                         L"更新清单返回 HTTP %lu，GitHub 接口限流（HTTP %lu）；%lu 分钟后自动重试",
+                         (unsigned long) s_manifest_status, (unsigned long) st,
+                         (unsigned long) (UPDATE_COOLDOWN_SEC / 60));
+        } else if (st > 0) {
+            swprintf(s_check_error, 192, L"更新清单返回 HTTP %lu，GitHub 接口返回 HTTP %lu",
+                     (unsigned long) s_manifest_status, (unsigned long) st);
+        } else {
+            swprintf(s_check_error, 192,
+                     L"无法连接 GitHub（清单 HTTP %lu）：可在 webserver.ini 写 "
+                     L"proxy=127.0.0.1:7890 或 mirror=https://ghfast.top/，详见 webserver.log",
+                     (unsigned long) s_manifest_status);
+        }
     } else {
         s_check_error[0] = 0;
     }
@@ -863,6 +1019,16 @@ static DWORD WINAPI check_thread(LPVOID param) {
 }
 
 void update_check_async(HWND hwnd) {
+    /*
+     * This is always a user action (the menu item and the toolbar button both
+     * call it). Reset the route decision so the proxy is probed again, and let
+     * the thread ignore the "HTTP 403, wait 30 minutes" cooldown: a click that
+     * silently answers from a cached failure is indistinguishable from "the
+     * update check is broken".
+     */
+    s_proxy_resolved = 0;
+    s_mirror_loaded = 0;
+    s_force_check = 1;
     CloseHandle(CreateThread(NULL, 0, check_thread, (LPVOID) hwnd, 0, NULL));
 }
 

@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.33`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.34`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -29,6 +29,18 @@
   本机常用代理端口（7890/7891/10809/10808/1080/8888）的顺序，**每条都真的发一次 HTTPS 请求**
   验证（只测 TCP 连通会把“能连上但不转发”的端口当成可用线路），选中的线路写进 `webserver.log`；
   下载或检查失败后清除缓存，下次重新探测（代理是刚开/刚关时不再卡在旧结论）。
+- 失败必须能自证 + 清单必须重试（v1.34）：实测“网络正常仍更新失败”的真身是
+  **GitHub 匿名接口限流**——`api.github.com` 返回 `403 rate limit exceeded`
+  （`X-RateLimit-Remaining: 0`，每小时每 IP 60 次，共享/代理出口几乎必然用完），
+  而更新检查只要清单那一步失败就会掉到这条被限流的接口上，界面上就只剩
+  “检查更新失败：GitHub API 限流”。改动：
+  1. 清单下载重试 3 次（1 s / 2 s 退避），不再一次失败就转去 API；
+  2. 每次请求都写日志（线路、URL、HTTP 状态、耗时、WinHTTP 错误码），
+     直连成功也写 —— 之前失败时日志里一个字都没有，无法排查；
+  3. 用户点“检查更新”一律重新探测线路并忽略 403 冷却缓存，点击一定会真的重试；
+  4. 失败文案同时给出清单线路与接口的状态，不再只报“限流”；
+  5. 新增 `webserver.ini` 的 `mirror=`（GitHub 加速站，如 `https://ghfast.top/`）：
+     清单与更新包都改从加速站取，下载后仍强制校验发布方 SHA-256，加速站无法掉包。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），
