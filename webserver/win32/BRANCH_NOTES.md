@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.46`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.47`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -204,3 +204,8 @@
   （原来共约 49 s 的死等）。
 - 发布类步骤（Release、公共更新源、安装器上传、清单）加 `if: github.event_name != 'pull_request'`，
   PR 构建只做验证，绝不发布。
+
+- 日志立即落盘的回归修复（v1.47，现场证据驱动）：1.40 按审计第61条把 INFO 行改成走缓冲，
+  结果在一次真实的更新里“新版本已安装并启动”的证据（listening/ready 行）留在缓冲区没落盘，
+  用户日志看起来像更新没发生。现在恢复为**每行立即 fflush**；心跳仍是 5 分钟一条，
+  写入量并不大，日志的可诊断性优先。

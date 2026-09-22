@@ -348,14 +348,19 @@ static void log_file_line(const char *level, const char *fmt, ...) {
     }
     if (fputc('\n', s_log_fp) != EOF) s_log_bytes += 1;
     /*
-     * Audit item 61: every line used to call fflush(), so the heartbeat and the
-     * per-request INFO lines forced a disc write each time (and the file was
-     * written from the server thread while the GUI wrote heartbeats). Only the
-     * lines that matter for a crash - warnings and worse - are flushed
-     * immediately; everything else is flushed by the rotating/close paths and
-     * by the periodic heartbeat, which is enough for a log nobody tails.
+     * Every line is flushed again.
+     *
+     * Audit item 61 suggested buffering the INFO lines, and 1.40 did exactly
+     * that - then a real update failed on a user machine and the log stopped
+     * right after "Autostart enabled OK": the freshly installed server had
+     * written its "listening:" and "v1.x ready" lines, but they were still
+     * sitting in the C runtime buffer, so the log looked like the update had
+     * never happened. Losing the single most important diagnostic (did the new
+     * build start?) to save a handful of small writes is a bad trade: the log
+     * is what this app is debugged with. The heartbeat stays at its 5 minute
+     * interval, so the write volume is modest anyway.
      */
-    if (level[0] != 'I') fflush(s_log_fp);
+    fflush(s_log_fp);
     pthread_mutex_unlock(&s_log_mutex);
 }
 
