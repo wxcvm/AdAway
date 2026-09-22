@@ -84,6 +84,10 @@ int update_state(void) {
 #define UPDATE_MODE_INSTALLER 1
 #define UPDATE_MODE_PORTABLE 2
 
+/* Defined further down (the proxy/ini helpers); declared here because the mode
+   reader above needs it. */
+static int ini_path(wchar_t *out, size_t cap);
+
 static int update_mode_pref(void) {
     wchar_t ini[MAX_PATH], value[32];
     if (!ini_path(ini, MAX_PATH)) return UPDATE_MODE_AUTO;
@@ -124,7 +128,7 @@ static void update_fail_report(const wchar_t *stage, const wchar_t *detail,
                                const wchar_t *diag) {
     win32_log_line("update: FAILED at %ls%s%s", stage,
                    detail != NULL && detail[0] != 0 ? ": " : "",
-                   detail != NULL ? detail : "");
+                   detail != NULL ? detail : L"");
     wchar_t msg[1200];
     swprintf(msg, 1200,
              L"更新失败（阶段：%ls）\n\n%ls\n\n"
