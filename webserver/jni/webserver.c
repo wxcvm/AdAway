@@ -550,17 +550,25 @@ static bool cfg_conf = true;
 static bool cfg_ws = true;
 
 /* ── Per-type blocking method (dashboard selectable) ────────────────
- *  BM_REPLY 0 = 占位/静默响应（按类型回空图片、空脚本、204 等，默认）
- *  BM_DENY  1 = 204 快速拒绝（带 CORS，页面立即拿到“没有内容”）
- *  BM_ALLOW 2 = 本类型不拦截（只统计，不返回占位资源）
- * The legacy reply_* booleans keep working and act as the default. */
+ *  BM_REPLY 0 = 占位/本地响应：按类型返回占位图、空脚本、空样式等
+ *               （看得到占位图的就是这种，图片/媒体/页面结构用它）
+ *  BM_DENY  1 = 204 快速拒绝（带 CORS，页面立即拿到“没有内容”，
+ *               适合 API/遥测/配置/WebSocket 这类不需要内容的请求）
+ *  BM_ALLOW 2 = 本类型不拦截（只统计，仍然返回真实内容）
+ *  BM_EMPTY 3 = 空响应：200 + 0 字节，content-type 保持“像那么回事”，
+ *               比 204 更兼容（某些浏览器的 <script>/<link> 会把 204
+ *               当成加载错误并打印控制台红字），适合脚本/样式/字体
+ * 默认按“看得见的用占位、看不见的用空响应/204”分配；用户可在面板里
+ * 逐类型改成自己想要的任何一种。The legacy reply_* booleans keep working
+ * and act as the default. */
 #define BM_REPLY 0
 #define BM_DENY  1
 #define BM_ALLOW 2
-static int  mode_images = BM_REPLY, mode_scripts = BM_REPLY, mode_styles = BM_REPLY;
-static int  mode_fonts  = BM_REPLY, mode_media   = BM_REPLY, mode_struct = BM_REPLY;
-static int  mode_api    = BM_REPLY, mode_tele    = BM_REPLY, mode_conf   = BM_REPLY;
-static int  mode_ws     = BM_REPLY;
+#define BM_EMPTY 3
+static int  mode_images = BM_REPLY, mode_scripts = BM_EMPTY, mode_styles = BM_EMPTY;
+static int  mode_fonts  = BM_EMPTY, mode_media   = BM_REPLY, mode_struct = BM_REPLY;
+static int  mode_api    = BM_DENY,  mode_tele    = BM_DENY,  mode_conf   = BM_DENY;
+static int  mode_ws     = BM_DENY;
 /*
  * Which policy type the last reply_blocked_by_type() matched, and the mode that
  * type is configured with. The query log stores both so the dashboard can show
@@ -2160,16 +2168,16 @@ static void load_block_modes(const char *dir) {
     b[n] = 0;
     fclose(f);
     int m;
-    if ((m = jint(b, "mode_images", -1)) >= 0 && m <= BM_ALLOW) mode_images = m;
-    if ((m = jint(b, "mode_scripts", -1)) >= 0 && m <= BM_ALLOW) mode_scripts = m;
-    if ((m = jint(b, "mode_styles", -1)) >= 0 && m <= BM_ALLOW) mode_styles = m;
-    if ((m = jint(b, "mode_fonts", -1)) >= 0 && m <= BM_ALLOW) mode_fonts = m;
-    if ((m = jint(b, "mode_media", -1)) >= 0 && m <= BM_ALLOW) mode_media = m;
-    if ((m = jint(b, "mode_struct", -1)) >= 0 && m <= BM_ALLOW) mode_struct = m;
-    if ((m = jint(b, "mode_api", -1)) >= 0 && m <= BM_ALLOW) mode_api = m;
-    if ((m = jint(b, "mode_tele", -1)) >= 0 && m <= BM_ALLOW) mode_tele = m;
-    if ((m = jint(b, "mode_conf", -1)) >= 0 && m <= BM_ALLOW) mode_conf = m;
-    if ((m = jint(b, "mode_ws", -1)) >= 0 && m <= BM_ALLOW) mode_ws = m;
+    if ((m = jint(b, "mode_images", -1)) >= 0 && m <= BM_EMPTY) mode_images = m;
+    if ((m = jint(b, "mode_scripts", -1)) >= 0 && m <= BM_EMPTY) mode_scripts = m;
+    if ((m = jint(b, "mode_styles", -1)) >= 0 && m <= BM_EMPTY) mode_styles = m;
+    if ((m = jint(b, "mode_fonts", -1)) >= 0 && m <= BM_EMPTY) mode_fonts = m;
+    if ((m = jint(b, "mode_media", -1)) >= 0 && m <= BM_EMPTY) mode_media = m;
+    if ((m = jint(b, "mode_struct", -1)) >= 0 && m <= BM_EMPTY) mode_struct = m;
+    if ((m = jint(b, "mode_api", -1)) >= 0 && m <= BM_EMPTY) mode_api = m;
+    if ((m = jint(b, "mode_tele", -1)) >= 0 && m <= BM_EMPTY) mode_tele = m;
+    if ((m = jint(b, "mode_conf", -1)) >= 0 && m <= BM_EMPTY) mode_conf = m;
+    if ((m = jint(b, "mode_ws", -1)) >= 0 && m <= BM_EMPTY) mode_ws = m;
     /* Keep the legacy booleans meaningful for anything else that reads them. */
     cfg_images = mode_images != BM_ALLOW;
     cfg_scripts = mode_scripts != BM_ALLOW;
@@ -2245,6 +2253,41 @@ static bool deny_quick(uint64_t *c, struct mg_connection *co) {
     return true;
 }
 
+/*
+ * Empty resource: 200 with a zero-byte body.
+ *
+ * A 204 is legal for every type, but Chromium reports "Failed to load resource:
+ * the server responded with a status of 204" for <script>/<link> and prints
+ * console errors, which users read as "the blocker is broken". An empty 200 is
+ * a valid empty file: the script or stylesheet simply does nothing.
+ */
+static bool empty_quick(uint64_t *c, struct mg_connection *co) {
+    (*c)++;
+    char hdr[160];
+    int hl = snprintf(hdr, sizeof(hdr),
+        "Content-Type: text/plain; charset=utf-8%c%c"
+        "Access-Control-Allow-Origin: *%c%c"
+        "Cache-Control: public, max-age=86400%c%c",
+        0x0d, 0x0a, 0x0d, 0x0a, 0x0d, 0x0a);
+    (void) hl;
+    mg_http_reply(co, 200, hdr, "");
+    return true;
+}
+
+/*
+ * One per-type decision, in the order the settings screen offers them:
+ * allow -> 204 -> empty -> (fall through to the type's placeholder reply).
+ * s_last_mode records the method actually used so the query log can show
+ * "拦截 · 脚本 · 空响应" instead of a bare "blocked".
+ */
+#define RB_APPLY(lt, mode, counter) do {                            \
+        s_last_type = (lt);                                         \
+        s_last_mode = (mode);                                       \
+        if ((mode) == BM_ALLOW) { s_rb_allow = true; return true; } \
+        if ((mode) == BM_DENY) return deny_quick(&(counter), c);    \
+        if ((mode) == BM_EMPTY) return empty_quick(&(counter), c);  \
+    } while (0)
+
 static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
     struct mg_str u = hm->uri;
     /* Cleared per request: a caller that falls through to the generic
@@ -2259,9 +2302,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_ends_with_ci(u, ".webp") || uri_ends_with_ci(u, ".avif") ||
         uri_ends_with_ci(u, ".svg") || uri_ends_with_ci(u, ".ico") ||
         uri_ends_with_ci(u, ".bmp")) {
-        RB_TYPE(LT_IMAGES, mode_images);
-        if (mode_images == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_images == BM_DENY) return deny_quick(&s_stats.blocked_images, c);
+        RB_APPLY(LT_IMAGES, mode_images, s_stats.blocked_images);
         return false;
     }
 
@@ -2270,9 +2311,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        re-requesting it after the first time (saves battery/bandwidth
        on every page load). */
     if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
-        RB_TYPE(LT_SCRIPTS, mode_scripts);
-        if (mode_scripts == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_scripts == BM_DENY) return deny_quick(&s_stats.blocked_scripts, c);
+        RB_APPLY(LT_SCRIPTS, mode_scripts, s_stats.blocked_scripts);
         s_stats.blocked_scripts++;
         mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
                               CORS_HDR
@@ -2282,9 +2321,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Stylesheets: empty CSS, HTTP 200. Cached like JS above. */
     if (uri_ends_with_ci(u, ".css")) {
-        RB_TYPE(LT_STYLES, mode_styles);
-        if (mode_styles == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_styles == BM_DENY) return deny_quick(&s_stats.blocked_styles, c);
+        RB_APPLY(LT_STYLES, mode_styles, s_stats.blocked_styles);
         s_stats.blocked_styles++;
         mg_http_reply(c, 200, "Content-Type: text/css\r\n"
                               CORS_HDR
@@ -2296,9 +2333,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
         uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
         uri_ends_with_ci(u, ".eot")) {
-        RB_TYPE(LT_FONTS, mode_fonts);
-        if (mode_fonts == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_fonts == BM_DENY) return deny_quick(&s_stats.blocked_fonts, c);
+        RB_APPLY(LT_FONTS, mode_fonts, s_stats.blocked_fonts);
         s_stats.blocked_fonts++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -2319,9 +2354,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_ends_with_ci(u, ".ts") || uri_ends_with_ci(u, ".m3u8") ||
         uri_ends_with_ci(u, ".mpd") || uri_ends_with_ci(u, ".flv") ||
         uri_ends_with_ci(u, ".mov") || uri_ends_with_ci(u, ".wav")) {
-        RB_TYPE(LT_MEDIA, mode_media);
-        if (mode_media == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_media == BM_DENY) return deny_quick(&s_stats.blocked_media, c);
+        RB_APPLY(LT_MEDIA, mode_media, s_stats.blocked_media);
         s_stats.blocked_media++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -2333,9 +2366,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_ends_with_ci(u, ".xml") || uri_ends_with_ci(u, ".txt") ||
         uri_ends_with_ci(u, ".map") || uri_ends_with_ci(u, ".wasm") ||
         uri_ends_with_ci(u, ".webmanifest") || uri_ends_with_ci(u, ".jsonp")) {
-        RB_TYPE(LT_STRUCT, mode_struct);
-        if (mode_struct == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_struct == BM_DENY) return deny_quick(&s_stats.blocked_other, c);
+        RB_APPLY(LT_STRUCT, mode_struct, s_stats.blocked_other);
         s_stats.blocked_other++;
         mg_http_reply(c, 200, "Content-Type: application/octet-stream\r\n"
                               CORS_HDR
@@ -2350,9 +2381,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/stratum") || uri_contains_ci(u, "/worker") ||
         uri_contains_ci(u, "/mining") || uri_contains_ci(u, "/hashrate") ||
         uri_contains_ci(u, "/pool")) {
-        RB_TYPE(LT_STRUCT, mode_struct);   /* 挖矿池 归入 页面结构 策略 */
-        if (mode_struct == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_struct == BM_DENY) return deny_quick(&s_stats.blocked_crypto, c);
+        RB_APPLY(LT_STRUCT, mode_struct, s_stats.blocked_crypto);   /* 挖矿池 归入 页面结构 策略 */
         s_stats.blocked_crypto++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -2361,9 +2390,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/click") || uri_contains_ci(u, "/track") ||
         uri_contains_ci(u, "/pixel") || uri_contains_ci(u, "/beacon") ||
         uri_contains_ci(u, "/impression")) {
-        RB_TYPE(LT_TELEMETRY, mode_tele);  /* 点击/像素追踪 归入 遥测/统计 策略 */
-        if (mode_tele == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_tele == BM_DENY) return deny_quick(&s_stats.blocked_clickbait, c);
+        RB_APPLY(LT_TELEMETRY, mode_tele, s_stats.blocked_clickbait);  /* 点击/像素追踪 归入 遥测/统计 策略 */
         s_stats.blocked_clickbait++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -2374,9 +2401,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        gateway. Decline politely with 204 instead of serving an image. */
     struct mg_str *upgrade = mg_http_get_header(hm, "Upgrade");
     if (upgrade != NULL && mg_strcasecmp(*upgrade, mg_str("websocket")) == 0) {
-        RB_TYPE(LT_WS, mode_ws);
-        if (mode_ws == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_ws == BM_DENY) return deny_quick(&s_stats.blocked_ws_sse, c);
+        RB_APPLY(LT_WS, mode_ws, s_stats.blocked_ws_sse);
         s_stats.blocked_ws_sse++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -2387,9 +2412,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        clean "closed" stream (204) rather than a corrupt body. */
     struct mg_str *accept_hdr = mg_http_get_header(hm, "Accept");
     if (accept_hdr != NULL && uri_contains_ci(*accept_hdr, "text/event-stream")) {
-        RB_TYPE(LT_WS, mode_ws);
-        if (mode_ws == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_ws == BM_DENY) return deny_quick(&s_stats.blocked_ws_sse, c);
+        RB_APPLY(LT_WS, mode_ws, s_stats.blocked_ws_sse);
         s_stats.blocked_ws_sse++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: no-cache\r\n", "");
@@ -2406,15 +2429,11 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     struct mg_str *dest = mg_http_get_header(hm, "Sec-Fetch-Dest");
     if (dest != NULL && dest->len > 0) {
         if (mg_strcasecmp(*dest, mg_str("image")) == 0) {
-        RB_TYPE(LT_IMAGES, mode_images);
-        if (mode_images == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_images == BM_DENY) return deny_quick(&s_stats.blocked_images, c);
+        RB_APPLY(LT_IMAGES, mode_images, s_stats.blocked_images);
             return false;  /* image request without extension → placeholder image */
         }
         if (mg_strcasecmp(*dest, mg_str("script")) == 0) {
-        RB_TYPE(LT_SCRIPTS, mode_scripts);
-        if (mode_scripts == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_scripts == BM_DENY) return deny_quick(&s_stats.blocked_scripts, c);
+        RB_APPLY(LT_SCRIPTS, mode_scripts, s_stats.blocked_scripts);
             s_stats.blocked_scripts++;
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
                                   CORS_HDR
@@ -2422,9 +2441,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("style")) == 0) {
-        RB_TYPE(LT_STYLES, mode_styles);
-        if (mode_styles == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_styles == BM_DENY) return deny_quick(&s_stats.blocked_styles, c);
+        RB_APPLY(LT_STYLES, mode_styles, s_stats.blocked_styles);
             s_stats.blocked_styles++;
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
                                   CORS_HDR
@@ -2432,9 +2449,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return true;
         }
         if (mg_strcasecmp(*dest, mg_str("font")) == 0) {
-        RB_TYPE(LT_FONTS, mode_fonts);
-        if (mode_fonts == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_fonts == BM_DENY) return deny_quick(&s_stats.blocked_fonts, c);
+        RB_APPLY(LT_FONTS, mode_fonts, s_stats.blocked_fonts);
             s_stats.blocked_fonts++;
             mg_http_reply(c, 204, CORS_HDR
                                   "Cache-Control: public, max-age=86400\r\n", "");
@@ -2449,9 +2464,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/ad") || uri_contains_ci(u, "/ads") ||
         uri_contains_ci(u, "/banner") || uri_contains_ci(u, "/feed") ||
         uri_contains_ci(u, "/recommend")) {
-        RB_TYPE(LT_API, mode_api);
-        if (mode_api == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_api == BM_DENY) return deny_quick(&s_stats.blocked_api, c);
+        RB_APPLY(LT_API, mode_api, s_stats.blocked_api);
         s_stats.blocked_api++;
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
                               CORS_HDR
@@ -2463,9 +2476,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/track") || uri_contains_ci(u, "/event") ||
         uri_contains_ci(u, "/log") || uri_contains_ci(u, "/collect") ||
         uri_contains_ci(u, "/pixel")) {
-        RB_TYPE(LT_TELEMETRY, mode_tele);
-        if (mode_tele == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_tele == BM_DENY) return deny_quick(&s_stats.blocked_telemetry, c);
+        RB_APPLY(LT_TELEMETRY, mode_tele, s_stats.blocked_telemetry);
         s_stats.blocked_telemetry++;
         mg_http_reply(c, 204, CORS_HDR
                               "Cache-Control: public, max-age=86400\r\n", "");
@@ -2487,9 +2498,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/wlan/userip") || uri_contains_ci(u, "/wlan/ac_portal") ||
         uri_contains_ci(u, "/wlan/login") || uri_contains_ci(u, "/portal/") ||
         uri_contains_ci(u, "/eportal/") || uri_contains_ci(u, "/cmcc/")) {
-        RB_TYPE(LT_TELEMETRY, mode_tele);
-        if (mode_tele == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_tele == BM_DENY) return deny_quick(&s_stats.blocked_heartbeat, c);
+        RB_APPLY(LT_TELEMETRY, mode_tele, s_stats.blocked_heartbeat);
         s_stats.blocked_heartbeat++;
         mg_http_reply(c, 204, CORS_HDR
                       "Cache-Control: public, max-age=86400\r\n", "");
@@ -2498,9 +2507,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Config endpoints: empty JSON, HTTP 200. */
     if (uri_contains_ci(u, "/config") || uri_contains_ci(u, "/settings")) {
-        RB_TYPE(LT_CONFIG, mode_conf);
-        if (mode_conf == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_conf == BM_DENY) return deny_quick(&s_stats.blocked_config, c);
+        RB_APPLY(LT_CONFIG, mode_conf, s_stats.blocked_config);
         s_stats.blocked_config++;
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
                               CORS_HDR
@@ -2517,15 +2524,11 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (accept != NULL && accept->len > 0) {
         if (uri_contains_ci(*accept, "image/") ||
             uri_contains_ci(*accept, "image/*")) {
-        RB_TYPE(LT_IMAGES, mode_images);
-        if (mode_images == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_images == BM_DENY) return deny_quick(&s_stats.blocked_images, c);
+        RB_APPLY(LT_IMAGES, mode_images, s_stats.blocked_images);
             return false;  /* image request → placeholder image */
         }
         if (uri_contains_ci(*accept, "text/css")) {
-        RB_TYPE(LT_STYLES, mode_styles);
-        if (mode_styles == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_styles == BM_DENY) return deny_quick(&s_stats.blocked_styles, c);
+        RB_APPLY(LT_STYLES, mode_styles, s_stats.blocked_styles);
         s_stats.blocked_styles++;
             mg_http_reply(c, 200, "Content-Type: text/css\r\n"
                                   CORS_HDR
@@ -2534,9 +2537,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         }
         if (uri_contains_ci(*accept, "application/javascript") ||
             uri_contains_ci(*accept, "text/javascript")) {
-        RB_TYPE(LT_SCRIPTS, mode_scripts);
-        if (mode_scripts == BM_ALLOW) { s_rb_allow = true; return true; }
-        if (mode_scripts == BM_DENY) return deny_quick(&s_stats.blocked_scripts, c);
+        RB_APPLY(LT_SCRIPTS, mode_scripts, s_stats.blocked_scripts);
         s_stats.blocked_scripts++;
             mg_http_reply(c, 200, "Content-Type: application/javascript\r\n"
                                   CORS_HDR

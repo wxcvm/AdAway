@@ -635,20 +635,42 @@ static void *stats_poll_thread(void *arg) {
 
 #define IDC_POL0      1110
 #define IDC_SUBRELOAD 1130
+#define IDC_POLDEF    1131   /* 恢复推荐默认 */
 
-/* Block reply policy toggles: label, block_config.json key, control id. */
-struct policy_item { const wchar_t *label; const char *key; const char *mode_key; int id; };
+/*
+ * Per-type blocking method: label, block_config.json key, control id and the
+ * recommended default.
+ *
+ * The values must match webserver/jni/webserver.c (BM_*). The recommended
+ * default follows "if the placeholder can be seen, use the placeholder":
+ * images / media / page structure get the placeholder reply, while scripts,
+ * styles and fonts get an empty 200 (a 204 makes Chromium print console
+ * errors for <script>/<link>), and API / telemetry / config / WebSocket get a
+ * plain 204. The user can cycle any type through all four methods.
+ */
+#define POL_REPLY 0   /* 占位/本地响应 */
+#define POL_DENY  1   /* 204 快速拒绝 */
+#define POL_ALLOW 2   /* 不拦截（只统计） */
+#define POL_EMPTY 3   /* 空响应：200 + 0 字节 */
+
+struct policy_item {
+    const wchar_t *label;
+    const char *key;
+    const char *mode_key;
+    int id;
+    int def;
+};
 static const struct policy_item g_policy[] = {
-    { L"图片", "reply_images", "mode_images", IDC_POL0 + 0 },
-    { L"脚本", "reply_scripts", "mode_scripts", IDC_POL0 + 1 },
-    { L"样式表", "reply_styles", "mode_styles", IDC_POL0 + 2 },
-    { L"字体", "reply_fonts", "mode_fonts", IDC_POL0 + 3 },
-    { L"媒体/音频", "reply_media", "mode_media", IDC_POL0 + 4 },
-    { L"页面结构", "reply_structures", "mode_struct", IDC_POL0 + 5 },
-    { L"API 请求", "reply_api", "mode_api", IDC_POL0 + 6 },
-    { L"遥测/统计", "reply_telemetry", "mode_tele", IDC_POL0 + 7 },
-    { L"配置文件", "reply_config", "mode_conf", IDC_POL0 + 8 },
-    { L"WebSocket", "reply_ws_sse", "mode_ws", IDC_POL0 + 9 },
+    { L"图片", "reply_images", "mode_images", IDC_POL0 + 0, POL_REPLY },
+    { L"脚本", "reply_scripts", "mode_scripts", IDC_POL0 + 1, POL_EMPTY },
+    { L"样式表", "reply_styles", "mode_styles", IDC_POL0 + 2, POL_EMPTY },
+    { L"字体", "reply_fonts", "mode_fonts", IDC_POL0 + 3, POL_EMPTY },
+    { L"媒体/音频", "reply_media", "mode_media", IDC_POL0 + 4, POL_REPLY },
+    { L"页面结构", "reply_structures", "mode_struct", IDC_POL0 + 5, POL_REPLY },
+    { L"API 请求", "reply_api", "mode_api", IDC_POL0 + 6, POL_DENY },
+    { L"遥测/统计", "reply_telemetry", "mode_tele", IDC_POL0 + 7, POL_DENY },
+    { L"配置文件", "reply_config", "mode_conf", IDC_POL0 + 8, POL_DENY },
+    { L"WebSocket", "reply_ws_sse", "mode_ws", IDC_POL0 + 9, POL_DENY },
 };
 #define POLICY_COUNT ((int)(sizeof(g_policy) / sizeof(g_policy[0])))
 
@@ -747,6 +769,11 @@ static void policy_read(const char *dir, bool *vals) {
         vals[i] = policy_get(dir, g_policy[i].key, true);
 }
 
+/* Declared before use: both are defined further down (the settings helpers
+   come first in this file). */
+static void control_post(int port, const char *cmd, wchar_t *status, size_t statusn);
+static int mgmt_port(void);
+
 /* modes[i]: 0 = placeholder reply, 1 = 204 deny, 2 = allow (no blocking).
    reply_* is kept in sync for compatibility with older servers. */
 static void policy_save_modes(const char *dir, const int *modes) {
@@ -764,17 +791,59 @@ static void policy_save_modes(const char *dir, const int *modes) {
     fclose(f);
 }
 
-/* Push the stored modes into the tri-state controls (called whenever the
-   settings page becomes visible, so an external edit is picked up too). */
-static void policy_sync_controls(HWND hwnd) {
-    for (int i = 0; i < POLICY_COUNT; i++) {
-        int m = policy_get_int(g_res, g_policy[i].mode_key,
-                               policy_get(g_res, g_policy[i].key, true) ? 0 : 1);
-        HWND w = GetDlgItem(hwnd, IDC_POL0 + i);
-        if (w)
-            SendMessageW(w, BM_SETCHECK,
-                         m == 2 ? BST_CHECKED : (m == 0 ? BST_INDETERMINATE : BST_UNCHECKED), 0);
+/* Current method of one type: mode_* when present, otherwise the legacy
+   reply_* boolean (true = placeholder, false = 204). */
+static int policy_mode(const char *dir, int i) {
+    const char *key = g_policy[i].key;
+    int def = policy_get(dir, key, true) ? POL_REPLY : POL_DENY;
+    return policy_get_int(dir, g_policy[i].mode_key, def);
+}
+
+static const wchar_t *policy_method_label(int m) {
+    switch (m) {
+    case POL_DENY:  return L"204 快速拒绝";
+    case POL_ALLOW: return L"不拦截";
+    case POL_EMPTY: return L"空响应";
+    default:        return L"占位响应";
     }
+}
+
+/* Click order: 占位 → 空响应 → 204 → 不拦截 → 占位. */
+static int policy_next_mode(int m) {
+    switch (m) {
+    case POL_REPLY: return POL_EMPTY;
+    case POL_EMPTY: return POL_DENY;
+    case POL_DENY:  return POL_ALLOW;
+    default:        return POL_REPLY;
+    }
+}
+
+/* Button caption: "图片：占位响应" — the old tri-state checkbox could not show
+   four methods at all (and its three states were unreadable). */
+static void policy_button_text(HWND hwnd, int i) {
+    HWND w = GetDlgItem(hwnd, IDC_POL0 + i);
+    if (w == NULL) return;
+    wchar_t txt[96];
+    swprintf(txt, 96, L"%ls：%ls", g_policy[i].label,
+             policy_method_label(policy_mode(g_res, i)));
+    SetWindowTextW(w, txt);
+}
+
+/* Push the stored modes into the buttons (called whenever the settings page
+   becomes visible, so an external edit is picked up too). */
+static void policy_sync_controls(HWND hwnd) {
+    for (int i = 0; i < POLICY_COUNT; i++) policy_button_text(hwnd, i);
+}
+
+/* Write all ten modes and let the running server pick them up immediately. */
+static void policy_apply_modes(HWND hwnd, const int *modes, const wchar_t *what) {
+    policy_save_modes(g_res, modes);
+    char st[128] = "";
+    control_post(mgmt_port(), "reload_config", st, 128);
+    policy_sync_controls(hwnd);
+    swprintf(g_status, 4096, L"%ls（已生效；点击某个类型可在 占位/空响应/204/不拦截 之间切换）",
+             what ? what : L"拦截方式已更新");
+    InvalidateRect(hwnd, NULL, FALSE);
 }
 
 /* POST /control (cmd=reload_config | flush_stats | shutdown) */
@@ -1669,6 +1738,7 @@ static const struct ctl_desc g_clayout[] = {
     { IDC_FLUSH,      542, 424, 96, 28, L"BUTTON", L"清空统计", BS_PUSHBUTTON },
     { IDC_DIAG,       844, 434, 170, 26, L"BUTTON", L"导出诊断信息", BS_PUSHBUTTON },
     { IDC_SUBRELOAD,  664, 456, 170, 26, L"BUTTON", L"重新加载订阅", BS_PUSHBUTTON },
+    { IDC_POLDEF,     664, 486, 170, 26, L"BUTTON", L"恢复推荐默认", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 426, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
     /* Below the "导出诊断信息" button (which sits at 844,434): the two used to
        overlap in x 844-948 / y 434-452. */
@@ -1723,17 +1793,23 @@ static void show_controls(HWND hwnd, int tab) {
         ShowWindow(GetDlgItem(hwnd, IDC_POL0 + i), show ? SW_SHOW : SW_HIDE);
 }
 
-static void policy_apply(HWND hwnd) {
+/* Click on one type: advance it to the next method and apply immediately. */
+static void policy_cycle_one(HWND hwnd, int i) {
     int modes[POLICY_COUNT];
-    for (int i = 0; i < POLICY_COUNT; i++) {
-        LRESULT chk = SendMessageW(GetDlgItem(hwnd, IDC_POL0 + i), BM_GETCHECK, 0, 0);
-        modes[i] = (chk == BST_CHECKED) ? 2 : (chk == BST_INDETERMINATE ? 0 : 1);
-    }
-    policy_save_modes(g_res, modes);
-    wchar_t st[128];
-    control_post(mgmt_port(), "reload_config", st, 128);
-    swprintf(g_status, 4096, L"拦截方式已更新（未选=204 拒绝 / 半选=占位 / 选中=放行）（%ls）", st);
-    InvalidateRect(hwnd, NULL, FALSE);
+    for (int k = 0; k < POLICY_COUNT; k++) modes[k] = policy_mode(g_res, k);
+    int before = modes[i];
+    modes[i] = policy_next_mode(before);
+    wchar_t what[128];
+    swprintf(what, 128, L"%ls 的拦截方式：%ls → %ls", g_policy[i].label,
+             policy_method_label(before), policy_method_label(modes[i]));
+    policy_apply_modes(hwnd, modes, what);
+}
+
+/* One button that puts every type back to the recommended method. */
+static void policy_apply_defaults(HWND hwnd) {
+    int modes[POLICY_COUNT];
+    for (int k = 0; k < POLICY_COUNT; k++) modes[k] = g_policy[k].def;
+    policy_apply_modes(hwnd, modes, L"已恢复推荐默认：看得见的用占位，脚本/样式/字体用空响应，API/遥测/配置/WS 用 204");
 }
 
 /* Policy type / reply mode of a query-log row: "脚本 · 204" answers both
@@ -1747,7 +1823,12 @@ static const wchar_t *log_type_label(int t) {
 }
 
 static const wchar_t *log_mode_label(int m) {
-    return m == 1 ? L"204" : (m == 2 ? L"放行" : L"占位");
+    switch (m) {
+    case 1: return L"204";
+    case 2: return L"放行";
+    case 3: return L"空响应";
+    default: return L"占位";
+    }
 }
 
 /* ── "应用日志" page ──────────────────────────────────────────────
@@ -1943,9 +2024,11 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             int cx = (i % 2 == 0) ? 210 : 440;
             int cy = 208 + (i / 2) * 28;
             s_ctrls[s_ctrl_count++] = CreateWindowExW(0, L"BUTTON", g_policy[i].label,
-                /* BS_AUTO3STATE: unchecked = 204 deny, indeterminate =
-                   placeholder reply (default), checked = allow (no blocking) */
-                WS_CHILD | BS_AUTO3STATE, S(cx), S(cy), S(200), S(24), hwnd,
+                /* A plain button whose caption IS the current method
+                   ("图片：占位响应"); clicking cycles 占位 → 空响应 → 204 →
+                   不拦截. The old BS_AUTO3STATE checkbox could not express
+                   four methods and its three states were unreadable. */
+                WS_CHILD | BS_PUSHBUTTON, S(cx), S(cy), S(200), S(24), hwnd,
                 (HMENU)(INT_PTR)g_policy[i].id, hinst, NULL);
         }
         g_ctl_font = mfont(13, FW_NORMAL);
@@ -2172,7 +2255,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 swprintf(g_status, 4096, L"%ls", st);
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id >= IDC_POL0 && id < IDC_POL0 + POLICY_COUNT) {
-                policy_apply(hwnd);
+                policy_cycle_one(hwnd, id - IDC_POL0);
+            } else if (id == IDC_POLDEF) {
+                policy_apply_defaults(hwnd);
             }
         }
         return 0;
