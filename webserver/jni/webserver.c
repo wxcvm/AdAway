@@ -347,7 +347,15 @@ static void log_file_line(const char *level, const char *fmt, ...) {
         if (n > 0) s_log_bytes += n;
     }
     if (fputc('\n', s_log_fp) != EOF) s_log_bytes += 1;
-    fflush(s_log_fp);
+    /*
+     * Audit item 61: every line used to call fflush(), so the heartbeat and the
+     * per-request INFO lines forced a disc write each time (and the file was
+     * written from the server thread while the GUI wrote heartbeats). Only the
+     * lines that matter for a crash - warnings and worse - are flushed
+     * immediately; everything else is flushed by the rotating/close paths and
+     * by the periodic heartbeat, which is enough for a log nobody tails.
+     */
+    if (level[0] != 'I') fflush(s_log_fp);
     pthread_mutex_unlock(&s_log_mutex);
 }
 
@@ -4393,8 +4401,22 @@ int main(int argc, char *argv[]) {
      * webserver.exe processes fighting for the same ports. The duplicate asks
      * the running instance to show its dashboard and exits immediately.
      */
-    HANDLE single = CreateMutexW(NULL, FALSE, L"Local\\ADBlockWebServer_Singleton");
-    if (single != NULL && GetLastError() == ERROR_ALREADY_EXISTS) {
+    /*
+     * Audit item 35: the mutex used to live in the per-session "Local\" name
+     * space, so two sessions (fast user switching, or Remote Desktop next to
+     * the console session) both started a server and fought over the ports.
+     * "Global\" covers the whole machine; creating it needs
+     * SeCreateGlobalPrivilege, which a plain user token does not have, so fall
+     * back to the old per-session name instead of losing the guard entirely.
+     */
+    HANDLE single = CreateMutexW(NULL, FALSE, L"Global\\ADBlockWebServer_Singleton");
+    DWORD single_err = (single == NULL) ? GetLastError() : 0;
+    if (single == NULL && single_err != ERROR_ACCESS_DENIED)
+        single = CreateMutexW(NULL, FALSE, L"Local\\ADBlockWebServer_Singleton");
+    /* Either the global name already exists, or it exists but this token may
+       not open it (ERROR_ACCESS_DENIED) - both mean "another instance runs". */
+    if ((single != NULL && GetLastError() == ERROR_ALREADY_EXISTS) ||
+        single_err == ERROR_ACCESS_DENIED) {
         UINT show = RegisterWindowMessageW(L"ADBlockShowDashboard");
         if (show != 0) PostMessageW(HWND_BROADCAST, show, 0, 0);
         LOG_INFO("ADBlock: another instance is already running - exiting.");
