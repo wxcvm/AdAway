@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.41`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.42`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -109,6 +109,15 @@
   静默变 0、`--bind lan` 静默当 loopback），现在 1–65535 之外一律拒绝，
   `--bind` 只接受 `all` / `loopback`；出错时 main() 会打印具体原因再退出，
   不再“按另一个配置悄悄启动”。
+- localhost 叶子跨重启复用（v1.42，审计第25条）：原来每次启动都用新密钥重签
+  localhost 叶子，浏览器每次会话看到不同证书（没有会话复用、pinning 直接失效、
+  证书查看器里每次都多一条）。现在叶子写到 `resources/localhost-leaf.crt/.key`，
+  只要它比 CA 新、且未满 300 天（叶子本身 397 天）就复用；CA 轮换后旧叶子自动作废。
+- 局域网地址选择（v1.42，审计第65条）：原来取“第一个适配器的第一个 IPv4”，
+  在普通机器上常常是 Hyper-V/WSL/VirtualBox 的 vEthernet（172.x）或残留的
+  169.254.x，提示的地址手机根本连不上。现在按分数挑：169.254 与虚拟网卡名
+  （Hyper-V/WSL/VirtualBox/VMware/TAP/WireGuard/Tailscale/ZeroTier…）直接排除，
+  10/8、172.16/12、192.168/16 优先，其次才是其它可路由地址。
 
 ## 为什么没有合并回 master（2026-09 决策）
 - master 已前进 17 个提交（劫持过滤、AdGuard 规则语法、服务器自愈看护、统计与端口解耦等），

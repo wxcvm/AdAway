@@ -925,7 +925,32 @@ static long long cert_days_left(const char *cert_path) {
     return (expiry - (long long)time(NULL)) / 86400LL;
 }
 
-/* First non-loopback IPv4 (for LAN access hints); returns 0 on success. */
+/*
+ * Best non-loopback IPv4 for the LAN hint; returns 0 on success.
+ *
+ * Audit item 65: the old code returned the first address of the first adapter
+ * in the list, which on a normal Windows machine is often a Hyper-V/WSL/VirtualBox
+ * "vEthernet" adapter (172.x) or an APIPA 169.254.x.x left behind by a network
+ * that is no longer reachable - the hint then pointed at an address nobody can
+ * reach from the phone. Private ranges of real adapters win, APIPA and known
+ * virtual adapter names are skipped, and only if nothing matches does the first
+ * usable address win.
+ */
+static int lan_ip_score(const IP_ADAPTER_ADDRESSES *a, const SOCKADDR_IN *sin) {
+    unsigned long h = ntohl(sin->sin_addr.s_addr);
+    if ((h & 0xFFFF0000UL) == 0xA9FE0000UL) return -1;        /* 169.254/16 APIPA */
+    const char *desc = a->Description != NULL ? a->Description : "";
+    const char *names[] = { "Hyper-V", "WSL", "VirtualBox", "VMware", "Loopback",
+                            "Bluetooth", "TAP-", "WireGuard", "Tailscale", "ZeroTier" };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (strstr(desc, names[i]) != NULL) return -1;
+    }
+    if ((h & 0xFF000000UL) == 0x0A000000UL) return 3;          /* 10/8 */
+    if ((h & 0xFFF00000UL) == 0xAC100000UL) return 3;          /* 172.16/12 */
+    if ((h & 0xFFFF0000UL) == 0xC0A80000UL) return 3;          /* 192.168/16 */
+    return 1;                                                  /* public/other */
+}
+
 static int first_lan_ip(char *out, size_t n) {
     ULONG buflen = 0;
     if (GetAdaptersAddresses(AF_INET,
@@ -937,6 +962,7 @@ static int first_lan_ip(char *out, size_t n) {
             GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER,
             NULL, buf, &buflen);
     if (rc != NO_ERROR) { free(buf); return -1; }
+    int best_score = -1;
     for (PIP_ADAPTER_ADDRESSES a = buf; a; a = a->Next) {
         if (a->OperStatus != IfOperStatusUp) continue;
         for (PIP_ADAPTER_UNICAST_ADDRESS u = a->FirstUnicastAddress; u; u = u->Next) {
@@ -944,15 +970,17 @@ static int first_lan_ip(char *out, size_t n) {
             if (sin->sin_family == AF_INET &&
                 sin->sin_addr.s_addr != htonl(INADDR_LOOPBACK) &&
                 sin->sin_addr.s_addr != htonl(INADDR_ANY)) {
-                strncpy(out, inet_ntoa(sin->sin_addr), n - 1);
-                out[n - 1] = '\0';
-                free(buf);
-                return 0;
+                int score = lan_ip_score(a, sin);
+                if (score > best_score) {
+                    best_score = score;
+                    strncpy(out, inet_ntoa(sin->sin_addr), n - 1);
+                    out[n - 1] = '\0';
+                }
             }
         }
     }
     free(buf);
-    return -1;
+    return best_score >= 0 ? 0 : -1;
 }
 
 /* DER of the PEM cert (malloc'd; caller frees). */

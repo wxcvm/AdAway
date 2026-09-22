@@ -1961,13 +1961,92 @@ static struct mg_str key_to_pem_mgstr(EVP_PKEY *key) {
    IPv6 loopback SANs (the server also listens on ::1) and use *that*
    as the default, matching how every other hostname already gets a
    purpose-issued leaf cert via make_domain_ctx(). */
-static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts) {
+/* Read a whole file into a malloc'd mg_str (used for the persisted leaf). */
+static int mg_str_from_file(const char *path, struct mg_str *out) {
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) return 0;
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 0; }
+    long n = ftell(f);
+    if (n <= 0 || n > 64 * 1024) { fclose(f); return 0; }
+    rewind(f);
+    char *buf = (char *) malloc((size_t) n);
+    if (buf == NULL) { fclose(f); return 0; }
+    if (fread(buf, 1, (size_t) n, f) != (size_t) n) {
+        free(buf);
+        fclose(f);
+        return 0;
+    }
+    fclose(f);
+    out->buf = buf;
+    out->len = (size_t) n;
+    return 1;
+}
+
+/*
+ * Audit item 25: the "localhost" leaf used to be re-signed with a brand new
+ * key on every start, so every browser session saw a different certificate
+ * (no session resumption, broken pinning, and a fresh entry in "certificate
+ * viewer" each time). The leaf is kept next to the CA and reused while it is
+ * younger than 300 of its 397 days and newer than the CA itself (a rotated CA
+ * must not keep an old leaf alive). The age is taken from the file time, so no
+ * PEM parsing is needed here.
+ */
+static int leaf_files_fresh(const char *crt, const char *key, const char *dir) {
+    WIN32_FILE_ATTRIBUTE_DATA lf, cf;
+    if (!GetFileAttributesExA(crt, GetFileExInfoStandard, &lf)) return 0;
+    if (!GetFileAttributesExA(key, GetFileExInfoStandard, &lf)) return 0;
+    if (!GetFileAttributesExA(crt, GetFileExInfoStandard, &lf)) return 0;
+    char ca_path[PATH_MAX];
+    snprintf(ca_path, sizeof(ca_path), "%s/localhost-2410.crt", dir);
+    if (GetFileAttributesExA(ca_path, GetFileExInfoStandard, &cf) &&
+        CompareFileTime(&lf.ftLastWriteTime, &cf.ftLastWriteTime) < 0)
+        return 0;                                  /* older than the CA */
+    ULARGE_INTEGER now, written;
+    GetSystemTimeAsFileTime((FILETIME *) &now);
+    written.LowPart = lf.ftLastWriteTime.dwLowDateTime;
+    written.HighPart = lf.ftLastWriteTime.dwHighDateTime;
+    if (now.QuadPart <= written.QuadPart) return 1;  /* clock skew: keep it */
+    unsigned long long age_days =
+        (now.QuadPart - written.QuadPart) / 10000000ULL / 86400ULL;
+    return age_days < 300;
+}
+
+static int make_localhost_leaf(struct ca_state *ca, const char *dir,
+                               struct mg_tls_opts *out_opts) {
+    char crt[PATH_MAX], keyp[PATH_MAX];
+    if (dir != NULL && dir[0] != 0) {
+        snprintf(crt, sizeof(crt), "%s/localhost-leaf.crt", dir);
+        snprintf(keyp, sizeof(keyp), "%s/localhost-leaf.key", dir);
+        if (leaf_files_fresh(crt, keyp, dir)) {
+            struct mg_str c, k;
+            if (mg_str_from_file(crt, &c) && mg_str_from_file(keyp, &k)) {
+                out_opts->cert = c;
+                out_opts->key = k;
+                LOG_INFO("make_cert(localhost): reusing the stored leaf");
+                return EXIT_SUCCESS;
+            }
+        }
+    }
     X509 *cert = NULL; EVP_PKEY *key = NULL;
     if (make_cert("localhost", ca->cert, ca->key, 0, 397,
                   "DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1", /*use_ec=*/0, /*rsa_bits=*/0, &cert, &key) != EXIT_SUCCESS)
         return EXIT_FAILURE;
     out_opts->cert = cert_to_pem_mgstr(cert);
     out_opts->key  = key_to_pem_mgstr(key);
+    /* Remember it for the next start (audit item 25). */
+    if (dir != NULL && dir[0] != 0 &&
+        out_opts->cert.buf != NULL && out_opts->key.buf != NULL) {
+        FILE *fc = fopen(crt, "wb");
+        if (fc != NULL) {
+            fwrite(out_opts->cert.buf, 1, out_opts->cert.len, fc);
+            fclose(fc);
+        }
+        FILE *fk = fopen(keyp, "wb");
+        if (fk != NULL) {
+            fwrite(out_opts->key.buf, 1, out_opts->key.len, fk);
+            fclose(fk);
+        }
+    }
     X509_free(cert);
     EVP_PKEY_free(key);
     return (out_opts->cert.buf && out_opts->key.buf) ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -4254,7 +4333,7 @@ static bool setup_resources_dir(struct settings *s, const char *rpath) {
     /* TLS opts for the localhost listener: a leaf cert issued
        specifically for "localhost"/127.0.0.1, not the raw CA
        cert (see make_localhost_leaf() for why). */
-    if (make_localhost_leaf(&s->ca, &s->tls_opts) != EXIT_SUCCESS) {
+    if (make_localhost_leaf(&s->ca, s->resource_dir, &s->tls_opts) != EXIT_SUCCESS) {
         LOG_FATAL("Failed to issue localhost leaf cert");
         return false;
     }
