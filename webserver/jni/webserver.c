@@ -409,6 +409,15 @@ static void log_file_line(const char *level, const char *fmt, ...) {
 #define BLOCK_IMAGE_MAX_COUNT 100
 #define BLOCK_IMAGE_NAME_MAX  128
 
+/*
+ * The placeholder-image strategy (rotate per app / random / fixed) is
+ * implemented further down - it needs struct settings - but the statistics JSON
+ * is built earlier in this file and publishes these two, so they are declared
+ * up here (a tentative definition plus a forward declaration).
+ */
+static char s_img_last[BLOCK_IMAGE_NAME_MAX];
+static const char *img_mode_name(void);
+
 /* Scan resource_dir for files matching img_*.webp (case-sensitive,
    any suffix - "img_00.webp", "img_cat.webp", "img_2024-ad.webp" all
    match), storing up to BLOCK_IMAGE_MAX_COUNT filenames into out[].
@@ -4500,7 +4509,6 @@ static int cli_parse_port(const char *text, int *out) {
 
 static int      s_img_mode = IMG_MODE_ROTATE;
 static uint64_t s_img_seq;
-static char     s_img_last[BLOCK_IMAGE_NAME_MAX];
 static struct { uint32_t uid; uint64_t seq; } s_img_uid[IMG_UID_SLOTS];
 
 static void img_mode_set(const char *name) {
