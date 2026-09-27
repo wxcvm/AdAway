@@ -417,7 +417,10 @@ static void log_file_line(const char *level, const char *fmt, ...) {
  */
 static char s_img_last[BLOCK_IMAGE_NAME_MAX];
 static const char *img_mode_name(void);
-static int img_pick_index(struct settings *s, uint32_t uid);
+/* Takes the image count instead of the settings struct: this prototype is at the
+   top of the file, long before struct settings is defined, and a struct pointer
+   there made the compiler see two different types. */
+static int img_pick_index(uint32_t uid, int count);
 
 /* Scan resource_dir for files matching img_*.webp (case-sensitive,
    any suffix - "img_00.webp", "img_cat.webp", "img_2024-ad.webp" all
@@ -4330,7 +4333,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        The index comes from img_pick_index() (per-UID rotation / random /
        fixed); it used to be read out of c->data, undefined contents that made
        every request answer with the first image. */
-    int idx = img_pick_index(s, conn_load_uid(c));
+    int idx = img_pick_index(conn_load_uid(c), s->block_image_count);
     if (idx < 0 || idx >= s->block_image_count) idx = 0;
     snprintf(s_img_last, sizeof(s_img_last), "%s", s->block_images[idx]);
     char img_path[PATH_MAX];
@@ -4525,9 +4528,8 @@ static const char *img_mode_name(void) {
 }
 
 /* Pick the image for this request (never touches c->data). */
-static int img_pick_index(struct settings *s, uint32_t uid) {
-    if (s == NULL || s->block_image_count <= 0) return 0;
-    int count = s->block_image_count;
+static int img_pick_index(uint32_t uid, int count) {
+    if (count <= 0) return 0;
     if (s_img_mode == IMG_MODE_FIXED) return 0;
     if (s_img_mode == IMG_MODE_RANDOM) {
         static int seeded;
