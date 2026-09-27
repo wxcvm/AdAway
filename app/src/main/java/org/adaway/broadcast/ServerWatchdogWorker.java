@@ -4,6 +4,7 @@ import android.content.Context;
 
 import androidx.annotation.NonNull;
 import androidx.work.ExistingWorkPolicy;
+import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.OneTimeWorkRequest;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
@@ -124,7 +125,7 @@ public class ServerWatchdogWorker extends Worker {
         PeriodicWorkRequest periodic = new PeriodicWorkRequest.Builder(
                 ServerWatchdogWorker.class, 15, TimeUnit.MINUTES).build();
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                UNIQUE_PERIODIC, ExistingWorkPolicy.KEEP, periodic);
+                UNIQUE_PERIODIC, ExistingPeriodicWorkPolicy.KEEP, periodic);
         scheduleFollowUp(context);
     }
 
