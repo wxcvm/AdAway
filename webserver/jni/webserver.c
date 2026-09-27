@@ -2930,6 +2930,9 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"blocked_clickbait\":%llu,"
         "\"sni_certs_issued\":%llu,"
         "\"block_image_count\":%d,"
+        "\"img_mode\":\"%s\","
+        "\"img_count\":%d,"
+        "\"img_last\":\"%s\","
         "\"stats_port\":%d,"
         "\"bind_ok\":%s,"
         "\"listeners\":[%s],"
@@ -2965,6 +2968,9 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         (unsigned long long)s_stats.blocked_clickbait,
         (unsigned long long)s_stats.sni_certs_issued,
         s->block_image_count,
+        img_mode_name(),
+        s->block_image_count,
+        s_img_last,
         s->stats_port,
         s_main_http_bound ? "true" : "false",
         listeners_json,
@@ -4308,12 +4314,15 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
 
 
-    /* Random block image - serve whichever actual filename was found at
-       scan time (see scan_block_images()), not a reconstructed
-       img_%02d.webp - deleting/adding images doesn't require renaming
-       the rest to stay contiguous. */
-    uint64_t t; memcpy(&t, c->data, sizeof(t));
-    int idx = (int)(t % (uint64_t)s->block_image_count);
+    /* Block image - serve whichever actual filename was found at scan time (see
+       scan_block_images()), not a reconstructed img_%02d.webp, so deleting or
+       adding images does not require renaming the rest to stay contiguous.
+       The index comes from img_pick_index() (per-UID rotation / random /
+       fixed); it used to be read out of c->data, undefined contents that made
+       every request answer with the first image. */
+    int idx = img_pick_index(s, conn_load_uid(c));
+    if (idx < 0 || idx >= s->block_image_count) idx = 0;
+    snprintf(s_img_last, sizeof(s_img_last), "%s", s->block_images[idx]);
     char img_path[PATH_MAX];
     snprintf(img_path, sizeof(img_path), "%s/%s", s->resource_dir, s->block_images[idx]);
     s_stats.blocked_images++;
@@ -4469,6 +4478,69 @@ static int cli_parse_port(const char *text, int *out) {
     if (end == text || *end != '\0' || v < 1 || v > 65535) return 0;
     *out = (int) v;
     return 1;
+}
+
+/* ── placeholder image strategy ─────────────────────────────────────
+ * The index used to be read out of c->data - mongoose's per-connection scratch
+ * area, i.e. undefined contents that in practice are zero for a fresh
+ * connection, so every blocked request answered with img_00.webp: the "random
+ * placeholder" had quietly died. The strategy is configurable now
+ * (webserver.ini [settings] img_mode):
+ *   rotate (default) - per-UID round robin: a burst of ad images from one app
+ *                      (a WeChat mini program start-up, for example) gets
+ *                      different pictures instead of the same one;
+ *   random           - uniform random per request (may repeat);
+ *   fixed            - always the first image (the old visible behaviour).
+ * When one app has more requests than images the sequence simply starts over.
+ */
+#define IMG_MODE_ROTATE 0
+#define IMG_MODE_RANDOM 1
+#define IMG_MODE_FIXED  2
+#define IMG_UID_SLOTS 64
+
+static int      s_img_mode = IMG_MODE_ROTATE;
+static uint64_t s_img_seq;
+static char     s_img_last[BLOCK_IMAGE_NAME_MAX];
+static struct { uint32_t uid; uint64_t seq; } s_img_uid[IMG_UID_SLOTS];
+
+static void img_mode_set(const char *name) {
+    if (name == NULL) return;
+    if (_stricmp(name, "random") == 0) s_img_mode = IMG_MODE_RANDOM;
+    else if (_stricmp(name, "fixed") == 0) s_img_mode = IMG_MODE_FIXED;
+    else if (_stricmp(name, "rotate") == 0) s_img_mode = IMG_MODE_ROTATE;
+}
+
+static const char *img_mode_name(void) {
+    return s_img_mode == IMG_MODE_RANDOM ? "random"
+         : (s_img_mode == IMG_MODE_FIXED ? "fixed" : "rotate");
+}
+
+/* Pick the image for this request (never touches c->data). */
+static int img_pick_index(struct settings *s, uint32_t uid) {
+    if (s == NULL || s->block_image_count <= 0) return 0;
+    int count = s->block_image_count;
+    if (s_img_mode == IMG_MODE_FIXED) return 0;
+    if (s_img_mode == IMG_MODE_RANDOM) {
+        static int seeded;
+        if (!seeded) {
+            srand((unsigned) time(NULL) ^ (unsigned) GetCurrentProcessId());
+            seeded = 1;
+        }
+        return (int) ((unsigned) rand() % (unsigned) count);
+    }
+    uint64_t seq;
+    if (uid == 0xFFFFFFFFu) {
+        seq = s_img_seq++;
+    } else {
+        int slot = (int) (uid % IMG_UID_SLOTS);
+        if (s_img_uid[slot].uid != uid) {
+            s_img_uid[slot].uid = uid;
+            s_img_uid[slot].seq = 0;
+        }
+        seq = s_img_uid[slot].seq++;
+        s_img_seq++;
+    }
+    return (int) (seq % (uint64_t) count);
 }
 
 static struct settings parse_cli_parameters(int argc, char *argv[]) {
@@ -4687,10 +4759,15 @@ int main(int argc, char *argv[]) {
                         s.bind_all = (v != 0);
                     else if (sscanf(line, "stats_port=%d", &v) == 1 && !s.cli_stats_port_set)
                         s.stats_port = v;
+                    else {
+                        char imode[16];
+                        if (sscanf(line, "img_mode=%15s", imode) == 1) img_mode_set(imode);
+                    }
                 }
                 fclose(f);
-                LOG_INFO("Loaded webserver.ini settings (ports %d/%d, bind_all=%d, stats_port=%d).",
-                         s.http_port, s.https_port, s.bind_all ? 1 : 0, s.stats_port);
+                LOG_INFO("Loaded webserver.ini settings (ports %d/%d, bind_all=%d, stats_port=%d, img_mode=%s).",
+                         s.http_port, s.https_port, s.bind_all ? 1 : 0, s.stats_port,
+                         img_mode_name());
             }
         }
     }

@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.48`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.49`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -225,3 +225,14 @@
      （阶段 + 细节 + 诊断：模式、包路径、包是否仍存在、是否签名、Win32 错误码、
      目录与日志路径），弹窗标题统一为「更新安装失败」并提供“复制诊断信息到剪贴板”；
   5. 仪表盘新增「用便携包更新」按钮（写入 `update_mode=portable` 后立即检查更新）。
+- 占位图策略 + 修掉“永远同一张”（v1.49，用户报告 + 代码取证）：
+  索引原来是 `memcpy(&t, c->data, sizeof(t))` 再从 `c->data`（mongoose 每连接
+  暂存区）取余 —— 那是**未定义数据**，新连接实际恒为 0，于是所有被拦请求都返回
+  `img_00.webp`，“随机占位图”其实早就死了。现在：
+  - 索引改由服务端 `img_pick_index()` 决定，绝不读 `c->data`；
+  - 新增 `webserver.ini [settings] img_mode`：`rotate`（默认，**按 UID 轮转**：
+    同一个应用的一批广告图请求会依次拿到不同图片，用尽后从头循环）、`random`
+    （启动时真随机种子，逐请求随机、允许重复）、`fixed`（永远第一张，旧行为）；
+  - `/internal-stats` 增加 `img_mode`、`img_count`、`img_last`（最近返回的文件名），
+    便于直接从统计接口验证；启动日志也会打印当前 img_mode。
+  待办：设置页的三选一按钮 + `/control set_img_mode` 实时切换（本轮先以 ini 提供）。
