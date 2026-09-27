@@ -3060,6 +3060,11 @@ static size_t s_block_cap;    /* allocated slots (power of two, 0 = none) */
 static size_t s_block_used;
 static bool s_block_grow(void);
 
+/* Domains contributed by resources/subscriptions.txt in the last (re)load, so
+   "重新加载订阅" can answer with something a user can act on instead of a bare
+   "OK" - the button looked useless because it never said what it found. */
+static size_t s_subs_domains;
+
 static uint64_t fnv1a_lower(const char *s, size_t n) {
     uint64_t h = 1469598103934665603ULL;
     for (size_t i = 0; i < n; i++) {
@@ -3188,6 +3193,7 @@ static void block_set_load_subscriptions(const char *resource_dir) {
     }
     fclose(fp);
     if (n > 0) LOG_INFO("block set: %lu subscription domains loaded", (unsigned long) n);
+    s_subs_domains = (size_t) n;
 }
 
 static void block_set_load(const char *resource_dir) {
@@ -4293,7 +4299,19 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             }
         } else if (mg_strcmp(cmd, mg_str("reload_subscriptions")) == 0) {
             block_set_load(s->resource_dir);
-            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: subscriptions reloaded");
+            /* Report what was actually found: the count from the local list and
+               where that list lives. Zero entries is the normal answer when the
+               file was never filled in - which is exactly what made this button
+               look pointless. */
+            char msg[320];
+            snprintf(msg, sizeof(msg),
+                     "OK: 订阅已重新加载 - 本地订阅域名 %lu 条（%s\\subscriptions.txt），"
+                     "拦截集合共 %lu 条",
+                     (unsigned long) s_subs_domains, s->resource_dir,
+                     (unsigned long) s_block_used);
+            LOG_INFO("control: reload_subscriptions -> %lu local domains, %lu in the block set",
+                     (unsigned long) s_subs_domains, (unsigned long) s_block_used);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "%s", msg);
         } else if (mg_strcmp(cmd, mg_str("clear_query_log")) == 0) {
             qlog_clear();
             qlog_save(s->resource_dir);
