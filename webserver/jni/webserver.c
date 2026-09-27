@@ -417,6 +417,7 @@ static void log_file_line(const char *level, const char *fmt, ...) {
  */
 static char s_img_last[BLOCK_IMAGE_NAME_MAX];
 static const char *img_mode_name(void);
+static int img_pick_index(struct settings *s, uint32_t uid);
 
 /* Scan resource_dir for files matching img_*.webp (case-sensitive,
    any suffix - "img_00.webp", "img_cat.webp", "img_2024-ad.webp" all
