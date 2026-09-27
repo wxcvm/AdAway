@@ -139,6 +139,10 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- Extra triggers: BOOT_COMPLETED waits for the first unlock on
+                     encrypted devices and some OEM cleaners drop it entirely. -->
+                <action android:name="android.intent.action.USER_UNLOCKED" />
+                <action android:name="android.intent.action.USER_PRESENT" />
                 <!-- HTC / some Qualcomm firmwares fire this instead of BOOT_COMPLETED -->
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <!-- HTC-specific alias -->

@@ -62,6 +62,11 @@ public class BootReceiver extends BroadcastReceiver {
     /** All boot-completed actions this receiver recognises. */
     private static final java.util.Set<String> BOOT_ACTIONS = new java.util.HashSet<>(java.util.Arrays.asList(
             ACTION_BOOT_COMPLETED,
+            /* Delivered right after the first unlock and on every wake: on
+               devices where BOOT_COMPLETED waits for the unlock (or is dropped
+               by an OEM cleaner) these still arrive and repair the watchdog. */
+            "android.intent.action.USER_UNLOCKED",
+            "android.intent.action.USER_PRESENT",
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON",
             // The app update replaces the staged executable's library path and
@@ -150,6 +155,9 @@ public class BootReceiver extends BroadcastReceiver {
         quickStart.start();
 
         scheduleStart(appContext, action);
+        /* Re-arm the watchdog backstop: if the self-rescheduling chain was ever
+           lost, this is the moment it comes back - before the user notices. */
+        ServerWatchdogWorker.ensureScheduled(appContext);
     }
 
     /**

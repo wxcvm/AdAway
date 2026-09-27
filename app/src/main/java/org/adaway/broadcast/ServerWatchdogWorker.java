@@ -5,6 +5,7 @@ import android.content.Context;
 import androidx.annotation.NonNull;
 import androidx.work.ExistingWorkPolicy;
 import androidx.work.OneTimeWorkRequest;
+import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
@@ -62,6 +63,7 @@ public class ServerWatchdogWorker extends Worker {
         Context context = getApplicationContext();
         // Chain the next check first: it must be scheduled even if this run
         // throws (a lost chain would mean up to 15 minutes of downtime).
+        ensureScheduled(context);
         scheduleFollowUp(context);
         if (!PreferenceHelper.getWebServerEnabled(context)) {
             return Result.success();
@@ -101,6 +103,32 @@ public class ServerWatchdogWorker extends Worker {
     }
 
     /**
+     * Make sure BOTH safety nets exist.
+     *
+     * <p>The periodic work was declared (UNIQUE_PERIODIC) but never actually
+     * enqueued - only the self-rescheduling 5 minute one-shot was. So whenever
+     * that chain broke (the app was force-stopped, the system cancelled the
+     * pending work, an OEM cleaner removed it) nothing ever restarted the
+     * server again until the user opened the app by hand: exactly the "the web
+     * server is not started at boot until I touch the app" report.</p>
+     *
+     * <p>ExistingWorkPolicy.KEEP makes this idempotent: calling it from the app
+     * start, the boot receiver and the worker itself never resets a running
+     * schedule, it only re-creates one that is gone. WorkManager persists the
+     * period across reboots, so the backstop survives everything except the
+     * user force-stopping the app.</p>
+     *
+     * @param context The application context.
+     */
+    public static void ensureScheduled(Context context) {
+        PeriodicWorkRequest periodic = new PeriodicWorkRequest.Builder(
+                ServerWatchdogWorker.class, 15, TimeUnit.MINUTES).build();
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                UNIQUE_PERIODIC, ExistingWorkPolicy.KEEP, periodic);
+        scheduleFollowUp(context);
+    }
+
+    /**
      * Schedule the next self-check.
      *
      * @param context The application context.
@@ -120,6 +148,8 @@ public class ServerWatchdogWorker extends Worker {
      * @param context The application context.
      */
     public static void scheduleImmediateCheck(Context context) {
+        // Opening the app is also the moment to repair a missing backstop.
+        ensureScheduled(context);
         OneTimeWorkRequest now = new OneTimeWorkRequest.Builder(ServerWatchdogWorker.class)
                 .setInitialDelay(5, TimeUnit.SECONDS)
                 .build();
