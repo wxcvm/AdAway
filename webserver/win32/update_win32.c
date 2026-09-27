@@ -881,11 +881,22 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                 WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
                                     WINHTTP_HEADER_NAME_BY_INDEX, &declared, &clen_size,
                                     WINHTTP_NO_HEADER_INDEX);
+                /* The download path used to say only "incomplete (0 bytes)",
+                   which hid whether the server refused the request or the file
+                   could not be opened at all. */
+                win32_log_line("update: download HTTP %lu, Content-Length %llu, "
+                               "resuming from %llu, target %ls",
+                               (unsigned long) status, declared, have, file);
                 /* A server that ignores our Range header restarts the file. */
                 if (status == 200) have = 0;
                 if ((status == 200 || status == 206) &&
                     have + declared <= (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES) {
                     out = _wfopen(file, have > 0 ? L"ab" : L"wb");
+                    if (out != NULL) {
+                    } else {
+                        win32_log_line("update: cannot open %ls for writing (Win32 error %lu)",
+                                       file, (unsigned long) GetLastError());
+                    }
                     if (out != NULL) {
                         /* When the server omits Content-Length, "have" alone has
                            to represent the total, so a clean EOF means done. */
@@ -1426,6 +1437,29 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     DWORD stamp = GetTickCount();
 
     GetTempPathW(MAX_PATH, temp);
+    /*
+     * Prefer a folder we know is writable: a policy or an antivirus rule that
+     * forbids writing executables to %TEMP% makes the download fail with
+     * "0 bytes on disk" and also blocks the portable fallback (measured on a
+     * user machine: %TEMP% writable for a signed shell, but the unsigned
+     * webserver.exe could not even open the file there; the install directory's
+     * own resources\ folder was writable, so use it).
+     */
+    {
+        wchar_t mod[MAX_PATH], upd[MAX_PATH];
+        if (GetModuleFileNameW(NULL, mod, MAX_PATH)) {
+            wchar_t *slash = wcsrchr(mod, L'\\');
+            if (slash != NULL) {
+                *slash = 0;
+                swprintf(upd, MAX_PATH, L"%s\\resources\\update", mod);
+                if (CreateDirectoryW(upd, NULL) ||
+                    GetLastError() == ERROR_ALREADY_EXISTS) {
+                    swprintf(temp, MAX_PATH, L"%s\\", upd);
+                    win32_log_line("update: package folder is %ls", temp);
+                }
+            }
+        }
+    }
     /*
      * Keep the REAL extension of the downloaded asset: the feed ships either
      * the Inno Setup installer (.exe) or the portable zip. Naming everything
