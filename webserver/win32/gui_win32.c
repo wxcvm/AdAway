@@ -1386,6 +1386,25 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
 
     int slotw = aw / count;
     if (slotw < 4) slotw = 4;
+    /*
+     * Chart polish (the old drawing put two very thin slivers side by side on
+     * flat blue/red, which is what "统计图太丑" was about):
+     *   - wider rounded columns with a real gap between the pair;
+     *   - a baseline axis so the plot has a floor;
+     *   - the highest blocked column is labelled with its value.
+     * Purely inside the existing plot rectangle - no control moves, so nothing
+     * can overlap (see the settings-page fix in 1.50).
+     */
+    int barw = (int) (slotw * 0.42);
+    if (barw < 3) barw = 3;
+    int gap = slotw - 2 * barw;
+    if (gap < 2) { barw = (slotw - 2) / 2; gap = slotw - 2 * barw; }
+    if (barw < 2) barw = 2;
+    long long peak_blocked = -1;
+    int peak_index = 0;
+    for (int i = 0; i < count; i++) {
+        if (h[i].blocked > peak_blocked) { peak_blocked = h[i].blocked; peak_index = i; }
+    }
     HBRUSH blue = CreateSolidBrush(C_BLUE);
     HBRUSH red = CreateSolidBrush(C_RED);
     HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
@@ -1396,17 +1415,40 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
         if (bh1 > 1) {
             SelectObject(hdc, blue);
             RoundRect(hdc, S(bx + 1), S(ay + ah) - S(bh1),
-                      S(bx + (int)(slotw * 0.38)), S(ay + ah), S(5), S(5));
+                      S(bx + 1 + barw), S(ay + ah), S(4), S(4));
         }
         if (bh2 > 1) {
             SelectObject(hdc, red);
-            RoundRect(hdc, S(bx + (int)(slotw * 0.55)), S(ay + ah) - S(bh2),
-                      S(bx + slotw - 1), S(ay + ah), S(5), S(5));
+            RoundRect(hdc, S(bx + 1 + barw + gap), S(ay + ah) - S(bh2),
+                      S(bx + 1 + 2 * barw + gap), S(ay + ah), S(4), S(4));
         }
     }
     SelectObject(hdc, op);
     DeleteObject(blue);
     DeleteObject(red);
+
+    /* Baseline axis: without it the columns floated in the grid. */
+    HPEN axis = CreatePen(PS_SOLID, 1, g_pal.border);
+    HGDIOBJ aop = SelectObject(hdc, axis);
+    MoveToEx(hdc, S(ax), S(ay + ah), NULL);
+    LineTo(hdc, S(ax) + S(aw), S(ay + ah));
+    SelectObject(hdc, aop);
+    DeleteObject(axis);
+
+    /* Label the peak so the chart says something without a mouse-over. */
+    if (peak_blocked > 0) {
+        wchar_t pb[32];
+        swprintf(pb, 32, L"%lld", peak_blocked);
+        HFONT pf = mfont(10, FW_NORMAL);
+        HGDIOBJ pop = SelectObject(hdc, pf);
+        SetTextColor(hdc, C_RED);
+        int pbx = ax + peak_index * slotw + 1 + barw + gap;
+        int pby = ay + ah - (int)((double)ah * (double)peak_blocked / (double)maxv) - 14;
+        if (pby < ay) pby = ay;
+        TextOutW(hdc, S(pbx), S(pby), pb, (int)wcslen(pb));
+        SelectObject(hdc, pop);
+        DeleteObject(pf);
+    }
 }
 
 static void draw_legend(HDC hdc, int x, int y) {
