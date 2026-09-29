@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.49`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.50`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -236,3 +236,5 @@
   - `/internal-stats` 增加 `img_mode`、`img_count`、`img_last`（最近返回的文件名），
     便于直接从统计接口验证；启动日志也会打印当前 img_mode。
   待办：设置页的三选一按钮 + `/control set_img_mode` 实时切换（本轮先以 ini 提供）。
+
+- 版本号纪律（v1.50 起）：任何用户可见的改动都必须升版本号。1.49 之后我连着推了三个修复却没升版本，CI 只是把 1.49 的资产覆盖一遍，用户端一直显示 1.49，无法判断是否装上。
