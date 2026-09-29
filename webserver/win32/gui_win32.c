@@ -1795,11 +1795,11 @@ static const struct ctl_desc g_clayout[] = {
     /* Manual, dual-CA rotation: the new CA is created next to the old one and
        both stay valid for 90 days (devices are migrated by hand), so the old
        button that silently replaced the CA is gone. */
-    { IDC_CAROTATE,   410, 424, 210, 26, L"BUTTON", L"生成新 CA（并存 90 天）", BS_PUSHBUTTON },
-    { IDC_CADROP,     410, 456, 210, 26, L"BUTTON", L"撤销旧 CA（90 天后）", BS_PUSHBUTTON },
+   { IDC_CAROTATE,   210, 456, 200, 26, L"BUTTON", L"生成新 CA（并存 90 天）", BS_PUSHBUTTON },
+    { IDC_CADROP,     210, 486, 200, 26, L"BUTTON", L"撤销旧 CA（90 天后）", BS_PUSHBUTTON },
     /* Escape hatch for machines where policy/antivirus blocks running an
        installer: switch to the portable in-place path and check right away. */
-    { IDC_PORTABLEUPD, 410, 486, 210, 26, L"BUTTON", L"用便携包更新", BS_PUSHBUTTON },
+    { IDC_PORTABLEUPD, 420, 456, 200, 26, L"BUTTON", L"用便携包更新", BS_PUSHBUTTON },
     { IDM_AUTOSTART,  648, 426, 180, 24, L"BUTTON", L"开机自启动", BS_AUTOCHECKBOX },
     /* Below the "导出诊断信息" button (which sits at 844,434): the two used to
        overlap in x 844-948 / y 434-452. */
