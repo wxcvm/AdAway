@@ -828,6 +828,21 @@ static void post_progress(int percent) {
  * finished file, so a resumed download is never trusted on size alone.
  */
 #define UPDATE_DOWNLOAD_ATTEMPTS 5
+/*
+ * Paths for the log. win32_log_line() is a *narrow* printf and MinGW does not
+ * honour %ls there: the wide argument was printed byte-wise and stopped at the
+ * first NUL, so every logged path came out as garbage like
+ * "Cadblock-update-16084-359153296." - the real path was fine, only the log was
+ * unreadable. Convert to UTF-8 and print with %s instead.
+ */
+static const char *narrow_path(const wchar_t *path) {
+    static char buf[1400];
+    buf[0] = 0;
+    if (path != NULL)
+        WideCharToMultiByte(CP_UTF8, 0, path, -1, buf, (int) sizeof(buf), NULL, NULL);
+    return buf;
+}
+
 static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                                  const wchar_t *extra_headers) {
     wchar_t host[256] = L"", path[1024] = L"", mapped[1200] = L"";
@@ -885,8 +900,8 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                    which hid whether the server refused the request or the file
                    could not be opened at all. */
                 win32_log_line("update: download HTTP %lu, Content-Length %llu, "
-                               "resuming from %llu, target %ls",
-                               (unsigned long) status, declared, have, file);
+                               "resuming from %llu, target %s",
+                               (unsigned long) status, declared, have, narrow_path(file));
                 /* A server that ignores our Range header restarts the file. */
                 if (status == 200) have = 0;
                 if ((status == 200 || status == 206) &&
@@ -894,8 +909,8 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                     out = _wfopen(file, have > 0 ? L"ab" : L"wb");
                     if (out != NULL) {
                     } else {
-                        win32_log_line("update: cannot open %ls for writing (Win32 error %lu)",
-                                       file, (unsigned long) GetLastError());
+                        win32_log_line("update: cannot open %s for writing (Win32 error %lu)",
+                                       narrow_path(file), (unsigned long) GetLastError());
                     }
                     if (out != NULL) {
                         /* When the server omits Content-Length, "have" alone has
@@ -1455,7 +1470,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
                 if (CreateDirectoryW(upd, NULL) ||
                     GetLastError() == ERROR_ALREADY_EXISTS) {
                     swprintf(temp, MAX_PATH, L"%s\\", upd);
-                    win32_log_line("update: package folder is %ls", temp);
+                    win32_log_line("update: package folder is %s", narrow_path(temp));
                 }
             }
         }
@@ -1659,7 +1674,7 @@ portable_fallback:
             return 0;
         }
         update_temp_file(temp, pid, stamp + 1, info->alt_url, altfile, MAX_PATH);
-        win32_log_line("update: portable fallback - downloading %ls", info->alt_url);
+        win32_log_line("update: portable fallback - downloading %s", narrow_path(info->alt_url));
         if (!(http_download_to_file(info->alt_url, altfile, NULL) ||
               (info->alt_api_url[0] &&
                http_download_to_file(info->alt_api_url, altfile,
