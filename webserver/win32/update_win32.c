@@ -1731,10 +1731,48 @@ portable_fallback:
     run_and_wait(cmd);
     swprintf(cmd, 4096, L"cmd.exe /c mkdir \"%s\"", dir);
     run_and_wait(cmd);
-    swprintf(cmd, 4096, L"tar.exe -xf \"%s\" -C \"%s\"", zip, dir);
-    int rc = run_and_wait(cmd);
+    /*
+     * Extraction with a fallback chain - and, for the first time, diagnostics.
+     * "解压更新包失败或包内缺少 webserver.exe" was the one stage that logged
+     * nothing at all, so it could only ever mean "something went wrong here":
+     *  1. tar.exe (present since Windows 10 1803) - fast, no PowerShell start-up;
+     *  2. powershell Expand-Archive - present on every supported build;
+     *  3. System.IO.Compression - still works when the cmdlet is blocked by
+     *     execution policy, which is how (2) fails on locked-down machines.
+     */
+    int rc = -1;
+    win32_log_line("update: extracting %s into %s", narrow_path(zip), narrow_path(dir));
+    swprintf(cmd, 4096, L"cmd.exe /c tar.exe -xf \"%s\" -C \"%s\"", zip, dir);
+    rc = run_and_wait(cmd);
+    win32_log_line("update: tar rc=%d", rc);
+    if (rc != 0 || !find_extracted_dir(dir, src, MAX_PATH)) {
+        swprintf(cmd, 4096,
+                 L"powershell -NoProfile -ExecutionPolicy Bypass -Command "
+                 L"\"Expand-Archive -LiteralPath '%s' -DestinationPath '%s' -Force\"",
+                 zip, dir);
+        rc = run_and_wait(cmd);
+        win32_log_line("update: powershell Expand-Archive rc=%d", rc);
+    }
+    if (rc != 0 || !find_extracted_dir(dir, src, MAX_PATH)) {
+        /* A clean directory first: the two-argument ExtractToDirectory merges
+           but refuses to overwrite an existing file (PS 5.1 has no overwrite
+           overload). */
+        swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%s\"", dir);
+        run_and_wait(cmd);
+        swprintf(cmd, 4096, L"cmd.exe /c mkdir \"%s\"", dir);
+        run_and_wait(cmd);
+        swprintf(cmd, 4096,
+                 L"powershell -NoProfile -ExecutionPolicy Bypass -Command "
+                 L"\"Add-Type -AssemblyName System.IO.Compression.FileSystem; "
+                 L"[System.IO.Compression.ZipFile]::ExtractToDirectory('%s','%s')\"",
+                 zip, dir);
+        rc = run_and_wait(cmd);
+        win32_log_line("update: System.IO.Compression extract rc=%d", rc);
+    }
     DeleteFileW(zip);              /* the batch script only needs the extracted tree */
     if (rc != 0 || !find_extracted_dir(dir, src, MAX_PATH)) {
+        win32_log_line("update: apply aborted - last rc=%d, webserver.exe %s under %s",
+                       rc, src[0] ? "found" : "missing", narrow_path(dir));
         /* The archive must really contain the server: the old fallback copied
            whatever was there and closed the app without installing anything. */
         swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%s\"", dir);
