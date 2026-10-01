@@ -1395,11 +1395,14 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
      * Purely inside the existing plot rectangle - no control moves, so nothing
      * can overlap (see the settings-page fix in 1.50).
      */
-    int barw = (int) (slotw * 0.42);
+    /*
+     * ONE solid column per slot. The previous revision drew the pair
+     * (requests + blocked) as two separate thin columns with a gap between
+     * them, which read as "the chart is broken in the middle" - so the blocked
+     * share is now a segment at the bottom of the same column instead.
+     */
+    int barw = slotw - 2;
     if (barw < 3) barw = 3;
-    int gap = slotw - 2 * barw;
-    if (gap < 2) { barw = (slotw - 2) / 2; gap = slotw - 2 * barw; }
-    if (barw < 2) barw = 2;
     long long peak_blocked = -1;
     int peak_index = 0;
     for (int i = 0; i < count; i++) {
@@ -1419,8 +1422,9 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
         }
         if (bh2 > 1) {
             SelectObject(hdc, red);
-            RoundRect(hdc, S(bx + 1 + barw + gap), S(ay + ah) - S(bh2),
-                      S(bx + 1 + 2 * barw + gap), S(ay + ah), S(4), S(4));
+            /* Blocked share of this period, stacked on the same column. */
+            RoundRect(hdc, S(bx + 1), S(ay + ah) - S(bh2),
+                      S(bx + 1 + barw), S(ay + ah), S(4), S(4));
         }
     }
     SelectObject(hdc, op);
@@ -1442,7 +1446,7 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
         HFONT pf = mfont(10, FW_NORMAL);
         HGDIOBJ pop = SelectObject(hdc, pf);
         SetTextColor(hdc, C_RED);
-        int pbx = ax + peak_index * slotw + 1 + barw + gap;
+        int pbx = ax + peak_index * slotw + 1;   /* left edge of that column */
         int pby = ay + ah - (int)((double)ah * (double)peak_blocked / (double)maxv) - 14;
         if (pby < ay) pby = ay;
         TextOutW(hdc, S(pbx), S(pby), pb, (int)wcslen(pb));

@@ -4,7 +4,7 @@
 - **Windows 11 x64 独立版从本分支发布**，与 master 上的 Android 主线互不影响。
 - 工作流 `.github/workflows/windows-release.yml` 在本分支 push 时运行：
   编译 → HTTP/HTTPS 冒烟 + 监听表断言 → GUI 存活 → 端口冲突处理 → 自启动注册表 → 打包 → 发布 Release。
-- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.54`）；
+- 发布标签规则：`win11-webserver-v<major>.<minor>`（当前 `win11-webserver-v1.55`）；
   工作流顶部的 `TAG` 是唯一来源，`gui_win32.h` 与 `installer.iss` 的版本号必须与它一致（CI 会断言）。
  程序内版本号见 `gui_win32.h` 的 `ADBLOCK_APP_VERSION`。
 
@@ -243,3 +243,4 @@
 - 更新日志可读性 + 解压诊断（v1.52）：win32_log_line() 是窄字符 printf，MinGW 不认 %ls，宽字符参数被逐字节打印并在第一个 NUL 处截断 —— 于是日志里的路径变成「Cadblock-update-16084-359153296.」这种垃圾（实际路径是对的）。新增 narrow_path() 统一转 UTF-8 后用 %s 输出，并修好下载/目标/便携包等 4 处路径日志。
 - 修 CI 全红：签名步骤的验证方式（v1.53）。配上签名 secret 后，`osslsigncode verify` 会用 runner 的 CA 库建信任链，而自签名证书不在其中，于是每次都报 `Failed to add store lookup file / Signature verification: failed` —— 签名其实是成功的，是**验证方式**错了。改为：先从 pfx 导出签发证书 `cert.pem`，用 `-CAfile cert.pem` 验证；导出或验证失败只记 warning，不再让发布变红（签名本身依旧强制：sign + mv 失败即步骤失败）。
 - 解压环节的回退链 + 诊断（v1.54）：用户机器上“下载已完成（安装器 5,305,029 / 便携包 3,999,590 字节，均 HTTP 200 且校验通过），安装器启动失败→自动降级便携包→最后卡在解压/就位”。解压原来只用 tar.exe、且全程无日志。现在：tar.exe → powershell Expand-Archive → System.IO.Compression 三级回退（第三级先清空 staging 再用两参数 ExtractToDirectory，兼容 PS 5.1），每次尝试与返回码、解压目录、以及“webserver.exe 是否找到”都写进 webserver.log。
+- 统计图修正（v1.55）：v1.51 把每个时间点画成「请求柱 + 拦截柱」两根细柱、中间留缝，用户看到的是「中间断开了」。改回**单一实心柱**：整柱用强调色表示请求量，拦截量作为同一根柱子底部的红色段叠加（stacked），保留基线轴与峰值标注。
