@@ -1545,23 +1545,26 @@ static DWORD WINAPI apply_thread(LPVOID param) {
        could be pre-created by another process, and it was never removed: the
        batch script now deletes it after the file copy. */
     /*
-     * ROOT CAUSE of "更新成功了但版本号没变": the extraction tree and the update
-     * batch must NOT live inside the install directory.
+     * ROOT CAUSE (2) of "更新成功了但版本号没变": the staging tree must be on the
+     * SAME VOLUME as the install directory.
      *
-     * Step 1 of the generated batch renames the install directory aside in one
-     * atomic move (APP -> APP.backup-N). The preferred download folder is
-     * <install>\resources\update\ (chosen because policy/antivirus rules that
-     * block writing to %TEMP% made the download fail there), so the extracted
-     * tree used to land INSIDE APP: after the rename it moved along with it and
-     * the SRC path recorded in the batch dangled. Step 2 (move SRC into place)
-     * then failed, the batch took its rollback branch, restored the backup and
-     * restarted the OLD build - while the user had already been told the update
-     * succeeded. cmd.exe also keeps the running .bat open, which blocks the
-     * rename for the very same reason.
+     * Fixing (1) by staging in %TEMP% moved the tree to C: while the install
+     * lives on D:, and cmd's move refuses to move a DIRECTORY across volumes
+     * ("Access is denied", exit code 1, nothing copied - reproduced on the
+     * affected machine). Step 2 therefore failed within 10 ms, the batch rolled
+     * back and the version never changed; the step log added for (1) is what
+     * made this visible.
      *
-     * Downloads stay in the (writable) package folder; only the things that
-     * must survive the rename - the extracted tree, the listing file and the
-     * batch itself - move outside the install directory.
+     * So the staging tree has exactly two constraints:
+     *   1. NOT inside the install directory (step 1 renames that whole directory
+     *      aside, which would drag a staged tree along with it and dangle the
+     *      recorded SRC path);
+     *   2. on the same volume (step 2 must be able to move it into place).
+     * A sibling directory of the install directory satisfies both. If that
+     * parent is not writable, %TEMP% is still used - the generated batch then
+     * falls back to xcopy for step 2, which does work across volumes.
+     *
+     * Downloads stay in the (writable) package folder.
      */
     wchar_t stage_parent[MAX_PATH];
     {
@@ -1577,14 +1580,39 @@ static DWORD WINAPI apply_thread(LPVOID param) {
         }
         if (appdir_now[0] != 0 &&
             _wcsnicmp(temp, appdir_now, wcslen(appdir_now)) == 0) {
+            wchar_t parent[MAX_PATH], probe[MAX_PATH];
+            parent[0] = 0;
+            wcsncpy(parent, appdir_now, MAX_PATH - 1);
+            parent[MAX_PATH - 1] = 0;
+            wchar_t *slash = wcsrchr(parent, L'\\');
+            if (slash != NULL && slash != parent) {
+                *(slash + 1) = 0;      /* "D:\ADBlock" -> "D:\" (keep the root) */
+            } else {
+                parent[0] = 0;
+            }
+            if (parent[0] != 0) {
+                swprintf(probe, MAX_PATH, L"%lsadblock-update-%lu-%lu", parent,
+                         (unsigned long) pid, (unsigned long) stamp);
+                /* Prove the parent is writable before committing to it. */
+                if (CreateDirectoryW(probe, NULL) ||
+                    GetLastError() == ERROR_ALREADY_EXISTS) {
+                    wcsncpy(stage_parent, parent, MAX_PATH - 1);
+                    stage_parent[MAX_PATH - 1] = 0;
+                    win32_log_line("update: staging beside the install directory (%s)",
+                                   narrow_path(stage_parent));
+                    goto stage_parent_ready;
+                }
+            }
             GetTempPathW(MAX_PATH, stage_parent);
-            win32_log_line("update: staging outside the install directory (%s)",
+            win32_log_line("update: staging in the system temp folder (%s) - the install "
+                           "folder's parent is not writable, the batch will xcopy",
                            narrow_path(stage_parent));
         } else {
             wcsncpy(stage_parent, temp, MAX_PATH - 1);
             stage_parent[MAX_PATH - 1] = 0;
         }
     }
+stage_parent_ready:
     swprintf(dir, MAX_PATH, L"%lsadblock-update-%lu-%lu", stage_parent, (unsigned long) pid, (unsigned long) stamp);
     swprintf(list, MAX_PATH, L"%lsadblock-update-%lu-%lu.list", stage_parent, (unsigned long) pid, (unsigned long) stamp);
     swprintf(bat, MAX_PATH, L"%lsadblock-update-%lu-%lu.bat", stage_parent, (unsigned long) pid, (unsigned long) stamp);
@@ -1971,10 +1999,18 @@ portable_fallback:
              L"timeout /t 1 /nobreak >nul\r\n"
              L"goto moveloop\r\n"
              L":moved\r\n"
-             L"echo [%%DATE%% %%TIME%%] old build moved aside>>\"%%ULOG%%\"\r\n"
-             L"rem 2) the extracted build takes its place\r\n"
+             L"echo [%%DATE%% %%TIME%%] old build moved aside (src=\"%%SRC%%\")>>\"%%ULOG%%\"\r\n"
+             L"rem 2) the extracted build takes its place. A rename is preferred - fast\r\n"
+             L"rem    and atomic - but cmd's move refuses to move a DIRECTORY across\r\n"
+             L"rem    volumes (\"Access is denied\"), so xcopy is the fallback for a\r\n"
+             L"rem    staging folder that ended up on another drive.\r\n"
              L"move \"%%SRC%%\" \"%%APP%%\" >nul 2>&1\r\n"
+             L"if not errorlevel 1 goto placed\r\n"
+             L"echo [%%DATE%% %%TIME%%] move failed (cross-volume?) - trying xcopy>>\"%%ULOG%%\"\r\n"
+             L"xcopy /E /I /Y \"%%SRC%%\" \"%%APP%%\" >nul 2>&1\r\n"
              L"if errorlevel 1 goto :rollback\r\n"
+             L"rmdir /S /Q \"%%SRC%%\" >nul 2>&1\r\n"
+             L":placed\r\n"
              L"echo [%%DATE%% %%TIME%%] new build in place>>\"%%ULOG%%\"\r\n"
              L"rem 3) user data comes back (installer exclusion list + own images)\r\n"
              L"xcopy /E /I /Y \"%%BK%%\\resources\\*.dat\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
