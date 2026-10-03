@@ -25,6 +25,8 @@ windres "$RC_FILE" -O coff -o "$HERE/app_res.o"
 echo "==> Compiling webserver.exe ..."
 gcc \
   -std=c11 -O2 -Wall -mwindows \
+  -fstack-protector-strong \
+  -Wl,--dynamicbase,--nxcompat,--high-entropy-va \
   -D MG_ENABLE_IPV6 -DMG_TLS=MG_TLS_OPENSSL -DMG_ENABLE_POLL=1 \
   -I"$HERE" \
   -I"$MINGW_PREFIX/include" \
@@ -37,11 +39,29 @@ gcc \
 
 echo "==> Bundling runtime DLLs ..."
 for dll in libssl-3-x64.dll libcrypto-3-x64.dll zlib-1.dll \
-           libgcc_s_seh-1.dll libwinpthread-1.dll; do
+           libgcc_s_seh-1.dll libwinpthread-1.dll libssp-0.dll; do
   if [ -f "$MINGW_PREFIX/bin/$dll" ]; then
     cp "$MINGW_PREFIX/bin/$dll" "$OUT/"
   fi
 done
+
+# Refuse to publish a binary with a dependency that is not bundled and not a
+# Windows system DLL. -fstack-protector-strong adds libssp, and a missing DLL
+# is invisible on a CI runner (MSYS2's bin is on PATH there) but makes the
+# executable fail to start on a user's machine.
+echo "==> Verifying runtime dependencies ..."
+missing=""
+for dll in $(objdump -p "$OUT/webserver.exe" | sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p'); do
+  [ -f "$OUT/$dll" ] && continue
+  [ -f "/c/Windows/System32/$dll" ] && continue
+  missing="$missing $dll"
+done
+if [ -n "$missing" ]; then
+  echo "ERROR: webserver.exe needs DLLs that are neither bundled nor system:"
+  echo "      $missing"
+  exit 1
+fi
+echo "==> All imports satisfied ($(objdump -p "$OUT/webserver.exe" | grep -c 'DLL Name:'))"
 
 echo "==> Build output:"
 ls -la "$OUT"

@@ -692,13 +692,49 @@ static void ini_file_path(char *out, size_t n) {
 static void ini_save(int http_port, int https_port, bool bind_all) {
     char path[1024];
     ini_file_path(path, sizeof(path));
+    /*
+     * AUDIT W4-02 / V7: this used fopen(path, "w") and wrote back only these
+     * four keys. Every other key was silently destroyed - stats_port and
+     * img_mode (read by webserver.c) and update_mode / mirror (read by
+     * update_win32.c; update_mode is the portable-update escape hatch the
+     * settings page itself writes). Merge instead: copy every line we do not
+     * own and re-emit ours on top.
+     */
+    char *kept = NULL;
+    size_t kept_len = 0;
+    FILE *r = fopen(path, "r");
+    if (r != NULL) {
+        char line[512];
+        while (fgets(line, sizeof(line), r) != NULL) {
+            if (strncmp(line, "http_port=", 10) == 0 ||
+                strncmp(line, "https_port=", 11) == 0 ||
+                strncmp(line, "bind_all=", 9) == 0 ||
+                strncmp(line, "theme=", 6) == 0) continue;
+            size_t n = strlen(line);
+            char *grown = (char *) realloc(kept, kept_len + n + 1);
+            if (grown == NULL) break;
+            kept = grown;
+            memcpy(kept + kept_len, line, n);
+            kept_len += n;
+            kept[kept_len] = 0;
+        }
+        fclose(r);
+    }
     FILE *f = fopen(path, "w");
-    if (!f) return;
+    if (f == NULL) {
+        free(kept);
+        return;
+    }
     fprintf(f, "http_port=%d\n", http_port);
     fprintf(f, "https_port=%d\n", https_port);
     fprintf(f, "bind_all=%d\n", bind_all ? 1 : 0);
     fprintf(f, "theme=%d\n", g_theme_pref);
+    if (kept != NULL && kept_len > 0) {
+        fwrite(kept, 1, kept_len, f);
+        if (kept[kept_len - 1] != '\n') fputc('\n', f);
+    }
     fclose(f);
+    free(kept);
 }
 
 /* Reads theme= from webserver.ini; returns THEME_SYSTEM when absent. */
@@ -1411,6 +1447,14 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
     HBRUSH blue = CreateSolidBrush(C_BLUE);
     HBRUSH red = CreateSolidBrush(C_RED);
     HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+    /*
+     * AUDIT W4-01: remember the brush that is currently selected so the two
+     * brushes below can be de-selected again before they are deleted.
+     * DeleteObject() on an object that is still selected into a DC fails, and
+     * the object then leaks on every repaint (this chart is redrawn by a 2 s
+     * timer) until the process runs out of its GDI quota.
+     */
+    HGDIOBJ obrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
     for (int i = 0; i < count; i++) {
         int bh1 = (int)((double)ah * (double)h[i].requests / (double)maxv);
         int bh2 = (int)((double)ah * (double)h[i].blocked / (double)maxv);
@@ -1427,6 +1471,7 @@ static void draw_chart(HDC hdc, RECT panel, const wchar_t *title,
                       S(bx + 1 + barw), S(ay + ah), S(4), S(4));
         }
     }
+    SelectObject(hdc, obrush);   /* de-select before deleting (AUDIT W4-01) */
     SelectObject(hdc, op);
     DeleteObject(blue);
     DeleteObject(red);
@@ -1567,7 +1612,7 @@ static void draw_listener_card(HDC hdc, int x, int y, int w, int h,
 }
 
 static void draw_statusbar(HDC hdc) {
-    RECT strip = {0, 630, 1000, 678};
+    RECT strip = {S(0), S(630), S(1000), S(678)};   /* AUDIT V8: scale like everything else */
     HBRUSH sbg = CreateSolidBrush(g_pal.strip);
     FillRect(hdc, &strip, sbg);
     DeleteObject(sbg);
@@ -1634,7 +1679,7 @@ static bool nav_hit(int x, int y, int which) {
 }
 
 static void draw_sidebar(HDC hdc) {
-    RECT sb = {0, 0, 190, 680};
+    RECT sb = {S(0), S(0), S(190), S(680)};         /* AUDIT V8: was unscaled */
     HBRUSH bg = CreateSolidBrush(g_pal.sidebar);
     FillRect(hdc, &sb, bg);
     DeleteObject(bg);

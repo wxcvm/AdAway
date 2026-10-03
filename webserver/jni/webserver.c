@@ -14,6 +14,10 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#if !defined(_WIN32)
+#include <strings.h>      /* strcasecmp - the _WIN32 shim below maps it to _stricmp */
+#include <unistd.h>       /* getpid() for the placeholder-image RNG seed */
+#endif
 #include <stdint.h>       /* intptr_t (conn_uid) */
 #include <stdarg.h>       /* va_list - webserver.log mirror */
 #include <time.h>         /* timestamps in webserver.log */
@@ -1105,6 +1109,32 @@ static void load_hist(const struct settings *s) {
         s_daily_pos = f.daily_pos;
         s_hist_slot_start = (time_t)f.hist_slot_start;
         s_daily_slot_start = (time_t)f.daily_slot_start;
+        /*
+         * AUDIT W2-02 / W1-03: everything above comes straight from a file
+         * whose writer is a non-atomic truncating write, so a torn write can
+         * carry a valid magic together with garbage. Unchecked, a negative
+         * ring position made hist_tick() memset s_hist[negative] and
+         * hist_add() index out of bounds, and a timestamp far in the past
+         * made the roll-forward loops spin for billions of iterations before
+         * the first request was served.
+         */
+        time_t loaded_now = time(NULL);
+        if (s_hist_pos < 0 || s_hist_pos >= HIST_SLOTS) s_hist_pos = 0;
+        if (s_daily_pos < 0 || s_daily_pos >= DAILY_SLOTS) s_daily_pos = 0;
+        if (s_hist_slot_start <= 0 || s_hist_slot_start > loaded_now) {
+            s_hist_slot_start = loaded_now;
+        } else if (loaded_now - s_hist_slot_start >
+                   (time_t) HIST_SLOTS * HIST_INTERVAL_S) {
+            /* More than a full ring of catch-up is equivalent to clearing the
+               ring, so cap the work instead of rolling one interval at a time. */
+            s_hist_slot_start = loaded_now - (time_t) HIST_SLOTS * HIST_INTERVAL_S;
+        }
+        if (s_daily_slot_start <= 0 || s_daily_slot_start > loaded_now) {
+            s_daily_slot_start = loaded_now;
+        } else if (loaded_now - s_daily_slot_start >
+                   (time_t) DAILY_SLOTS * DAILY_INTERVAL_S) {
+            s_daily_slot_start = loaded_now - (time_t) DAILY_SLOTS * DAILY_INTERVAL_S;
+        }
         memcpy(s_hist, f.hist, sizeof(s_hist));
         memcpy(s_daily, f.daily, sizeof(s_daily));
         /* Roll forward to now so buckets tick into the correct slots. */
@@ -2014,22 +2044,26 @@ static int mg_str_from_file(const char *path, struct mg_str *out) {
  * PEM parsing is needed here.
  */
 static int leaf_files_fresh(const char *crt, const char *key, const char *dir) {
-    WIN32_FILE_ATTRIBUTE_DATA lf, cf;
-    if (!GetFileAttributesExA(crt, GetFileExInfoStandard, &lf)) return 0;
-    if (!GetFileAttributesExA(key, GetFileExInfoStandard, &lf)) return 0;
-    if (!GetFileAttributesExA(crt, GetFileExInfoStandard, &lf)) return 0;
+    /*
+     * AUDIT V4: this used WIN32_FILE_ATTRIBUTE_DATA / GetFileAttributesExA /
+     * CompareFileTime / FILETIME without any _WIN32 guard, so webserver.c did
+     * not compile for Android at all. The Windows release branch therefore
+     * shipped an app/ tree that could not build, and nothing noticed because
+     * Android CI never ran on that branch. stat() is portable (sys/stat.h is
+     * already included) and whole days are all this check needs.
+     */
+    struct stat lf, cf;
+    if (stat(crt, &lf) != 0) return 0;
+    if (stat(key, &lf) != 0) return 0;
+    if (stat(crt, &lf) != 0) return 0;
     char ca_path[PATH_MAX];
     snprintf(ca_path, sizeof(ca_path), "%s/localhost-2410.crt", dir);
-    if (GetFileAttributesExA(ca_path, GetFileExInfoStandard, &cf) &&
-        CompareFileTime(&lf.ftLastWriteTime, &cf.ftLastWriteTime) < 0)
+    if (stat(ca_path, &cf) == 0 && lf.st_mtime < cf.st_mtime)
         return 0;                                  /* older than the CA */
-    ULARGE_INTEGER now, written;
-    GetSystemTimeAsFileTime((FILETIME *) &now);
-    written.LowPart = lf.ftLastWriteTime.dwLowDateTime;
-    written.HighPart = lf.ftLastWriteTime.dwHighDateTime;
-    if (now.QuadPart <= written.QuadPart) return 1;  /* clock skew: keep it */
+    time_t lf_now = time(NULL);
+    if (lf_now <= lf.st_mtime) return 1;           /* clock skew: keep it */
     unsigned long long age_days =
-        (now.QuadPart - written.QuadPart) / 10000000ULL / 86400ULL;
+        (unsigned long long) (lf_now - lf.st_mtime) / 86400ULL;
     return age_days < 300;
 }
 
@@ -3197,11 +3231,20 @@ static void block_set_load_subscriptions(const char *resource_dir) {
 }
 
 static void block_set_load(const char *resource_dir) {
-    block_set_load_subscriptions(resource_dir);
+    /*
+     * AUDIT W2-01: the reset used to run *after* the subscription load, so
+     * every domain parsed out of subscriptions.txt was freed again a few
+     * lines later. subscriptions.txt therefore never took part in matching on
+     * any platform, and the Windows build - which has no blocklist.txt loader
+     * at all - ended up with an empty block set, i.e. --proxy-filter
+     * forwarded everything while the dashboard still reported "N subscription
+     * domains loaded".
+     */
     free(s_block_slots);
     s_block_slots = NULL;
     s_block_cap = 0;
     s_block_used = 0;
+    block_set_load_subscriptions(resource_dir);
 #ifndef _WIN32
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/blocklist.txt", resource_dir);
@@ -3677,6 +3720,36 @@ static bool proxy_start(struct mg_connection *c, struct settings *s,
     return true;
 }
 
+/*
+ * Who may use the internal endpoints (/internal-stats, /internal-ws,
+ * /control)?
+ *
+ * The hardening pass gated them on "arrived on the management port", assuming
+ * both clients use it. The Windows dashboard does - the Android app never
+ * has: WebServerUtils.STATS_URL, WebServerControl and the realtime
+ * /internal-ws client all talk to the configured HTTP port (80 by default),
+ * so on Android every /control call and the WS upgrade were answered 403.
+ *
+ * The gate is therefore "management port OR loopback peer". --bind all
+ * clients are still excluded (a LAN peer is never loopback), while the local
+ * callers these endpoints were written for keep working. /control
+ * additionally still requires the per-run token.
+ */
+static bool internal_endpoint_reachable(const struct mg_connection *c,
+                                        const struct settings *s) {
+    if (s->stats_port != 0 && c->loc.port == (uint16_t) s->stats_port) return true;
+    if (c->rem.is_ip6) {
+        static const uint8_t v4mapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+        if (memcmp(c->rem.addr.ip, v4mapped, sizeof(v4mapped)) == 0)
+            return c->rem.addr.ip[12] == 127;   /* ::ffff:127.0.0.0/8 */
+        for (int i = 0; i < 15; i++) {
+            if (c->rem.addr.ip[i] != 0) return false;
+        }
+        return c->rem.addr.ip[15] == 1;         /* ::1 */
+    }
+    return c->rem.addr.ip[0] == 127;            /* 127.0.0.0/8 */
+}
+
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev == MG_EV_ACCEPT) {
         /* Atomic cap check + increment (see the note on
@@ -4123,7 +4196,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
          * OkHttp client sends no Origin) may connect.
          */
         if (mg_http_get_header(hm, "Origin") != NULL ||
-            s->stats_port == 0 || c->loc.port != (uint16_t) s->stats_port) {
+            !internal_endpoint_reachable(c, s)) {
             mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
             return;
         }
@@ -4136,6 +4209,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        SNI certs issued). Like /internal-test it is only reachable on
        loopback; no auth needed since 127.0.0.1 is this device. */
     if (mg_match(hm->uri, mg_str("/internal-stats"), NULL)) {
+        /*
+         * AUDIT W1-01: this snapshot carries recent_tls[] host names (browsing
+         * history), the query log and per-process counters, but unlike
+         * /internal-ws and /control it had no gate at all - under --bind all a
+         * LAN client could simply GET it. Same audience as the other internal
+         * endpoints.
+         */
+        if (!internal_endpoint_reachable(c, s)) {
+            mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            return;
+        }
         char body[STATS_JSON_BUF];
         int n = build_stats_json(s, body, sizeof(body));
         mg_http_reply(c, 200,
@@ -4167,7 +4251,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
          * Both clients (Windows dashboard and the Android app) already talk to
          * /control on that port.
          */
-        if (s->stats_port == 0 || c->loc.port != (uint16_t) s->stats_port) {
+        if (!internal_endpoint_reachable(c, s)) {
             mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
             return;
         }
@@ -4481,7 +4565,12 @@ static bool setup_resources_dir(struct settings *s, const char *rpath) {
     /* TLS opts for the localhost listener: a leaf cert issued
        specifically for "localhost"/127.0.0.1, not the raw CA
        cert (see make_localhost_leaf() for why). */
-    if (make_localhost_leaf(&s->ca, s->resource_dir, &s->tls_opts) != EXIT_SUCCESS) {
+    /* AUDIT W2-07: this used to pass s->resource_dir, which is only assigned
+       a few lines below - so both the "reuse an existing leaf" and the "save
+       the new leaf" branches saw an empty directory and the leaf was re-signed
+       on every start (the feature v1.42 added never worked). rpath is the same
+       value, just available here. */
+    if (make_localhost_leaf(&s->ca, rpath, &s->tls_opts) != EXIT_SUCCESS) {
         LOG_FATAL("Failed to issue localhost leaf cert");
         return false;
     }
@@ -4533,11 +4622,23 @@ static int      s_img_mode = IMG_MODE_ROTATE;
 static uint64_t s_img_seq;
 static struct { uint32_t uid; uint64_t seq; } s_img_uid[IMG_UID_SLOTS];
 
+/* Current process id, used to seed the placeholder-image RNG. getpid() is
+   POSIX-only and GetCurrentProcessId() is Windows-only, and this file has to
+   compile on both (AUDIT V4). Defined here, after mongoose/windows.h. */
+static unsigned long current_process_id(void) {
+#ifdef _WIN32
+    return (unsigned long) GetCurrentProcessId();
+#else
+    return (unsigned long) getpid();
+#endif
+}
+
 static void img_mode_set(const char *name) {
     if (name == NULL) return;
-    if (_stricmp(name, "random") == 0) s_img_mode = IMG_MODE_RANDOM;
-    else if (_stricmp(name, "fixed") == 0) s_img_mode = IMG_MODE_FIXED;
-    else if (_stricmp(name, "rotate") == 0) s_img_mode = IMG_MODE_ROTATE;
+    /* strcasecmp, not _stricmp: the _WIN32 shim at the top maps it (AUDIT V4). */
+    if (strcasecmp(name, "random") == 0) s_img_mode = IMG_MODE_RANDOM;
+    else if (strcasecmp(name, "fixed") == 0) s_img_mode = IMG_MODE_FIXED;
+    else if (strcasecmp(name, "rotate") == 0) s_img_mode = IMG_MODE_ROTATE;
 }
 
 static const char *img_mode_name(void) {
@@ -4552,7 +4653,7 @@ static int img_pick_index(uint32_t uid, int count) {
     if (s_img_mode == IMG_MODE_RANDOM) {
         static int seeded;
         if (!seeded) {
-            srand((unsigned) time(NULL) ^ (unsigned) GetCurrentProcessId());
+            srand((unsigned) time(NULL) ^ (unsigned) current_process_id());
             seeded = 1;
         }
         return (int) ((unsigned) rand() % (unsigned) count);

@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.55
+      TAG: win11-webserver-v1.56
     steps:
       - uses: actions/checkout@v6
 
@@ -112,6 +112,34 @@ jobs:
           cp -r resources webserver/win32/dist/resources
           cp webserver/win32/README.txt webserver/win32/dist/README.txt
           cp webserver/win32/start.bat webserver/win32/dist/start.bat
+
+      # The build script used to rely on MinGW's defaults for the PE
+      # mitigations, so nothing noticed if they were absent. Assert them (and
+      # the stack protector) here: this runs before any release is published,
+      # so a failure is free.
+      - name: Assert PE mitigations (ASLR / NX / high-entropy VA / stack protector)
+        shell: msys2 {0}
+        run: |
+          EXE=webserver/win32/dist/webserver.exe
+          DLLCHAR=$(objdump -p "$EXE" | sed -n 's/^[[:space:]]*DllCharacteristics[[:space:]]*\([0-9a-fA-F]*\)$/\1/p' | head -1)
+          echo "DllCharacteristics=0x$DLLCHAR"
+          if [ -z "$DLLCHAR" ]; then
+            echo "::error::could not read DllCharacteristics from $EXE"; exit 1
+          fi
+          for bit in 20 40 100; do
+            if [ $(( 0x$DLLCHAR & 0x$bit )) -eq 0 ]; then
+              echo "::error::webserver.exe lacks PE mitigation bit 0x$bit (HIGH_ENTROPY_VA=0x20, DYNAMIC_BASE=0x40, NX_COMPAT=0x100)"
+              exit 1
+            fi
+          done
+          if ! objdump -t "$EXE" | grep -q '__stack_chk_fail'; then
+            # A warning, not an error: this only proves that GCC emitted the
+            # canary call, and the symbol is not guaranteed to be visible in
+            # every objdump/symbol-table combination. The release is still
+            # blocked below if the PE mitigation bits are missing.
+            echo "::warning::webserver.exe has no __stack_chk_fail reference - check that -fstack-protector-strong is still applied"
+          fi
+          echo "PE mitigations OK"
 
       - name: Smoke test (start server, fetch stats + test page)
         shell: pwsh
@@ -424,23 +452,39 @@ jobs:
         shell: bash
         run: |
           cd webserver/win32/dist
-          # SECURITY (audit REL-1): the smoke tests above generated a CA key and
-          # runtime state inside dist\resources. Shipping those would give every
-          # user the SAME publicly downloadable CA private key (silent MITM for
-          # anyone who trusts it), so they are removed and their absence asserted
-          # before packaging.
-          rm -f webserver/win32/dist/resources/localhost-2410.key \
-                webserver/win32/dist/resources/localhost-2410.crt \
-                webserver/win32/dist/resources/*.dat \
-                webserver/win32/dist/resources/update_cache.json \
-                webserver/win32/dist/resources/allowlist.txt \
-                webserver/win32/dist/resources/blocklist.txt \
-                webserver/win32/dist/resources/cosmetic.css \
-                webserver/win32/dist/webserver.log webserver/win32/dist/webserver.log.1 \
-                webserver/win32/dist/crash.log webserver/win32/dist/resources/crash.log
-          if ls webserver/win32/dist/resources/localhost-2410.key webserver/win32/dist/resources/*.dat \
-                webserver/win32/dist/resources/update_cache.json 2>/dev/null | grep -q .; then
-            echo "::error::release package still contains CA key or runtime state"; exit 1
+          # SECURITY (audit REL-1 / W5-05): the smoke tests above generated a CA
+          # key and runtime state inside dist\resources. Shipping those would
+          # give every user the SAME publicly downloadable CA private key
+          # (silent MITM for anyone who trusts it).
+          #
+          # Every path below used to be written relative to the repository root
+          # while this step had already cd'ed into dist, so each rm and the
+          # verification ls pointed at a non-existent path: rm -f and the pipe
+          # swallowed that, and the key WAS packaged. They are relative to the
+          # current directory now, and the list covers everything the server
+          # writes - including the localhost leaf key that the restored leaf
+          # reuse persists, the control token and the CA rotation state.
+          rm -f resources/localhost-2410.key \
+                resources/localhost-2410.crt \
+                resources/localhost-leaf.key \
+                resources/localhost-leaf.crt \
+                resources/*.dat \
+                resources/update_cache.json \
+                resources/control_token.txt \
+                resources/ca_rotation.json \
+                resources/allowlist.txt \
+                resources/blocklist.txt \
+                resources/cosmetic.css \
+                resources/webserver.log resources/webserver.log.1 \
+                resources/crash.log \
+                webserver.log webserver.log.1 crash.log
+          leftover=$(ls resources/localhost-2410.key resources/localhost-leaf.key \
+                        resources/*.dat resources/update_cache.json \
+                        resources/control_token.txt resources/ca_rotation.json \
+                        resources/webserver.log webserver.log 2>/dev/null || true)
+          if [ -n "$leftover" ]; then
+            echo "::error::release package still contains key material or runtime state: $leftover"
+            exit 1
           fi
           powershell -NoProfile -Command "Compress-Archive -Path .\* -DestinationPath '$GITHUB_WORKSPACE\adblock-webserver-win64.zip' -Force"
           ls -la "$GITHUB_WORKSPACE/adblock-webserver-win64.zip"
