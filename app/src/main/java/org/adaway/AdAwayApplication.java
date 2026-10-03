@@ -83,6 +83,27 @@ public class AdAwayApplication extends Application {
                 }
             }, "hijack-cleanup").start();
         }
+        // Keep the Magisk boot script in sync with this install. The recorded
+        // nativeLibraryDir changes on every app update (/data/app/~~hash==/…),
+        // so without a refresh the script would keep pointing at a path that no
+        // longer exists and could only start the (possibly outdated) staged
+        // binary in /data/local/tmp. Only runs when "start at boot" is on and
+        // the device really has Magisk/KernelSU service.d support.
+        if (org.adaway.helper.PreferenceHelper.getWebServerEnabled(this)) {
+            new Thread(() -> {
+                try {
+                    if (org.adaway.model.root.MagiskBootScript.isSupported()) {
+                        org.adaway.model.root.MagiskBootScript.install(
+                                this,
+                                org.adaway.util.WebServerUtils.isBindAll(this),
+                                org.adaway.util.WebServerUtils.getHttpPort(this),
+                                org.adaway.util.WebServerUtils.getHttpsPort(this));
+                    }
+                } catch (Throwable throwable) {
+                    Timber.w(throwable, "Magisk boot script refresh failed");
+                }
+            }, "magisk-bootscript").start();
+        }
         // Crash diagnostics: persist any uncaught exception to filesDir/crash.log
         // so a "it just closed" report can be diagnosed afterwards
         // (readable via root/adb even if logcat buffers have rotated).
