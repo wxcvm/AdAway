@@ -663,14 +663,13 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
-                    // ── 开机自动启动 + 诊断 ──
+                    // ── 开机自动启动 ──
                     Spacer(Modifier.height(8.dp))
                     var autostart by remember {
                         mutableStateOf(
                             org.adaway.helper.PreferenceHelper.getWebServerEnabled(context),
                         )
                     }
-                    var showBootDiag by remember { mutableStateOf(false) }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -705,85 +704,34 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
-                    TextButton(onClick = { showBootDiag = !showBootDiag }) {
-                        Icon(
-                            if (showBootDiag) Icons.Outlined.ExpandLess
-                            else Icons.Outlined.ExpandMore,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.compose_settings_autostart_diag))
-                    }
-                    AnimatedVisibility(visible = showBootDiag) {
-                        Column {
-                            val bootTime = org.adaway.helper.PreferenceHelper
-                                .getLastBootTime(context)
-                            val bootAction = org.adaway.helper.PreferenceHelper
-                                .getLastBootAction(context)
-                            val bootResult = org.adaway.helper.PreferenceHelper
-                                .getLastBootResult(context)
-                            DiagLine(
-                                stringResource(R.string.compose_settings_autostart_event),
-                                if (bootTime == 0L) {
-                                    stringResource(R.string.compose_settings_autostart_never)
-                                } else {
-                                    "${bootActionLabel(bootAction)} · ${formatDiagTime(bootTime)}"
-                                },
-                            )
-                            DiagLine(
-                                stringResource(R.string.compose_settings_autostart_result),
-                                bootResult.ifEmpty {
-                                    stringResource(R.string.compose_settings_autostart_never)
-                                },
-                            )
-                            DiagLine(
-                                stringResource(R.string.compose_settings_autostart_receiver),
-                                if (isBootReceiverEnabled(context)) {
-                                    stringResource(R.string.compose_settings_autostart_on)
-                                } else {
-                                    stringResource(R.string.compose_settings_autostart_off)
-                                },
-                            )
-                            DiagLine(
-                                stringResource(R.string.compose_settings_autostart_battery),
-                                if (isBatteryRestricted(context)) {
-                                    stringResource(R.string.compose_settings_autostart_battery_limited)
-                                } else {
-                                    stringResource(R.string.compose_settings_autostart_battery_ok)
-                                },
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(
-                                    onClick = { openBatterySettings(context) },
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text(stringResource(R.string.compose_settings_autostart_battery_button))
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        enableBootReceiver(context)
-                                        org.adaway.broadcast.BootReceiver
-                                            .scheduleStart(context, "user retried")
-                                        org.adaway.util.WebServerUtils.startWebServer(context)
-                                        Toast.makeText(
-                                            context,
-                                            R.string.compose_settings_autostart_retry_toast,
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text(stringResource(R.string.compose_settings_autostart_retry))
-                                }
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                stringResource(R.string.compose_settings_autostart_note),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                    /*
+                     * 自启动失败时真正有用的两个动作（原先藏在“自启动诊断”的展开区里，
+                     * 只读的诊断行已按反馈移除）。MIUI/EMUI/ColorOS 除了电池优化之外
+                     * 还会单独拦截开机广播，需要在系统设置里再允许“自启动/后台运行”。
+                     */
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { openBatterySettings(context) },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.compose_settings_autostart_battery_button))
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                enableBootReceiver(context)
+                                org.adaway.broadcast.BootReceiver
+                                    .scheduleStart(context, "user retried")
+                                org.adaway.util.WebServerUtils.startWebServer(context)
+                                Toast.makeText(
+                                    context,
+                                    R.string.compose_settings_autostart_retry_toast,
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.compose_settings_autostart_retry))
                         }
                     }
                     // ── 证书管理区 ──
@@ -832,24 +780,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f),
                             )
-                            /* The app could only ever *add* the CA; removing it
-                               meant deleting /data/misc/user/0/cacerts-added/
-                               <hash>.0 by hand over a root shell. */
-                            TextButton(
-                                onClick = {
-                                    val removed = org.adaway.util.WebServerUtils
-                                        .uninstallCertificateFromSystemStore(context)
-                                    Toast.makeText(
-                                        context,
-                                        if (removed) R.string.compose_settings_cert_remove_ok
-                                        else R.string.compose_settings_cert_remove_fail,
-                                        Toast.LENGTH_LONG,
-                                    ).show()
-                                    certTrusted = !removed
-                                },
-                            ) {
-                                Text(stringResource(R.string.compose_settings_cert_remove))
-                            }
                         }
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1818,56 +1748,8 @@ private fun saveBitmapToCache(context: Context, bitmap: Bitmap, filename: String
     )
 }
 
-/* ── 开机自启动诊断 ───────────────────────────────────────────────
- * 手机上没法看 logcat，“重启后服务器有时不启动”只能靠记录：
- * BootReceiver / ServerStartWorker 把每次开机事件与结果写进偏好，
- * 这里读出来显示。下面几个函数只服务设置页的这一块。 */
 
-/**
- * 诊断里的一行：左边名称、右边状态。
- */
-@Composable
-private fun DiagLine(name: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-    ) {
-        Text(
-            name,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(96.dp),
-        )
-        Text(
-            value,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
 
-/**
- * 把开机广播的 action 翻译成用户看得懂的名字。
- */
-@Composable
-private fun bootActionLabel(action: String): String = when {
-    action.isEmpty() -> stringResource(R.string.compose_settings_autostart_never)
-    action.contains("QUICKBOOT") ->
-        stringResource(R.string.compose_settings_autostart_action_quickboot)
-    action.endsWith("MY_PACKAGE_REPLACED") ->
-        stringResource(R.string.compose_settings_autostart_action_replaced)
-    action.endsWith("BOOT_COMPLETED") ->
-        stringResource(R.string.compose_settings_autostart_action_boot)
-    else -> action
-}
-
-/**
- * 诊断行里的时间：只显示“月-日 时:分”。
- */
-private fun formatDiagTime(millis: Long): String =
-    java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
-        .format(java.util.Date(millis))
 
 /**
  * 开机接收器是否启用。有些系统/清理软件会把组件整个禁掉，此时开机广播
@@ -1904,21 +1786,8 @@ private fun enableBootReceiver(context: Context) {
 }
 
 /**
- * 本应用是否仍受电池优化限制（受限时后台任务/开机广播会被推迟）。
- */
-private fun isBatteryRestricted(context: Context): Boolean {
-    return try {
-        val power = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
-        // .not() instead of a leading "!": Kotlin's parser rejects a statement
-        // that starts with a prefix operator (CI build #541).
-        power.isIgnoringBatteryOptimizations(context.packageName).not()
-    } catch (e: Exception) {
-        false
-    }
-}
-
-/**
  * 打开系统的电池优化列表，让用户把本应用设为“不优化”。
+ * 这是自启动失败的两大原因之一（另一个是厂商的自启动白名单）。
  */
 private fun openBatterySettings(context: Context) {
     try {
@@ -1931,3 +1800,4 @@ private fun openBatterySettings(context: Context) {
         Toast.makeText(context, e.message ?: "unavailable", Toast.LENGTH_SHORT).show()
     }
 }
+
