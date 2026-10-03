@@ -39,6 +39,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Settings
@@ -670,6 +672,23 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             org.adaway.helper.PreferenceHelper.getWebServerEnabled(context),
                         )
                     }
+                    /*
+                     * 有 Magisk 时，开机由 init 侧直接拉起服务器（service.d 脚本），
+                     * 不再依赖开机广播——国产 ROM 常把广播延后甚至丢掉，这也是
+                     * “必须手动打开一次应用才会启动”的根因。0 = 未写入，1 = 已写入，
+                     * -1 = 本机没有 Magisk。
+                     */
+                    val autostartScope = rememberCoroutineScope()
+                    var bootScriptState by remember { mutableIntStateOf(0) }
+                    LaunchedEffect(Unit) {
+                        bootScriptState = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            when {
+                                !org.adaway.model.root.MagiskBootScript.isSupported() -> -1
+                                org.adaway.model.root.MagiskBootScript.isInstalled() -> 1
+                                else -> 0
+                            }
+                        }
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -698,8 +717,30 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                     org.adaway.broadcast.BootReceiver
                                         .scheduleStart(context, "user enabled autostart")
                                     org.adaway.util.WebServerUtils.startWebServer(context)
+                                    // root shell 不能跑在主线程上
+                                    autostartScope.launch {
+                                        val supported = kotlinx.coroutines.withContext(
+                                            kotlinx.coroutines.Dispatchers.IO,
+                                        ) {
+                                            org.adaway.model.root.MagiskBootScript.install(
+                                                context,
+                                                org.adaway.util.WebServerUtils.isBindAll(context),
+                                                org.adaway.util.WebServerUtils.getHttpPort(context),
+                                                org.adaway.util.WebServerUtils.getHttpsPort(context),
+                                            )
+                                        }
+                                        bootScriptState = if (supported) 1 else -1
+                                    }
                                 } else {
                                     org.adaway.util.WebServerUtils.stopWebServer()
+                                    autostartScope.launch {
+                                        kotlinx.coroutines.withContext(
+                                            kotlinx.coroutines.Dispatchers.IO,
+                                        ) {
+                                            org.adaway.model.root.MagiskBootScript.uninstall()
+                                        }
+                                        bootScriptState = 0
+                                    }
                                 }
                             },
                         )
@@ -733,6 +774,31 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         ) {
                             Text(stringResource(R.string.compose_settings_autostart_retry))
                         }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = { openVendorAutostart(context) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.compose_settings_autostart_vendor_button))
+                    }
+                    if (bootScriptState != 0) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            stringResource(
+                                if (bootScriptState == 1) {
+                                    R.string.compose_settings_autostart_bootscript_on
+                                } else {
+                                    R.string.compose_settings_autostart_bootscript_na
+                                },
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (bootScriptState == 1) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
                     }
                     // ── 证书管理区 ──
                     Spacer(Modifier.height(12.dp))
@@ -1797,6 +1863,74 @@ private fun openBatterySettings(context: Context) {
         )
     } catch (e: Exception) {
         Timber.w(e, "No battery optimization settings activity")
+        Toast.makeText(context, e.message ?: "unavailable", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * 打开厂商自己的“自启动/后台运行”白名单页面。
+ *
+ * <p>国产 ROM 除了电池优化之外，还有一套独立的开机自启动开关；不点亮它，
+ * BOOT_COMPLETED 会被直接丢掉。各家 Activity 名字不同，且随版本变化，所以逐条
+ * 尝试，全部失败就退回“应用详情”页让用户自己找——比什么都不做要好。</p>
+ */
+private fun openVendorAutostart(context: Context) {
+    val candidates = listOf(
+        // MIUI / HyperOS
+        android.content.ComponentName(
+            "com.miui.securitycenter",
+            "com.miui.permcenter.autostart.AutoStartManagementActivity",
+        ),
+        // EMUI / HarmonyOS
+        android.content.ComponentName(
+            "com.huawei.systemmanager",
+            "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
+        ),
+        android.content.ComponentName(
+            "com.huawei.systemmanager",
+            "com.huawei.systemmanager.optimize.process.ProtectActivity",
+        ),
+        // ColorOS / realme
+        android.content.ComponentName(
+            "com.coloros.safecenter",
+            "com.coloros.safecenter.permission.startup.StartupAppListActivity",
+        ),
+        android.content.ComponentName(
+            "com.oppo.safe",
+            "com.oppo.safe.permission.startup.StartupAppListActivity",
+        ),
+        // vivo / iQOO
+        android.content.ComponentName(
+            "com.vivo.permissionmanager",
+            "com.vivo.permissionmanager.activity.BgStartUpManagerActivity",
+        ),
+        // 三星
+        android.content.ComponentName(
+            "com.samsung.android.lool",
+            "com.samsung.android.sm.ui.battery.BatteryActivity",
+        ),
+    )
+    for (component in candidates) {
+        try {
+            context.startActivity(
+                Intent().setComponent(component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return
+        } catch (e: Exception) {
+            // 该 ROM 没有这个页面：试下一个
+        }
+    }
+    try {
+        context.startActivity(
+            Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.fromParts("package", context.packageName, null),
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        Toast.makeText(context, R.string.compose_settings_autostart_vendor_fallback, Toast.LENGTH_LONG)
+            .show()
+    } catch (e: Exception) {
+        Timber.w(e, "No vendor autostart or app details screen")
         Toast.makeText(context, e.message ?: "unavailable", Toast.LENGTH_SHORT).show()
     }
 }

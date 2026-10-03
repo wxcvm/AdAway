@@ -302,4 +302,8 @@
     <string name="compose_settings_autostart_battery_button">电池优化设置</string>
     <string name="compose_settings_autostart_retry">重新启动服务器</string>
     <string name="compose_settings_autostart_retry_toast">已重新排队，几秒后自动启动</string>
+    <string name="compose_settings_autostart_vendor_button">厂商自启动设置</string>
+    <string name="compose_settings_autostart_vendor_fallback">本机没有已知的自启动页面 —— 请在应用详情里允许“自启动/后台运行”。</string>
+    <string name="compose_settings_autostart_bootscript_on">已写入 Magisk 开机脚本：开机由系统直接拉起服务器，不再依赖开机广播</string>
+    <string name="compose_settings_autostart_bootscript_na">未检测到 Magisk：只能依赖开机广播，若开机没起来请在系统设置里允许“自启动”</string>
 </resources>
