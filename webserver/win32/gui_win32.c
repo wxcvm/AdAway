@@ -934,7 +934,7 @@ static void control_post(int port, const char *cmd, wchar_t *status, size_t stat
     closesocket(s);
     wchar_t w[16];
     utf8_to_wide(cmd, w, 16);
-    if (statusn) swprintf(status, statusn, L"控制命令 %ls: %s",
+    if (statusn) swprintf(status, statusn, L"控制命令 %ls: %ls",
                           w, ok == 0 ? L"成功" : L"失败");
 }
 
@@ -1600,7 +1600,7 @@ static void draw_listener_card(HDC hdc, int x, int y, int w, int h,
     if (h > 120) {
         wchar_t diag[260];
         swprintf(diag, 260,
-                 L"进程：CPU %.1f%% · 内存 %llu MB · 句柄 %lu · 线程 %lu · GDI %lu · 服务器线程 %s",
+                 L"进程：CPU %.1f%% · 内存 %llu MB · 句柄 %lu · 线程 %lu · GDI %lu · 服务器线程 %ls",
                  g_cpu_pct, g_ws_kb / 1024ULL, (unsigned long)g_handle_count,
                  (unsigned long)g_thread_count, (unsigned long)g_gdi_obj,
                  g_owns_server ? (win32_server_alive() ? L"运行中" : L"已停止") : L"外部进程");
@@ -1648,7 +1648,7 @@ static void draw_statusbar(HDC hdc) {
     wchar_t trust[64];
     cert_trust_text(g_cert_trust_state, trust, 64);
     if (days > 0 && days < 200000)
-        swprintf(cert, 200, L"CA 证书剩余 %lld 天 · %s", days, trust);
+        swprintf(cert, 200, L"CA 证书剩余 %lld 天 · %ls", days, trust);
     else if (days == -100001)
         swprintf(cert, 200, L"CA 证书文件缺失: %hs", cert_path);
     else if (days == -100002)
@@ -1856,7 +1856,7 @@ static void tray_menu(HWND hwnd) {
                  exe, g_res, g_http_port, g_https_port);
         win32_autostart_set(on, ccmd);
         SendMessageW(chk, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
-        swprintf(g_status, 4096, L"开机自启动已%s", on ? L"启用" : L"关闭");
+        swprintf(g_status, 4096, L"开机自启动已%ls", on ? L"启用" : L"关闭");
         InvalidateRect(hwnd, NULL, FALSE);
     } else if (cmd == 3004) {
             swprintf(g_status, 4096, L"正在检查更新…");
@@ -2331,10 +2331,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 cert_trust_text(cert_trust_state(cert_path), state_txt, 64);
                 if (rc == 0 && id == IDM_TRUST)
                     swprintf(msg, 512,
-                             L"CA 证书%s。\n\n"
+                             L"CA 证书%ls。\n\n"
                              L"Chrome/Edge/系统组件会立即信任它；Firefox 用自己的信任库，需要在"
                              L"Firefox 的“证书管理器 → 授权机构”里单独导入同一个 .crt 文件。\n\n"
-                             L"%s",
+                             L"%ls",
                              state_txt,
                              (cert_trust_state(cert_path) & CERT_TRUST_MACHINE)
                                  ? L"已同时写入“本机根”，其它账户与系统服务也信任它。"
@@ -2342,10 +2342,10 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                                    L"仍会报警——用管理员身份运行本程序再点一次“信任 CA”，"
                                    L"即可同时写入“本机根”。");
                 else if (rc == 0)
-                    swprintf(msg, 512, L"CA 证书已移出信任根（%s）。", state_txt);
+                    swprintf(msg, 512, L"CA 证书已移出信任根（%ls）。", state_txt);
                 else
                     swprintf(msg, 512,
-                             L"证书操作失败（当前状态：%s）。\n\n"
+                             L"证书操作失败（当前状态：%ls）。\n\n"
                              L"若 CA 也存在于“本机根”，请以管理员身份运行后再移除；"
                              L"详细错误已写入 webserver.log。",
                              state_txt);
@@ -2396,7 +2396,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                          "\"%s\" --resources \"%s\" --http-port %d --https-port %d --stats-port %d --minimized",
                          exe, g_res, g_http_port, g_https_port, g_stats_port);
                 win32_autostart_set(on, cmd);
-                swprintf(g_status, 4096, L"开机自启动已%s", on ? L"启用" : L"关闭");
+                swprintf(g_status, 4096, L"开机自启动已%ls", on ? L"启用" : L"关闭");
                 InvalidateRect(hwnd, NULL, FALSE);
             } else if (id == IDM_DARK) {
                 bool on = SendMessageW(GetDlgItem(hwnd, IDM_DARK), BM_GETCHECK, 0, 0) == BST_CHECKED;
@@ -2616,8 +2616,8 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HFONT old2 = (HFONT)SelectObject(hdc, lf);
         if (days > 0 && days < 200000)
             swprintf(txt, 256,
-                     trusted ? L"证书：剩余 %lld 天 · %s"
-                             : L"证书：剩余 %lld 天 · %s → 左侧\"设置\"→\"信任 CA\"",
+                     trusted ? L"证书：剩余 %lld 天 · %ls"
+                             : L"证书：剩余 %lld 天 · %ls → 左侧\"设置\"→\"信任 CA\"",
                      days, trust_txt);
         else if (days == -100001)
             swprintf(txt, 256, L"证书文件缺失：%hs（首次运行时会自动生成）", cert_path);

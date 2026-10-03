@@ -226,7 +226,7 @@ static int ini_path(wchar_t *out, size_t cap) {
     if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return 0;
     wchar_t *slash = wcsrchr(exe, L'\\');
     if (slash != NULL) *slash = 0;
-    swprintf(out, cap, L"%s\\webserver.ini", exe);
+    swprintf(out, cap, L"%ls\\webserver.ini", exe);
     return 1;
 }
 
@@ -1379,7 +1379,7 @@ static int tar_entry_is_safe(const char *line) {
 /* 1 = listing is safe, 0 = hostile archive, -1 = could not list at all. */
 static int tar_listing_is_safe(const wchar_t *zip, const wchar_t *listfile) {
     wchar_t cmd[4096];
-    swprintf(cmd, 4096, L"cmd.exe /c tar.exe -tf \"%s\" > \"%s\"", zip, listfile);
+    swprintf(cmd, 4096, L"cmd.exe /c tar.exe -tf \"%ls\" > \"%ls\"", zip, listfile);
     if (run_and_wait(cmd) != 0) return -1;
     FILE *fp = _wfopen(listfile, L"rb");
     if (!fp) return -1;
@@ -1400,7 +1400,7 @@ static int tar_listing_is_safe(const wchar_t *zip, const wchar_t *listfile) {
 /* Does this directory contain webserver.exe? */
 static int dir_has_exe(const wchar_t *dir) {
     wchar_t probe[MAX_PATH];
-    swprintf(probe, MAX_PATH, L"%s\\webserver.exe", dir);
+    swprintf(probe, MAX_PATH, L"%ls\\webserver.exe", dir);
     return GetFileAttributesW(probe) != INVALID_FILE_ATTRIBUTES;
 }
 
@@ -1412,7 +1412,7 @@ static int find_extracted_dir(const wchar_t *root, wchar_t *out, size_t cap) {
         return 1;
     }
     wchar_t pattern[MAX_PATH];
-    swprintf(pattern, MAX_PATH, L"%s\\*", root);
+    swprintf(pattern, MAX_PATH, L"%ls\\*", root);
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW(pattern, &fd);
     if (h == INVALID_HANDLE_VALUE) return 0;
@@ -1420,7 +1420,7 @@ static int find_extracted_dir(const wchar_t *root, wchar_t *out, size_t cap) {
     do {
         if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && fd.cFileName[0] != L'.') {
             wchar_t sub[MAX_PATH];
-            swprintf(sub, MAX_PATH, L"%s\\%s", root, fd.cFileName);
+            swprintf(sub, MAX_PATH, L"%ls\\%ls", root, fd.cFileName);
             if (dir_has_exe(sub)) {
                 wcsncpy(out, sub, cap - 1);
                 out[cap - 1] = 0;
@@ -1440,7 +1440,7 @@ static void update_temp_file(const wchar_t *temp, DWORD pid, DWORD stamp,
                              const wchar_t *url, wchar_t *out, size_t cap) {
     size_t ulen = wcslen(url);
     const wchar_t *ext = (ulen > 4 && _wcsicmp(url + ulen - 4, L".exe") == 0) ? L".exe" : L".zip";
-    swprintf(out, cap, L"%sadblock-update-%lu-%lu%s", temp,
+    swprintf(out, cap, L"%lsadblock-update-%lu-%lu%ls", temp,
              (unsigned long) pid, (unsigned long) stamp, ext);
 }
 
@@ -1466,10 +1466,10 @@ static DWORD WINAPI apply_thread(LPVOID param) {
             wchar_t *slash = wcsrchr(mod, L'\\');
             if (slash != NULL) {
                 *slash = 0;
-                swprintf(upd, MAX_PATH, L"%s\\resources\\update", mod);
+                swprintf(upd, MAX_PATH, L"%ls\\resources\\update", mod);
                 if (CreateDirectoryW(upd, NULL) ||
                     GetLastError() == ERROR_ALREADY_EXISTS) {
-                    swprintf(temp, MAX_PATH, L"%s\\", upd);
+                    swprintf(temp, MAX_PATH, L"%ls\\", upd);
                     win32_log_line("update: package folder is %s", narrow_path(temp));
                 }
             }
@@ -1488,9 +1488,9 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     /* Unique staging paths as well (audit A6). A fixed "%TEMP%\adblock-update"
        could be pre-created by another process, and it was never removed: the
        batch script now deletes it after the file copy. */
-    swprintf(dir, MAX_PATH, L"%sadblock-update-%lu-%lu", temp, (unsigned long) pid, (unsigned long) stamp);
-    swprintf(list, MAX_PATH, L"%sadblock-update-%lu-%lu.list", temp, (unsigned long) pid, (unsigned long) stamp);
-    swprintf(bat, MAX_PATH, L"%sadblock-update-%lu-%lu.bat", temp, (unsigned long) pid, (unsigned long) stamp);
+    swprintf(dir, MAX_PATH, L"%lsadblock-update-%lu-%lu", temp, (unsigned long) pid, (unsigned long) stamp);
+    swprintf(list, MAX_PATH, L"%lsadblock-update-%lu-%lu.list", temp, (unsigned long) pid, (unsigned long) stamp);
+    swprintf(bat, MAX_PATH, L"%lsadblock-update-%lu-%lu.bat", temp, (unsigned long) pid, (unsigned long) stamp);
 
     /*
      * Chance 1: the package this machine normally wants (installer for an
@@ -1612,13 +1612,13 @@ static DWORD WINAPI apply_thread(LPVOID param) {
          * the package is already SHA-256 verified at this point.
          */
         wchar_t staged[MAX_PATH], params[640], ilog[MAX_PATH];
-        swprintf(staged, MAX_PATH, L"%s\\adblock-update-%lu-%lu.exe", appdir,
+        swprintf(staged, MAX_PATH, L"%ls\\adblock-update-%lu-%lu.exe", appdir,
                  (unsigned long) pid, (unsigned long) stamp);
         wchar_t zone[MAX_PATH + 32];
         swprintf(zone, MAX_PATH + 32, L"%ls:Zone.Identifier", staged);
         DeleteFileW(zone);
         if (!CopyFileW(zip, staged, FALSE)) wcscpy(staged, zip);
-        swprintf(ilog, MAX_PATH, L"%s\\adblock-install-%lu.log", appdir,
+        swprintf(ilog, MAX_PATH, L"%ls\\adblock-install-%lu.log", appdir,
                  (unsigned long) pid);
         swprintf(params, 640,
                  L"/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=\"%ls\" /PID=%lu",
@@ -1727,9 +1727,9 @@ portable_fallback:
         free(info);
         return 0;
     }
-    swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%s\"", dir);
+    swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%ls\"", dir);
     run_and_wait(cmd);
-    swprintf(cmd, 4096, L"cmd.exe /c mkdir \"%s\"", dir);
+    swprintf(cmd, 4096, L"cmd.exe /c mkdir \"%ls\"", dir);
     run_and_wait(cmd);
     /*
      * Extraction with a fallback chain - and, for the first time, diagnostics.
@@ -1742,13 +1742,13 @@ portable_fallback:
      */
     int rc = -1;
     win32_log_line("update: extracting %s into %s", narrow_path(zip), narrow_path(dir));
-    swprintf(cmd, 4096, L"cmd.exe /c tar.exe -xf \"%s\" -C \"%s\"", zip, dir);
+    swprintf(cmd, 4096, L"cmd.exe /c tar.exe -xf \"%ls\" -C \"%ls\"", zip, dir);
     rc = run_and_wait(cmd);
     win32_log_line("update: tar rc=%d", rc);
     if (rc != 0 || !find_extracted_dir(dir, src, MAX_PATH)) {
         swprintf(cmd, 4096,
                  L"powershell -NoProfile -ExecutionPolicy Bypass -Command "
-                 L"\"Expand-Archive -LiteralPath '%s' -DestinationPath '%s' -Force\"",
+                 L"\"Expand-Archive -LiteralPath '%ls' -DestinationPath '%ls' -Force\"",
                  zip, dir);
         rc = run_and_wait(cmd);
         win32_log_line("update: powershell Expand-Archive rc=%d", rc);
@@ -1757,14 +1757,14 @@ portable_fallback:
         /* A clean directory first: the two-argument ExtractToDirectory merges
            but refuses to overwrite an existing file (PS 5.1 has no overwrite
            overload). */
-        swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%s\"", dir);
+        swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%ls\"", dir);
         run_and_wait(cmd);
-        swprintf(cmd, 4096, L"cmd.exe /c mkdir \"%s\"", dir);
+        swprintf(cmd, 4096, L"cmd.exe /c mkdir \"%ls\"", dir);
         run_and_wait(cmd);
         swprintf(cmd, 4096,
                  L"powershell -NoProfile -ExecutionPolicy Bypass -Command "
                  L"\"Add-Type -AssemblyName System.IO.Compression.FileSystem; "
-                 L"[System.IO.Compression.ZipFile]::ExtractToDirectory('%s','%s')\"",
+                 L"[System.IO.Compression.ZipFile]::ExtractToDirectory('%ls','%ls')\"",
                  zip, dir);
         rc = run_and_wait(cmd);
         win32_log_line("update: System.IO.Compression extract rc=%d", rc);
@@ -1775,7 +1775,7 @@ portable_fallback:
                        rc, src[0] ? "found" : "missing", narrow_path(dir));
         /* The archive must really contain the server: the old fallback copied
            whatever was there and closed the app without installing anything. */
-        swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%s\"", dir);
+        swprintf(cmd, 4096, L"cmd.exe /c rmdir /S /Q \"%ls\"", dir);
         run_and_wait(cmd);
         MessageBoxW(NULL, L"解压更新包失败或包内缺少 webserver.exe，未做任何改动。\n\n请手动下载 zip 覆盖安装。",
                     L"更新", MB_OK | MB_ICONWARNING);
@@ -1809,10 +1809,10 @@ portable_fallback:
     swprintf(script, 8192,
              L"@echo off\r\n"
              L"setlocal enableextensions\r\n"
-             L"set APP=%s\r\n"
-             L"set SRC=%s\r\n"
-             L"set STAGE=%s\r\n"
-             L"set BK=%s.backup-%lu\r\n"
+             L"set APP=%ls\r\n"
+             L"set SRC=%ls\r\n"
+             L"set STAGE=%ls\r\n"
+             L"set BK=%ls.backup-%lu\r\n"
              L"set PID=%lu\r\n"
              L":waitloop\r\n"
              L"tasklist /FI \"PID eq %%PID%%\" 2>nul | find \"%%PID%%\" >nul\r\n"
@@ -1863,7 +1863,7 @@ portable_fallback:
         free(info);
         return 0;
     }
-    swprintf(cmd, 4096, L"cmd.exe /c \"%s\"", bat);
+    swprintf(cmd, 4096, L"cmd.exe /c \"%ls\"", bat);
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     memset(&si, 0, sizeof(si));

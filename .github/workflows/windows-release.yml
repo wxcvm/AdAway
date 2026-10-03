@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.56
+      TAG: win11-webserver-v1.57
     steps:
       - uses: actions/checkout@v6
 
@@ -50,6 +50,51 @@ jobs:
           if [ -z "$HDR_VER" ] || [ "$HDR_VER" != "$ISS_VER" ] || [ "$HDR_VER" != "$TAG_VER" ]; then
             echo "::error::version mismatch (header=$HDR_VER installer=$ISS_VER tag=$TAG_VER)"; exit 1
           fi
+
+      # Regression guard for a bug that silently broke the entire updater:
+      # with -std=c11 MinGW-w64 enables its ANSI stdio, so in a *wide* printf
+      # %s means char* and %ls means wchar_t*. Formatting a wchar_t* with %s
+      # stops at the first NUL byte, so "C:\...\adblock-update-....zip" became
+      # the relative path "Cadblock-update-...." - the download then failed with
+      # ERROR_ACCESS_DENIED whenever the process had not been started from a
+      # writable working directory, and the same mistake garbled GUI status
+      # text. Keep the specifiers honest.
+      - name: Check wide-printf specifiers (%ls for wide strings)
+        shell: bash
+        run: |
+          python3 - <<'PYEOF'
+          import re, sys
+          files = ['webserver/jni/webserver.c',
+                   'webserver/win32/gui_win32.c',
+                   'webserver/win32/update_win32.c']
+          bad = 0
+          for path in files:
+              src = open(path, encoding='utf-8', errors='replace').read()
+              for m in re.finditer(r'(?<![\w_])swprintf\s*\(', src):
+                  i, depth = m.end() - 1, 0
+                  while i < len(src):
+                      ch = src[i]
+                      if ch == '"':
+                          i += 1
+                          while i < len(src) and src[i] != '"':
+                              i += 2 if src[i] == '\\' else 1
+                      elif ch == '(':
+                          depth += 1
+                      elif ch == ')':
+                          depth -= 1
+                          if depth == 0:
+                              break
+                      i += 1
+                  call = src[m.start():i + 1]
+                  if re.search(r'%(?!l|h|%)s', call):
+                      line = src.count('\n', 0, m.start()) + 1
+                      print('::error file=%s,line=%d::swprintf() uses %%s for a wide string; '
+                            'use %%ls (MinGW ANSI stdio: %%s is char*)' % (path, line))
+                      bad += 1
+          if bad:
+              sys.exit(1)
+          print('wide-printf specifiers OK')
+          PYEOF
 
       - name: Prepare resources (convert block placeholder images to webp)
         shell: bash
