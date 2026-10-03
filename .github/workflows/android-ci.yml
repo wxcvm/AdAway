@@ -4,8 +4,14 @@ on:
   push:
     branches:
       - master
+      # The Windows release branch carries its own copy of app/ and reaches
+      # master through PR #42. Nothing used to compile that copy, so an
+      # Android-side change could land on the release branch - and from there
+      # into a release - without a single CI signal.
+      - feat/win11-webserver-release
     tags:
       - 'v*'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -134,6 +140,11 @@ jobs:
               arts = json.load(sys.stdin).get('artifacts', [])
           except Exception:
               arts = []
+          # Only this workflow's own artifacts. The repo-wide sweep used to
+          # delete the Windows release branch's build artifacts as well, and
+          # now that this workflow runs on that branch as well, that
+          # collision is no longer hypothetical.
+          arts = [a for a in arts if a.get('name') == 'ADBlock-release-signed']
           arts.sort(key=lambda a: a['created_at'], reverse=True)
           for a in arts[1:]:
               print(a['id'])
@@ -157,6 +168,9 @@ jobs:
       # count against the Actions artifact storage quota, so this always
       # succeeds even when artifact upload is rejected.
       - name: Publish APK to GitHub Release (draft)
+        # Skip on the Windows release branch: it only needs the build + test
+        # signal, and one draft release per push would bury the real ones.
+        if: github.ref != 'refs/heads/feat/win11-webserver-release'
         run: |
           APK=app/build/outputs/apk/release/app-release-signed.apk
           TAG="ci-${{ github.run_number }}"
@@ -197,6 +211,12 @@ jobs:
           VERSION_NAME=$(cut -d'|' -f1 "$VERSION_FILE")
           VERSION_CODE=$(cut -d'|' -f2 "$VERSION_FILE")
           cp "$APK_FILE" release-assets/ADBlock-latest.apk
+          # AUDIT W5-03: UpdateModel.DOWNLOAD_URL has always asked for
+          # "AdAway-latest.apk", but only "ADBlock-latest.apk" was published,
+          # so every in-app download 404'd. Publish both names: the second one
+          # fixes the clients that are already installed, and keeping the first
+          # one keeps any newer client working.
+          cp "$APK_FILE" release-assets/AdAway-latest.apk
           printf '{"version":"%s","versionCode":%s,"changelog":"New Material 3 UI, per-app stats, ADBlock branding, dynamic versioning, captive portal fix"}' "$VERSION_NAME" "$VERSION_CODE" > release-assets/manifest.json
 
       - name: Create GitHub Release

@@ -101,13 +101,35 @@ public class WebServerUtils {
 
     private static volatile int sHttpPortCached = 80;
     private static volatile int sHttpsPortCached = 443;
+    /**
+     * Absolute resource-directory path, cached at app start.
+     *
+     * <p>The native server writes its per-run {@code /control} token to
+     * {@code control_token.txt} in that directory and refuses every
+     * {@code /control} call without it. The callers live in static helpers
+     * without a {@code Context} (they talk to the server over {@code nc}, see
+     * {@link WebServerStats}), so the path has to be cached here - otherwise
+     * the token can never be sent and reload-images / flush-stats / shutdown
+     * are answered with 403 forever.</p>
+     */
+    private static volatile String sResourcePathCached;
 
     /** Load persisted ports into the static cache (called at app start). */
     public static void initPortCache(Context context) {
+        sResourcePathCached = getResourcePath(context).toAbsolutePath().toString();
         sHttpPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
                 .getInt("http_port", 80);
         sHttpsPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
                 .getInt("https_port", 443);
+    }
+
+    /**
+     * Absolute resource-directory path used by the native server, or
+     * {@code null} when {@link #initPortCache(Context)} has not run yet.
+     * Needed by the Context-less callers that must read control_token.txt.
+     */
+    public static String getResourcePathCached() {
+        return sResourcePathCached;
     }
 
     /** Port used by the stats client (cached; no Context needed). */
