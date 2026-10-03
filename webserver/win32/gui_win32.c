@@ -185,6 +185,8 @@ struct snapshot {
     /* v1.59 ranking (absent -> zero) */
     int top_count;
     struct top_row top[GUI_TOP_MAX];
+    /* v1.60 per-type blocked counters, same order as kBlockTypes[] */
+    long long blocked_by_type[16];
 };
 
 /* ── shared dashboard state ─────────────────────────────────────────
@@ -495,6 +497,30 @@ static int http_get(int port, const char *path, char *out, size_t outsz) {
     return rc;
 }
 
+/*
+ * ── 拦截类型分布 ───────────────────────────────────────────────────
+ * The server has always published one counter per blocked category
+ * (blocked_images, blocked_scripts, …), but the dashboard never read them, so
+ * the only thing a user could see was "N blocked in total". Keep the JSON key
+ * and the label next to each other so neither can drift.
+ */
+static const struct { const char *key; const wchar_t *label; } kBlockTypes[] = {
+    {"blocked_images",    L"图片"},
+    {"blocked_scripts",   L"脚本"},
+    {"blocked_styles",    L"样式"},
+    {"blocked_fonts",     L"字体"},
+    {"blocked_media",     L"媒体"},
+    {"blocked_api",       L"API"},
+    {"blocked_telemetry", L"遥测"},
+    {"blocked_heartbeat", L"心跳"},
+    {"blocked_config",    L"配置"},
+    {"blocked_ws_sse",    L"WebSocket"},
+    {"blocked_other",     L"其它"},
+    {"blocked_crypto",    L"挖矿"},
+    {"blocked_clickbait", L"标题党"},
+};
+#define BLOCK_TYPE_COUNT ((int) (sizeof(kBlockTypes) / sizeof(kBlockTypes[0])))
+
 static void snapshot_fetch(int port, struct snapshot *sn) {
     static char buf[STEAL_JSON_BUF];
     memset(sn, 0, sizeof(*sn));
@@ -511,6 +537,8 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->hist_count = json_hist(buf, "history", sn->hist, HIST_MAX);
     sn->daily_count = json_hist(buf, "daily", sn->daily, HIST_MAX);
     json_listeners(buf, sn);
+    for (int i = 0; i < BLOCK_TYPE_COUNT; i++)
+        sn->blocked_by_type[i] = json_num(buf, kBlockTypes[i].key);
     json_apps(buf, sn);
     json_top(buf, sn);
     json_qlog(buf, sn);
@@ -2081,8 +2109,9 @@ static void update_button_refresh(HWND hwnd) {
  * win32_pid_for_tuple) and the query log ring buffer that answers "why was
  * this blocked?". Unlike the settings page this one has no child controls, so
  * the layout below is self contained and cannot overlap them. */
-/* 拦截排行：服务端按 Host 头累计的“真正被拦下”的次数（最多 20 条）。
-   以前只有聚合数字，看不出“到底哪些域名在捣乱”。 */
+/* 拦截排行 + 拦截类型分布：服务端按 Host 头累计的“真正被拦下”的次数（最多 20 条），
+   以及每个类别各被拦下多少次。以前只有聚合数字，看不出“到底哪些域名在捣乱、
+   拦的都是什么”。 */
 static void draw_ranking_page(HDC hdc) {
     struct snapshot *sn = g_sn;
     HFONT hf = mfont(15, FW_SEMIBOLD);
@@ -2093,9 +2122,11 @@ static void draw_ranking_page(HDC hdc) {
     static const wchar_t *WAIT = L"等待服务器统计数据 ...";
     static const wchar_t *NONE =
         L"还没有拦截记录：等有广告/追踪请求被拦下后，这里会出现排行。";
+    const int rows_shown = 12;
     SetBkMode(hdc, TRANSPARENT);
 
-    rounded_card(hdc, 202, 12, 812, 608, 12, g_pal.card, g_pal.border);
+    /* ── 排行 ── */
+    rounded_card(hdc, 202, 12, 812, 348, 12, g_pal.card, g_pal.border);
     old = (HFONT) SelectObject(hdc, hf);
     SetTextColor(hdc, g_pal.text);
     TextOutW(hdc, S(218), S(24), L"拦截排行", 4);
@@ -2107,7 +2138,7 @@ static void draw_ranking_page(HDC hdc) {
     } else if (sn->top_count == 0) {
         TextOutW(hdc, S(222), S(100), NONE, (int) wcslen(NONE));
     } else {
-        int rows = sn->top_count > GUI_TOP_MAX ? GUI_TOP_MAX : sn->top_count;
+        int rows = sn->top_count > rows_shown ? rows_shown : sn->top_count;
         long long maxc = 1;
         for (int i = 0; i < rows; i++)
             if (sn->top[i].count > maxc) maxc = sn->top[i].count;
@@ -2116,7 +2147,7 @@ static void draw_ranking_page(HDC hdc) {
         TextOutW(hdc, S(880), S(74), L"拦截次数", 4);
         for (int i = 0; i < rows; i++) {
             wchar_t nm[64], line[80], num[32];
-            int y = 100 + i * 24;
+            int y = 100 + i * 21;
             size_t nl = wcslen(sn->top[i].host);
             wcsncpy(nm, sn->top[i].host, 44);
             nm[44] = 0;
@@ -2129,13 +2160,52 @@ static void draw_ranking_page(HDC hdc) {
                 int w = (int) (160.0 * (double) sn->top[i].count / (double) maxc);
                 if (w < 2) w = 2;
                 HBRUSH bb = CreateSolidBrush(C_ACCENT);
-                RECT bar = {S(560), S(y + 3), S(560 + w), S(y + 15)};
+                RECT bar = {S(560), S(y + 2), S(560 + w), S(y + 13)};
                 FillRect(hdc, &bar, bb);
                 DeleteObject(bb);
             }
             SetTextColor(hdc, g_pal.muted);
             fmt_num(num, 32, sn->top[i].count);
             TextOutW(hdc, S(880), S(y), num, (int) wcslen(num));
+        }
+    }
+
+    /* ── 类型分布 ── */
+    rounded_card(hdc, 202, 372, 812, 248, 12, g_pal.card, g_pal.border);
+    SelectObject(hdc, hf);
+    SetTextColor(hdc, g_pal.text);
+    TextOutW(hdc, S(218), S(384), L"拦截类型分布", 6);
+    SelectObject(hdc, lf);
+    SetTextColor(hdc, g_pal.muted);
+    {
+        static const wchar_t *THINT = L"服务端按命中的策略类别累计（自本次安装以来的总数）";
+        TextOutW(hdc, S(218), S(408), THINT, (int) wcslen(THINT));
+    }
+    if (sn != NULL && sn->valid) {
+        long long maxv = 1;
+        for (int i = 0; i < BLOCK_TYPE_COUNT && i < 16; i++)
+            if (sn->blocked_by_type[i] > maxv) maxv = sn->blocked_by_type[i];
+        const int per_col = (BLOCK_TYPE_COUNT + 1) / 2;
+        for (int i = 0; i < BLOCK_TYPE_COUNT && i < 16; i++) {
+            int col = i / per_col;
+            int row = i % per_col;
+            int x = 222 + col * 400;
+            int y = 440 + row * 26;
+            wchar_t num[32];
+            SetTextColor(hdc, g_pal.text);
+            TextOutW(hdc, S(x), S(y), kBlockTypes[i].label,
+                     (int) wcslen(kBlockTypes[i].label));
+            if (sn->blocked_by_type[i] > 0) {
+                int w = (int) (150.0 * (double) sn->blocked_by_type[i] / (double) maxv);
+                if (w < 2) w = 2;
+                HBRUSH bb = CreateSolidBrush(C_ACCENT);
+                RECT bar = {S(x + 96), S(y + 2), S(x + 96 + w), S(y + 13)};
+                FillRect(hdc, &bar, bb);
+                DeleteObject(bb);
+            }
+            SetTextColor(hdc, g_pal.muted);
+            fmt_num(num, 32, sn->blocked_by_type[i]);
+            TextOutW(hdc, S(x + 260), S(y), num, (int) wcslen(num));
         }
     }
     SelectObject(hdc, old);
