@@ -117,6 +117,8 @@ static void utf8_to_wide(const char *src, wchar_t *dst, size_t n) {
    (QLOG_RENDER_MAX); only 11 of them are visible at a time and the card
    scrolls with the mouse wheel. */
 #define GUI_QLOG_MAX 400
+/* Top blocked hosts shown on the ranking page. The server sends at most 20. */
+#define GUI_TOP_MAX 20
 
 /* One socket the server reported through /internal-stats. */
 struct listener_info {
@@ -149,6 +151,12 @@ struct qlog_row {
     wchar_t host[128];
 };
 
+/* One entry of the server's "top_blocked" ranking (busiest first). */
+struct top_row {
+    wchar_t host[128];
+    long long count;
+};
+
 struct snapshot {
     long long uptime_seconds;
     long long total_requests;
@@ -174,6 +182,9 @@ struct snapshot {
     struct app_row apps[GUI_APP_MAX];
     int qlog_count;
     struct qlog_row qlog[GUI_QLOG_MAX];
+    /* v1.59 ranking (absent -> zero) */
+    int top_count;
+    struct top_row top[GUI_TOP_MAX];
 };
 
 /* ── shared dashboard state ─────────────────────────────────────────
@@ -325,9 +336,14 @@ static void json_apps(const char *body, struct snapshot *sn) {
     p = strchr(p, '[');
     if (p == NULL) return;
     p++;
+    /* AUDIT: the loop used to look only for the next '{' without ever checking
+       that it still sits inside THIS array, so an empty "apps":[] made it read
+       the next array's objects and invent an "id 0" process row. Bound it. */
+    const char *arr_end = strchr(p, ']');
     while (sn->app_count < GUI_APP_MAX) {
         const char *open = strchr(p, '{');
         const char *close = open ? strchr(open, '}') : NULL;
+        if (open != NULL && arr_end != NULL && open > arr_end) break;
         char item[512];
         size_t il;
         struct app_row *a;
@@ -364,6 +380,46 @@ static void json_apps(const char *body, struct snapshot *sn) {
             j--;
         }
         sn->apps[j + 1] = key;
+    }
+}
+
+/* "top_blocked":[{"host":"…","count":N}, …] - the server sorts it, so the
+   dashboard only has to read it in order. */
+static void json_top(const char *body, struct snapshot *sn) {
+    const char *p = strstr(body, "\"top_blocked\":[");
+    sn->top_count = 0;
+    if (p == NULL) return;
+    p = strchr(p, '[');
+    if (p == NULL) return;
+    p++;
+    const char *arr_end = strchr(p, ']');
+    while (sn->top_count < GUI_TOP_MAX) {
+        const char *open = strchr(p, '{');
+        const char *close = open ? strchr(open, '}') : NULL;
+        char item[512];
+        size_t il;
+        struct top_row *t;
+        const char *q, *e;
+        /* Stop at the end of this array: an empty ranking must not pick up the
+           objects of the next array (see the same guard in json_apps()). */
+        if (open == NULL || close == NULL) break;
+        if (arr_end != NULL && open > arr_end) break;
+        il = (size_t)(close - open) + 1;
+        if (il >= sizeof(item)) il = sizeof(item) - 1;
+        memcpy(item, open, il);
+        item[il] = '\0';
+        t = &sn->top[sn->top_count];
+        memset(t, 0, sizeof(*t));
+        t->count = json_num(item, "count");
+        q = strstr(item, "\"host\":\"");
+        if (q != NULL) {
+            q += 8;
+            e = strchr(q, '"');
+            if (e != NULL && e > q)
+                MultiByteToWideChar(CP_UTF8, 0, q, (int)(e - q), t->host, 127);
+        }
+        sn->top_count++;
+        p = close + 1;
     }
 }
 
@@ -456,6 +512,7 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->daily_count = json_hist(buf, "daily", sn->daily, HIST_MAX);
     json_listeners(buf, sn);
     json_apps(buf, sn);
+    json_top(buf, sn);
     json_qlog(buf, sn);
     sn->valid = 1;
 }
@@ -1712,7 +1769,7 @@ static void draw_sidebar(HDC hdc) {
     DeleteObject(sf);
 
     /* nav items */
-    for (int t = 0; t < 3; t++) {
+    for (int t = 0; t < 4; t++) {
         int ny = 96 + t * 52;
         bool active = (g_tab == t);
         rounded_card(hdc, 16, ny, 160, 40, 10,
@@ -1748,7 +1805,7 @@ static void draw_sidebar(HDC hdc) {
             SelectObject(hdc, ob2);
             SelectObject(hdc, op);
             DeleteObject(ip);
-        } else {
+        } else if (t == 2) {
             HPEN ip = CreatePen(PS_SOLID, S(2), active ? C_ACCENT : g_pal.nav_text);
             HGDIOBJ op = SelectObject(hdc, ip);
             HGDIOBJ ob2 = SelectObject(hdc, GetStockObject(NULL_BRUSH));
@@ -1762,12 +1819,25 @@ static void draw_sidebar(HDC hdc) {
             SelectObject(hdc, ob2);
             SelectObject(hdc, op);
             DeleteObject(ip);
+        } else {
+            /* ranking: three bars of growing height */
+            HBRUSH ib = CreateSolidBrush(active ? C_ACCENT : g_pal.nav_text);
+            HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
+            HGDIOBJ ob = SelectObject(hdc, ib);
+            RoundRect(hdc, S(34), S(ny + 22), S(41), S(30), S(2), S(2));
+            RoundRect(hdc, S(45), S(16), S(52), S(30), S(2), S(2));
+            RoundRect(hdc, S(56), S(10), S(63), S(30), S(2), S(2));
+            SelectObject(hdc, op);
+            SelectObject(hdc, ob);
+            DeleteObject(ib);
         }
         HFONT nf = mfont(14, active ? FW_SEMIBOLD : FW_NORMAL);
         SelectObject(hdc, nf);
         SetTextColor(hdc, active ? RGB(255, 255, 255) : g_pal.nav_text);
         {
-            const wchar_t *label = t == 0 ? L"统计" : (t == 1 ? L"应用日志" : L"设置");
+            const wchar_t *label = t == 0 ? L"统计"
+                                 : (t == 1 ? L"应用日志"
+                                 : (t == 2 ? L"设置" : L"拦截排行"));
             TextOutW(hdc, S(70), S(ny + 10), label, (int) wcslen(label));
         }
         SelectObject(hdc, old);
@@ -2011,6 +2081,68 @@ static void update_button_refresh(HWND hwnd) {
  * win32_pid_for_tuple) and the query log ring buffer that answers "why was
  * this blocked?". Unlike the settings page this one has no child controls, so
  * the layout below is self contained and cannot overlap them. */
+/* 拦截排行：服务端按 Host 头累计的“真正被拦下”的次数（最多 20 条）。
+   以前只有聚合数字，看不出“到底哪些域名在捣乱”。 */
+static void draw_ranking_page(HDC hdc) {
+    struct snapshot *sn = g_sn;
+    HFONT hf = mfont(15, FW_SEMIBOLD);
+    HFONT lf = mfont(12, FW_NORMAL);
+    HFONT old;
+    static const wchar_t *HINT =
+        L"按被拦截次数排序 - 只统计真正被拦下的请求（占位图 / 204 / 空响应）";
+    static const wchar_t *WAIT = L"等待服务器统计数据 ...";
+    static const wchar_t *NONE =
+        L"还没有拦截记录：等有广告/追踪请求被拦下后，这里会出现排行。";
+    SetBkMode(hdc, TRANSPARENT);
+
+    rounded_card(hdc, 202, 12, 812, 608, 12, g_pal.card, g_pal.border);
+    old = (HFONT) SelectObject(hdc, hf);
+    SetTextColor(hdc, g_pal.text);
+    TextOutW(hdc, S(218), S(24), L"拦截排行", 4);
+    SelectObject(hdc, lf);
+    SetTextColor(hdc, g_pal.muted);
+    TextOutW(hdc, S(218), S(48), HINT, (int) wcslen(HINT));
+    if (sn == NULL || !sn->valid) {
+        TextOutW(hdc, S(222), S(100), WAIT, (int) wcslen(WAIT));
+    } else if (sn->top_count == 0) {
+        TextOutW(hdc, S(222), S(100), NONE, (int) wcslen(NONE));
+    } else {
+        int rows = sn->top_count > GUI_TOP_MAX ? GUI_TOP_MAX : sn->top_count;
+        long long maxc = 1;
+        for (int i = 0; i < rows; i++)
+            if (sn->top[i].count > maxc) maxc = sn->top[i].count;
+        SetTextColor(hdc, g_pal.muted);
+        TextOutW(hdc, S(222), S(74), L"域名", 2);
+        TextOutW(hdc, S(880), S(74), L"拦截次数", 4);
+        for (int i = 0; i < rows; i++) {
+            wchar_t nm[64], line[80], num[32];
+            int y = 100 + i * 24;
+            size_t nl = wcslen(sn->top[i].host);
+            wcsncpy(nm, sn->top[i].host, 44);
+            nm[44] = 0;
+            if (nl > 44) wcscat(nm, L"...");
+            swprintf(line, 80, L"%d. %ls", i + 1, nm);
+            SetTextColor(hdc, g_pal.text);
+            TextOutW(hdc, S(222), S(y), line, (int) wcslen(line));
+            /* 条形长度按最忙的域名归一，形状一眼能看出差距 */
+            if (sn->top[i].count > 0) {
+                int w = (int) (160.0 * (double) sn->top[i].count / (double) maxc);
+                if (w < 2) w = 2;
+                HBRUSH bb = CreateSolidBrush(C_ACCENT);
+                RECT bar = {S(560), S(y + 3), S(560 + w), S(y + 15)};
+                FillRect(hdc, &bar, bb);
+                DeleteObject(bb);
+            }
+            SetTextColor(hdc, g_pal.muted);
+            fmt_num(num, 32, sn->top[i].count);
+            TextOutW(hdc, S(880), S(y), num, (int) wcslen(num));
+        }
+    }
+    SelectObject(hdc, old);
+    DeleteObject(hf);
+    DeleteObject(lf);
+}
+
 static void draw_activity_page(HDC hdc) {
     struct snapshot *sn = g_sn;
     HFONT hf = mfont(15, FW_SEMIBOLD);
@@ -2308,8 +2440,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_LBUTTONUP: {
         int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
-        if (nav_hit(x, y, 0) || nav_hit(x, y, 1) || nav_hit(x, y, 2)) {
-            int new_tab = nav_hit(x, y, 0) ? 0 : (nav_hit(x, y, 1) ? 1 : 2);
+        if (nav_hit(x, y, 0) || nav_hit(x, y, 1) || nav_hit(x, y, 2) || nav_hit(x, y, 3)) {
+            int new_tab = nav_hit(x, y, 0) ? 0 : (nav_hit(x, y, 1) ? 1
+                        : (nav_hit(x, y, 2) ? 2 : 3));
             if (new_tab != g_tab) {
                 g_tab = new_tab;
                 show_controls(hwnd, g_tab);
@@ -2561,6 +2694,17 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (g_tab == 1) {
             /* 应用日志 page */
             draw_activity_page(hdc);
+            BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
+            SelectObject(mem, oldbmp);
+            DeleteObject(bmp);
+            DeleteDC(mem);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
+        if (g_tab == 3) {
+            /* 拦截排行 page */
+            draw_ranking_page(hdc);
             BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
             SelectObject(mem, oldbmp);
             DeleteObject(bmp);

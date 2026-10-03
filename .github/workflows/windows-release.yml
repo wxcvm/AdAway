@@ -21,7 +21,7 @@ jobs:
       # Single source of truth for the release tag: the installer attach step
       # used to hardcode the tag, so every version bump uploaded the new
       # installer onto the PREVIOUS release and the new one shipped zip-only.
-      TAG: win11-webserver-v1.58
+      TAG: win11-webserver-v1.59
     steps:
       - uses: actions/checkout@v6
 
@@ -240,6 +240,10 @@ jobs:
               throw "apps[] has no process-attributed request (per-app attribution broken)"
             }
             if ($json2 -notmatch '"query_log":\[') { throw "internal-stats has no query_log[] array" }
+            # v1.59: the ranking needs the field to exist even when nothing has
+            # been blocked yet - an absent array is what left the Android
+            # "拦截排行" card permanently empty.
+            if ($json2 -notmatch '"top_blocked":\[') { throw "internal-stats has no top_blocked[] array" }
             Write-Output ("per-app attribution OK: " + ([regex]::Match($json2, '"apps":\[\{[^}]*\}')).Value)
           } catch {
             Write-Output "SMOKE TEST ERROR: $($_.Exception.Message)"

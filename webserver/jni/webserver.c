@@ -679,6 +679,61 @@ static struct qlog_entry s_qlog[QLOG_MAX];
 static uint32_t s_qlog_pos;    /* next slot to write */
 static uint32_t s_qlog_count;  /* valid entries (<= QLOG_MAX) */
 
+/*
+ * 拦截排行。服务端此前只发聚合计数，于是 Android 的“拦截排行”卡片永远是空的
+ * （它读的就是 top_blocked），而 Windows 仪表盘根本没有这个视图。这里按 Host
+ * 头累计每个域名被拦截的次数，最多记 TOP_HOSTS_MAX 个，输出时按次数降序。
+ * 与 master 上的同名实现保持一致的字段形状：{"host":"…","count":N}。
+ */
+#define TOP_HOSTS_MAX 32
+struct top_host {
+    char host[128];
+    uint32_t count;
+};
+static struct top_host s_top_hosts[TOP_HOSTS_MAX];
+static int s_top_count;
+
+/* Host header of a request (port stripped), or the URI when there is none. */
+static void req_host_of(struct mg_http_message *hm, char *out, size_t cap) {
+    if (out == NULL || cap == 0) return;
+    out[0] = '\0';
+    struct mg_str *hh = hm != NULL ? mg_http_get_header(hm, "Host") : NULL;
+    if (hh != NULL && hh->len > 0) {
+        size_t n = hh->len < cap - 1 ? hh->len : cap - 1;
+        memcpy(out, hh->buf, n);
+        out[n] = '\0';
+        char *colon = strchr(out, ':');
+        if (colon != NULL) *colon = '\0';
+    } else if (hm != NULL && hm->uri.len > 0) {
+        size_t n = hm->uri.len < cap - 1 ? hm->uri.len : cap - 1;
+        memcpy(out, hm->uri.buf, n);
+        out[n] = '\0';
+    }
+}
+
+static void top_host_add(const char *host) {
+    if (host == NULL || host[0] == '\0') return;
+    for (int i = 0; i < s_top_count; i++) {
+        if (strcasecmp(s_top_hosts[i].host, host) == 0) {
+            s_top_hosts[i].count++;
+            return;
+        }
+    }
+    if (s_top_count < TOP_HOSTS_MAX) {
+        snprintf(s_top_hosts[s_top_count].host, sizeof(s_top_hosts[0].host), "%s", host);
+        s_top_hosts[s_top_count].count = 1;
+        s_top_count++;
+        return;
+    }
+    /* Table full: the least frequently blocked host gives up its slot, so a
+       long tail of one-off domains cannot push the real offenders out. */
+    int min = 0;
+    for (int i = 1; i < s_top_count; i++)
+        if (s_top_hosts[i].count < s_top_hosts[min].count) min = i;
+    snprintf(s_top_hosts[min].host, sizeof(s_top_hosts[0].host), "%s", host);
+    s_top_hosts[min].count = 1;
+}
+
 static void qlog_clear(void) {
     s_qlog_pos = 0;
     s_qlog_count = 0;
@@ -2871,6 +2926,33 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     /* static: a few KB that must never sit on the 16 KB event-loop stack */
     static char qlog_json[QLOG_JSON_MAX];
     qlog_render(qlog_json, sizeof(qlog_json));
+    /* 拦截排行，busiest first（见 top_host_add），最多 20 条。 */
+    char top_json[2048] = "";
+    {
+        struct top_host sorted[TOP_HOSTS_MAX];
+        int n = s_top_count;
+        memcpy(sorted, s_top_hosts, sizeof(sorted[0]) * (size_t) n);
+        for (int i = 1; i < n; i++) {
+            struct top_host key = sorted[i];
+            int j = i - 1;
+            while (j >= 0 && sorted[j].count < key.count) {
+                sorted[j + 1] = sorted[j];
+                j--;
+            }
+            sorted[j + 1] = key;
+        }
+        int toff = 0;
+        for (int i = 0; i < n && i < 20; i++) {
+            char safe[160];
+            int w;
+            json_safe_copy(safe, sizeof(safe), sorted[i].host);
+            w = snprintf(top_json + toff, sizeof(top_json) - (size_t) toff,
+                         "%s{\"host\":\"%s\",\"count\":%lu}",
+                         toff ? "," : "", safe, (unsigned long) sorted[i].count);
+            if (w <= 0 || toff + w >= (int) sizeof(top_json)) break;
+            toff += w;
+        }
+    }
     int off = 0;
     for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
         /* Android maps the uid to a package name on the app side; Windows has
@@ -2987,7 +3069,8 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"recent_tls\":[%s],"
         "\"history\":[%s],"
         "\"daily\":[%s],"
-        "\"query_log\":[%s]}",
+        "\"query_log\":[%s],"
+        "\"top_blocked\":[%s]}",
         (unsigned long long)uptime,
         (double)uptime / 86400.0,
         (unsigned long long)req,
@@ -3021,7 +3104,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         s->stats_port,
         s_main_http_bound ? "true" : "false",
         listeners_json,
-        apps_json, tls_json, hist_json, daily_json, qlog_json);
+        apps_json, tls_json, hist_json, daily_json, qlog_json, top_json);
         if (n < 0) return 0;
         return n < (int) out_sz ? n : (int) out_sz - 1;
     }
@@ -4424,6 +4507,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         hist_add(HIST_BLOCKED);
         struct appstat *ba = app_find_or_add(conn_load_uid(c));
         if (ba) ba->blocked++;
+        {
+            char bh[192];
+            req_host_of(hm, bh, sizeof(bh));
+            top_host_add(bh);
+        }
         ws_push_broadcast(s);  /* real-time push to WS subscribers */
         return;
     }
@@ -4449,6 +4537,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
        missing from the query log. Type = 图片 / 占位 is the honest description. */
     RB_TYPE(LT_IMAGES, BM_REPLY);
     qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
+    {
+        char bh[192];
+        req_host_of(hm, bh, sizeof(bh));
+        top_host_add(bh);
+    }
     ws_push_broadcast(s);  /* real-time push to WS subscribers */
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
