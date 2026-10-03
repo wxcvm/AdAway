@@ -302,8 +302,12 @@
     <string name="compose_settings_autostart_battery_button">电池优化设置</string>
     <string name="compose_settings_autostart_retry">重新启动服务器</string>
     <string name="compose_settings_autostart_retry_toast">已重新排队，几秒后自动启动</string>
-    <string name="compose_settings_autostart_vendor_button">厂商自启动设置</string>
-    <string name="compose_settings_autostart_vendor_fallback">本机没有已知的自启动页面 —— 请在应用详情里允许“自启动/后台运行”。</string>
     <string name="compose_settings_autostart_bootscript_on">已写入 Magisk 开机脚本：开机由系统直接拉起服务器，不再依赖开机广播</string>
     <string name="compose_settings_autostart_bootscript_na">未检测到 Magisk：只能依赖开机广播，若开机没起来请在系统设置里允许“自启动”</string>
+    <string name="compose_settings_keepalive">常驻守护（前台服务）</string>
+    <string name="compose_settings_keepalive_hint">会常驻一条通知；服务器一旦停止，几秒内自动重启（而不是等周期看护的十几分钟）</string>
+    <string name="notification_keepalive_channel_name">服务器守护</string>
+    <string name="notification_keepalive_channel_description">常驻守护运行期间显示的通知</string>
+    <string name="notification_keepalive_title">ADBlock 正在守护服务器</string>
+    <string name="notification_keepalive_text">服务器停止时会在几秒内自动重启</string>
 </resources>

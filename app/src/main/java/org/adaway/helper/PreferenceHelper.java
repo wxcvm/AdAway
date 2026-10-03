@@ -33,6 +33,13 @@ import java.util.Collections;
 import java.util.Set;
 
 public final class PreferenceHelper {
+    /**
+     * Preference key for the optional keep-alive foreground service. Kept as a
+     * plain constant: it is internal, never shown in a settings screen, so it
+     * does not need a string resource.
+     */
+    private static final String PREF_KEEPALIVE_ENABLED = "keepalive_enabled";
+
     private PreferenceHelper() {
 
     }
@@ -196,6 +203,40 @@ public final class PreferenceHelper {
                 context.getString(R.string.pref_webserver_enabled_key),
                 context.getResources().getBoolean(R.bool.pref_webserver_enabled_def)
         );
+    }
+
+    /**
+     * Whether the optional keep-alive foreground service should run.
+     *
+     * <p>Off by default: it buys a much faster restart of the intercept server
+     * (seconds instead of the WorkManager minimum of many minutes) at the cost
+     * of a permanent notification, so the user opts in explicitly.</p>
+     *
+     * @param context The application context.
+     * @return {@code true} when the keep-alive service is wanted.
+     */
+    public static boolean getKeepAliveEnabled(Context context) {
+        SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(
+                Constants.PREFS_NAME,
+                Context.MODE_PRIVATE
+        );
+        return prefs.getBoolean(PREF_KEEPALIVE_ENABLED, false);
+    }
+
+    /**
+     * Store whether the keep-alive foreground service should run.
+     *
+     * @param context The application context.
+     * @param enabled Whether the service should run.
+     */
+    public static void setKeepAliveEnabled(Context context, boolean enabled) {
+        SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(
+                Constants.PREFS_NAME,
+                Context.MODE_PRIVATE
+        );
+        prefs.edit()
+                .putBoolean(PREF_KEEPALIVE_ENABLED, enabled)
+                .apply();
     }
 
     public static AdBlockMethod getAdBlockMethod(Context context) {

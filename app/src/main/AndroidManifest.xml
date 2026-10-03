@@ -35,6 +35,15 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Map web-server peer uids (per-app stats) to package names -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!--
+        Optional keep-alive foreground service (opt in, see
+        ServerKeepAliveService): it restarts the intercept server within seconds
+        instead of waiting for the WorkManager watchdog. "specialUse" is the
+        honest type - keeping a local user-enabled server alive is not
+        dataSync/media/etc.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!--
         ROOT CAUSE FIX (issue #2): targetSdk 30+ enables package visibility
@@ -121,6 +130,15 @@
             android:label="@string/update_title"
             android:parentActivityName=".ui.compose.MainActivity"
             android:theme="@style/Theme.AdAway.NoActionBar.Red" />
+
+        <service
+            android:name=".broadcast.ServerKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the local, user-enabled ad-blocking web server running and restarts it when the system kills it." />
+        </service>
 
         <service
             android:name=".tile.AdBlockingTileService"

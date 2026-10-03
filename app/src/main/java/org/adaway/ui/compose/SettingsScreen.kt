@@ -776,11 +776,44 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         }
                     }
                     Spacer(Modifier.height(6.dp))
-                    OutlinedButton(
-                        onClick = { openVendorAutostart(context) },
+                    /*
+                     * 可选的常驻守护：前台服务不被系统延迟调度，服务器被杀后能在
+                     * 数秒内拉起来（WorkManager 兜底要等十几分钟）。代价是一条常驻
+                     * 通知，所以默认关闭、由用户自己决定。
+                     */
+                    var keepAlive by remember {
+                        mutableStateOf(
+                            org.adaway.helper.PreferenceHelper.getKeepAliveEnabled(context),
+                        )
+                    }
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(stringResource(R.string.compose_settings_autostart_vendor_button))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_keepalive),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_keepalive_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = keepAlive,
+                            onCheckedChange = { v ->
+                                keepAlive = v
+                                org.adaway.helper.PreferenceHelper
+                                    .setKeepAliveEnabled(context, v)
+                                if (v) {
+                                    org.adaway.broadcast.ServerKeepAliveService.start(context)
+                                } else {
+                                    org.adaway.broadcast.ServerKeepAliveService.stop(context)
+                                }
+                            },
+                        )
                     }
                     if (bootScriptState != 0) {
                         Spacer(Modifier.height(4.dp))
@@ -1863,74 +1896,6 @@ private fun openBatterySettings(context: Context) {
         )
     } catch (e: Exception) {
         Timber.w(e, "No battery optimization settings activity")
-        Toast.makeText(context, e.message ?: "unavailable", Toast.LENGTH_SHORT).show()
-    }
-}
-
-/**
- * 打开厂商自己的“自启动/后台运行”白名单页面。
- *
- * <p>国产 ROM 除了电池优化之外，还有一套独立的开机自启动开关；不点亮它，
- * BOOT_COMPLETED 会被直接丢掉。各家 Activity 名字不同，且随版本变化，所以逐条
- * 尝试，全部失败就退回“应用详情”页让用户自己找——比什么都不做要好。</p>
- */
-private fun openVendorAutostart(context: Context) {
-    val candidates = listOf(
-        // MIUI / HyperOS
-        android.content.ComponentName(
-            "com.miui.securitycenter",
-            "com.miui.permcenter.autostart.AutoStartManagementActivity",
-        ),
-        // EMUI / HarmonyOS
-        android.content.ComponentName(
-            "com.huawei.systemmanager",
-            "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity",
-        ),
-        android.content.ComponentName(
-            "com.huawei.systemmanager",
-            "com.huawei.systemmanager.optimize.process.ProtectActivity",
-        ),
-        // ColorOS / realme
-        android.content.ComponentName(
-            "com.coloros.safecenter",
-            "com.coloros.safecenter.permission.startup.StartupAppListActivity",
-        ),
-        android.content.ComponentName(
-            "com.oppo.safe",
-            "com.oppo.safe.permission.startup.StartupAppListActivity",
-        ),
-        // vivo / iQOO
-        android.content.ComponentName(
-            "com.vivo.permissionmanager",
-            "com.vivo.permissionmanager.activity.BgStartUpManagerActivity",
-        ),
-        // 三星
-        android.content.ComponentName(
-            "com.samsung.android.lool",
-            "com.samsung.android.sm.ui.battery.BatteryActivity",
-        ),
-    )
-    for (component in candidates) {
-        try {
-            context.startActivity(
-                Intent().setComponent(component).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-            return
-        } catch (e: Exception) {
-            // 该 ROM 没有这个页面：试下一个
-        }
-    }
-    try {
-        context.startActivity(
-            Intent(
-                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.fromParts("package", context.packageName, null),
-            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-        Toast.makeText(context, R.string.compose_settings_autostart_vendor_fallback, Toast.LENGTH_LONG)
-            .show()
-    } catch (e: Exception) {
-        Timber.w(e, "No vendor autostart or app details screen")
         Toast.makeText(context, e.message ?: "unavailable", Toast.LENGTH_SHORT).show()
     }
 }

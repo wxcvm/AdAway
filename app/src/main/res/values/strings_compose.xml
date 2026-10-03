@@ -302,8 +302,12 @@
     <string name="compose_settings_autostart_battery_button">Battery settings</string>
     <string name="compose_settings_autostart_retry">Start the server again</string>
     <string name="compose_settings_autostart_retry_toast">Queued again - it starts within a few seconds</string>
-    <string name="compose_settings_autostart_vendor_button">Vendor autostart settings</string>
-    <string name="compose_settings_autostart_vendor_fallback">This ROM has no known autostart page - allowing "autostart / run in background" in the app settings is what matters.</string>
     <string name="compose_settings_autostart_bootscript_on">Magisk boot script installed - the server is started from init at boot, no broadcast needed</string>
     <string name="compose_settings_autostart_bootscript_na">Magisk not detected - only the boot broadcast path is available; allow "autostart" in the system settings if the server does not come up</string>
+    <string name="compose_settings_keepalive">Keep-alive service</string>
+    <string name="compose_settings_keepalive_hint">Adds a permanent notification; the server is then restarted within seconds instead of waiting for the periodic watchdog</string>
+    <string name="notification_keepalive_channel_name">Server keep-alive</string>
+    <string name="notification_keepalive_channel_description">Permanent notification shown while the keep-alive service runs</string>
+    <string name="notification_keepalive_title">ADBlock is watching the server</string>
+    <string name="notification_keepalive_text">The intercept server is restarted within seconds if it stops</string>
 </resources>

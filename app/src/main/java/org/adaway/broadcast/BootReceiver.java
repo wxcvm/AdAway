@@ -90,6 +90,17 @@ public class BootReceiver extends BroadcastReceiver {
         }
 
         /*
+         * Opt-in foreground service (see ServerKeepAliveService): unlike this
+         * receiver's ~10 s window it is not deferred and not killed, so it can
+         * wait for root, start the server and then watch it every minute. Only
+         * started when the user asked for it, and START_STICKY brings it back
+         * if the system reclaims it.
+         */
+        if (PreferenceHelper.getKeepAliveEnabled(context)) {
+            ServerKeepAliveService.start(context);
+        }
+
+        /*
          * Immediate attempt, bounded by the receiver's own ~10 s window.
          *
          * WorkManager is the reliable retry path, but several OEM builds defer
