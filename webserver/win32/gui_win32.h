@@ -1,4 +1,4 @@
-﻿#ifndef ADBLOCK_GUI_WIN32_H
+#ifndef ADBLOCK_GUI_WIN32_H
 #define ADBLOCK_GUI_WIN32_H
 #include <stdbool.h>
 
