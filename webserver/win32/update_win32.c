@@ -2014,8 +2014,20 @@ portable_fallback:
              L"echo [%%DATE%% %%TIME%%] new build in place>>\"%%ULOG%%\"\r\n"
              L"rem 3) user data comes back (installer exclusion list + own images)\r\n"
              L"xcopy /E /I /Y \"%%BK%%\\resources\\*.dat\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
-             L"xcopy /Y \"%%BK%%\\resources\\img_*.webp\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
-             L"for %%F in (localhost-2410.crt localhost-2410.key allowlist.txt blocklist.txt cosmetic.css update_cache.json webserver.log webserver.log.1 crash.log) do copy /y \"%%BK%%\\resources\\%%F\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
+             L"xcopy /Y /I \"%%BK%%\\resources\\img_*.webp\" \"%%APP%%\\resources\\\" <nul >nul 2>&1\r\n"
+             /*
+              * NOTE the quadruple percent: this string is a swprintf FORMAT
+              * string, so %% collapses to a single % on the way into the file.
+              * A batch FOR variable therefore needs %%%%F here to end up as
+              * %%F in the script. With the old %%F the file got "%F", which is
+              * not a batch FOR variable at all - cmd reported a syntax error and
+              * ABORTED THE WHOLE SCRIPT at this line, leaving the update half
+              * applied: the .dat files copied, webserver.ini / the CA cert and
+              * key / the logs NOT copied, the new server never started and the
+              * backup never removed. Nobody had ever reached this line before,
+              * because every earlier attempt already rolled back at the move.
+              */
+             L"for %%%%F in (localhost-2410.crt localhost-2410.key allowlist.txt blocklist.txt cosmetic.css update_cache.json webserver.log webserver.log.1 crash.log) do copy /y \"%%BK%%\\resources\\%%%%F\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
              L"copy /y \"%%BK%%\\webserver.ini\" \"%%APP%%\\webserver.ini\" >nul 2>&1\r\n"
              L"rem 4) start it and see whether it survives the first seconds\r\n"
              L"start \"\" \"%%APP%%\\webserver.exe\" --minimized\r\n"

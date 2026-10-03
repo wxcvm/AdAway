@@ -255,6 +255,39 @@ static double json_double(const char *body, const char *key) {
     return strtod(p, NULL);
 }
 
+/*
+ * Position of the ']' that closes the array in which p currently sits,
+ * skipping over quoted strings and nested arrays.
+ *
+ * A plain strchr(p, ']') is NOT enough: listener addresses look like
+ * "http://[::1]:8686", so the first ']' after the array start sits inside an
+ * IPv6 address. The bound then cut the parse off after two entries, and the
+ * dashboard reported 2 listeners ("listeners=2" in the heartbeat, a card
+ * saying "绑定正常 · 2 个监听端口") while the server really owns 10 sockets.
+ * Every JSON array parser in this file uses this helper.
+ */
+static const char *json_array_end(const char *p) {
+    int depth = 0;
+    for (; p != NULL && *p != '\0'; p++) {
+        if (*p == '"') {
+            p++;
+            while (*p != '\0' && *p != '"') {
+                if (*p == '\\' && p[1] != '\0') p++;
+                p++;
+            }
+            if (*p == '\0') return NULL;
+            continue;
+        }
+        if (*p == '[') {
+            depth++;
+        } else if (*p == ']') {
+            if (depth == 0) return p;
+            depth--;
+        }
+    }
+    return NULL;
+}
+
 static int json_hist(const char *body, const char *key,
                      struct histogram *out, int max) {
     char pat[64];
@@ -268,7 +301,7 @@ static int json_hist(const char *body, const char *key,
        kept reading the objects of the NEXT array - "history" and "daily" share
        the requests/blocked field names, so a 24-bucket history silently
        absorbed the 30 daily buckets (and every shorter array did the same). */
-    const char *arr_end = strchr(p, ']');
+    const char *arr_end = json_array_end(p);
     while (count < max && *p) {
         const char *open = strchr(p, '{');
         if (!open) break;
@@ -309,7 +342,7 @@ static void json_listeners(const char *body, struct snapshot *sn) {
      * parser kept going and turned 4 app objects into "listeners" with no
      * name/bound field - 4 phantom unbound ports, and the card went red.
      */
-    const char *arr_end = strchr(p, ']');
+    const char *arr_end = json_array_end(p);
     while (sn->listener_count < LISTENER_MAX_GUI) {
         const char *open = strchr(p, '{');
         if (open == NULL) break;
@@ -358,7 +391,7 @@ static void json_apps(const char *body, struct snapshot *sn) {
     /* AUDIT: the loop used to look only for the next '{' without ever checking
        that it still sits inside THIS array, so an empty "apps":[] made it read
        the next array's objects and invent an "id 0" process row. Bound it. */
-    const char *arr_end = strchr(p, ']');
+    const char *arr_end = json_array_end(p);
     while (sn->app_count < GUI_APP_MAX) {
         const char *open = strchr(p, '{');
         const char *close = open ? strchr(open, '}') : NULL;
@@ -411,7 +444,7 @@ static void json_top(const char *body, struct snapshot *sn) {
     p = strchr(p, '[');
     if (p == NULL) return;
     p++;
-    const char *arr_end = strchr(p, ']');
+    const char *arr_end = json_array_end(p);
     while (sn->top_count < GUI_TOP_MAX) {
         const char *open = strchr(p, '{');
         const char *close = open ? strchr(open, '}') : NULL;
@@ -453,7 +486,7 @@ static void json_qlog(const char *body, struct snapshot *sn) {
        followed by top_blocked, whose objects also carry a "host" field, so
        without this the ranking's entries showed up as extra "recent requests"
        with a bogus type/mode of 0. */
-    const char *arr_end = strchr(p, ']');
+    const char *arr_end = json_array_end(p);
     while (sn->qlog_count < GUI_QLOG_MAX) {
         const char *open = strchr(p, '{');
         const char *close = open ? strchr(open, '}') : NULL;
