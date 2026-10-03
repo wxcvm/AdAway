@@ -264,9 +264,15 @@ static int json_hist(const char *body, const char *key,
     if (!p) return 0;
     p += pl;
     int count = 0;
+    /* AUDIT: bound the scan by the array's own ']'. Without it a SHORT array
+       kept reading the objects of the NEXT array - "history" and "daily" share
+       the requests/blocked field names, so a 24-bucket history silently
+       absorbed the 30 daily buckets (and every shorter array did the same). */
+    const char *arr_end = strchr(p, ']');
     while (count < max && *p) {
         const char *open = strchr(p, '{');
         if (!open) break;
+        if (arr_end != NULL && open > arr_end) break;
         const char *close = strchr(open, '}');
         if (!close) break;
         char item[512];
@@ -294,9 +300,20 @@ static void json_listeners(const char *body, struct snapshot *sn) {
     p = strchr(p, '[');
     if (p == NULL) return;
     p++;
+    /*
+     * ROOT CAUSE of the dashboard reporting "有端口绑定失败 · 10/14 已监听"
+     * (and of "listeners=14" in the heartbeat log): the server really owns 10
+     * sockets and all of them bound, but this loop only looked for the next '{'
+     * without ever checking that it still sat inside THIS array. The listeners
+     * array is followed by apps[], so once the 10 real entries were consumed the
+     * parser kept going and turned 4 app objects into "listeners" with no
+     * name/bound field - 4 phantom unbound ports, and the card went red.
+     */
+    const char *arr_end = strchr(p, ']');
     while (sn->listener_count < LISTENER_MAX_GUI) {
         const char *open = strchr(p, '{');
         if (open == NULL) break;
+        if (arr_end != NULL && open > arr_end) break;
         const char *close = strchr(open, '}');
         if (close == NULL) break;
         char item[384];
@@ -432,6 +449,11 @@ static void json_qlog(const char *body, struct snapshot *sn) {
     p = strchr(p, '[');
     if (p == NULL) return;
     p++;
+    /* Same array-bound rule as json_apps()/json_listeners(): query_log is
+       followed by top_blocked, whose objects also carry a "host" field, so
+       without this the ranking's entries showed up as extra "recent requests"
+       with a bogus type/mode of 0. */
+    const char *arr_end = strchr(p, ']');
     while (sn->qlog_count < GUI_QLOG_MAX) {
         const char *open = strchr(p, '{');
         const char *close = open ? strchr(open, '}') : NULL;
@@ -440,6 +462,7 @@ static void json_qlog(const char *body, struct snapshot *sn) {
         struct qlog_row *r;
         const char *q, *e;
         if (open == NULL || close == NULL) break;
+        if (arr_end != NULL && open > arr_end) break;
         il = (size_t)(close - open) + 1;
         if (il >= sizeof(item)) il = sizeof(item) - 1;
         memcpy(item, open, il);
@@ -1629,7 +1652,10 @@ static void draw_listener_card(HDC hdc, int x, int y, int w, int h,
 
     wchar_t pill[160];
     if (live)
-        swprintf(pill, 160, ok ? L"绑定正常 · %d/%d 个端口在监听"
+        /* bound == total in the normal case, and printing "10/14" there made a
+           healthy server look like it had four dead ports - so only show the
+           fraction when something is actually wrong. */
+        swprintf(pill, 160, ok ? L"绑定正常 · %d 个监听端口"
                                : L"有端口绑定失败 · %d/%d 已监听", bound, total);
     else
         swprintf(pill, 160, L"服务器暂不可达，无法确认监听状态");

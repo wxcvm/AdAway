@@ -1,11 +1,11 @@
-; Inno Setup script for the ADBlock Windows web server.
+﻿; Inno Setup script for the ADBlock Windows web server.
 ; Build: iscc.exe installer.iss   (output: dist-installer\adblock-webserver-setup.exe)
 [Setup]
 ; Stable identity so an upgrade replaces the previous install (and keeps its
 ; folder as the default) instead of installing side by side.
 AppId={{8F2A61D4-6C0B-4B3E-9E77-ADB10C1A5F27}
-AppName=ADBlock 拦截服务器
-AppVersion=1.61
+AppName=ADBlock 鎷︽埅鏈嶅姟鍣?
+AppVersion=1.62
 AppPublisher=wxcvm
 DefaultDirName={autopf}\ADBlock
 DefaultGroupName=ADBlock
@@ -31,8 +31,8 @@ RestartApplications=no
 Name: "chinese"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"; Flags: unchecked
-Name: "autostart"; Description: "开机自动启动"; GroupDescription: "附加任务:"; Flags: unchecked
+Name: "desktopicon"; Description: "鍒涘缓妗岄潰蹇嵎鏂瑰紡"; GroupDescription: "闄勫姞浠诲姟:"; Flags: unchecked
+Name: "autostart"; Description: "寮€鏈鸿嚜鍔ㄥ惎鍔?; GroupDescription: "闄勫姞浠诲姟:"; Flags: unchecked
 
 [Files]
 ; Program files are always replaced, but the resources folder is USER DATA:
@@ -44,8 +44,8 @@ Source: "dist\*"; DestDir: "{app}"; Excludes: "resources\*"; Flags: recursesubdi
 Source: "dist\resources\*"; DestDir: "{app}\resources"; Excludes: "localhost-2410.*,localhost-leaf.*,*.dat,stats.json,update_cache.json,control_token.txt,ca_rotation.json,webserver.log,webserver.log.1,crash.log,allowlist.txt,blocklist.txt,cosmetic.css"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist
 
 [Icons]
-Name: "{group}\ADBlock 仪表盘"; Filename: "{app}\webserver.exe"
-Name: "{group}\卸载 ADBlock"; Filename: "{uninstallexe}"
+Name: "{group}\ADBlock 浠〃鐩?; Filename: "{app}\webserver.exe"
+Name: "{group}\鍗歌浇 ADBlock"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\ADBlock"; Filename: "{app}\webserver.exe"; Tasks: desktopicon
 
 
@@ -54,11 +54,11 @@ Name: "{autodesktop}\ADBlock"; Filename: "{app}\webserver.exe"; Tasks: desktopic
 ; folder shortcut (as before) plus that Run key meant TWO autostart entries and
 ; therefore two server processes after logon.
 Filename: "{app}\webserver.exe"; Parameters: "--install-autostart"; Tasks: autostart; Flags: runhidden skipifsilent
-Filename: "{app}\webserver.exe"; Description: "立即启动 ADBlock"; Flags: nowait skipifsilent
+Filename: "{app}\webserver.exe"; Description: "绔嬪嵆鍚姩 ADBlock"; Flags: nowait skipifsilent
 ; The in-app updater installs with /VERYSILENT. Every entry above is skipped in
 ; that mode (skipifsilent) and RestartApplications=no keeps Inno from bringing
 ; the server back either, so the update killed the running dashboard and left
-; nothing behind - it looked like "更新失败". Start it again for the silent path.
+; nothing behind - it looked like "鏇存柊澶辫触". Start it again for the silent path.
 Filename: "{app}\webserver.exe"; Flags: nowait; Check: WizardSilent
 
 [UninstallRun]

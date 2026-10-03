@@ -1,9 +1,9 @@
-#ifndef ADBLOCK_GUI_WIN32_H
+﻿#ifndef ADBLOCK_GUI_WIN32_H
 #define ADBLOCK_GUI_WIN32_H
 #include <stdbool.h>
 
 /* Version marker - shown in the window title and the console startup log. */
-#define ADBLOCK_APP_VERSION "1.61"
+#define ADBLOCK_APP_VERSION "1.62"
 
 struct adblock_gui_args {
     const char *resource_dir;   /* folder holding localhost-2410.crt/.key */
