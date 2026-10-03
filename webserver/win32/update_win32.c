@@ -904,6 +904,15 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                                (unsigned long) status, declared, have, narrow_path(file));
                 /* A server that ignores our Range header restarts the file. */
                 if (status == 200) have = 0;
+                /*
+                 * 416 = "nothing beyond what you already hold". That happens
+                 * when an earlier attempt already fetched the whole file (for
+                 * example the app was closed before it could be verified).
+                 * Treating it as a failure made the updater retry five times
+                 * and give up on a package it already had; hand it to the
+                 * SHA-256 check instead, which is the real judge.
+                 */
+                if (status == 416 && have > 0) complete = 1;
                 if ((status == 200 || status == 206) &&
                     have + declared <= (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES) {
                     out = _wfopen(file, have > 0 ? L"ab" : L"wb");
@@ -1196,6 +1205,24 @@ static DWORD WINAPI check_thread(LPVOID param) {
 
 void update_check_async(HWND hwnd) {
     /*
+     * One pipeline at a time: a second click while a check (or a download) is
+     * running is ignored instead of starting a competing thread. The state is
+     * claimed FIRST: the route resets below used to run before it, so a click
+     * that was then ignored still cleared s_proxy_resolved / s_mirror_loaded
+     * out from under the download that was already running - exactly what the
+     * comment at the top of this file says must not happen.
+     */
+    if (InterlockedCompareExchange(&s_update_state, UPDATE_STATE_CHECKING,
+                                   UPDATE_STATE_IDLE) != UPDATE_STATE_IDLE) {
+        win32_log_line("update: %s is already running (state=%d) - click ignored",
+                       update_state() == UPDATE_STATE_CHECKING ? "a check"
+                       : (update_state() == UPDATE_STATE_DOWNLOADING ? "a download"
+                       : (update_state() == UPDATE_STATE_VERIFYING ? "a verification"
+                                                                   : "an installation")),
+                       update_state());
+        return;
+    }
+    /*
      * This is always a user action (the menu item and the toolbar button both
      * call it). Reset the route decision so the proxy is probed again, and let
      * the thread ignore the "HTTP 403, wait 30 minutes" cooldown: a click that
@@ -1206,21 +1233,22 @@ void update_check_async(HWND hwnd) {
     s_mirror_loaded = 0;
     s_force_check = 1;
     /*
-     * One pipeline at a time: a second click while a check (or a download) is
-     * running is ignored instead of starting a competing thread.
+     * A failed CreateThread used to leave the state at CHECKING for the rest of
+     * the process lifetime - every later click was then answered with "already
+     * running", so 检查更新 looked permanently broken until the app restarted.
+     * Give the state back and say what happened.
      */
-    if (InterlockedCompareExchange(&s_update_state, UPDATE_STATE_CHECKING,
-                                   UPDATE_STATE_IDLE) != UPDATE_STATE_IDLE) {
-        win32_log_line("update: %s is already running (state=%d) - click ignored",
-                       update_state() == UPDATE_STATE_CHECKING ? "a check"
-                       : (update_state() == UPDATE_STATE_DOWNLOADING ? "a download"
-                       : (update_state() == UPDATE_STATE_VERIFYING ? "a verification"
-                                                                   : "an installation")),
-                       update_state());
+    HANDLE th = CreateThread(NULL, 0, check_thread, (LPVOID) hwnd, 0, NULL);
+    if (th == NULL) {
+        win32_log_line("update: could not start the check thread (Win32 error %lu)",
+                       (unsigned long) GetLastError());
         s_force_check = 0;
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
+        MessageBoxW(hwnd, L"无法启动更新检查（系统暂时无法创建线程）。请稍后重试。",
+                    L"更新", MB_OK | MB_ICONWARNING);
         return;
     }
-    CloseHandle(CreateThread(NULL, 0, check_thread, (LPVOID) hwnd, 0, NULL));
+    CloseHandle(th);
 }
 
 void update_info_free(struct update_info *info) {
@@ -1433,6 +1461,16 @@ static int find_extracted_dir(const wchar_t *root, wchar_t *out, size_t cap) {
     return found;
 }
 
+/*
+ * Where the last interrupted download went. update_temp_file() deliberately
+ * adds a per-attempt random part to the name (so another process of the same
+ * user cannot pre-create it), which means the partial file from a previous
+ * click can only be resumed if we remember its path - otherwise "keep the
+ * partial" would just accumulate junk and every attempt would start at zero.
+ */
+static wchar_t s_resume_path[MAX_PATH];
+static wchar_t s_resume_url[1024];
+
 /* Unique temp file for one candidate package; the extension must follow the
    URL because it decides later whether the result is run as an installer or
    unpacked as a portable package. */
@@ -1484,7 +1522,25 @@ static DWORD WINAPI apply_thread(LPVOID param) {
      * fixed %TEMP% target could be pre-created by another process of the same
      * user (audit P0-1).
      */
-    update_temp_file(temp, pid, stamp, info->url, zip, MAX_PATH);
+    /*
+     * Continue the download of the SAME package when an earlier click left a
+     * partial behind: update_temp_file() produces a fresh unpredictable name
+     * every time, so without this the remaining bytes of a broken attempt could
+     * never be reused.
+     */
+    if (s_resume_url[0] != 0 && _wcsicmp(s_resume_url, info->url) == 0 &&
+        partial_size(s_resume_path) > 0) {
+        wcsncpy(zip, s_resume_path, MAX_PATH - 1);
+        zip[MAX_PATH - 1] = 0;
+        win32_log_line("update: resuming the earlier download (%llu bytes already on disk)",
+                       (unsigned long long) partial_size(zip));
+    } else {
+        update_temp_file(temp, pid, stamp, info->url, zip, MAX_PATH);
+        wcsncpy(s_resume_path, zip, MAX_PATH - 1);
+        s_resume_path[MAX_PATH - 1] = 0;
+        wcsncpy(s_resume_url, info->url, (sizeof(s_resume_url) / sizeof(wchar_t)) - 1);
+        s_resume_url[(sizeof(s_resume_url) / sizeof(wchar_t)) - 1] = 0;
+    }
     /* Unique staging paths as well (audit A6). A fixed "%TEMP%\adblock-update"
        could be pre-created by another process, and it was never removed: the
        batch script now deletes it after the file copy. */
@@ -1526,6 +1582,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     if (!got) {
         if (MessageBoxW(NULL,
                         L"下载更新失败：已重试 5 次并尝试断点续传，仍无法从 GitHub 的下载服务器取回更新包。\n\n"
+                        L"已经下载的部分会保留，下次点“检查更新”会从中断处继续，不会从头开始。\n"
                         L"提示：这条线路到 GitHub 资源节点可能只有十几 KB/s，4 MB 的包需要几分钟；\n"
                         L"如果一直失败，请检查代理设置，或改用浏览器手动下载。\n\n"
                         L"是否用浏览器打开下载页，手动下载安装？",
@@ -1533,11 +1590,24 @@ static DWORD WINAPI apply_thread(LPVOID param) {
             ShellExecuteW(NULL, L"open", L"https://github.com/wxcvm/AdAway/releases",
                           NULL, NULL, SW_SHOWNORMAL);
         }
-        DeleteFileW(zip);          /* no half-downloaded package in %TEMP% */
+        /*
+         * Keep what did arrive. http_download_to_file() resumes from
+         * partial_size(), so the next click - or the next start of the app -
+         * carries on where this attempt stopped instead of restarting a
+         * multi-MB download from zero on a slow line. Only a package that fails
+         * verification is deleted (see below); the old code threw the partial
+         * away here, which made "断点续传" true within one run but a lie
+         * between two of them.
+         */
+        win32_log_line("update: download incomplete, %llu bytes kept for the next attempt",
+                       (unsigned long long) partial_size(zip));
         InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);   /* failure: the updater must stay usable */
         free(info);
         return 0;
     }
+    /* The package is complete, so there is nothing left to resume for this URL
+       (a later verification failure deletes the file anyway). */
+    s_resume_url[0] = 0;
     /* Download finished: the package is verified before anything is replaced
        (audit items 49/50 - the dashboard shows "校验中…" for this step). */
     InterlockedExchange(&s_update_state, UPDATE_STATE_VERIFYING);
@@ -1896,7 +1966,25 @@ void update_apply_async(HWND hwnd, const struct update_info *info) {
     }
     s_update_hwnd = hwnd;
     struct update_info *copy = (struct update_info *) calloc(1, sizeof(*copy));
-    if (!copy) return;
+    if (!copy) {
+        /* Returning here used to leave the state at DOWNLOADING forever, which
+           locked the updater out until the next restart. */
+        win32_log_line("update: out of memory - the download was not started");
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
+        MessageBoxW(hwnd, L"内存不足，未能开始下载更新包。请关闭一些程序后重试。",
+                    L"更新", MB_OK | MB_ICONWARNING);
+        return;
+    }
     *copy = *info;
-    CloseHandle(CreateThread(NULL, 0, apply_thread, (LPVOID) copy, 0, NULL));
+    HANDLE th = CreateThread(NULL, 0, apply_thread, (LPVOID) copy, 0, NULL);
+    if (th == NULL) {
+        win32_log_line("update: could not start the download thread (Win32 error %lu)",
+                       (unsigned long) GetLastError());
+        free(copy);
+        InterlockedExchange(&s_update_state, UPDATE_STATE_IDLE);
+        MessageBoxW(hwnd, L"无法启动下载（系统暂时无法创建线程）。请稍后重试。",
+                    L"更新", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    CloseHandle(th);
 }
