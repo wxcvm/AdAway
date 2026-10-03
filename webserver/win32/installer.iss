@@ -41,7 +41,7 @@ Name: "autostart"; Description: "开机自动启动"; GroupDescription: "附加�
 ; any custom block image. Never overwrite those on an upgrade
 ; (onlyifdoesntexist), so updating keeps the certificate and the statistics.
 Source: "dist\*"; DestDir: "{app}"; Excludes: "resources\*"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "dist\resources\*"; DestDir: "{app}\resources"; Excludes: "localhost-2410.*,localhost-leaf.*,*.dat,update_cache.json,control_token.txt,ca_rotation.json,webserver.log,webserver.log.1,crash.log,allowlist.txt,blocklist.txt,cosmetic.css"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist
+Source: "dist\resources\*"; DestDir: "{app}\resources"; Excludes: "localhost-2410.*,localhost-leaf.*,*.dat,stats.json,update_cache.json,control_token.txt,ca_rotation.json,webserver.log,webserver.log.1,crash.log,allowlist.txt,blocklist.txt,cosmetic.css"; Flags: recursesubdirs createallsubdirs onlyifdoesntexist
 
 [Icons]
 Name: "{group}\ADBlock 仪表盘"; Filename: "{app}\webserver.exe"

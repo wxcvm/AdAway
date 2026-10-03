@@ -469,6 +469,7 @@ jobs:
                 resources/localhost-leaf.key \
                 resources/localhost-leaf.crt \
                 resources/*.dat \
+                resources/stats.json \
                 resources/update_cache.json \
                 resources/control_token.txt \
                 resources/ca_rotation.json \
@@ -479,7 +480,7 @@ jobs:
                 resources/crash.log \
                 webserver.log webserver.log.1 crash.log
           leftover=$(ls resources/localhost-2410.key resources/localhost-leaf.key \
-                        resources/*.dat resources/update_cache.json \
+                        resources/*.dat resources/stats.json resources/update_cache.json \
                         resources/control_token.txt resources/ca_rotation.json \
                         resources/webserver.log webserver.log 2>/dev/null || true)
           if [ -n "$leftover" ]; then
@@ -511,6 +512,19 @@ jobs:
               --title "ADBlock Web Server - Windows 11 (x64)" \
               --notes "ADBlock Web Server for Windows 11 (x64)：托盘常驻 + 开机自启、CA 一键信任、系统代理式拦截（拦截模式填 127.0.0.1 / 0.0.0.0，可配合 AdGuard）、劫持过滤（全流量 + HTTPS MITM + 类 AdGuard 规则）、应用内自动更新（SHA-256 校验 + API 兜底下载）、统计与诊断导出。统计口径修正：管理流量不再计入连接/请求，拦截率与拦截量一致。" || true
           fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # AUDIT W5-04: GitHub keeps a single "latest release" pointer, and the
+      # Android updater reads releases/latest/download/manifest.json. Windows
+      # releases are published far more often than Android ones, so without
+      # this they take the pointer over and the Android update check 404s.
+      - name: Keep the Android release as "latest"
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          gh release edit "$TAG" --repo "${{ github.repository }}" --latest=false \
+            && echo "$TAG is no longer the latest release" || true
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -625,6 +639,10 @@ jobs:
                  --title "Windows 最新版（固定标签）" \
                  --notes "固定标签：windows-manifest.json 每次发布时由 CI 覆盖，应用内更新直接读它，不经过 GitHub API，因此不受 60 次/小时限流影响。"
           gh release upload win11-latest windows-manifest.json --repo "${{ github.repository }}" --clobber
+          # This release only carries the manifest; it must never be "latest"
+          # either, or releases/latest/download/<apk> resolves to it (W5-04).
+          gh release edit win11-latest --repo "${{ github.repository }}" --latest=false \
+            && echo "win11-latest is not the latest release" || true
           # ── Remote verification (audit item 68) ───────────────────────────
           # The job used to stop right here, so "the release is published but
           # the fixed tag still advertises the previous build" was only ever
