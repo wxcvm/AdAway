@@ -1544,9 +1544,50 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     /* Unique staging paths as well (audit A6). A fixed "%TEMP%\adblock-update"
        could be pre-created by another process, and it was never removed: the
        batch script now deletes it after the file copy. */
-    swprintf(dir, MAX_PATH, L"%lsadblock-update-%lu-%lu", temp, (unsigned long) pid, (unsigned long) stamp);
-    swprintf(list, MAX_PATH, L"%lsadblock-update-%lu-%lu.list", temp, (unsigned long) pid, (unsigned long) stamp);
-    swprintf(bat, MAX_PATH, L"%lsadblock-update-%lu-%lu.bat", temp, (unsigned long) pid, (unsigned long) stamp);
+    /*
+     * ROOT CAUSE of "更新成功了但版本号没变": the extraction tree and the update
+     * batch must NOT live inside the install directory.
+     *
+     * Step 1 of the generated batch renames the install directory aside in one
+     * atomic move (APP -> APP.backup-N). The preferred download folder is
+     * <install>\resources\update\ (chosen because policy/antivirus rules that
+     * block writing to %TEMP% made the download fail there), so the extracted
+     * tree used to land INSIDE APP: after the rename it moved along with it and
+     * the SRC path recorded in the batch dangled. Step 2 (move SRC into place)
+     * then failed, the batch took its rollback branch, restored the backup and
+     * restarted the OLD build - while the user had already been told the update
+     * succeeded. cmd.exe also keeps the running .bat open, which blocks the
+     * rename for the very same reason.
+     *
+     * Downloads stay in the (writable) package folder; only the things that
+     * must survive the rename - the extracted tree, the listing file and the
+     * batch itself - move outside the install directory.
+     */
+    wchar_t stage_parent[MAX_PATH];
+    {
+        wchar_t mod[MAX_PATH], appdir_now[MAX_PATH];
+        appdir_now[0] = 0;
+        if (GetModuleFileNameW(NULL, mod, MAX_PATH)) {
+            wchar_t *slash = wcsrchr(mod, L'\\');
+            if (slash != NULL) {
+                *slash = 0;
+                wcsncpy(appdir_now, mod, MAX_PATH - 1);
+                appdir_now[MAX_PATH - 1] = 0;
+            }
+        }
+        if (appdir_now[0] != 0 &&
+            _wcsnicmp(temp, appdir_now, wcslen(appdir_now)) == 0) {
+            GetTempPathW(MAX_PATH, stage_parent);
+            win32_log_line("update: staging outside the install directory (%s)",
+                           narrow_path(stage_parent));
+        } else {
+            wcsncpy(stage_parent, temp, MAX_PATH - 1);
+            stage_parent[MAX_PATH - 1] = 0;
+        }
+    }
+    swprintf(dir, MAX_PATH, L"%lsadblock-update-%lu-%lu", stage_parent, (unsigned long) pid, (unsigned long) stamp);
+    swprintf(list, MAX_PATH, L"%lsadblock-update-%lu-%lu.list", stage_parent, (unsigned long) pid, (unsigned long) stamp);
+    swprintf(bat, MAX_PATH, L"%lsadblock-update-%lu-%lu.bat", stage_parent, (unsigned long) pid, (unsigned long) stamp);
 
     /*
      * Chance 1: the package this machine normally wants (installer for an
@@ -1811,7 +1852,18 @@ portable_fallback:
      *     execution policy, which is how (2) fails on locked-down machines.
      */
     int rc = -1;
-    win32_log_line("update: extracting %s into %s", narrow_path(zip), narrow_path(dir));
+    /*
+     * narrow_path() returns a SINGLE static buffer, so passing it twice in one
+     * call printed the same path for both %s ("extracting X into X") - the log
+     * line that was supposed to say where the package went was worthless
+     * exactly when it was needed. Copy the first one out before asking for the
+     * second.
+     */
+    {
+        char zip_log[1400];
+        snprintf(zip_log, sizeof(zip_log), "%s", narrow_path(zip));
+        win32_log_line("update: extracting %s into %s", zip_log, narrow_path(dir));
+    }
     swprintf(cmd, 4096, L"cmd.exe /c tar.exe -xf \"%ls\" -C \"%ls\"", zip, dir);
     rc = run_and_wait(cmd);
     win32_log_line("update: tar rc=%d", rc);
@@ -1879,24 +1931,51 @@ portable_fallback:
     swprintf(script, 8192,
              L"@echo off\r\n"
              L"setlocal enableextensions\r\n"
+             /*
+              * ROOT CAUSE of "更新成功但版本号没变": this script is started by the
+              * updater, which runs from the install directory, so the script
+              * INHERITED that directory as its own current directory. Windows
+              * refuses to rename a directory that is the current directory of
+              * any process - so the move below failed, the batch took the
+              * restore_old branch and simply restarted the OLD build, while the
+              * user had already been told the update succeeded.
+              * Getting out of the way is the whole fix.
+              */
+             L"cd /d \"%%TEMP%%\"\r\n"
              L"set APP=%ls\r\n"
              L"set SRC=%ls\r\n"
              L"set STAGE=%ls\r\n"
              L"set BK=%ls.backup-%lu\r\n"
              L"set PID=%lu\r\n"
+             /* Step log: the batch used to swallow every error with >nul 2>&1, so
+                "nothing happened" was undiagnosable. Failures now also drop a copy
+                next to the user's data (see the failure branches). */
+             L"set ULOG=%%TEMP%%\\adblock-update.log\r\n"
+             L"echo [%%DATE%% %%TIME%%] updating \"%%APP%%\" (pid %%PID%%)>>\"%%ULOG%%\"\r\n"
              L":waitloop\r\n"
              L"tasklist /FI \"PID eq %%PID%%\" 2>nul | find \"%%PID%%\" >nul\r\n"
              L"if not errorlevel 1 (\r\n"
              L"  timeout /t 1 /nobreak >nul\r\n"
              L"  goto waitloop\r\n"
              L")\r\n"
-             L"rem 1) move the running build aside: a rename cannot half-succeed\r\n"
+             L"echo [%%DATE%% %%TIME%%] previous process gone>>\"%%ULOG%%\"\r\n"
+             L"rem 1) move the running build aside: a rename cannot half-succeed.\r\n"
+             L"rem    Retried, because a lock can outlive the process by a moment.\r\n"
+             L"set TRIES=0\r\n"
+             L":moveloop\r\n"
              L"rmdir /S /Q \"%%BK%%\" >nul 2>&1\r\n"
              L"move \"%%APP%%\" \"%%BK%%\" >nul 2>&1\r\n"
-             L"if errorlevel 1 goto :restore_old\r\n"
+             L"if not errorlevel 1 goto moved\r\n"
+             L"set /a TRIES+=1\r\n"
+             L"if %%TRIES%% GEQ 20 goto :restore_old\r\n"
+             L"timeout /t 1 /nobreak >nul\r\n"
+             L"goto moveloop\r\n"
+             L":moved\r\n"
+             L"echo [%%DATE%% %%TIME%%] old build moved aside>>\"%%ULOG%%\"\r\n"
              L"rem 2) the extracted build takes its place\r\n"
              L"move \"%%SRC%%\" \"%%APP%%\" >nul 2>&1\r\n"
              L"if errorlevel 1 goto :rollback\r\n"
+             L"echo [%%DATE%% %%TIME%%] new build in place>>\"%%ULOG%%\"\r\n"
              L"rem 3) user data comes back (installer exclusion list + own images)\r\n"
              L"xcopy /E /I /Y \"%%BK%%\\resources\\*.dat\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
              L"xcopy /Y \"%%BK%%\\resources\\img_*.webp\" \"%%APP%%\\resources\\\" >nul 2>&1\r\n"
@@ -1907,6 +1986,7 @@ portable_fallback:
              L"ping -n 6 127.0.0.1 >nul\r\n"
              L"tasklist /FI \"IMAGENAME eq webserver.exe\" 2>nul | find /I \"webserver.exe\" >nul\r\n"
              L"if errorlevel 1 goto :rollback\r\n"
+             L"echo [%%DATE%% %%TIME%%] update applied, backup removed>>\"%%ULOG%%\"\r\n"
              L"rem 5) done: drop the backup and the staging leftovers\r\n"
              L"rmdir /S /Q \"%%BK%%\" >nul 2>&1\r\n"
              L"rmdir /S /Q \"%%STAGE%%\" >nul 2>&1\r\n"
@@ -1914,6 +1994,8 @@ portable_fallback:
              L"exit /b 0\r\n"
              L":rollback\r\n"
              L"rem the new build is not healthy: put the previous one back\r\n"
+             L"echo [%%DATE%% %%TIME%%] ROLLBACK - the new build did not survive>>\"%%ULOG%%\"\r\n"
+             L"copy /y \"%%ULOG%%\" \"%%APP%%\\resources\\update-failed.log\" >nul 2>&1\r\n"
              L"taskkill /F /IM webserver.exe >nul 2>&1\r\n"
              L"rmdir /S /Q \"%%APP%%\" >nul 2>&1\r\n"
              L"move \"%%BK%%\" \"%%APP%%\" >nul 2>&1\r\n"
@@ -1923,6 +2005,8 @@ portable_fallback:
              L"exit /b 1\r\n"
              L":restore_old\r\n"
              L"rem the old directory is locked: nothing was changed, just restart\r\n"
+             L"echo [%%DATE%% %%TIME%%] FAILED - the install directory could not be moved aside>>\"%%ULOG%%\"\r\n"
+             L"copy /y \"%%ULOG%%\" \"%%APP%%\\resources\\update-failed.log\" >nul 2>&1\r\n"
              L"start \"\" \"%%APP%%\\webserver.exe\" --minimized\r\n"
              L"rmdir /S /Q \"%%STAGE%%\" >nul 2>&1\r\n"
              L"del \"%%~f0\" >nul 2>&1\r\n"
@@ -1942,7 +2026,7 @@ portable_fallback:
     wchar_t mutable_cmd[4096];
     wcsncpy(mutable_cmd, cmd, 4095);
     mutable_cmd[4095] = 0;
-    if (CreateProcessW(NULL, mutable_cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+    if (CreateProcessW(NULL, mutable_cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, stage_parent, &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
     } else {
