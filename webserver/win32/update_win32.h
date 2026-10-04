@@ -25,6 +25,10 @@ struct update_info {
 
 /* Check the release feed in the background (never blocks the UI). */
 void update_check_async(HWND hwnd);
+/* Download url into file with the updater's HTTP client (WinHTTP, proxy
+   detection, resume, retries). The dashboard's subscription updater uses this
+   so the platform has one HTTP implementation, not two. Returns 1 on success. */
+int adblock_http_download(const wchar_t *url, const wchar_t *file);
 /* Download + extract the release and restart the executable afterwards. */
 void update_apply_async(HWND hwnd, const struct update_info *info);
 void update_info_free(struct update_info *info);

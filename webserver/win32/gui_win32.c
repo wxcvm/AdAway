@@ -779,6 +779,12 @@ static void *stats_poll_thread(void *arg) {
 #define IDC_POLDEF    1131   /* 恢复推荐默认 */
 #define IDC_CAROTATE  1132   /* 生成新 CA（并存 90 天） */
 #define IDC_CADROP    1133   /* 撤销旧 CA（90 天后） */
+#define IDC_SUB_URL    1140
+#define IDC_SUB_LIST   1141
+#define IDC_SUB_ADD    1142
+#define IDC_SUB_DEL    1143
+#define IDC_SUB_UPD    1144
+#define IDC_SUB_OPEN   1145
 #define IDC_PORTABLEUPD 1134 /* 用便携包更新（zip 就地替换） */
 
 /*
@@ -1856,7 +1862,7 @@ static void draw_sidebar(HDC hdc) {
     DeleteObject(sf);
 
     /* nav items */
-    for (int t = 0; t < 4; t++) {
+    for (int t = 0; t < 5; t++) {
         int ny = 96 + t * 52;
         bool active = (g_tab == t);
         rounded_card(hdc, 16, ny, 160, 40, 10,
@@ -1906,7 +1912,7 @@ static void draw_sidebar(HDC hdc) {
             SelectObject(hdc, ob2);
             SelectObject(hdc, op);
             DeleteObject(ip);
-        } else {
+        } else if (t == 3) {
             /* ranking: three bars of growing height */
             HBRUSH ib = CreateSolidBrush(active ? C_ACCENT : g_pal.nav_text);
             HGDIOBJ op = SelectObject(hdc, GetStockObject(NULL_PEN));
@@ -1917,6 +1923,17 @@ static void draw_sidebar(HDC hdc) {
             SelectObject(hdc, op);
             SelectObject(hdc, ob);
             DeleteObject(ib);
+        } else {
+            /* subscriptions: a globe (circle + meridian) */
+            HPEN ip = CreatePen(PS_SOLID, S(2), active ? C_ACCENT : g_pal.nav_text);
+            HGDIOBJ op = SelectObject(hdc, ip);
+            HGDIOBJ ob2 = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            Ellipse(hdc, S(34), S(10), S(62), S(30));
+            MoveToEx(hdc, S(48), S(10), NULL);
+            LineTo(hdc, S(48), S(30));
+            SelectObject(hdc, ob2);
+            SelectObject(hdc, op);
+            DeleteObject(ip);
         }
         HFONT nf = mfont(14, active ? FW_SEMIBOLD : FW_NORMAL);
         SelectObject(hdc, nf);
@@ -1924,7 +1941,8 @@ static void draw_sidebar(HDC hdc) {
         {
             const wchar_t *label = t == 0 ? L"统计"
                                  : (t == 1 ? L"应用日志"
-                                 : (t == 2 ? L"设置" : L"拦截排行"));
+                                 : (t == 2 ? L"设置"
+                                 : (t == 3 ? L"拦截排行" : L"订阅")));
             TextOutW(hdc, S(70), S(ny + 10), label, (int) wcslen(label));
         }
         SelectObject(hdc, old);
@@ -2059,6 +2077,19 @@ static const struct ctl_desc g_clayout[] = {
    from the settings page. */
 #define CL_MAIN ((int) (sizeof(g_clayout) / sizeof(g_clayout[0])))
 
+/* Native controls of the 订阅 page. Created with the settings controls (same
+   loop) and shown only on tab 4, see show_controls(). */
+static const struct ctl_desc g_sublayout[] = {
+    { IDC_SUB_URL,   218,  70, 560, 26, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL },
+    { IDC_SUB_ADD,   790,  70, 100, 26, L"BUTTON", L"添加", BS_PUSHBUTTON },
+    { IDC_SUB_DEL,   898,  70, 104, 26, L"BUTTON", L"删除选中", BS_PUSHBUTTON },
+    { IDC_SUB_LIST,  218, 110, 784, 372, L"LISTBOX", L"",
+      WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT },
+    { IDC_SUB_UPD,   218, 500, 190, 28, L"BUTTON", L"立即更新全部", BS_PUSHBUTTON },
+    { IDC_SUB_OPEN,  418, 500, 190, 28, L"BUTTON", L"打开订阅文件夹", BS_PUSHBUTTON },
+};
+#define CL_SUB ((int) (sizeof(g_sublayout) / sizeof(g_sublayout[0])))
+
 /* The dashboard is painted in a fixed 1000x678 logical canvas (sidebar
    0..190, content to x=1000, status bar to y=678). Deriving g_scale from the
    DPI alone left that canvas at design size in the top-left corner of a
@@ -2089,17 +2120,26 @@ static void layout_controls(HWND hwnd) {
         HWND w = GetDlgItem(hwnd, IDC_POL0 + i);
         if (w) SetWindowPos(w, NULL, S(cx), S(cy), S(200), S(24), SWP_NOZORDER | SWP_NOACTIVATE);
     }
+    /* 订阅 page controls */
+    for (int i = 0; i < CL_SUB; i++)
+        SetWindowPos(GetDlgItem(hwnd, g_sublayout[i].id), NULL,
+                     S(g_sublayout[i].x), S(g_sublayout[i].y),
+                     S(g_sublayout[i].w), S(g_sublayout[i].h), SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 static void show_controls(HWND hwnd, int tab) {
-    /* Native controls belong to the settings page, which is tab 2 now that
-       "应用日志" sits in the middle (tab 1). */
+    /* Native controls belong to one page each: settings is tab 2, the new
+       订阅 page is tab 4. Leaving a page must hide its controls, otherwise
+       the edit box and the list box stay on top of the other pages. */
     bool show = (tab == 2);
+    bool subs = (tab == 4);
     if (show) policy_sync_controls(hwnd);
     for (int i = 0; i < CL_MAIN; i++)
         ShowWindow(GetDlgItem(hwnd, g_clayout[i].id), show ? SW_SHOW : SW_HIDE);
     for (int i = 0; i < POLICY_COUNT; i++)
         ShowWindow(GetDlgItem(hwnd, IDC_POL0 + i), show ? SW_SHOW : SW_HIDE);
+    for (int i = 0; i < CL_SUB; i++)
+        ShowWindow(GetDlgItem(hwnd, g_sublayout[i].id), subs ? SW_SHOW : SW_HIDE);
 }
 
 /* Click on one type: advance it to the next method and apply immediately. */
@@ -2405,6 +2445,286 @@ static void draw_activity_page(HDC hdc) {
  * (MB_TOPMOST) and poke the tray so the question is noticed even when nobody is
  * looking at the window.
  */
+/* ── 订阅管理 ────────────────────────────────────────────────────────────
+ * The server only ever knew a flat domain file (<resources>/subscriptions.txt):
+ * something had to fetch the subscription URLs, reduce them to that file and ask
+ * the server to reload. On Android the app does that; on Windows nothing did -
+ * which is exactly why "重新加载订阅" had nothing to load and there was no way to
+ * add a source at all.
+ *
+ * This is the missing half, and it stays deliberately small: the URL list lives
+ * in <resources>/subscription_urls.txt (one URL per line, '#' comments), the
+ * fetcher reuses the updater's HTTP client (WinHTTP + proxy detection + resume +
+ * retries), the parser accepts hosts ("0.0.0.0 domain"), bare domains and
+ * AdGuard ("||domain^") lines, and the merged domains are written to the very
+ * file the server already loads. Duplicates are left in: the server's block set
+ * is a hash set and drops them itself.
+ */
+#define SUBS_MAX 32
+#define SUBS_URL_MAX 1024
+#define WM_APP_SUBS_DONE (WM_APP + 31)
+
+static wchar_t s_sub_urls[SUBS_MAX][SUBS_URL_MAX];
+static wchar_t s_sub_status[SUBS_MAX][160];
+static int s_sub_count;
+static int s_sub_loaded;
+static int s_sub_written;
+static volatile int s_subs_running;
+
+static void subs_path(wchar_t *out, size_t cap, const wchar_t *name) {
+    swprintf(out, cap, L"%hs\\%ls", g_res, name);
+}
+
+/* Trim ASCII blanks in place and return the first non-blank character. */
+static char *subs_trim(char *s) {
+    while (*s == ' ' || *s == '\t') s++;
+    size_t n = strlen(s);
+    while (n > 0 && (s[n - 1] == '\n' || s[n - 1] == '\r' ||
+                     s[n - 1] == ' ' || s[n - 1] == '\t')) s[--n] = 0;
+    return s;
+}
+
+static void subs_load(void) {
+    if (s_sub_loaded) return;
+    s_sub_loaded = 1;
+    s_sub_count = 0;
+    wchar_t path[MAX_PATH];
+    subs_path(path, MAX_PATH, L"subscription_urls.txt");
+    FILE *f = _wfopen(path, L"r");
+    if (f != NULL) {
+        char line[SUBS_URL_MAX];
+        while (s_sub_count < SUBS_MAX && fgets(line, sizeof(line), f) != NULL) {
+            char *p = subs_trim(line);
+            if (p[0] == 0 || p[0] == '#') continue;
+            if (MultiByteToWideChar(CP_UTF8, 0, p, -1, s_sub_urls[s_sub_count],
+                                    SUBS_URL_MAX) <= 0) continue;
+            s_sub_status[s_sub_count][0] = 0;
+            s_sub_count++;
+        }
+        fclose(f);
+    }
+    /* Per-source status survives a restart: "<url>\t<status text>". */
+    subs_path(path, MAX_PATH, L"subscription_status.txt");
+    f = _wfopen(path, L"r");
+    if (f != NULL) {
+        char line[1600];
+        while (fgets(line, sizeof(line), f) != NULL) {
+            char *tab = strchr(line, '\t');
+            if (tab == NULL) continue;
+            *tab++ = 0;
+            char *url = subs_trim(line);
+            char *st = subs_trim(tab);
+            wchar_t wurl[SUBS_URL_MAX];
+            if (MultiByteToWideChar(CP_UTF8, 0, url, -1, wurl, SUBS_URL_MAX) <= 0) continue;
+            for (int i = 0; i < s_sub_count; i++) {
+                if (_wcsicmp(s_sub_urls[i], wurl) == 0) {
+                    MultiByteToWideChar(CP_UTF8, 0, st, -1, s_sub_status[i], 160);
+                    break;
+                }
+            }
+        }
+        fclose(f);
+    }
+}
+
+static void subs_save_urls(void) {
+    wchar_t path[MAX_PATH];
+    subs_path(path, MAX_PATH, L"subscription_urls.txt");
+    FILE *f = _wfopen(path, L"w");
+    if (f == NULL) return;
+    fprintf(f, "# ADBlock 订阅源列表：一行一个 URL，'#' 开头为注释。由仪表盘维护。\n");
+    for (int i = 0; i < s_sub_count; i++) {
+        char u8[SUBS_URL_MAX * 2];
+        if (WideCharToMultiByte(CP_UTF8, 0, s_sub_urls[i], -1, u8, sizeof(u8),
+                                NULL, NULL) <= 0) continue;
+        fprintf(f, "%s\n", u8);
+    }
+    fclose(f);
+}
+
+static void subs_save_status(void) {
+    wchar_t path[MAX_PATH];
+    subs_path(path, MAX_PATH, L"subscription_status.txt");
+    FILE *f = _wfopen(path, L"w");
+    if (f == NULL) return;
+    for (int i = 0; i < s_sub_count; i++) {
+        char u8[SUBS_URL_MAX * 2], s8[700];
+        if (WideCharToMultiByte(CP_UTF8, 0, s_sub_urls[i], -1, u8, sizeof(u8),
+                                NULL, NULL) <= 0) continue;
+        if (WideCharToMultiByte(CP_UTF8, 0, s_sub_status[i], -1, s8, sizeof(s8),
+                                NULL, NULL) <= 0) s8[0] = 0;
+        fprintf(f, "%s\t%s\n", u8, s8);
+    }
+    fclose(f);
+}
+
+/* One line -> one bare hostname. Accepts hosts ("0.0.0.0 domain"), bare domains
+   and AdGuard ("||domain^") filter lines; anything else is ignored. */
+static int subs_host_from_line(const char *line, char *out, size_t cap) {
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p == 0 || *p == '#' || *p == '!' || *p == '[') return 0;
+    if (p[0] == '|' && p[1] == '|') {
+        p += 2;
+    } else if ((*p >= '0' && *p <= '9') || *p == ':') {
+        while (*p != 0 && *p != ' ' && *p != '\t') p++;
+        while (*p == ' ' || *p == '\t') p++;
+    }
+    size_t n = 0;
+    while (*p != 0 && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' &&
+           *p != '^' && *p != '/' && *p != '$' && *p != '|') {
+        if (n + 1 >= cap) return 0;
+        out[n++] = *p++;
+    }
+    out[n] = 0;
+    if (n < 4 || n > 253 || out[0] == '.') return 0;
+    int dot = 0;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char) out[i];
+        if (c == '.') { dot = 1; continue; }
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c >= 0x80) continue;
+        return 0;
+    }
+    return dot;
+}
+
+static void subs_do_update(void) {
+    wchar_t merged[MAX_PATH], tmp[MAX_PATH], st[160];
+    subs_path(merged, MAX_PATH, L"subscriptions.txt");
+    subs_path(tmp, MAX_PATH, L"subscription_fetch.tmp");
+    FILE *out = _wfopen(merged, L"w");
+    if (out == NULL) {
+        win32_log_line("subs: cannot write %s", merged[0] ? "(resources)" : "?");
+        return;
+    }
+    fprintf(out, "# Generated by the ADBlock dashboard from the subscription sources.\n");
+    fprintf(out, "# One domain per line; replaced on every update.\n");
+    unsigned long long total = 0;
+    for (int i = 0; i < s_sub_count; i++) {
+        char u8[SUBS_URL_MAX * 2];
+        if (WideCharToMultiByte(CP_UTF8, 0, s_sub_urls[i], -1, u8, sizeof(u8),
+                                NULL, NULL) <= 0) continue;
+        DeleteFileW(tmp);
+        unsigned long long got = 0;
+        if (adblock_http_download(s_sub_urls[i], tmp)) {
+            FILE *in = _wfopen(tmp, L"r");
+            if (in != NULL) {
+                char line[1024];
+                while (fgets(line, sizeof(line), in) != NULL) {
+                    char host[256];
+                    if (subs_host_from_line(line, host, sizeof(host))) {
+                        fprintf(out, "%s\n", host);
+                        got++;
+                    }
+                }
+                fclose(in);
+            }
+            SYSTEMTIME now;
+            GetLocalTime(&now);
+            swprintf(s_sub_status[i], 160, L"%llu 条 · 更新于 %02d:%02d",
+                     got, now.wHour, now.wMinute);
+            win32_log_line("subs: %s -> %llu entries", u8, got);
+            total += got;
+        } else {
+            swprintf(s_sub_status[i], 160, L"下载失败，保留上一次结果");
+            win32_log_line("subs: %s download failed", u8);
+        }
+        DeleteFileW(tmp);
+    }
+    fclose(out);
+    s_sub_written = (int) total;
+    subs_save_status();
+    /* Ask the server to reload the block set now instead of at the next tick. */
+    control_post(mgmt_port(), "reload_subscriptions", st, 160);
+    win32_log_line("subs: merged %llu entries into subscriptions.txt", total);
+}
+
+static DWORD WINAPI subs_thread(LPVOID param) {
+    subs_do_update();
+    s_subs_running = 0;
+    HWND hwnd = (HWND) param;
+    if (hwnd != NULL) PostMessageW(hwnd, WM_APP_SUBS_DONE, 0, 0);
+    return 0;
+}
+
+/* Fetching happens on a worker thread: a subscription on a slow line must not
+   freeze the dashboard (the updater does the same). */
+static void subs_start_update(HWND hwnd) {
+    if (s_subs_running) return;
+    subs_load();
+    if (s_sub_count == 0) {
+        MessageBoxW(hwnd, L"还没有订阅源。请在上面的输入框里粘贴一个订阅链接，然后点「添加」。",
+                    L"订阅", MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
+        return;
+    }
+    s_subs_running = 1;
+    swprintf(g_status, 4096, L"正在更新 %d 个订阅源…（下载期间界面仍可用）", s_sub_count);
+    HANDLE th = CreateThread(NULL, 0, subs_thread, (LPVOID) hwnd, 0, NULL);
+    if (th == NULL) {
+        s_subs_running = 0;
+        MessageBoxW(hwnd, L"无法启动更新线程。", L"订阅", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+        return;
+    }
+    CloseHandle(th);
+}
+
+static void subs_refresh_list(HWND hwnd) {
+    HWND lb = GetDlgItem(hwnd, IDC_SUB_LIST);
+    if (lb == NULL) return;
+    SendMessageW(lb, LB_RESETCONTENT, 0, 0);
+    for (int i = 0; i < s_sub_count; i++) {
+        wchar_t row[1200];
+        if (s_sub_status[i][0] != 0)
+            swprintf(row, 1200, L"%ls    —    %ls", s_sub_urls[i], s_sub_status[i]);
+        else
+            swprintf(row, 1200, L"%ls    —    尚未更新", s_sub_urls[i]);
+        SendMessageW(lb, LB_ADDSTRING, 0, (LPARAM) row);
+    }
+}
+
+
+static void draw_subs_page(HDC hdc) {
+    HFONT hf = mfont(15, FW_SEMIBOLD);
+    HFONT lf = mfont(12, FW_NORMAL);
+    HFONT old;
+    SetBkMode(hdc, TRANSPARENT);
+    rounded_card(hdc, 202, 12, 812, 620, 12, g_pal.card, g_pal.border);
+    old = (HFONT) SelectObject(hdc, hf);
+    SetTextColor(hdc, g_pal.text);
+    TextOutW(hdc, S(218), S(20), L"订阅源", 3);
+    SelectObject(hdc, lf);
+    SetTextColor(hdc, g_pal.muted);
+    {
+        static const wchar_t *H1 =
+            L"粘贴订阅链接后点「添加」（hosts / 纯域名 / ||域名^ 三种格式都能解析），再点「立即更新全部」";
+        TextOutW(hdc, S(218), S(44), H1, (int) wcslen(H1));
+    }
+    {
+        wchar_t sum[400];
+        if (s_sub_count == 0)
+            swprintf(sum, 400, L"还没有订阅源。");
+        else if (s_subs_running)
+            swprintf(sum, 400, L"正在更新…（%d 个源，本次已写入 %d 条）",
+                     s_sub_count, s_sub_written);
+        else
+            swprintf(sum, 400,
+                     L"%d 个源 · 上次写入 %d 条域名到 subscriptions.txt（服务端会自行去重）",
+                     s_sub_count, s_sub_written);
+        SetTextColor(hdc, g_pal.text);
+        TextOutW(hdc, S(218), S(534), sum, (int) wcslen(sum));
+    }
+    {
+        static const wchar_t *H2 =
+            L"源列表存在 resources\\subscription_urls.txt，可以直接用记事本编辑；改完点「立即更新全部」即可生效。";
+        SetTextColor(hdc, g_pal.muted);
+        TextOutW(hdc, S(218), S(560), H2, (int) wcslen(H2));
+    }
+    SelectObject(hdc, old);
+    DeleteObject(hf);
+    DeleteObject(lf);
+}
+
 static void update_prompt_notify(HWND hwnd) {
     if (!g_ui_visible) {
         ShowWindow(hwnd, SW_SHOW);
@@ -2477,6 +2797,13 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)app_icon);
         for (int i = 0; i < CL_MAIN; i++) {
             const struct ctl_desc *d = &g_clayout[i];
+            HWND w = CreateWindowExW(0, d->cls, d->text,
+                WS_CHILD | d->style, S(d->x), S(d->y), S(d->w), S(d->h),
+                hwnd, (HMENU)(INT_PTR)d->id, hinst, NULL);
+            s_ctrls[s_ctrl_count++] = w;
+        }
+        for (int i = 0; i < CL_SUB; i++) {
+            const struct ctl_desc *d = &g_sublayout[i];
             HWND w = CreateWindowExW(0, d->cls, d->text,
                 WS_CHILD | d->style, S(d->x), S(d->y), S(d->w), S(d->h),
                 hwnd, (HMENU)(INT_PTR)d->id, hinst, NULL);
@@ -2596,12 +2923,14 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_LBUTTONUP: {
         int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
-        if (nav_hit(x, y, 0) || nav_hit(x, y, 1) || nav_hit(x, y, 2) || nav_hit(x, y, 3)) {
+        if (nav_hit(x, y, 0) || nav_hit(x, y, 1) || nav_hit(x, y, 2) ||
+            nav_hit(x, y, 3) || nav_hit(x, y, 4)) {
             int new_tab = nav_hit(x, y, 0) ? 0 : (nav_hit(x, y, 1) ? 1
-                        : (nav_hit(x, y, 2) ? 2 : 3));
+                        : (nav_hit(x, y, 2) ? 2 : (nav_hit(x, y, 3) ? 3 : 4)));
             if (new_tab != g_tab) {
                 g_tab = new_tab;
                 show_controls(hwnd, g_tab);
+                if (g_tab == 4) { subs_load(); subs_refresh_list(hwnd); }
                 InvalidateRect(hwnd, NULL, TRUE);
             }
         } else if (x >= S(16) && x <= S(176) && y >= S(576) && y <= S(616)) {
@@ -2668,7 +2997,65 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             swprintf(g_status, 4096,
                      L"已切换为便携包更新模式（zip 就地替换，跳过安装器），正在检查更新…");
             update_check_async(hwnd);
-        } else if (id == IDM_UPDATE) {
+        } else if (id == IDC_SUB_ADD) {
+                wchar_t url[SUBS_URL_MAX];
+                GetWindowTextW(GetDlgItem(hwnd, IDC_SUB_URL), url, SUBS_URL_MAX);
+                wchar_t *s = url;
+                while (*s == L' ' || *s == L'\t') s++;
+                size_t n = wcslen(s);
+                while (n > 0 && (s[n - 1] == L' ' || s[n - 1] == L'\t')) s[--n] = 0;
+                subs_load();
+                bool dup = false;
+                for (int i = 0; i < s_sub_count; i++)
+                    if (_wcsicmp(s_sub_urls[i], s) == 0) dup = true;
+                if (n < 8 ||
+                    (wcsncmp(s, L"http://", 7) != 0 && wcsncmp(s, L"https://", 8) != 0)) {
+                    MessageBoxW(hwnd, L"请输入以 http:// 或 https:// 开头的订阅链接。",
+                                L"订阅", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+                } else if (dup) {
+                    MessageBoxW(hwnd, L"这个订阅已经加过了。",
+                                L"订阅", MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
+                } else if (s_sub_count >= SUBS_MAX) {
+                    wchar_t full[160];
+                    swprintf(full, 160, L"最多 32 个订阅源（当前 %d）。请先删掉不再需要的。", SUBS_MAX);
+                    MessageBoxW(hwnd, full, L"订阅", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+                } else {
+                    wcsncpy(s_sub_urls[s_sub_count], s, SUBS_URL_MAX - 1);
+                    s_sub_urls[s_sub_count][SUBS_URL_MAX - 1] = 0;
+                    s_sub_status[s_sub_count][0] = 0;
+                    s_sub_count++;
+                    subs_save_urls();
+                    subs_refresh_list(hwnd);
+                    SetWindowTextW(GetDlgItem(hwnd, IDC_SUB_URL), L"");
+                    swprintf(g_status, 4096, L"已添加订阅源，共 %d 个 - 点「立即更新全部」开始下载", s_sub_count);
+                }
+                InvalidateRect(hwnd, NULL, FALSE);
+        } else if (id == IDC_SUB_DEL) {
+                subs_load();
+                int sel = (int) SendMessageW(GetDlgItem(hwnd, IDC_SUB_LIST), LB_GETCURSEL, 0, 0);
+                if (sel < 0 || sel >= s_sub_count) {
+                    MessageBoxW(hwnd, L"请先在列表里选中一个订阅源。",
+                                L"订阅", MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
+                } else {
+                    for (int i = sel; i + 1 < s_sub_count; i++) {
+                        wcsncpy(s_sub_urls[i], s_sub_urls[i + 1], SUBS_URL_MAX - 1);
+                        wcsncpy(s_sub_status[i], s_sub_status[i + 1], 159);
+                    }
+                    s_sub_count--;
+                    subs_save_urls();
+                    subs_save_status();
+                    subs_refresh_list(hwnd);
+                    swprintf(g_status, 4096, L"已删除，剩 %d 个订阅源", s_sub_count);
+                }
+                InvalidateRect(hwnd, NULL, FALSE);
+        } else if (id == IDC_SUB_UPD) {
+                subs_start_update(hwnd);
+                InvalidateRect(hwnd, NULL, FALSE);
+        } else if (id == IDC_SUB_OPEN) {
+                wchar_t dir[MAX_PATH];
+                if (MultiByteToWideChar(CP_UTF8, 0, g_res, -1, dir, MAX_PATH) > 0)
+                    ShellExecuteW(NULL, L"open", dir, NULL, NULL, SW_SHOWNORMAL);
+            } else if (id == IDM_UPDATE) {
                 swprintf(g_status, 4096, L"正在检查更新…");
                 update_check_async(hwnd);
                 InvalidateRect(hwnd, NULL, FALSE);
@@ -2858,6 +3245,17 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
 
+        if (g_tab == 4) {
+            /* 订阅 page */
+            draw_subs_page(hdc);
+            BitBlt(real, 0, 0, cw, chh, mem, 0, 0, SRCCOPY);
+            SelectObject(mem, oldbmp);
+            DeleteObject(bmp);
+            DeleteDC(mem);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
         if (g_tab == 3) {
             /* 拦截排行 page */
             draw_ranking_page(hdc);
@@ -2996,6 +3394,13 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
     }
+    case WM_APP_SUBS_DONE:
+        subs_refresh_list(hwnd);
+        swprintf(g_status, 4096,
+                 L"订阅更新完成：%d 个源共写入 %d 条域名，服务端已重新加载",
+                 s_sub_count, s_sub_written);
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
     case WM_APP_TRAY:
         if (lp == WM_RBUTTONUP) {
             tray_menu(hwnd);

@@ -1504,6 +1504,14 @@ static void update_temp_file(const wchar_t *temp, DWORD pid, DWORD stamp,
              (unsigned long) pid, (unsigned long) stamp, ext);
 }
 
+/* Public entry point so the dashboard's subscription updater reuses exactly
+   this HTTP client (proxy detection, resume, retries) instead of growing a
+   second, differently-behaving one. */
+int adblock_http_download(const wchar_t *url, const wchar_t *file) {
+    if (url == NULL || file == NULL || url[0] == 0 || file[0] == 0) return 0;
+    return http_download_to_file(url, file, NULL);
+}
+
 static DWORD WINAPI apply_thread(LPVOID param) {
     struct update_info *info = (struct update_info *) param;
     wchar_t temp[MAX_PATH], zip[MAX_PATH], list[MAX_PATH], dir[MAX_PATH], src[MAX_PATH];
