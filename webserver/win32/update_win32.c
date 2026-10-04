@@ -829,6 +829,16 @@ static void post_progress(int percent) {
  */
 #define UPDATE_DOWNLOAD_ATTEMPTS 5
 /*
+ * Whole-download budget. The retry loop alone is bounded (5 x 45 s stall
+ * timeout), but a link that trickles a byte at a time can keep "making
+ * progress" forever; this caps the total so the caller can move on to the API
+ * asset endpoint - which answers on exactly the networks where the release
+ * download host does not - instead of leaving the dashboard stuck on
+ * "下载中…" with the 检查更新 button disabled.
+ * Measured on the affected machine: 5.3 MB in 34 s, so 8 minutes is generous.
+ */
+#define UPDATE_DOWNLOAD_BUDGET_MS 480000u
+/*
  * Paths for the log. win32_log_line() is a *narrow* printf and MinGW does not
  * honour %ls there: the wide argument was printed byte-wise and stopped at the
  * first NUL, so every logged path came out as garbage like
@@ -860,7 +870,14 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
     const wchar_t *connect_path = connect_host == host ? path : mapped;
 
     unsigned long long have = partial_size(file);
+    unsigned long long started = GetTickCount64();
     for (int attempt = 1; attempt <= UPDATE_DOWNLOAD_ATTEMPTS; attempt++) {
+        if (GetTickCount64() - started > UPDATE_DOWNLOAD_BUDGET_MS) {
+            win32_log_line("update: download budget of %u s exhausted (%llu bytes on disk) "
+                           "- trying the fallback endpoint",
+                           (unsigned) (UPDATE_DOWNLOAD_BUDGET_MS / 1000), have);
+            break;
+        }
         HINTERNET session = NULL, connect = NULL, request = NULL;
         FILE *out = NULL;
         unsigned long long declared = 0;
@@ -870,7 +887,7 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                               WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (session == NULL) return 0;
         apply_update_proxy(session);
-        WinHttpSetTimeouts(session, 20000, 20000, 30000, 120000);
+        WinHttpSetTimeouts(session, 15000, 15000, 20000, 45000);
         connect = WinHttpConnect(session, connect_host, INTERNET_DEFAULT_HTTPS_PORT, 0);
         request = connect != NULL
             ? WinHttpOpenRequest(connect, L"GET", connect_path, NULL, WINHTTP_NO_REFERER,
@@ -936,6 +953,11 @@ static int http_download_to_file(const wchar_t *url, const wchar_t *file,
                             if (have > (unsigned long long) UPDATE_DOWNLOAD_MAX_BYTES ||
                                 fwrite(buffer, 1, read, out) != read) { io_ok = 0; break; }
                             if (total > 0) post_progress((int) (have * 100ULL / total));
+                            /* Trickling link guard - see UPDATE_DOWNLOAD_BUDGET_MS. */
+                            if (GetTickCount64() - started > UPDATE_DOWNLOAD_BUDGET_MS) {
+                                io_ok = 0;
+                                break;
+                            }
                         }
                         complete = io_ok && (declared == 0 || have >= total);
                     }

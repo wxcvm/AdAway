@@ -2396,6 +2396,33 @@ static void draw_activity_page(HDC hdc) {
     draw_statusbar(hdc);
 }
 
+/*
+ * The "a new version is available - download it now?" question is a modal
+ * MessageBox, and this window normally sits in the tray (the app is started
+ * with --minimized). The dialog then appeared behind everything and simply
+ * waited: no download started, no log line was written, and from the user's
+ * side "检查更新" looked broken. Bring the dashboard up first, raise the dialog
+ * (MB_TOPMOST) and poke the tray so the question is noticed even when nobody is
+ * looking at the window.
+ */
+static void update_prompt_notify(HWND hwnd) {
+    if (!g_ui_visible) {
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+    }
+    SetForegroundWindow(hwnd);
+    if (g_tray_ok) {
+        g_nid.uFlags |= NIF_INFO;
+        g_nid.dwInfoFlags = NIIF_INFO;
+        wcsncpy(g_nid.szInfoTitle, L"ADBlock 发现新版本", 63);
+        g_nid.szInfoTitle[63] = 0;
+        wcsncpy(g_nid.szInfo, L"请在弹窗中确认是否下载并更新。", 255);
+        g_nid.szInfo[255] = 0;
+        Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+        g_nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    }
+}
+
 static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (g_taskbar_created != 0 && msg == g_taskbar_created) {
         tray_add(hwnd);
@@ -2949,7 +2976,9 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                      L"发现新版本 %ls（当前版本 v" L"" ADBLOCK_APP_VERSION L"）。\n\n"
                      L"现在下载并自动更新吗？更新会关闭本窗口，替换文件后自动重启。",
                      info->tag);
-            if (MessageBoxW(hwnd, msg, L"检查更新", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+            update_prompt_notify(hwnd);
+            if (MessageBoxW(hwnd, msg, L"检查更新",
+                            MB_YESNO | MB_ICONQUESTION | MB_TOPMOST) == IDYES) {
                 swprintf(g_status, 4096, L"正在下载更新（完成后会自动重启）…");
                 update_apply_async(hwnd, info);
             } else {
@@ -2959,7 +2988,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             /* A failed check used to be displayed as "已是最新版本" - exactly
                the "它经常检测不到更新" report. */
             swprintf(g_status, 4096, L"检查更新失败：%ls", update_last_error());
-            MessageBoxW(hwnd, g_status, L"检查更新", MB_OK | MB_ICONWARNING);
+            MessageBoxW(hwnd, g_status, L"检查更新", MB_OK | MB_ICONWARNING | MB_TOPMOST);
         } else {
             swprintf(g_status, 4096, L"已是最新版本（v" L"" ADBLOCK_APP_VERSION L"）");
         }
