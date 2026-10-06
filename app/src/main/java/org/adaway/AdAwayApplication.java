@@ -87,17 +87,18 @@ public class AdAwayApplication extends Application {
         // nativeLibraryDir changes on every app update (/data/app/~~hash==/…),
         // so without a refresh the script would keep pointing at a path that no
         // longer exists and could only start the (possibly outdated) staged
-        // binary in /data/local/tmp. Only runs when "start at boot" is on and
-        // the device really has Magisk/KernelSU service.d support.
+        // binary in /data/local/tmp. install() now derives every parameter
+        // (bind mode, ports, --proxy-filter, a fresh blocklist in hijack mode)
+        // and verifies what it wrote, so nothing can drift out of sync here.
         if (org.adaway.helper.PreferenceHelper.getWebServerEnabled(this)) {
+            // An OEM cleaner can disable the boot receiver component; nothing
+            // would ever re-enable it, and BOOT_COMPLETED would never arrive
+            // again. Do it on every start while the server is enabled.
+            org.adaway.broadcast.BootReceiver.ensureEnabled(this);
             new Thread(() -> {
                 try {
                     if (org.adaway.model.root.MagiskBootScript.isSupported()) {
-                        org.adaway.model.root.MagiskBootScript.install(
-                                this,
-                                org.adaway.util.WebServerUtils.isBindAll(this),
-                                org.adaway.util.WebServerUtils.getHttpPort(this),
-                                org.adaway.util.WebServerUtils.getHttpsPort(this));
+                        org.adaway.model.root.MagiskBootScript.install(this);
                     }
                 } catch (Throwable throwable) {
                     Timber.w(throwable, "Magisk boot script refresh failed");

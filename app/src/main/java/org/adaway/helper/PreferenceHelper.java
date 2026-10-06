@@ -340,6 +340,21 @@ public final class PreferenceHelper {
     /** Whether the last recorded attempt ended with a running server. */
     private static final String PREF_BOOT_OK = "boot_diag_last_ok";
 
+    /** Which mechanism performed the last attempt (前台服务 / 后台任务 / …). */
+    private static final String PREF_BOOT_MECHANISM = "boot_diag_last_mechanism";
+
+    /**
+     * Ring of the last {@link #BOOT_RING_MAX} attempts, one
+     * "time|action|mechanism|result|ok" line each. "The server did not start at
+     * boot" cannot be diagnosed from a single line: which mechanism ran first
+     * and what the fallbacks replied is exactly what tells the two failure
+     * classes apart (broadcast never delivered vs. work deferred by the ROM).
+     */
+    private static final String PREF_BOOT_RING = "boot_diag_ring";
+
+    /** How many attempts the diagnostics view shows. */
+    private static final int BOOT_RING_MAX = 8;
+
     /**
      * Record one boot start attempt. Must be called from the receiver/worker
      * threads; {@code apply()} keeps it off the critical path.
@@ -350,16 +365,79 @@ public final class PreferenceHelper {
      * @param started Whether the server was confirmed running afterwards.
      */
     public static void recordBootEvent(Context context, String action, String result, boolean started) {
+        recordBootEvent(context, action, "", result, started);
+    }
+
+    /**
+     * Record one boot start attempt together with the mechanism that ran it.
+     *
+     * @param context The application context.
+     * @param action The broadcast action ("" when not triggered by one).
+     * @param mechanism Which path performed the attempt.
+     * @param result A short outcome text (already localised).
+     * @param started Whether the server was confirmed running afterwards.
+     */
+    public static void recordBootEvent(Context context, String action, String mechanism,
+                                       String result, boolean started) {
         SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(
                 Constants.PREFS_NAME,
                 Context.MODE_PRIVATE
         );
+        long now = System.currentTimeMillis();
+        String line = now + "|" + cleanField(action) + "|" + cleanField(mechanism) + "|"
+                + cleanField(result) + "|" + (started ? "1" : "0");
+        String ring = prefs.getString(PREF_BOOT_RING, "");
+        StringBuilder next = new StringBuilder();
+        if (ring != null && !ring.isEmpty()) {
+            String[] lines = ring.split("\n");
+            int keep = Math.min(lines.length, BOOT_RING_MAX - 1);
+            for (int i = lines.length - keep; i < lines.length; i++) {
+                if (!lines[i].isEmpty()) {
+                    next.append(lines[i]).append('\n');
+                }
+            }
+        }
+        next.append(line);
         prefs.edit()
                 .putString(PREF_BOOT_ACTION, action == null ? "" : action)
+                .putString(PREF_BOOT_MECHANISM, mechanism == null ? "" : mechanism)
                 .putString(PREF_BOOT_RESULT, result == null ? "" : result)
                 .putBoolean(PREF_BOOT_OK, started)
-                .putLong(PREF_BOOT_TIME, System.currentTimeMillis())
+                .putLong(PREF_BOOT_TIME, now)
+                .putString(PREF_BOOT_RING, next.toString())
                 .apply();
+    }
+
+    /** One ring field: the separators must not appear inside a value. */
+    private static String cleanField(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace('|', '/').replace('\n', ' ').replace('\r', ' ');
+    }
+
+    /**
+     * @return The mechanism of the last attempt ("" when unknown/old record).
+     */
+    public static String getLastBootMechanism(Context context) {
+        return prefsOf(context).getString(PREF_BOOT_MECHANISM, "");
+    }
+
+    /**
+     * @return The recorded attempts, oldest first, as raw
+     *         "time|action|mechanism|result|ok" lines (may be empty).
+     */
+    public static java.util.List<String> getBootEventRing(Context context) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        String ring = prefsOf(context).getString(PREF_BOOT_RING, "");
+        if (ring != null) {
+            for (String line : ring.split("\n")) {
+                if (!line.isEmpty()) {
+                    out.add(line);
+                }
+            }
+        }
+        return out;
     }
 
     /**

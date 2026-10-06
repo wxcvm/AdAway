@@ -310,4 +310,17 @@
     <string name="notification_keepalive_channel_description">Permanent notification shown while the keep-alive service runs</string>
     <string name="notification_keepalive_title">ADBlock is watching the server</string>
     <string name="notification_keepalive_text">The intercept server is restarted within seconds if it stops</string>
+    <string name="notification_boot_channel_name">Boot start</string>
+    <string name="notification_boot_channel_description">Transient notification shown while the intercept server starts after boot</string>
+    <string name="notification_boot_title">Starting the intercept server</string>
+    <string name="notification_boot_text">Waiting for root; this notification disappears once the server is up</string>
+    <string name="compose_settings_boot_diag_line">Last boot: %1$s - %2$s - %3$s</string>
+    <string name="compose_settings_boot_diag_never">No record yet - reboot once and the result appears here</string>
+    <string name="compose_settings_boot_diag_details">Details</string>
+    <string name="compose_settings_boot_diag_title">Boot diagnostics</string>
+    <string name="compose_settings_boot_diag_copy">Copy</string>
+    <string name="compose_settings_boot_diag_copied">Copied</string>
+    <string name="compose_settings_boot_test_script">Test the boot script</string>
+    <string name="compose_settings_boot_test_running">Testing the boot script...</string>
+    <string name="compose_settings_boot_test_result_title">Test result</string>
 </resources>

@@ -132,6 +132,15 @@
             android:theme="@style/Theme.AdAway.NoActionBar.Red" />
 
         <service
+            android:name=".broadcast.ServerBootService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Starts the local ad-blocking web server right after boot; stops itself once the server answers, so no permanent notification is needed." />
+        </service>
+
+        <service
             android:name=".broadcast.ServerKeepAliveService"
             android:exported="false"
             android:foregroundServiceType="specialUse">

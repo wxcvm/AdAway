@@ -59,6 +59,9 @@ public class BootReceiver extends BroadcastReceiver {
     /** Budget for the immediate attempt inside the receiver's own 10 s window. */
     private static final long IMMEDIATE_BUDGET_MS = 6_000L;
 
+    /** Mechanism name recorded in the boot diagnostics. */
+    private static final String MECHANISM = "开机广播即时尝试";
+
     /** All boot-completed actions this receiver recognises. */
     private static final java.util.Set<String> BOOT_ACTIONS = new java.util.HashSet<>(java.util.Arrays.asList(
             ACTION_BOOT_COMPLETED,
@@ -90,11 +93,19 @@ public class BootReceiver extends BroadcastReceiver {
         }
 
         /*
-         * Opt-in foreground service (see ServerKeepAliveService): unlike this
-         * receiver's ~10 s window it is not deferred and not killed, so it can
-         * wait for root, start the server and then watch it every minute. Only
-         * started when the user asked for it, and START_STICKY brings it back
-         * if the system reclaims it.
+         * Primary path: a bounded foreground service. Unlike this receiver's
+         * ~10 s window and unlike the WorkManager job (which many ROMs defer
+         * until the app is opened - the "it only starts after I open the app"
+         * report), it is not deferred and can wait for root. It stops itself as
+         * soon as the server answers, so it does not add a permanent
+         * notification.
+         */
+        ServerBootService.start(context);
+
+        /*
+         * Optional keep-alive service (see ServerKeepAliveService): the
+         * user-chosen long-running watcher. Independent of the boot service
+         * above - that one is transient, this one keeps watching every minute.
          */
         if (PreferenceHelper.getKeepAliveEnabled(context)) {
             ServerKeepAliveService.start(context);
@@ -122,7 +133,8 @@ public class BootReceiver extends BroadcastReceiver {
             try {
                 if (org.adaway.util.WebServerUtils.isWebServerReachable(appContext)) {
                     Timber.d("BootReceiver: web server already reachable.");
-                    PreferenceHelper.recordBootEvent(appContext, action, "服务器已在运行", true);
+                    PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
+                            "服务器已在运行", true);
                     return;
                 }
                 long deadline = System.currentTimeMillis() + IMMEDIATE_BUDGET_MS;
@@ -139,7 +151,7 @@ public class BootReceiver extends BroadcastReceiver {
                         }
                         started = org.adaway.util.WebServerUtils.isWebServerReachable(appContext);
                         result = started ? "开机后立即启动成功" : "已发出启动命令，正在确认";
-                        PreferenceHelper.recordBootEvent(appContext, action, result, started);
+                        PreferenceHelper.recordBootEvent(appContext, action, MECHANISM, result, started);
                         break;
                     }
                     try {
@@ -152,12 +164,12 @@ public class BootReceiver extends BroadcastReceiver {
                 if (!started && System.currentTimeMillis() >= deadline) {
                     /* Root was still not answering: the worker below keeps
                        retrying, so this is "pending", not "failed". */
-                    PreferenceHelper.recordBootEvent(appContext, action,
+                    PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
                             "root 未就绪，已交给后台任务重试", false);
                 }
             } catch (Throwable throwable) {
                 Timber.w(throwable, "BootReceiver: immediate start attempt failed.");
-                PreferenceHelper.recordBootEvent(appContext, action,
+                PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
                         "启动出错：" + throwable.getClass().getSimpleName(), false);
             } finally {
                 pending.finish();
@@ -179,8 +191,7 @@ public class BootReceiver extends BroadcastReceiver {
      * @param context The application context.
      * @param reason The action that triggered the scheduling (diagnostics only).
      */
-    public static void scheduleStart(Context context, String reason) {
-        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ServerStartWorker.class)
+    public static void scheduleStart(Context context, String reason) {        OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ServerStartWorker.class)
                 .setInitialDelay(INITIAL_DELAY_SECONDS, TimeUnit.SECONDS)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15L, TimeUnit.SECONDS)
                 .build();
@@ -189,5 +200,36 @@ public class BootReceiver extends BroadcastReceiver {
                 ExistingWorkPolicy.REPLACE,
                 request);
         Timber.d("BootReceiver: web server start scheduled via WorkManager (%s).", reason);
+    }
+
+    /**
+     * Make sure this receiver is not disabled.
+     *
+     * <p>Some ROMs and "cleaner" tools disable the component outright; from then
+     * on no boot broadcast is delivered again and nothing in the app would ever
+     * re-enable it, so "start at boot" stays broken forever. Called whenever the
+     * server is enabled and whenever the user asks for a retry.</p>
+     *
+     * @param context The application context.
+     * @return {@code true} when the component is enabled afterwards.
+     */
+    public static boolean ensureEnabled(Context context) {
+        try {
+            android.content.ComponentName component = new android.content.ComponentName(
+                    context, BootReceiver.class);
+            int state = context.getPackageManager().getComponentEnabledSetting(component);
+            if (state == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                context.getPackageManager().setComponentEnabledSetting(
+                        component,
+                        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                        android.content.pm.PackageManager.DONT_KILL_APP);
+                Timber.i("BootReceiver: component was disabled - re-enabled");
+                return true;
+            }
+            return state != android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+        } catch (Throwable throwable) {
+            Timber.w(throwable, "BootReceiver: could not check/enable the component");
+            return false;
+        }
     }
 }

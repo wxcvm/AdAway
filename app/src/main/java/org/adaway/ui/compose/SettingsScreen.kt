@@ -58,6 +58,7 @@ import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -713,7 +714,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 if (v) {
                                     // 打开时顺手修掉两个最常见的“自启动失败”原因：
                                     // 接收器被系统/清理软件禁用、启动任务没排队。
-                                    enableBootReceiver(context)
+                                    org.adaway.broadcast.BootReceiver.ensureEnabled(context)
                                     org.adaway.broadcast.BootReceiver
                                         .scheduleStart(context, "user enabled autostart")
                                     org.adaway.util.WebServerUtils.startWebServer(context)
@@ -722,12 +723,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                         val supported = kotlinx.coroutines.withContext(
                                             kotlinx.coroutines.Dispatchers.IO,
                                         ) {
-                                            org.adaway.model.root.MagiskBootScript.install(
-                                                context,
-                                                org.adaway.util.WebServerUtils.isBindAll(context),
-                                                org.adaway.util.WebServerUtils.getHttpPort(context),
-                                                org.adaway.util.WebServerUtils.getHttpsPort(context),
-                                            )
+                                            org.adaway.model.root.MagiskBootScript.install(context)
                                         }
                                         bootScriptState = if (supported) 1 else -1
                                     }
@@ -760,7 +756,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         }
                         OutlinedButton(
                             onClick = {
-                                enableBootReceiver(context)
+                                org.adaway.broadcast.BootReceiver.ensureEnabled(context)
                                 org.adaway.broadcast.BootReceiver
                                     .scheduleStart(context, "user retried")
                                 org.adaway.util.WebServerUtils.startWebServer(context)
@@ -830,6 +826,141 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 MaterialTheme.colorScheme.primary
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    /*
+                     * 一行诊断（不是以前那个多行只读面板）：上次开机到底是哪条路跑的、
+                     * 结果如何。失败时点开详情能看到环形记录、开机脚本状态和脚本自己的
+                     * 日志 —— “打开 App 才自启”这类问题只能靠这些定位，靠猜没有意义。
+                     */
+                    var bootDiag by remember { mutableStateOf("") }
+                    var bootDetail by remember { mutableStateOf("") }
+                    var bootDialog by remember { mutableStateOf(false) }
+                    var bootTestResult by remember { mutableStateOf("") }
+                    var bootTesting by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        bootDiag = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            bootDiagSummary(context)
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (bootDiag.isEmpty()) {
+                            stringResource(R.string.compose_settings_boot_diag_never)
+                        } else {
+                            bootDiag
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable {
+                            bootTesting = false
+                            bootTestResult = ""
+                            bootDialog = true
+                            autostartScope.launch {
+                                bootDetail = kotlinx.coroutines.withContext(
+                                    kotlinx.coroutines.Dispatchers.IO,
+                                ) {
+                                    buildBootDetail(context)
+                                }
+                            }
+                        },
+                    )
+                    if (bootDialog) {
+                        // Hoisted: stringResource() is @Composable and cannot be
+                        // called from inside an onClick lambda.
+                        val testResultLabel = stringResource(
+                            R.string.compose_settings_boot_test_result_title,
+                        )
+                        AlertDialog(
+                            onDismissRequest = {
+                                bootDialog = false
+                                autostartScope.launch {
+                                    bootDiag = kotlinx.coroutines.withContext(
+                                        kotlinx.coroutines.Dispatchers.IO,
+                                    ) {
+                                        bootDiagSummary(context)
+                                    }
+                                }
+                            },
+                            title = {
+                                Text(stringResource(R.string.compose_settings_boot_diag_title))
+                            },
+                            text = {
+                                Column(
+                                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                                ) {
+                                    Text(
+                                        bootDetail,
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                    if (bootTesting) {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            stringResource(
+                                                R.string.compose_settings_boot_test_running,
+                                            ),
+                                        )
+                                    } else if (bootTestResult.isNotEmpty()) {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(testResultLabel + "：" + bootTestResult)
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(
+                                    onClick = {
+                                        bootTesting = true
+                                        bootTestResult = ""
+                                        autostartScope.launch {
+                                            bootTestResult = kotlinx.coroutines.withContext(
+                                                kotlinx.coroutines.Dispatchers.IO,
+                                            ) {
+                                                org.adaway.model.root.MagiskBootScript
+                                                    .runNow(context)
+                                            }
+                                            bootTesting = false
+                                            bootDetail = kotlinx.coroutines.withContext(
+                                                kotlinx.coroutines.Dispatchers.IO,
+                                            ) {
+                                                buildBootDetail(context)
+                                            }
+                                        }
+                                    },
+                                ) {
+                                    Text(
+                                        stringResource(
+                                            R.string.compose_settings_boot_test_script,
+                                        ),
+                                    )
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(
+                                    onClick = {
+                                        val clipboard = context.getSystemService(
+                                            Context.CLIPBOARD_SERVICE,
+                                        ) as android.content.ClipboardManager
+                                        val text = if (bootTestResult.isEmpty()) {
+                                            bootDetail
+                                        } else {
+                                            bootDetail + "\n\n" + testResultLabel + "：" +
+                                                bootTestResult
+                                        }
+                                        clipboard.setPrimaryClip(
+                                            android.content.ClipData.newPlainText(
+                                                "adblock-boot-diag", text,
+                                            ),
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            R.string.compose_settings_boot_diag_copied,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    },
+                                ) {
+                                    Text(stringResource(R.string.compose_settings_boot_diag_copy))
+                                }
                             },
                         )
                     }
@@ -1851,40 +1982,6 @@ private fun saveBitmapToCache(context: Context, bitmap: Bitmap, filename: String
 
 
 /**
- * 开机接收器是否启用。有些系统/清理软件会把组件整个禁掉，此时开机广播
- * 根本不会送到应用（“自启动失败”最常见的原因之一）。
- */
-private fun isBootReceiverEnabled(context: Context): Boolean {
-    val component = android.content.ComponentName(
-        context,
-        org.adaway.broadcast.BootReceiver::class.java,
-    )
-    return context.packageManager.getComponentEnabledSetting(component) !=
-        android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-}
-
-/**
- * 重新启用开机接收器（用户打开“开机自动启动”或点重试时调用）。
- */
-private fun enableBootReceiver(context: Context) {
-    try {
-        val component = android.content.ComponentName(
-            context,
-            org.adaway.broadcast.BootReceiver::class.java,
-        )
-        if (!isBootReceiverEnabled(context)) {
-            context.packageManager.setComponentEnabledSetting(
-                component,
-                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                android.content.pm.PackageManager.DONT_KILL_APP,
-            )
-        }
-    } catch (e: Exception) {
-        Timber.w(e, "Could not re-enable the boot receiver")
-    }
-}
-
-/**
  * 打开系统的电池优化列表，让用户把本应用设为“不优化”。
  * 这是自启动失败的两大原因之一（另一个是厂商的自启动白名单）。
  */
@@ -1898,5 +1995,82 @@ private fun openBatterySettings(context: Context) {
         Timber.w(e, "No battery optimization settings activity")
         Toast.makeText(context, e.message ?: "unavailable", Toast.LENGTH_SHORT).show()
     }
+}
+
+/**
+ * 一行开机诊断摘要：哪条路跑的、结果如何。无记录时返回空串，由界面显示提示文案。
+ */
+private fun bootDiagSummary(context: Context): String {
+    val time = org.adaway.helper.PreferenceHelper.getLastBootTime(context)
+    if (time <= 0L) {
+        return ""
+    }
+    val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+    val mechanism = org.adaway.helper.PreferenceHelper.getLastBootMechanism(context)
+        .ifEmpty { "—" }
+    val result = org.adaway.helper.PreferenceHelper.getLastBootResult(context)
+        .ifEmpty { "—" }
+    return context.getString(
+        R.string.compose_settings_boot_diag_line,
+        fmt.format(java.util.Date(time)),
+        mechanism,
+        result,
+    )
+}
+
+/**
+ * 详情文本：环形开机记录 + 开机脚本（Magisk service.d）状态与脚本日志。
+ *
+ * <p>“打开 App 才自启”有两种完全不同的原因——广播根本没送到（组件被禁用/OEM 拦截）
+ * 与后台任务被系统延后——只有把每条机制的记录和脚本自己的日志都摆出来才能区分。</p>
+ */
+private fun buildBootDetail(context: Context): String {
+    val sb = StringBuilder()
+    val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+    sb.append("== 开机尝试记录（新 → 旧）==\n")
+    val ring = org.adaway.helper.PreferenceHelper.getBootEventRing(context)
+    if (ring.isEmpty()) {
+        sb.append("（还没有记录）\n")
+    }
+    for (line in ring.reversed()) {
+        val parts = line.split("|")
+        if (parts.size >= 5) {
+            val at = parts[0].toLongOrNull() ?: 0L
+            sb.append(fmt.format(java.util.Date(at))).append("  ")
+                .append(parts[1]).append("  ")
+                .append(parts[2]).append("  ")
+                .append(parts[3]).append("  ")
+                .append(if (parts[4] == "1") "成功" else "未成功")
+                .append('\n')
+        }
+    }
+    sb.append("\n== 开机脚本（Magisk/KernelSU service.d）==\n")
+    val supported = org.adaway.model.root.MagiskBootScript.isSupported()
+    sb.append("service.d 可用：").append(if (supported) "是" else "否（本机没有该目录）").append('\n')
+    if (supported) {
+        val installed = org.adaway.model.root.MagiskBootScript.isInstalled()
+        sb.append("脚本已安装：").append(if (installed) "是" else "否").append('\n')
+        sb.append("路径：").append(org.adaway.model.root.MagiskBootScript.scriptPath()).append('\n')
+        if (installed) {
+            val content = org.adaway.model.root.MagiskBootScript.readScript()
+            val complete = content.contains("--http-port") &&
+                content.contains("--https-port") &&
+                content.contains("--stats-port")
+            sb.append("脚本参数校验：")
+                .append(if (complete) "完整（含统计端口）" else "不完整，请重新开关一次「开机自动启动」")
+                .append('\n')
+        }
+        sb.append("\n== 脚本日志（").append(org.adaway.model.root.MagiskBootScript.LOG_PATH)
+            .append("）==\n")
+        sb.append(org.adaway.model.root.MagiskBootScript.readLogTail()).append('\n')
+    }
+    sb.append("\n== 其他 ==\n")
+    sb.append("开机接收器组件：")
+        .append(if (org.adaway.broadcast.BootReceiver.ensureEnabled(context)) "已启用" else "无法启用")
+        .append('\n')
+    sb.append("服务器当前可达：")
+        .append(if (org.adaway.util.WebServerUtils.isWebServerReachable(context)) "是" else "否")
+        .append('\n')
+    return sb.toString()
 }
 

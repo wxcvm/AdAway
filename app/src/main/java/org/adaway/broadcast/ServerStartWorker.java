@@ -55,12 +55,12 @@ public class ServerStartWorker extends Worker {
         if (startWebServerReliably(context)) {
             Timber.i("ServerStartWorker: web server confirmed running after boot.");
             PreferenceHelper.recordBootEvent(context, PreferenceHelper.getLastBootAction(context),
-                    "后台任务已确认服务器运行", true);
+                    "后台任务", "后台任务已确认服务器运行", true);
             return Result.success();
         }
         Timber.w("ServerStartWorker: web server not running after this attempt - will retry.");
         PreferenceHelper.recordBootEvent(context, PreferenceHelper.getLastBootAction(context),
-                "后台任务启动失败，将自动重试", false);
+                "后台任务", "后台任务启动失败，将自动重试", false);
         return Result.retry();
     }
 
@@ -83,21 +83,21 @@ public class ServerStartWorker extends Worker {
     /**
      * Polls for a usable root shell until the timeout elapses.
      *
-     * @return {@code true} as soon as {@code su -c true} exits successfully.
+     * <p>Uses the same libsu channel as the rest of the app instead of spawning
+     * {@code su} ourselves: a background process started by WorkManager has a
+     * minimal environment, and {@code new ProcessBuilder("su","-c","true")}
+     * fails there on devices where the su binary is not on PATH or where the
+     * MagiskSU daemon expects the app's own shell handshake. That failure was
+     * indistinguishable from "root is slow", so the worker kept retrying a
+     * mechanism that could never succeed.</p>
+     *
+     * @return {@code true} as soon as a root shell answers.
      */
     private static boolean waitForRootReady(long timeoutMs) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
-            try {
-                Process p = new ProcessBuilder("su", "-c", "true").start();
-                boolean ok = p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-                        && p.exitValue() == 0;
-                p.destroy();
-                if (ok) {
-                    return true;
-                }
-            } catch (Exception ignored) {
-                // su binary missing / busy: keep polling
+            if (org.adaway.model.root.ShellUtils.isRootAvailable()) {
+                return true;
             }
             sleep(1_000L);
         }
