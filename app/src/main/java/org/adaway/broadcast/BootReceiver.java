@@ -181,6 +181,14 @@ public class BootReceiver extends BroadcastReceiver {
         /* Re-arm the watchdog backstop: if the self-rescheduling chain was ever
            lost, this is the moment it comes back - before the user notices. */
         ServerWatchdogWorker.ensureScheduled(appContext);
+        /*
+         * Light mode: the server is a detached native process, so this app
+         * process is dead weight once the boot work is done (see LightMode).
+         * Armed from boot paths only - opening the app never schedules an exit,
+         * and the check itself refuses to run while an activity is visible or
+         * while the user's opt-in keep-alive service is on.
+         */
+        LightMode.armIfEnabled(appContext, action);
     }
 
     /**

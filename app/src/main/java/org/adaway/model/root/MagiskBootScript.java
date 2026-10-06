@@ -48,11 +48,21 @@ public final class MagiskBootScript {
     }
 
     /**
-     * @return {@code true} when this device runs service.d scripts (only a root
-     *         solution creates that directory).
+     * @return {@code true} when this device has a root solution that owns
+     *         {@code /data/adb} (Magisk, KernelSU, APatch all do).
+     *
+     *         <p>This used to require {@code /data/adb/service.d} to already
+     *         exist, which was wrong: KernelSU creates that directory late in
+     *         boot, so on the boot where the app first ran the probe answered
+     *         "unsupported" and no script was written - it only appeared after
+     *         the next app start (measured on-device: directory created at
+     *         12:37, app process started 12:35 and again 12:40). {@link
+     *         #install(Context)} creates the directory itself with
+     *         {@code mkdir -p}, so probing {@code /data/adb} is both sufficient
+     *         and race-free.</p>
      */
     public static boolean isSupported() {
-        Shell.Result result = Shell.cmd("[ -d " + SERVICE_D_DIR + " ]").exec();
+        Shell.Result result = Shell.cmd("[ -d /data/adb ]").exec();
         return result.isSuccess();
     }
 
@@ -232,13 +242,38 @@ public final class MagiskBootScript {
                 + "  while [ \"$(getprop sys.boot_completed)\" != \"1\" ] && [ $i -lt 150 ]; do\n"
                 + "    sleep 2; i=$((i+1))\n"
                 + "  done\n"
-                + "  # The app was uninstalled: its data directory is gone. Do not start\n"
-                + "  # a server for an app that is no longer installed - clean up instead.\n"
+                + "  # service.d runs at late_start, which on an encrypted device is\n"
+                + "  # normally still BEFORE the first unlock: /data/user/0/<pkg> lives\n"
+                + "  # on credential-encrypted storage and is not visible yet, so a missing\n"
+                + "  # $RES says nothing about the app being installed. Every boot until\n"
+                + "  # now logged 'app data gone' and deleted this script for that reason,\n"
+                + "  # which is why the server never started from the init side.\n"
+                + "  u=0\n"
+                + "  while [ ! -d \"$RES\" ] && [ \"$(getprop sys.user.0.ce_available)\" != \"true\" ] && [ $u -lt 300 ]; do\n"
+                + "    sleep 2; u=$((u+1))\n"
+                + "  done\n"
                 + "  if [ ! -d \"$RES\" ]; then\n"
-                + "    echo \"$(date) app data gone - removing this boot script\" >> \"$LOG\"\n"
-                + "    rm -f " + SCRIPT_PATH + "\n"
+                + "    if [ \"$(getprop sys.user.0.ce_available)\" != \"true\" ]; then\n"
+                + "      echo \"$(date) user storage still locked - keeping this boot script\" >> \"$LOG\"\n"
+                + "      exit 0\n"
+                + "    fi\n"
+                + "    PKG=$(echo \"$RES\" | cut -d/ -f5)\n"
+                + "    if [ -n \"$PKG\" ] && pm path \"$PKG\" >/dev/null 2>&1; then\n"
+                + "      echo \"$(date) app installed, its data dir is not ready - keeping this boot script\" >> \"$LOG\"\n"
+                + "      exit 0\n"
+                + "    fi\n"
+                + "    MISS=/data/local/tmp/adblock-boot-miss\n"
+                + "    n=0; [ -f \"$MISS\" ] && n=$(cat \"$MISS\")\n"
+                + "    n=$((n+1)); echo $n > \"$MISS\"\n"
+                + "    if [ $n -ge 2 ]; then\n"
+                + "      echo \"$(date) app really gone ($n boots) - removing this boot script\" >> \"$LOG\"\n"
+                + "      rm -f " + SCRIPT_PATH + " \"$MISS\"\n"
+                + "      exit 0\n"
+                + "    fi\n"
+                + "    echo \"$(date) app data missing, boot $n of 2 - keeping this boot script\" >> \"$LOG\"\n"
                 + "    exit 0\n"
                 + "  fi\n"
+                + "  rm -f /data/local/tmp/adblock-boot-miss\n"
                 + "  if [ ! -x \"$BIN\" ] && [ -f \"" + src + "\" ]; then\n"
                 + "    cp -f \"" + src + "\" \"$BIN\" && chmod 755 \"$BIN\"\n"
                 + "  fi\n"

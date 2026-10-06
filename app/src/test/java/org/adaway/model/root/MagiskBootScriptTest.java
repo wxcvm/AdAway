@@ -92,11 +92,33 @@ public class MagiskBootScriptTest {
                 1, lines(script).stream().filter(l -> l.startsWith("#!/system/bin/sh")).count());
     }
 
+    /**
+     * The uninstall guard must never conclude "the app is gone" from a missing
+     * data directory alone.
+     *
+     * <p>service.d runs at late_start, which on an encrypted device is normally
+     * still before the first unlock: {@code /data/user/0/<pkg>} is not visible
+     * yet. Every boot until this fix logged "app data gone" and deleted the
+     * script, so the init-side path never started the server - the reason the
+     * server only came up after the app was opened.</p>
+     */
     @Test
-    public void uninstallGuardIsPresent() {
+    public void uninstallGuardWaitsForUserStorageAndNeedsTwoBoots() {
         String script = MagiskBootScript.buildScript(
                 NATIVE_LIB, RESOURCES, false, 8080, 8443, 8686, false);
-        assertTrue("removes itself when the app is gone",
+        assertTrue("waits for the CE key before judging anything",
+                script.contains("sys.user.0.ce_available"));
+        assertTrue("keeps the script while storage is still locked",
+                script.contains("user storage still locked - keeping this boot script"));
+        assertTrue("cross-checks the package manager", script.contains("pm path"));
+        assertTrue("keeps the script when the app is installed but data is not ready",
+                script.contains("app installed, its data dir is not ready"));
+        assertTrue("has a miss counter", script.contains("adblock-boot-miss"));
+        assertTrue("deletes only on the second consecutive miss",
+                script.contains("[ $n -ge 2 ]"));
+        assertTrue("resets the counter once the app is found",
+                script.contains("rm -f /data/local/tmp/adblock-boot-miss"));
+        assertFalse("the old unconditional delete is gone",
                 script.contains("app data gone - removing this boot script"));
     }
 }

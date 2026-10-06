@@ -163,6 +163,11 @@ public class ServerBootService extends Service {
         PreferenceHelper.recordBootEvent(this, PreferenceHelper.getLastBootAction(this),
                 MECHANISM, result, ok);
         Timber.i("boot service: %s", result);
+        if (ok) {
+            /* Light mode: the server is up and this process is no longer needed
+               (it exits only once it is in the background). */
+            LightMode.armIfEnabled(this, "前台服务");
+        }
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }

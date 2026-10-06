@@ -286,17 +286,16 @@ internal fun setThemeMode(context: Context, mode: Int) {
         .edit().putInt("theme_mode", mode).apply()
 }
 
-/* ── Light mode: keep webserver running only while app is foregrounded ── */
+/* ── Light mode: release the app's RAM once the boot work is done ──
+   Single source of truth is PreferenceHelper: the toggle used to write its own
+   "light_mode" key in a different preference file, and no code ever read it -
+   which is why the switch did nothing. */
 
-internal fun isLightMode(context: Context): Boolean {
-    return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-        .getBoolean("light_mode", false)
-}
+internal fun isLightMode(context: Context): Boolean =
+    org.adaway.helper.PreferenceHelper.getLightMode(context)
 
-internal fun setLightMode(context: Context, enabled: Boolean) {
-    context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-        .edit().putBoolean("light_mode", enabled).apply()
-}
+internal fun setLightMode(context: Context, enabled: Boolean) =
+    org.adaway.helper.PreferenceHelper.setLightMode(context, enabled)
 
 
 /**
@@ -659,8 +658,12 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             onCheckedChange = { v ->
                                 lightMode = v
                                 setLightMode(context, v)
+                                // Apply the cadence change immediately: light mode
+                                // switches the recovery check between 6 h and the
+                                // 5 min / 15 min pair.
+                                org.adaway.broadcast.ServerWatchdogWorker.ensureScheduled(context)
                                 if (!v) {
-                                    // 恢复常驻：确保 webserver 正在运行
+                                    // Leaving light mode: make sure it is running.
                                     org.adaway.util.WebServerUtils.startWebServer(context)
                                 }
                             },

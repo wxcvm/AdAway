@@ -51,6 +51,18 @@ public class ServerWatchdogWorker extends Worker {
     /** Delay between two self-scheduled checks. */
     public static final long FOLLOW_UP_DELAY_MINUTES = 5L;
 
+    /** Periodic interval in the default (fast) cadence. */
+    private static final long PERIOD_MINUTES = 15L;
+
+    /**
+     * Periodic interval when light mode asks for the smallest footprint.
+     *
+     * <p>WorkManager persists periodic work across reboots, so this keeps the
+     * "server died in the middle of the day" repair alive without waking the app
+     * (and possibly spawning a root shell) every few minutes.</p>
+     */
+    private static final long LIGHT_PERIOD_HOURS = 6L;
+
     /** How long to wait for the server to come back up after a restart. */
     private static final long START_VERIFY_MS = 3_000L;
 
@@ -122,11 +134,44 @@ public class ServerWatchdogWorker extends Worker {
      * @param context The application context.
      */
     public static void ensureScheduled(Context context) {
+        if (lightCadence(context)) {
+            /*
+             * Light mode: one slow periodic check instead of the 15 minute one
+             * plus the self-rescheduling 5 minute chain. The chain is the
+             * expensive half (a wakeup every 5 minutes, and a root shell spawn
+             * whenever the socket probe says "down"), so it is dropped here.
+             *
+             * Cancel first, then enqueue with KEEP: that replaces a short
+             * interval left behind by an older version or by the other mode
+             * without needing a newer WorkManager API.
+             */
+            WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_FOLLOW_UP);
+            WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_PERIODIC);
+            PeriodicWorkRequest slow = new PeriodicWorkRequest.Builder(
+                    ServerWatchdogWorker.class, LIGHT_PERIOD_HOURS, TimeUnit.HOURS).build();
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                    UNIQUE_PERIODIC, ExistingPeriodicWorkPolicy.KEEP, slow);
+            return;
+        }
         PeriodicWorkRequest periodic = new PeriodicWorkRequest.Builder(
-                ServerWatchdogWorker.class, 15, TimeUnit.MINUTES).build();
+                ServerWatchdogWorker.class, PERIOD_MINUTES, TimeUnit.MINUTES).build();
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 UNIQUE_PERIODIC, ExistingPeriodicWorkPolicy.KEEP, periodic);
         scheduleFollowUp(context);
+    }
+
+    /**
+     * @param context The application context.
+     * @return {@code true} when the cheap cadence applies: light mode is on and
+     *         the blocking mode is not hijack.
+     *
+     *         <p>Hijack mode redirects all 80/443 traffic into the server, so a
+     *         dead server means "no internet at all" there - that mode always
+     *         keeps the fast chain, whatever light mode says.</p>
+     */
+    private static boolean lightCadence(Context context) {
+        return org.adaway.helper.PreferenceHelper.getLightMode(context)
+                && org.adaway.util.BlockMode.current(context) != org.adaway.util.BlockMode.HIJACK;
     }
 
     /**
@@ -135,6 +180,10 @@ public class ServerWatchdogWorker extends Worker {
      * @param context The application context.
      */
     public static void scheduleFollowUp(Context context) {
+        if (lightCadence(context)) {
+            /* Light mode: no 5 minute chain (see ensureScheduled). */
+            return;
+        }
         OneTimeWorkRequest next = new OneTimeWorkRequest.Builder(ServerWatchdogWorker.class)
                 .setInitialDelay(FOLLOW_UP_DELAY_MINUTES, TimeUnit.MINUTES)
                 .build();

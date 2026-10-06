@@ -40,6 +40,9 @@ public final class PreferenceHelper {
      */
     private static final String PREF_KEEPALIVE_ENABLED = "keepalive_enabled";
 
+    /** Preference key of "light mode" (fewest resident resources). */
+    private static final String PREF_LIGHT_MODE = "light_mode";
+
     private PreferenceHelper() {
 
     }
@@ -236,6 +239,51 @@ public final class PreferenceHelper {
         );
         prefs.edit()
                 .putBoolean(PREF_KEEPALIVE_ENABLED, enabled)
+                .apply();
+    }
+
+    /**
+     * Whether "light mode" is on (the default: keep the resident footprint as
+     * small as possible).
+     *
+     * <p>The intercept server is a detached native process, so the app process
+     * itself is dead weight once the boot work is done - it measured ~180&nbsp;MB
+     * RSS on the reference device, which is the single biggest thing this app
+     * keeps in RAM. Light mode therefore has two effects:</p>
+     * <ul>
+     *     <li>after a <b>boot</b> start confirmed the server is up, the app
+     *     process exits once it is in the background (never while an activity is
+     *     visible, and never when the opt-in keep-alive service is on);</li>
+     *     <li>the watchdog drops from a self-rescheduling 5 minute chain (each
+     *     run may spawn a root shell) to a single 6 hour periodic check - except
+     *     in hijack mode, where a dead server would mean "no internet at all"
+     *     and the fast chain has to stay.</li>
+     * </ul>
+     *
+     * @param context The application context.
+     * @return {@code true} when light mode is enabled.
+     */
+    public static boolean getLightMode(Context context) {
+        SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(
+                Constants.PREFS_NAME,
+                Context.MODE_PRIVATE
+        );
+        return prefs.getBoolean(PREF_LIGHT_MODE, true);
+    }
+
+    /**
+     * Store whether "light mode" is on.
+     *
+     * @param context The application context.
+     * @param enabled Whether light mode should be enabled.
+     */
+    public static void setLightMode(Context context, boolean enabled) {
+        SharedPreferences prefs = context.getApplicationContext().getSharedPreferences(
+                Constants.PREFS_NAME,
+                Context.MODE_PRIVATE
+        );
+        prefs.edit()
+                .putBoolean(PREF_LIGHT_MODE, enabled)
                 .apply();
     }
 

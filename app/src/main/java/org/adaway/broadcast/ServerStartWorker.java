@@ -56,6 +56,9 @@ public class ServerStartWorker extends Worker {
             Timber.i("ServerStartWorker: web server confirmed running after boot.");
             PreferenceHelper.recordBootEvent(context, PreferenceHelper.getLastBootAction(context),
                     "后台任务", "后台任务已确认服务器运行", true);
+            /* Light mode: the boot work is done, the app process may exit once it
+               is in the background (see LightMode). */
+            org.adaway.broadcast.LightMode.armIfEnabled(context, "后台任务");
             return Result.success();
         }
         Timber.w("ServerStartWorker: web server not running after this attempt - will retry.");

@@ -150,7 +150,7 @@
     <string name="compose_settings_cert_trust_fail">安装失败：未写入系统信任库，请改用手动安装</string>
     <string name="compose_settings_cert_install_manual">手动安装</string>
     <string name="compose_settings_light_mode">轻量模式（省内存）</string>
-    <string name="compose_settings_light_mode_hint">开机启动服务器后应用会退出主进程以节省内存；内置服务器作为独立原生进程继续运行，应用关掉也能正常拦截。</string>
+    <string name="compose_settings_light_mode_hint">占用最低：开机拉起服务器后，应用会在退到后台时退出进程（服务器作为独立原生进程继续运行，拦截不受影响），自愈检查从每 5 分钟降为每 6 小时一次。开启常驻通知时本项被忽略；劫持模式始终保留高频检查。</string>
     <string name="compose_settings_allowlist_title">放行名单（跳过拦截）</string>
     <string name="compose_settings_allowlist_warning">⚠️ 名单内 UID 的流量不会被拦截。只用于门户登录等特殊情况，非必要不要添加。</string>
     <string name="compose_settings_allowlist_default">默认条目（门户登录探测，自动维护）</string>
