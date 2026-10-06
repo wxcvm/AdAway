@@ -37,7 +37,17 @@ public class MagiskBootScriptTest {
         String script = MagiskBootScript.buildScript(
                 NATIVE_LIB, RESOURCES, false, 8080, 8443, 8686, false);
 
-        assertTrue("resources", script.contains("--resources \"" + RESOURCES + "\""));
+        /*
+         * The script defines each path ONCE and then refers to it as a shell
+         * variable ("RES=…", "--resources \"$RES\""), so both halves have to be
+         * asserted: the definition carries the absolute path, the flag carries
+         * the variable. Asserting the expanded path on the flag line is what
+         * broke this test the first time.
+         */
+        assertTrue("resources dir is defined", script.contains("RES=" + RESOURCES));
+        assertTrue("resources flag uses the variable",
+                script.contains("--resources \"$RES\""));
+        assertTrue("app lib dir is defined", script.contains("APP_LIB=" + NATIVE_LIB));
         assertTrue("bind mode", script.contains("--bind loop"));
         assertTrue("http port", script.contains("--http-port 8080"));
         assertTrue("https port", script.contains("--https-port 8443"));
