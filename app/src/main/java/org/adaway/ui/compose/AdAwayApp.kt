@@ -48,6 +48,8 @@ object Destinations {
     const val SETTINGS = "settings"
     /** Secondary page (not a bottom-bar tab): the full request log. */
     const val LOGS = "logs"
+    /** Secondary page: per-domain exemptions (解除过滤), reachable from the rules page. */
+    const val EXEMPT = "rules/exempt"
 }
 
 private data class Destination(
@@ -106,10 +108,13 @@ fun AdAwayApp() {
                 StatisticsScreen(viewModel, onOpenLogs = { navController.navigate(Destinations.LOGS) })
             }
             composable(Destinations.RULES) {
-                RulesScreen(viewModel)
+                RulesScreen(viewModel, onOpenExempt = { navController.navigate(Destinations.EXEMPT) })
             }
             composable(Destinations.SETTINGS) {
                 SettingsScreen(viewModel)
+            }
+            composable(Destinations.EXEMPT) {
+                ExemptionRulesScreen(viewModel, onBack = { navController.popBackStack() })
             }
             composable(Destinations.LOGS) {
                 QueryLogScreen(viewModel, onBack = { navController.popBackStack() })

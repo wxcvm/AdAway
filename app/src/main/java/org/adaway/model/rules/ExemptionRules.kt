@@ -33,6 +33,59 @@ object ExemptionRules {
     fun file(context: Context): File =
         File(org.adaway.util.WebServerUtils.getResourcePath(context).toFile(), FILE_NAME)
 
+    /**
+     * 归一化一条豁免规则，规则与原生 `domain_rule_normalize()` **逐条对齐**，
+     * 因此界面预览的结果就是服务器实际生效的结果：
+     *
+     * - `example.com` / `.example.com` / `*.example.com`
+     * - `@@||example.com^` / `||example.com^`（AdGuard / uBlock，含误贴的拦截语法）
+     * - `0.0.0.0 example.com` / `:: example.com`（hosts 行，任意前置 IP）
+     * - `https://example.com/path?x=1`（取主机）、`example.com:8443`（去端口）
+     * - `#` 与 `!` 开头是注释
+     *
+     * @param raw 原始行。
+     * @return 规范化后的域；`null` 表示该行不可用（注释、空行、或过宽规则）。
+     */
+    fun normalize(raw: String): String? {
+        var p = raw.trim()
+        if (p.isEmpty() || p.startsWith("#") || p.startsWith("!")) return null
+        p = p.trimStart('@', '|', ' ', '\t')
+        // hosts 行：空白之后的字段才是主机
+        val sp = p.indexOfFirst { it == ' ' || it == '\t' }
+        if (sp >= 0) {
+            val tail = p.substring(sp).trim()
+            if (tail.isNotEmpty()) p = tail
+        }
+        val scheme = p.indexOf("://")
+        if (scheme >= 0) p = p.substring(scheme + 3)
+        p = p.trimStart('*', '.')
+        val cut = p.indexOfFirst {
+            it == '/' || it == '?' || it == '#' || it == ':' || it == '^' || it == ' ' || it == '\t'
+        }
+        if (cut >= 0) p = p.substring(0, cut)
+        p = p.lowercase()
+        // 与原生一致的三重拒绝：太短 / 不含点（裸 TLD）/ 含通配 —— 否则一行 "com" 等于放行半个互联网
+        if (p.length < 4 || !p.contains('.') || p.contains('*')) return null
+        return p
+    }
+
+    /**
+     * 解析多行输入，用于页面预览。
+     *
+     * @return 第一项是可用规则（去重、保持顺序），第二项是被拒绝的原始行。
+     */
+    fun parseAll(text: String): Pair<List<String>, List<String>> {
+        val accepted = LinkedHashSet<String>()
+        val rejected = ArrayList<String>()
+        text.lineSequence().forEach { line ->
+            val raw = line.trim()
+            if (raw.isEmpty() || raw.startsWith("#") || raw.startsWith("!")) return@forEach
+            val normalized = normalize(raw)
+            if (normalized == null) rejected += raw else accepted += normalized
+        }
+        return accepted.toList() to rejected
+    }
+
     /** 当前生效的域（已去重、已排序，注释行忽略）。 */
     fun list(context: Context): List<String> {
         val f = file(context)

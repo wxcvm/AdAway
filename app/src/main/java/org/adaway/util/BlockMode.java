@@ -129,6 +129,72 @@ public final class BlockMode {
     }
 
     /**
+     * Store a user defined redirection target (mode {@link #CUSTOM}).
+     *
+     * <p>The two values are exactly what the generated hosts file maps blocked
+     * hosts to, so a user who already knows what to write (a local sinkhole, an
+     * internal DNS, a proxy box) can set it here instead of null routing.</p>
+     *
+     * @param context The application context.
+     * @param ipv4    The IPv4 target written into the hosts file.
+     * @param ipv6    The IPv6 target written into the hosts file.
+     */
+    public static void applyCustom(Context context, String ipv4, String ipv6) {
+        prefs(context).edit()
+                .putString(ipv4Key(context), ipv4)
+                .putString(ipv6Key(context), ipv6)
+                .putBoolean(PREF_HIJACK_ENABLED, false)
+                .apply();
+    }
+
+    /**
+     * @param context The application context.
+     * @return The configured IPv4 redirection target.
+     */
+    public static String ipv4Target(Context context) {
+        return prefs(context).getString(ipv4Key(context),
+                context.getString(R.string.pref_redirection_ipv4_def));
+    }
+
+    /**
+     * @param context The application context.
+     * @return The configured IPv6 redirection target.
+     */
+    public static String ipv6Target(Context context) {
+        return prefs(context).getString(ipv6Key(context),
+                context.getString(R.string.pref_redirection_ipv6_def));
+    }
+
+    /**
+     * Light validation for a redirection target: a dotted quad with every octet
+     * in range, or an IPv6-looking address. Deliberately permissive - the hosts
+     * file accepts anything, and rejecting a valid-but-unusual target would be
+     * worse than letting the user set it.
+     *
+     * @param value The candidate address.
+     * @return {@code true} when it looks usable.
+     */
+    public static boolean isValidTarget(String value) {
+        if (value == null) return false;
+        String candidate = value.trim();
+        if (candidate.isEmpty()) return false;
+        if (candidate.contains(":")) {
+            return candidate.matches("[0-9a-fA-F:]+");
+        }
+        String[] parts = candidate.split("\\.", -1);
+        if (parts.length != 4) return false;
+        for (String part : parts) {
+            try {
+                int octet = Integer.parseInt(part);
+                if (octet < 0 || octet > 255) return false;
+            } catch (NumberFormatException exception) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
      * Whether the bundled web server is required to block.
      *
      * @param context The application context.

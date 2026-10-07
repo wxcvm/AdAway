@@ -452,6 +452,72 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+                    // ── 自定义重定向地址（hosts 档：被拦域指向哪里）──
+                    var customIpv4 by remember { mutableStateOf(org.adaway.util.BlockMode.ipv4Target(context)) }
+                    var customIpv6 by remember { mutableStateOf(org.adaway.util.BlockMode.ipv6Target(context)) }
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = blockMode == org.adaway.util.BlockMode.CUSTOM,
+                            onClick = {
+                                blockMode = org.adaway.util.BlockMode.CUSTOM
+                                customIpv4 = org.adaway.util.BlockMode.ipv4Target(context)
+                                customIpv6 = org.adaway.util.BlockMode.ipv6Target(context)
+                            },
+                            label = { Text(stringResource(R.string.compose_settings_block_mode_custom)) },
+                        )
+                    }
+                    if (blockMode == org.adaway.util.BlockMode.CUSTOM) {
+                        Spacer(Modifier.height(6.dp))
+                        androidx.compose.material3.OutlinedTextField(
+                            value = customIpv4,
+                            onValueChange = { customIpv4 = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            isError = customIpv4.isNotBlank() &&
+                                !org.adaway.util.BlockMode.isValidTarget(customIpv4),
+                            label = { Text(stringResource(R.string.compose_settings_custom_ipv4)) },
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
+                            ),
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        androidx.compose.material3.OutlinedTextField(
+                            value = customIpv6,
+                            onValueChange = { customIpv6 = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            isError = customIpv6.isNotBlank() &&
+                                !org.adaway.util.BlockMode.isValidTarget(customIpv6),
+                            label = { Text(stringResource(R.string.compose_settings_custom_ipv6)) },
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
+                            ),
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.compose_settings_custom_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        androidx.compose.material3.TextButton(
+                            enabled = org.adaway.util.BlockMode.isValidTarget(customIpv4) &&
+                                org.adaway.util.BlockMode.isValidTarget(customIpv6),
+                            onClick = {
+                                viewModel.applyCustomAddresses(customIpv4, customIpv6) { ok ->
+                                    Toast.makeText(
+                                        context,
+                                        context.getString(
+                                            if (ok) R.string.compose_settings_custom_saved
+                                            else R.string.compose_settings_custom_failed,
+                                        ),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            },
+                        ) { Text(stringResource(R.string.compose_settings_custom_apply)) }
+                    }
                     Spacer(Modifier.height(6.dp))
                     Text(
                         stringResource(

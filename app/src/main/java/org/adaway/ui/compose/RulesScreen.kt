@@ -106,7 +106,7 @@ private data class RuleTab(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RulesScreen(viewModel: StatsViewModel) {
+fun RulesScreen(viewModel: StatsViewModel, onOpenExempt: () -> Unit = {}) {
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
@@ -238,6 +238,24 @@ fun RulesScreen(viewModel: StatsViewModel) {
                         onClick = { selectedTab = index },
                         text = { Text(stringResource(tab.labelRes)) },
                     )
+                }
+            }
+
+            // 解除过滤（按域名放行）入口：只在劫持过滤模式下真正可用，页面里会说明原因
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.compose_exempt_entry),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onOpenExempt) {
+                    Text(stringResource(R.string.compose_exempt_open))
                 }
             }
 

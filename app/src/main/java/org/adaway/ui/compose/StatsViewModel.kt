@@ -642,12 +642,67 @@ fun refreshServerStats() {
     }
 
     /**
-     * 只放行一个域：同时写规则库（ALLOWED，参与 hosts 生成）与原生豁免名单
-     * domain_allowlist.txt（服务器每请求重读，立即生效）。
+     * 只放行一个域：写规则库（ALLOWED，单一事实来源），随后导出豁免名单。
+     * 原生服务器每请求重读 domain_allowlist.txt，所以立即生效。
      */
     fun allowHost(host: String, onDone: () -> Unit = {}) {
-        org.adaway.model.rules.ExemptionRules.addRaw(getApplication<Application>(), host)
-        addUserRule(host, org.adaway.db.entity.ListType.ALLOWED.value, null, onDone)
+        addExemptionRules(listOf(host)) { onDone() }
+    }
+
+    /**
+     * 批量加入"解除过滤"规则（多语法输入已由 ExemptionRules.parseAll 归一化）。
+     *
+     * @param hosts  规范化后的域列表。
+     * @param onDone 实际写入的条数。
+     */
+    fun addExemptionRules(hosts: List<String>, onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            val added = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                var count = 0
+                for (host in hosts) {
+                    try {
+                        val item = org.adaway.db.entity.HostListItem()
+                        item.host = host
+                        item.type = org.adaway.db.entity.ListType.ALLOWED
+                        item.sourceId = 1
+                        hostsListItemDao.insert(item)
+                        hostEntryDao.allowHost(host)
+                        count++
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to add exemption %s", host)
+                    }
+                }
+                if (count > 0) {
+                    org.adaway.util.WebServerUtils.exportBlockList(getApplication<Application>())
+                }
+                count
+            }
+            onDone(added)
+        }
+    }
+
+    /**
+     * 应用自定义重定向地址（hosts 档）：写偏好 → 重新生成 hosts → 导出规则 → 重载
+     * 服务器配置，并撤销劫持规则（自定义地址不依赖劫持，也就不会占用整机流量）。
+     */
+    fun applyCustomAddresses(ipv4: String, ipv6: String, onDone: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val app = getApplication<Application>()
+                    org.adaway.util.BlockMode.applyCustom(app, ipv4.trim(), ipv6.trim())
+                    adBlockModel.apply()
+                    org.adaway.util.WebServerUtils.exportBlockList(app)
+                    org.adaway.util.WebServerUtils.reloadConfig()
+                    org.adaway.model.root.HijackModel.disable()
+                    true
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to apply the custom redirection target")
+                    false
+                }
+            }
+            onDone(ok)
+        }
     }
 
     fun addUserRule(host: String, type: Int, redirection: String?, onDone: () -> Unit) {
