@@ -94,6 +94,12 @@
     <string name="compose_settings_custom_apply">应用并重新生成 hosts</string>
     <string name="compose_settings_custom_saved">自定义地址已应用</string>
     <string name="compose_settings_custom_failed">自定义地址应用失败</string>
+    <string name="compose_settings_block_mode_recommended">优化（推荐）</string>
+    <string name="compose_settings_adguard_title">检测到 AdGuard：可以让全部拦截都走本应用</string>
+    <string name="compose_settings_adguard_steps">在 AdGuard 里：设置 → DNS 过滤 → 拦截模式（DNS 阻止响应）→ 自定义 IP 地址，IPv4 填 %1$s、IPv6 填 %2$s（就是本应用的 Web 服务器）。此后**被 AdGuard 判定的域名全部**由本应用应答：统一的拦截页 + 完整的逐应用统计。本应用这边不需要再做什么——保持 127.0.0.1，别选 0.0.0.0。如果你把 Web 服务器改成监听全部接口（给局域网里别的设备用），这里请改填本机局域网地址。</string>
+    <string name="compose_settings_adguard_copy">复制这两个地址</string>
+    <string name="compose_settings_adguard_copied">地址已复制</string>
+    <string name="compose_settings_adguard_dismiss">不再提示</string>
     <string name="compose_stats_app_pin_refused">已改为廉价拒绝（固定证书）</string>
     <string name="compose_stats_recent_certs">最近签发的证书</string>
     <string name="compose_stats_certs_hint">各应用请求签发的域名（SNI）</string>

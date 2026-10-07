@@ -94,6 +94,12 @@
     <string name="compose_settings_custom_apply">Apply and regenerate hosts</string>
     <string name="compose_settings_custom_saved">Custom target applied</string>
     <string name="compose_settings_custom_failed">Could not apply the custom target</string>
+    <string name="compose_settings_block_mode_recommended">Optimised (recommended)</string>
+    <string name="compose_settings_adguard_title">AdGuard detected — you can route everything through this app</string>
+    <string name="compose_settings_adguard_steps">In AdGuard: Settings → DNS filtering → Blocking mode (DNS blocking response) → Custom IP address, and fill in IPv4 %1$s / IPv6 %2$s (that is this app\'s web server). From then on every domain AdGuard blocks is answered by this app: one shared block page plus per-app statistics. Nothing else is needed here — keep this app on 127.0.0.1 and do not pick 0.0.0.0. If you made the web server listen on all interfaces for other devices, use this phone\'s LAN address instead of %1$s.</string>
+    <string name="compose_settings_adguard_copy">Copy the addresses</string>
+    <string name="compose_settings_adguard_copied">Addresses copied</string>
+    <string name="compose_settings_adguard_dismiss">Do not show again</string>
     <string name="compose_stats_app_pin_refused">refused without interception (pinning)</string>
     <string name="compose_stats_recent_certs">Recently issued certs</string>
     <string name="compose_stats_certs_hint">Domains apps asked us to sign (SNI)</string>

@@ -402,12 +402,64 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(6.dp))
-                    // 与 AdGuard 等其它过滤工具搭配使用的提示
-                    Text(
-                        stringResource(R.string.compose_settings_block_mode_adguard_hint),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    // 与 AdGuard 共存：检测到（已安装 + VPN 在跑）就给出可直接照抄的配置
+                    val adguardActive = remember {
+                        org.adaway.util.AdGuardPresence.shouldSuggest(context)
+                    }
+                    var adguardDismissed by remember {
+                        mutableStateOf(org.adaway.util.AdGuardPresence.isHintDismissed(context))
+                    }
+                    if (adguardActive && !adguardDismissed) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            ),
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    stringResource(R.string.compose_settings_adguard_title),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    stringResource(
+                                        R.string.compose_settings_adguard_steps,
+                                        org.adaway.util.AdGuardPresence.suggestedIpv4(),
+                                        org.adaway.util.AdGuardPresence.suggestedIpv6(),
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        val text = org.adaway.util.AdGuardPresence.suggestedIpv4() +
+                                            " / " + org.adaway.util.AdGuardPresence.suggestedIpv6()
+                                        val clipboard = context.getSystemService(
+                                            android.content.Context.CLIPBOARD_SERVICE,
+                                        ) as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(
+                                            android.content.ClipData.newPlainText("AdGuard", text),
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.compose_settings_adguard_copied),
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }) { Text(stringResource(R.string.compose_settings_adguard_copy)) }
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        org.adaway.util.AdGuardPresence.dismissHint(context)
+                                        adguardDismissed = true
+                                    }) { Text(stringResource(R.string.compose_settings_adguard_dismiss)) }
+                                }
+                            }
+                        }
+                    } else {
+                        Text(
+                            stringResource(R.string.compose_settings_block_mode_adguard_hint),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Spacer(Modifier.height(8.dp))
                     var blockMode by remember { mutableStateOf(viewModel.currentBlockMode()) }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -418,7 +470,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 viewModel.applyBlockMode(org.adaway.util.BlockMode.LOCALHOST)
                             },
                             label = {
-                                Text(stringResource(R.string.compose_settings_block_mode_localhost))
+                                // S5：推荐档提到最前并改名——它是"回答被拦域"的最省资源方式
+                                Text(stringResource(R.string.compose_settings_block_mode_recommended))
                             },
                         )
                         FilterChip(
