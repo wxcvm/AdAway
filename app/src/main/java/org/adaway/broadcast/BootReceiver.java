@@ -128,45 +128,8 @@ public class BootReceiver extends BroadcastReceiver {
         final Context appContext = context.getApplicationContext();
         final PendingResult pending = goAsync();
         Thread quickStart = new Thread(() -> {
-            String result;
-            boolean started = false;
             try {
-                if (org.adaway.util.WebServerUtils.isWebServerReachable(appContext)) {
-                    Timber.d("BootReceiver: web server already reachable.");
-                    PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
-                            "服务器已在运行", true);
-                    return;
-                }
-                long deadline = System.currentTimeMillis() + IMMEDIATE_BUDGET_MS;
-                while (System.currentTimeMillis() < deadline) {
-                    if (org.adaway.model.root.ShellUtils.isRootAvailable()) {
-                        org.adaway.util.WebServerUtils.startWebServer(appContext);
-                        Timber.i("BootReceiver: immediate start dispatched.");
-                        /* Confirm it really came up: "dispatched" is not
-                           "running" (the port can be taken, the CA missing). */
-                        try {
-                            Thread.sleep(1_500L);
-                        } catch (InterruptedException interrupted) {
-                            Thread.currentThread().interrupt();
-                        }
-                        started = org.adaway.util.WebServerUtils.isWebServerReachable(appContext);
-                        result = started ? "开机后立即启动成功" : "已发出启动命令，正在确认";
-                        PreferenceHelper.recordBootEvent(appContext, action, MECHANISM, result, started);
-                        break;
-                    }
-                    try {
-                        Thread.sleep(500L);
-                    } catch (InterruptedException interrupted) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-                if (!started && System.currentTimeMillis() >= deadline) {
-                    /* Root was still not answering: the worker below keeps
-                       retrying, so this is "pending", not "failed". */
-                    PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
-                            "root 未就绪，已交给后台任务重试", false);
-                }
+                immediateStartAttempt(appContext, action);
             } catch (Throwable throwable) {
                 Timber.w(throwable, "BootReceiver: immediate start attempt failed.");
                 PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
@@ -189,6 +152,54 @@ public class BootReceiver extends BroadcastReceiver {
          * while the user's opt-in keep-alive service is on.
          */
         LightMode.armIfEnabled(appContext, action);
+    }
+
+    /**
+     * One bounded start attempt inside the receiver's own ~10&nbsp;s window.
+     *
+     * <p>Extracted from {@link #onReceive} to keep the receiver itself simple
+     * (SonarCloud java:S3776 measured it at a cognitive complexity of 27). The
+     * behaviour is unchanged: root is probed until {@link #IMMEDIATE_BUDGET_MS}
+     * elapses, a dispatched start is confirmed before it counts as successful,
+     * and every outcome is written to the boot diagnostics.</p>
+     *
+     * @param appContext The application context.
+     * @param action     The broadcast action (diagnostics only).
+     */
+    private static void immediateStartAttempt(Context appContext, String action) {
+        if (org.adaway.util.WebServerUtils.isWebServerReachable(appContext)) {
+            Timber.d("BootReceiver: web server already reachable.");
+            PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
+                    "服务器已在运行", true);
+            return;
+        }
+        long deadline = System.currentTimeMillis() + IMMEDIATE_BUDGET_MS;
+        while (System.currentTimeMillis() < deadline) {
+            if (org.adaway.model.root.ShellUtils.isRootAvailable()) {
+                org.adaway.util.WebServerUtils.startWebServer(appContext);
+                Timber.i("BootReceiver: immediate start dispatched.");
+                /* Confirm it really came up: "dispatched" is not "running"
+                   (the port can be taken, the CA missing). */
+                sleep(1_500L);
+                boolean started = org.adaway.util.WebServerUtils.isWebServerReachable(appContext);
+                PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
+                        started ? "开机后立即启动成功" : "已发出启动命令，正在确认", started);
+                return;
+            }
+            sleep(500L);
+        }
+        /* Root was still not answering: the worker below keeps retrying, so
+           this is "pending", not "failed". */
+        PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
+                "root 未就绪，已交给后台任务重试", false);
+    }
+
+    private static void sleep(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**

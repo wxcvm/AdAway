@@ -73,7 +73,7 @@ public final class LightMode {
                 if (!isEnabled(app)) {
                     return;
                 }
-                if (!isInBackground(app)) {
+                if (!isInBackground()) {
                     Timber.d("LightMode: an activity is visible, staying resident (%s)", reason);
                     return;
                 }
@@ -104,10 +104,9 @@ public final class LightMode {
     }
 
     /**
-     * @param context The application context.
      * @return {@code true} when no activity of this app is visible.
      */
-    private static boolean isInBackground(Context context) {
+    private static boolean isInBackground() {
         ActivityManager.RunningAppProcessInfo state = new ActivityManager.RunningAppProcessInfo();
         ActivityManager.getMyMemoryState(state);
         return state.importance != ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND

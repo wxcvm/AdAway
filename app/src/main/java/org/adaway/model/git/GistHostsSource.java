@@ -34,11 +34,24 @@ class GistHostsSource extends GitHostsJsonApiSource {
         URL parsedUrl = new URL(url);
         String path = parsedUrl.getPath();
         String[] pathParts = path.split("/");
-        if (pathParts.length < 2) {
+        /*
+         * Both gist URL shapes have to work:
+         *   https://gist.github.com/&lt;user&gt;/&lt;id&gt; -> ["", user, id]
+         *   https://gist.github.com/&lt;id&gt;           -> ["", id]
+         * The bare-id form used to pass the old "length < 2" check and then
+         * crash with an ArrayIndexOutOfBoundsException on pathParts[2]
+         * (SonarCloud javabugs:S6466: "Fix this access on a collection that may
+         * throw an ArrayIndexOutOfBoundsException").
+         */
+        if (pathParts.length >= 3 && !pathParts[2].isEmpty()) {
+            // https://gist.github.com/<user>/<id>
+            this.gistIdentifier = pathParts[2];
+        } else if (pathParts.length == 2 && !pathParts[1].isEmpty()) {
+            // https://gist.github.com/<id>
+            this.gistIdentifier = pathParts[1];
+        } else {
             throw new MalformedURLException("The GitHub gist URL " + url + " is not valid.");
         }
-        // Extract gist identifier from path
-        this.gistIdentifier = pathParts[2];
     }
 
     @Override
