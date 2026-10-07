@@ -620,8 +620,11 @@ fun refreshServerStats() {
     fun removeRule(host: String, onDone: () -> Unit) {
         viewModelScope.launch {
             withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val app = getApplication<Application>()
                 hostsListItemDao.deleteUserFromHost(host)
                 hostEntryDao.allowHost(host)
+                // 豁免名单是派生文件：规则一改就重写，避免文件与列表不一致
+                exportExemptions(app)
             }
             onDone()
         }
@@ -639,6 +642,42 @@ fun refreshServerStats() {
      */
     fun allowAppForever(uid: Int) {
         setAppAllowed(getApplication<Application>(), uid, true)
+    }
+
+    /**
+     * 把规则库里的 ALLOWED 条目导出成原生读取的 `domain_allowlist.txt`。
+     *
+     * <p>放在 ViewModel 而不是 WebServerUtils：后者是纯 JVM 工具类，一旦在那里引用
+     * Room 的 DAO，JVM 单元测试环境里没有生成的实现，抛出的往往是 `Error` 而不是
+     * `Exception`（普通 catch 兜不住），会把与导出无关的测试一起带崩。这里在协程的
+     * IO 上下文里调用，并显式兜住 `Throwable`：导出失败只是豁免名单不刷新，不该影响
+     * 规则本身的写入。</p>
+     */
+    private suspend fun exportExemptions(app: Application) {
+        try {
+            val allowed = hostsListItemDao.getListByType(
+                org.adaway.db.entity.ListType.ALLOWED.value,
+                10000,
+            )
+            val file = java.io.File(
+                org.adaway.util.WebServerUtils.getResourcePath(app).toFile(),
+                "domain_allowlist.txt",
+            )
+            file.parentFile?.mkdirs()
+            file.bufferedWriter().use { writer ->
+                writer.write("# 由 ADBlock 生成：按域名解除过滤（原生服务器每次请求都会重读）\n")
+                for (item in allowed) {
+                    val host = item.host?.trim().orEmpty()
+                    if (host.isNotEmpty() && !host.startsWith("#")) {
+                        writer.write(host)
+                        writer.write("\n")
+                    }
+                }
+            }
+            Timber.i("Exported %d exemption(s) to %s", allowed.size, file.absolutePath)
+        } catch (throwable: Throwable) {
+            Timber.w(throwable, "Failed to export the domain allow list")
+        }
     }
 
     /**
@@ -673,7 +712,9 @@ fun refreshServerStats() {
                     }
                 }
                 if (count > 0) {
-                    org.adaway.util.WebServerUtils.exportBlockList(getApplication<Application>())
+                    val app = getApplication<Application>()
+                    org.adaway.util.WebServerUtils.exportBlockList(app)
+                    exportExemptions(app)
                 }
                 count
             }

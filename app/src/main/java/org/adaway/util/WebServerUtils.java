@@ -172,7 +172,6 @@ public class WebServerUtils {
             return -1;
         }
         Timber.i("Exported %d blocked hosts to %s", count, target);
-        exportDomainAllowlist(context);
         // Element hiding rules (AdGuard / adblock syntax) picked up while the
         // sources were parsed: the hijack proxy injects this stylesheet into
         // every filtered page - the cosmetic filtering AdGuard does.
