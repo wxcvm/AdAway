@@ -523,6 +523,10 @@ static void json_qlog(const char *body, struct snapshot *sn) {
 static int http_get(int port, const char *path, char *out, size_t outsz) {
     SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == INVALID_SOCKET) return -1;
+    if (out == NULL || outsz == 0) {   /* nothing could be returned anyway */
+        closesocket(s);
+        return -1;
+    }
     SOCKADDR_IN addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -545,6 +549,15 @@ static int http_get(int port, const char *path, char *out, size_t outsz) {
                 if (n <= 0) break;
                 got += (size_t)n;
             }
+            /*
+             * Clamp before terminating. The loop condition already keeps `got`
+             * below outsz, but making the bound explicit is what lets the
+             * analyzer (and a reader) see that the write cannot go past the
+             * buffer - SonarCloud c:S3519 flagged it as a possible
+             * out-of-bounds access - and it also keeps this safe if the recv
+             * contract above is ever changed.
+             */
+            if (got >= outsz) got = outsz - 1;
             out[got] = '\0';
             rc = (got > 0) ? 0 : -1;
         }
@@ -1411,7 +1424,7 @@ static void theme_apply(int dark) {
 #define C_GREEN      RGB(34, 197, 94)
 #define C_GREEN_TXT  RGB(22, 163, 74)
 
-static const wchar_t *g_title = L"ADBlock 拦截服务器 v" ADBLOCK_APP_VERSION;
+static const wchar_t *g_title = L"ADBlock 拦截服务器 v" ADBLOCK_APP_VERSION_W;
 
 static struct snapshot *g_sn = NULL;
 static char g_res[512] = {0};
@@ -1843,7 +1856,7 @@ static void draw_sidebar(HDC hdc) {
     SelectObject(hdc, sf);
     SetTextColor(hdc, RGB(143, 163, 192));
     wchar_t ver[64];
-    swprintf(ver, 64, L"拦截服务器 v" ADBLOCK_APP_VERSION);
+    swprintf(ver, 64, L"拦截服务器 v" ADBLOCK_APP_VERSION_W);
     TextOutW(hdc, S(22), S(48), ver, (int)wcslen(ver));
     {
         bool live = (g_sn != NULL && g_sn->valid);
@@ -3371,7 +3384,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (wp && info) {
             wchar_t msg[512];
             swprintf(msg, 512,
-                     L"发现新版本 %ls（当前版本 v" L"" ADBLOCK_APP_VERSION L"）。\n\n"
+                     L"发现新版本 %ls（当前版本 v" ADBLOCK_APP_VERSION_W L"）。\n\n"
                      L"现在下载并自动更新吗？更新会关闭本窗口，替换文件后自动重启。",
                      info->tag);
             update_prompt_notify(hwnd);
@@ -3388,7 +3401,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             swprintf(g_status, 4096, L"检查更新失败：%ls", update_last_error());
             MessageBoxW(hwnd, g_status, L"检查更新", MB_OK | MB_ICONWARNING | MB_TOPMOST);
         } else {
-            swprintf(g_status, 4096, L"已是最新版本（v" L"" ADBLOCK_APP_VERSION L"）");
+            swprintf(g_status, 4096, L"已是最新版本（v" ADBLOCK_APP_VERSION_W L"）");
         }
         update_info_free(info);
         InvalidateRect(hwnd, NULL, FALSE);

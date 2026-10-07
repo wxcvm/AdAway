@@ -4590,18 +4590,29 @@ static bool setup_resources_dir(struct settings *s, const char *rpath) {
     SetUnhandledExceptionFilter(crash_filter);   /* crash.log forensics */
 #endif
 
-    struct stat st;
-    if (stat(rpath, &st) != 0 || (st.st_mode & S_IFDIR) == 0) {
-        LOG_INFO("Resources dir '%s' not present — creating it…", rpath);
+    /*
+     * Create the directory when it is missing - deliberately without a stat()
+     * first: checking and then creating is a TOCTOU race (SonarCloud c:S5847),
+     * and the check only bought a different log wording. EEXIST is a success
+     * here: a second instance, or the Android app, may have created it in the
+     * meantime.
+     *
+     * Mode 0750 rather than 0755 (c:S2612): nobody outside the owning user and
+     * group has business in this directory. When the Android app needs write
+     * access it creates the directory itself, with its own ownership - the
+     * server only writes the files the app asks for.
+     */
 #ifdef _WIN32
-        if (_mkdir(rpath) != 0) {
+    int mkres = _mkdir(rpath);
 #else
-        if (mkdir(rpath, 0755) != 0) {
+    int mkres = mkdir(rpath, 0750);
 #endif
-            LOG_FATAL("Cannot create resources dir '%s' (errno %d). "
-                      "Run: webserver --resources <writable directory>", rpath, errno);
-            return false;
-        }
+    if (mkres == 0) {
+        LOG_INFO("Resources dir '%s' did not exist — created it", rpath);
+    } else if (errno != EEXIST) {
+        LOG_FATAL("Cannot create resources dir '%s' (errno %d). "
+                  "Run: webserver --resources <writable directory>", rpath, errno);
+        return false;
     }
 
     char cert_path[PATH_MAX], key_path[PATH_MAX];
@@ -4739,17 +4750,37 @@ static const char *img_mode_name(void) {
          : (s_img_mode == IMG_MODE_FIXED ? "fixed" : "rotate");
 }
 
+/*
+ * Tiny xorshift64* generator for the "random placeholder image" mode.
+ *
+ * rand() is gone: SonarCloud c:S2245 flags it, and it is not thread-safe either
+ * (the request path runs on the server thread while the dashboard reads
+ * statistics from another). Nothing security-relevant is derived from this -
+ * the /control token comes from mg_random(), a real CSPRNG - so a fast local
+ * generator is the right tool for picking a decorative image.
+ */
+static uint64_t s_img_rng;
+static uint32_t img_rng_next(void) {
+    uint64_t x = s_img_rng;
+    if (x == 0) {
+        x = (uint64_t) time(NULL)
+          ^ ((uint64_t) current_process_id() << 32)
+          ^ (uint64_t) (uintptr_t) &s_img_rng;
+        if (x == 0) x = 0x9E3779B97F4A7C15ull;
+    }
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    s_img_rng = x;
+    return (uint32_t) ((x * 0x2545F4914F6CDD1Dull) >> 32);
+}
+
 /* Pick the image for this request (never touches c->data). */
 static int img_pick_index(uint32_t uid, int count) {
     if (count <= 0) return 0;
     if (s_img_mode == IMG_MODE_FIXED) return 0;
     if (s_img_mode == IMG_MODE_RANDOM) {
-        static int seeded;
-        if (!seeded) {
-            srand((unsigned) time(NULL) ^ (unsigned) current_process_id());
-            seeded = 1;
-        }
-        return (int) ((unsigned) rand() % (unsigned) count);
+        return (int) (img_rng_next() % (uint32_t) count);
     }
     uint64_t seq;
     if (uid == 0xFFFFFFFFu) {
@@ -4776,8 +4807,13 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
     s.https_port = 8443;
     s.bind_all = false;
     const char *rpath = NULL;
+    /*
+     * Holds "exe dir + relative --resources" when one is resolved. It used to be
+     * zeroed here first; SonarCloud c:S5798 rightly called that a store the
+     * compiler may drop, because a full snprintf() below always writes it before
+     * anything reads it.
+     */
     char resolved[PATH_MAX];
-    memset(resolved, 0, sizeof(resolved));
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--resources") == 0 && i < argc-1) {
             rpath = argv[++i];

@@ -1456,6 +1456,15 @@ static int dir_has_exe(const wchar_t *dir) {
 
 /* Find the directory holding webserver.exe inside the extracted zip. */
 static int find_extracted_dir(const wchar_t *root, wchar_t *out, size_t cap) {
+    /*
+     * Never leave `out` untouched: the caller logs out[0] after a failed search
+     * ("webserver.exe found/missing"), and reading it uninitialized is exactly
+     * the "branch condition evaluates to a garbage value" that SonarCloud
+     * c:S836 reported. cap == 0 must be handled first, out[cap - 1] would
+     * underflow.
+     */
+    if (out == NULL || cap == 0) return 0;
+    out[0] = 0;
     if (dir_has_exe(root)) {
         wcsncpy(out, root, cap - 1);
         out[cap - 1] = 0;
@@ -1516,6 +1525,7 @@ static DWORD WINAPI apply_thread(LPVOID param) {
     struct update_info *info = (struct update_info *) param;
     wchar_t temp[MAX_PATH], zip[MAX_PATH], list[MAX_PATH], dir[MAX_PATH], src[MAX_PATH];
     wchar_t appdir[MAX_PATH], exe[MAX_PATH], cmd[4096], script[8192], bat[MAX_PATH];
+    src[0] = 0;   /* read by the failure log even when no search matched */
     DWORD pid = GetCurrentProcessId();
     DWORD stamp = GetTickCount();
 

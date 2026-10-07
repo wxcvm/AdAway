@@ -3,7 +3,20 @@
 #include <stdbool.h>
 
 /* Version marker - shown in the window title and the console startup log. */
-#define ADBLOCK_APP_VERSION "1.68"
+#define ADBLOCK_APP_VERSION "1.69"
+
+/*
+ * Wide counterpart of ADBLOCK_APP_VERSION.
+ *
+ * Concatenating a wide string literal with this narrow macro is a constraint
+ * violation in C11 (SonarCloud c:S817) that only "works" because the compilers
+ * widen the narrow part by accident - the same class of accident that produced
+ * the %s/%ls mix-ups in this file. WIDEN() keeps one source of truth for the
+ * version instead of adding a second literal that can drift.
+ */
+#define ADBLOCK_WIDEN_IMPL(x) L##x
+#define ADBLOCK_WIDEN(x) ADBLOCK_WIDEN_IMPL(x)
+#define ADBLOCK_APP_VERSION_W ADBLOCK_WIDEN(ADBLOCK_APP_VERSION)
 
 struct adblock_gui_args {
     const char *resource_dir;   /* folder holding localhost-2410.crt/.key */
