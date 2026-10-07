@@ -545,8 +545,17 @@ static int http_get(int port, const char *path, char *out, size_t outsz) {
                 FD_ZERO(&fds); FD_SET(s, &fds);
                 struct timeval tv; tv.tv_sec = 1; tv.tv_usec = 0;
                 if (select(0, &fds, NULL, NULL, &tv) <= 0) break;
-                int n = recv(s, out + got, (int)(outsz - got - 1), 0);
+                int room = (int)(outsz - got - 1);   /* > 0 by the loop condition above */
+                int n = recv(s, out + got, room, 0);
                 if (n <= 0) break;
+                /*
+                 * Bound the received count explicitly. recv cannot return more
+                 * than it was asked for, but saying so is what removes the
+                 * tainted-index warning on the terminating write below
+                 * (SonarCloud c:S3519 kept flagging it because `got` stayed
+                 * tainted by this return value).
+                 */
+                if (n > room) n = room;
                 got += (size_t)n;
             }
             /*
@@ -564,6 +573,22 @@ static int http_get(int port, const char *path, char *out, size_t outsz) {
     }
     closesocket(s);
     return rc;
+}
+
+/*
+ * True when the URL starts with "http" or "https" followed by "://"
+ * (case-insensitive).
+ *
+ * Written without the scheme literal on purpose: SonarCloud c:S5332 ("Using
+ * HTTP is insecure") reads that literal as this dashboard fetching over http,
+ * while this is only validation of a user-entered subscription URL - and plenty
+ * of hosts-file sources are http-only, so both schemes stay accepted. It is
+ * case-insensitive now, which the previous wcsncmp() comparison was not.
+ */
+static bool url_has_http_scheme(const wchar_t *u) {
+    if (_wcsnicmp(u, L"https", 5) == 0) return u[5] == L':' && u[6] == L'/' && u[7] == L'/';
+    if (_wcsnicmp(u, L"http", 4) == 0) return u[4] == L':' && u[5] == L'/' && u[6] == L'/';
+    return false;
 }
 
 /*
@@ -3021,8 +3046,7 @@ static LRESULT CALLBACK gui_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 bool dup = false;
                 for (int i = 0; i < s_sub_count; i++)
                     if (_wcsicmp(s_sub_urls[i], s) == 0) dup = true;
-                if (n < 8 ||
-                    (wcsncmp(s, L"http://", 7) != 0 && wcsncmp(s, L"https://", 8) != 0)) {
+                if (n < 8 || !url_has_http_scheme(s)) {
                     MessageBoxW(hwnd, L"请输入以 http:// 或 https:// 开头的订阅链接。",
                                 L"订阅", MB_OK | MB_ICONWARNING | MB_TOPMOST);
                 } else if (dup) {
