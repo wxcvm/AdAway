@@ -63,6 +63,23 @@ public class ServerWatchdogWorker extends Worker {
      */
     private static final long LIGHT_PERIOD_HOURS = 6L;
 
+    /**
+     * Preference remembering which cadence is currently installed.
+     *
+     * <p>Without it, {@link #ensureScheduled(Context)} had to cancel and
+     * re-enqueue on every call to be sure the interval was the wanted one - and
+     * it is called on every app start, every boot broadcast and inside every
+     * worker run. That churn is what the battery stats showed as thousands of
+     * job executions and hundreds of cancellations for this package.</p>
+     */
+    private static final String PREF_CADENCE = "watchdog_cadence";
+
+    /** Value of {@link #PREF_CADENCE} for the light-mode cadence. */
+    private static final String CADENCE_LIGHT = "light";
+
+    /** Value of {@link #PREF_CADENCE} for the default cadence. */
+    private static final String CADENCE_FAST = "fast";
+
     /** How long to wait for the server to come back up after a restart. */
     private static final long START_VERIFY_MS = 3_000L;
 
@@ -134,30 +151,57 @@ public class ServerWatchdogWorker extends Worker {
      * @param context The application context.
      */
     public static void ensureScheduled(Context context) {
-        if (lightCadence(context)) {
+        boolean light = lightCadence(context);
+        android.content.SharedPreferences prefs = context.getApplicationContext()
+                .getSharedPreferences(org.adaway.util.Constants.PREFS_NAME, Context.MODE_PRIVATE);
+        String want = light ? CADENCE_LIGHT : CADENCE_FAST;
+        if (want.equals(prefs.getString(PREF_CADENCE, ""))) {
             /*
-             * Light mode: one slow periodic check instead of the 15 minute one
-             * plus the self-rescheduling 5 minute chain. The chain is the
-             * expensive half (a wakeup every 5 minutes, and a root shell spawn
-             * whenever the socket probe says "down"), so it is dropped here.
+             * Already scheduled with the wanted cadence - do nothing.
              *
-             * Cancel first, then enqueue with KEEP: that replaces a short
-             * interval left behind by an older version or by the other mode
-             * without needing a newer WorkManager API.
+             * This method runs on every app start, on every boot broadcast and
+             * inside every worker run. The previous version cancelled and
+             * re-enqueued the periodic work on each of those calls, which reset
+             * the period and made JobScheduler churn: the device battery stats
+             * showed ~5000 executions of this package's job and 315
+             * cancellations. Scheduling work is not free - each cancel/enqueue
+             * is a binder call plus a persisted write.
              */
-            WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_FOLLOW_UP);
-            WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_PERIODIC);
-            PeriodicWorkRequest slow = new PeriodicWorkRequest.Builder(
-                    ServerWatchdogWorker.class, LIGHT_PERIOD_HOURS, TimeUnit.HOURS).build();
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                    UNIQUE_PERIODIC, ExistingPeriodicWorkPolicy.KEEP, slow);
             return;
         }
-        PeriodicWorkRequest periodic = new PeriodicWorkRequest.Builder(
-                ServerWatchdogWorker.class, PERIOD_MINUTES, TimeUnit.MINUTES).build();
+        /* First run, or the cadence changed: replace whatever was scheduled. */
+        WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_FOLLOW_UP);
+        WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_PERIODIC);
+        PeriodicWorkRequest request = light
+                ? new PeriodicWorkRequest.Builder(ServerWatchdogWorker.class,
+                        LIGHT_PERIOD_HOURS, TimeUnit.HOURS).build()
+                : new PeriodicWorkRequest.Builder(ServerWatchdogWorker.class,
+                        PERIOD_MINUTES, TimeUnit.MINUTES).build();
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                UNIQUE_PERIODIC, ExistingPeriodicWorkPolicy.KEEP, periodic);
-        scheduleFollowUp(context);
+                UNIQUE_PERIODIC, ExistingPeriodicWorkPolicy.KEEP, request);
+        prefs.edit().putString(PREF_CADENCE, want).apply();
+        /*
+         * Verify, do not trust: the system (or an OEM cleaner) can drop the
+         * periodic work. When that happened, clear the sentinel so the next call
+         * installs it again - otherwise the sentinel would hide a missing
+         * watchdog. The listener runs after the (already started) query, so
+         * reading it there does not block anything.
+         */
+        final com.google.common.util.concurrent.ListenableFuture<java.util.List<androidx.work.WorkInfo>> pending =
+                WorkManager.getInstance(context).getWorkInfosForUniqueWork(UNIQUE_PERIODIC);
+        pending.addListener(() -> {
+            try {
+                if (pending.get().isEmpty()) {
+                    prefs.edit().remove(PREF_CADENCE).apply();
+                    Timber.w("ServerWatchdog: periodic work is missing - will re-install on the next call");
+                }
+            } catch (Throwable ignored) {
+                /* keep the sentinel; the next call checks again */
+            }
+        }, androidx.core.content.ContextCompat.getMainExecutor(context));
+        if (!light) {
+            scheduleFollowUp(context);
+        }
     }
 
     /**

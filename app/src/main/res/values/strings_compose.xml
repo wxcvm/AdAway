@@ -64,6 +64,9 @@
     <string name="compose_stats_active_apps_count">%1$d apps</string>
     <string name="compose_stats_app_unknown">UID %1$d</string>
     <string name="compose_stats_app_sub">%1$d conn · %2$d req · %3$d blocked</string>
+    <string name="compose_stats_app_storm">retry storm %1$d/s</string>
+    <string name="compose_stats_app_tls_rejected">cert rejected %1$d× (pinning)</string>
+    <string name="compose_stats_app_allowed">allowed (not blocked)</string>
     <string name="compose_stats_recent_certs">Recently issued certs</string>
     <string name="compose_stats_certs_hint">Domains apps asked us to sign (SNI)</string>
     <string name="compose_stats_recent_requests">Recent requests</string>

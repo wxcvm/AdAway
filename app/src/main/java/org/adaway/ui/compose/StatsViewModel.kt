@@ -28,7 +28,19 @@ data class AppStat(
     val requests: Long = 0,
     val blocked: Long = 0,
     val tlsHosts: Long = 0,
-)
+    /**
+     * Completed / failed TLS handshakes for this uid (best effort: the server
+     * only attributes them when the connection already knew its uid). A client
+     * that pins certificates shows tlsFail >> tlsOk - that is the "who is
+     * ignoring the block page and retrying forever" signal.
+     */
+    val tlsOk: Long = 0,
+    val tlsFail: Long = 0,
+) {
+    /** Requests per second since the server started (0 when unknown). */
+    fun requestsPerSecond(uptimeSeconds: Long): Long =
+        if (uptimeSeconds > 0) requests / uptimeSeconds else 0L
+}
 
 /** A TLS (SNI) hostname requested by a uid — i.e. a per-domain cert effectively issued. */
 data class TlsHost(
@@ -144,6 +156,8 @@ data class ServerStats(
                         requests = o.optLong("requests", 0),
                         blocked = o.optLong("blocked", 0),
                         tlsHosts = o.optLong("tls_hosts", 0),
+                        tlsOk = o.optLong("tls_ok", 0),
+                        tlsFail = o.optLong("tls_fail", 0),
                     )
                 }
             }

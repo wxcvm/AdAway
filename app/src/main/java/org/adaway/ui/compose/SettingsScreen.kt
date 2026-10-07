@@ -167,7 +167,22 @@ private fun syncAllowlistFile(context: Context) {
             .filterValues { it == true }
             .keys
             .mapNotNull { it.removePrefix("allow_").toIntOrNull() }
-        val content = uids.joinToString("\n")
+            .toMutableSet()
+        /*
+         * Keep the captive-portal defaults in the file.
+         *
+         * This used to write the user's entries only, so flipping any "放行"
+         * switch silently dropped com.android.captiveportallogin and
+         * com.google.android.captiveportallogin (and on ColorOS the Wi-Fi
+         * dialog) until the next server start re-added them. Without their
+         * allowlist entry those components fall back to a blocked-request retry
+         * loop - measured at ~240 requests/second from one of them - so the
+         * "fix" of allowing one app quietly re-created the retry storm.
+         */
+        org.adaway.util.WebServerUtils.CAPTIVE_PORTAL_PACKAGES.forEach { pkg ->
+            runCatching { uids.add(context.packageManager.getPackageUid(pkg, 0)) }
+        }
+        val content = uids.sorted().joinToString("\n")
         val dir = java.io.File(context.filesDir, "webserver")
         dir.mkdirs()
         java.io.File(dir, "allowlist.txt").writeText(content)

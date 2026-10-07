@@ -64,6 +64,9 @@
     <string name="compose_stats_active_apps_count">%1$d 个应用</string>
     <string name="compose_stats_app_unknown">UID %1$d</string>
     <string name="compose_stats_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
+    <string name="compose_stats_app_storm">重试风暴 %1$d 次/秒</string>
+    <string name="compose_stats_app_tls_rejected">证书被拒 %1$d 次（固定证书）</string>
+    <string name="compose_stats_app_allowed">已放行（不拦截）</string>
     <string name="compose_stats_recent_certs">最近签发的证书</string>
     <string name="compose_stats_certs_hint">各应用请求签发的域名（SNI）</string>
     <string name="compose_stats_recent_requests">最近请求</string>

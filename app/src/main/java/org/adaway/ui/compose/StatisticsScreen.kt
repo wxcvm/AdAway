@@ -339,7 +339,7 @@ fun StatisticsScreen(viewModel: StatsViewModel, onOpenLogs: () -> Unit = {}) {
 
             // Per-app activity
             if (showApps && serverStats != null && serverStats!!.apps.isNotEmpty()) {
-                ActiveAppsCard(serverStats!!.apps)
+                ActiveAppsCard(serverStats!!.apps, serverStats!!.uptimeSeconds)
             }
 
             // Recent requests: what was asked for and what the filter did with it
@@ -1583,7 +1583,9 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>, onOpenLogs: () -> U
  * 活跃应用卡：按 拦截+请求 总数降序展示各 uid 的
  * 连接数/请求数/拦截数。uid → 应用名通过 PackageManager 解析。
  */
-private fun ActiveAppsCard(apps: List<AppStat>) {
+private fun ActiveAppsCard(apps: List<AppStat>, uptimeSeconds: Long) {
+    /* Requests/second above which an app is flagged as a retry storm. */
+    val stormThreshold = 20L
     val context = androidx.compose.ui.platform.LocalContext.current
     val monitoredApps = apps.filter { isAppMonitored(context, it.uid) }
     if (monitoredApps.isEmpty()) return
@@ -1624,31 +1626,73 @@ private fun ActiveAppsCard(apps: List<AppStat>) {
                 Column {
                     Spacer(Modifier.height(8.dp))
                     monitoredApps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
-                        Row(
+                        val rps = app.requestsPerSecond(uptimeSeconds)
+                        val storm = rps >= stormThreshold
+                        val allowed = isAppAllowed(context, app.uid)
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                appNameForUid(app.uid),
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                stringResource(
-                                    R.string.compose_stats_app_sub,
-                                    app.connections,
-                                    app.requests,
-                                    app.blocked,
-                                ),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    appNameForUid(app.uid),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    stringResource(
+                                        R.string.compose_stats_app_sub,
+                                        app.connections,
+                                        app.requests,
+                                        app.blocked,
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            /*
+                             * Second line, only when something needs explaining:
+                             *  - an app hammering us with blocked requests (it pins
+                             *    certificates or simply ignores the block page, so it
+                             *    retries forever - that is CPU and battery),
+                             *  - handshakes we failed (the pinning signal),
+                             *  - a uid on the allowlist, i.e. traffic we do not touch.
+                             */
+                            if (storm || app.tlsFail > 0 || allowed) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (storm) {
+                                        Text(
+                                            stringResource(R.string.compose_stats_app_storm, rps),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                    if (app.tlsFail > 0) {
+                                        if (storm) Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            stringResource(
+                                                R.string.compose_stats_app_tls_rejected,
+                                                app.tlsFail,
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (allowed) {
+                                        if (storm || app.tlsFail > 0) Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            stringResource(R.string.compose_stats_app_allowed),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

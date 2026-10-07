@@ -67,7 +67,17 @@ public class WebServerUtils {
      */
     public static final String[] CAPTIVE_PORTAL_PACKAGES = {
             "com.google.android.captiveportallogin",
-            "com.android.captiveportallogin"
+            "com.android.captiveportallogin",
+            /*
+             * On ColorOS/OxygenOS and other OEM builds the Wi-Fi sign-in dialog
+             * is this component. Its captive-portal probes retry in a tight loop
+             * when the answer is "blocked": measured on a real device it
+             * produced ~240 requests/second (237k requests, all blocked, 3451
+             * distinct TLS hosts in 16 minutes), which was by far the largest
+             * CPU/battery cost this blocker caused. It is not an ad source, so
+             * it belongs in the default allowlist next to the AOSP portals.
+             */
+            "com.android.wifi.dialog"
     };
 
     /** Whether the web server listens on all interfaces (LAN). Default false. */

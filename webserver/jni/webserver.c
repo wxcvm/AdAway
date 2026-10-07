@@ -762,6 +762,18 @@ struct appstat {
     uint64_t requests;       /* HTTP requests seen          */
     uint64_t blocked;        /* requests answered as blocked */
     uint64_t tls_hosts;      /* distinct SNI hosts requested */
+    /*
+     * TLS outcomes for this uid, best effort (see the MG_EV_TLS_HS /
+     * MG_EV_ERROR handling): they are attributed only when the connection
+     * already knows its uid, because resolving it means scanning
+     * /proc/net/tcp* - the very thing that used to dominate CPU here. A
+     * client that gets its certificate rejected (pinning) shows up as
+     * tls_fail >> tls_ok, which is what the app displays as
+     * "证书被拒（固定证书）" so a retry storm can be explained instead of
+     * guessed at.
+     */
+    uint64_t tls_ok;
+    uint64_t tls_fail;
 };
 static struct appstat s_apps[APP_STATS_MAX];
 static int s_app_count = 0;
@@ -770,7 +782,9 @@ static int s_app_count = 0;
    zeroed on every webserver restart. Save to <resource_dir>/apps.dat at
    the same cadence as stats.dat (each /internal-stats poll + on exit)
    and load at startup, so the per-app list also survives reboots. */
-#define APPS_MAGIC 0x41505053u  /* "APPS" */
+/* Magic carries a format version: v1 had four counters per uid, v2 adds the
+   TLS outcomes. An old apps.dat is ignored instead of being misread. */
+#define APPS_MAGIC 0x41505032u  /* "APP2" */
 struct apps_file {
     uint32_t magic;
     uint32_t count;
@@ -2256,16 +2270,18 @@ static void ws_push_broadcast(struct settings *s) {
 static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     char apps_json[4096] = "";
     int off = 0;
-    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
+    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 160; i++) {
         int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
             "%s{\"uid\":%d,\"connections\":%llu,\"requests\":%llu,"
-            "\"blocked\":%llu,\"tls_hosts\":%llu}",
+            "\"blocked\":%llu,\"tls_hosts\":%llu,\"tls_ok\":%llu,\"tls_fail\":%llu}",
             off ? "," : "",
             (int)s_apps[i].uid,
             (unsigned long long)s_apps[i].connections,
             (unsigned long long)s_apps[i].requests,
             (unsigned long long)s_apps[i].blocked,
-            (unsigned long long)s_apps[i].tls_hosts);
+            (unsigned long long)s_apps[i].tls_hosts,
+            (unsigned long long)s_apps[i].tls_ok,
+            (unsigned long long)s_apps[i].tls_fail);
         if (n > 0) off += n;
     }
     /* static: a few KB that must never sit on the event-loop stack */
@@ -3113,13 +3129,24 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
-    /* TLS handshake outcome statistics (new metric). */
+    /*
+     * TLS handshake outcome statistics (global + per uid).
+     *
+     * The uid is only used when the connection already resolved it (a CONNECT
+     * proxy request does that); resolving it here would mean a /proc/net/tcp*
+     * scan per handshake, which is exactly the cost this server avoids. So the
+     * per-app split is best effort while the global counter stays exact.
+     */
     if (ev == MG_EV_TLS_HS) {
         s_stats.tls_handshakes++;
+        struct appstat *ha = app_find_or_add(conn_load_uid(c));
+        if (ha) ha->tls_ok++;
         return;
     }
     if (ev == MG_EV_ERROR && c->is_tls) {
         s_stats.tls_failures++;
+        struct appstat *fa = app_find_or_add(conn_load_uid(c));
+        if (fa) fa->tls_fail++;
         return;
     }
 
