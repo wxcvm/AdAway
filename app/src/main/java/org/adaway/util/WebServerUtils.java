@@ -172,6 +172,7 @@ public class WebServerUtils {
             return -1;
         }
         Timber.i("Exported %d blocked hosts to %s", count, target);
+        exportDomainAllowlist(context);
         // Element hiding rules (AdGuard / adblock syntax) picked up while the
         // sources were parsed: the hijack proxy injects this stylesheet into
         // every filtered page - the cosmetic filtering AdGuard does.
@@ -315,6 +316,49 @@ public class WebServerUtils {
             Timber.w(throwable, "Failed to write pin_policy.txt");
         }
     }
+
+    /**
+     * Export the per-host exemption list the native server reads
+     * ({@code <resources>/domain_allowlist.txt}).
+     *
+     * <p>It is <b>derived</b> from the rules database instead of being edited
+     * directly: the "allowed" entries of the rules page are the single source of
+     * truth, so the file can never drift from what the UI shows. The native side
+     * re-reads it on every request, so a change applies without a restart.</p>
+     *
+     * <p>Only hosts can be listed here (one per line); the native parser also
+     * accepts AdGuard/uBlock/hosts/URL syntax so the file stays usable if the
+     * user edits it by hand.</p>
+     *
+     * @param context The application context.
+     * @return The number of exported exemptions ({@code -1} on failure).
+     */
+    public static int exportDomainAllowlist(Context context) {
+        java.io.File target = getResourcePath(context).resolve("domain_allowlist.txt").toFile();
+        int written = 0;
+        try {
+            java.util.List<org.adaway.db.entity.HostListItem> allowed =
+                    org.adaway.db.AppDatabase.getInstance(context).hostsListItemDao()
+                            .getListByType(org.adaway.db.entity.ListType.ALLOWED.getValue(), 10000);
+            try (java.io.BufferedWriter writer = new java.io.BufferedWriter(
+                    new java.io.OutputStreamWriter(new java.io.FileOutputStream(target), "UTF-8"))) {
+                writer.write("# 由 ADBlock 生成：按域名解除过滤（原生服务器每次请求都会重读）\n");
+                for (org.adaway.db.entity.HostListItem item : allowed) {
+                    String host = item.host == null ? null : item.host.trim();
+                    if (host == null || host.isEmpty() || host.startsWith("#")) continue;
+                    writer.write(host);
+                    writer.write('\n');
+                    written++;
+                }
+            }
+        } catch (Exception exception) {
+            Timber.w(exception, "Failed to export the domain allow list");
+            return -1;
+        }
+        Timber.i("Exported %d exempted hosts to %s", written, target);
+        return written;
+    }
+
 
     /**
      * Ensure allowlist.txt contains UIDs for captive portal login packages
