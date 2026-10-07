@@ -42,10 +42,43 @@ data class AppStat(
      * when the user enabled that policy in the settings).
      */
     val pinRefused: Boolean = false,
+    /**
+     * Requests per second measured by the server between two stats snapshots
+     * (i.e. the UI refresh period). This is the storm signal: a healthy app is
+     * far below [STORM_TPS], while an app that is blocked and retries in a loop
+     * sits far above it.
+     */
+    val tps: Int = 0,
+    /**
+     * What this uid is actually hitting (server-side, up to three hosts with
+     * counts) - the missing half of "there is a storm": which host it hammers.
+     */
+    val hosts: List<Pair<String, Int>> = emptyList(),
 ) {
     /** Requests per second since the server started (0 when unknown). */
     fun requestsPerSecond(uptimeSeconds: Long): Long =
         if (uptimeSeconds > 0) requests / uptimeSeconds else 0L
+
+    /**
+     * Rate to display: the measured window rate when the server reported one,
+     * otherwise the average since start (older servers had no tps field).
+     */
+    fun ratePerSecond(uptimeSeconds: Long): Long =
+        if (tps > 0) tps.toLong() else requestsPerSecond(uptimeSeconds)
+
+    /** Whether this app is retrying fast enough to be worth showing as a storm. */
+    fun isStorming(uptimeSeconds: Long): Boolean = ratePerSecond(uptimeSeconds) >= STORM_TPS
+
+    companion object {
+        /**
+         * Requests per second above which an app counts as storming.
+         *
+         * Measured on a real device: a system component hit ~240 req/s against a
+         * host it could never reach, which is what this threshold is sized for -
+         * 20/s is already ~1700 requests per minute, i.e. clearly a retry loop.
+         */
+        const val STORM_TPS = 20L
+    }
 }
 
 /** A TLS (SNI) hostname requested by a uid — i.e. a per-domain cert effectively issued. */
@@ -149,6 +182,22 @@ data class ServerStats(
             blockedCrypto + blockedClickbait
 
     companion object {
+        /**
+         * Parse `hosts:[{h,n},…]` of one app: the domains the native server
+         * attributed to that uid (see app_note_host() in webserver.c).
+         */
+        private fun parseAppHosts(o: JSONObject): List<Pair<String, Int>> {
+            val arr = o.optJSONArray("hosts") ?: return emptyList()
+            val out = ArrayList<Pair<String, Int>>(arr.length())
+            for (i in 0 until arr.length()) {
+                val h = arr.optJSONObject(i) ?: continue
+                val name = h.optString("h", "")
+                if (name.isEmpty()) continue
+                out += name to h.optInt("n", 0)
+            }
+            return out
+        }
+
         fun fromJson(json: JSONObject?): ServerStats? {
             if (json == null) return null
             val apps = mutableListOf<AppStat>()
@@ -165,6 +214,8 @@ data class ServerStats(
                         tlsOk = o.optLong("tls_ok", 0),
                         tlsFail = o.optLong("tls_fail", 0),
                         pinRefused = o.optBoolean("pin_refused", false),
+                        tps = o.optInt("tps", 0),
+                        hosts = parseAppHosts(o),
                     )
                 }
             }
@@ -582,6 +633,23 @@ fun refreshServerStats() {
      * @param type    0=拦截 1=放行 2=重定向
      * @param redirection 重定向目标（type==2 时使用）
      */
+    /**
+     * 放行整个应用：与设置页"应用监控"里的放行开关共用同一状态，写进
+     * allowlist.txt，服务器随后不再拦截该 uid。
+     */
+    fun allowAppForever(uid: Int) {
+        setAppAllowed(getApplication<Application>(), uid, true)
+    }
+
+    /**
+     * 只放行一个域：同时写规则库（ALLOWED，参与 hosts 生成）与原生豁免名单
+     * domain_allowlist.txt（服务器每请求重读，立即生效）。
+     */
+    fun allowHost(host: String, onDone: () -> Unit = {}) {
+        org.adaway.model.rules.ExemptionRules.addRaw(getApplication<Application>(), host)
+        addUserRule(host, org.adaway.db.entity.ListType.ALLOWED.value, null, onDone)
+    }
+
     fun addUserRule(host: String, type: Int, redirection: String?, onDone: () -> Unit) {
         viewModelScope.launch {
             val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {

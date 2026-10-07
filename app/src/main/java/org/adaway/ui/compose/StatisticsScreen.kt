@@ -339,6 +339,12 @@ fun StatisticsScreen(viewModel: StatsViewModel, onOpenLogs: () -> Unit = {}) {
 
             // Per-app activity
             if (showApps && serverStats != null && serverStats!!.apps.isNotEmpty()) {
+                StormCard(
+                    apps = serverStats!!.apps,
+                    uptimeSeconds = serverStats!!.uptimeSeconds,
+                    onAllowApp = { uid -> viewModel.allowAppForever(uid) },
+                    onAllowDomain = { host -> viewModel.allowHost(host) },
+                )
                 ActiveAppsCard(serverStats!!.apps, serverStats!!.uptimeSeconds)
             }
 
@@ -1583,6 +1589,90 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>, onOpenLogs: () -> U
  * 活跃应用卡：按 拦截+请求 总数降序展示各 uid 的
  * 连接数/请求数/拦截数。uid → 应用名通过 PackageManager 解析。
  */
+/**
+ * uid → 可读名字（拿不到就退回 uid，不抛异常）。
+ */
+private fun appLabelOf(context: android.content.Context, uid: Int): String = try {
+    val pm = context.packageManager
+    val pkg = pm.getPackagesForUid(uid)?.firstOrNull()
+    if (pkg == null) {
+        "uid $uid"
+    } else {
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() + " · " + pkg
+    }
+} catch (e: Exception) {
+    "uid $uid"
+}
+
+/**
+ * 请求风暴卡：把"谁在风暴、在打哪个域"单独列出来，并给两个止血动作。
+ *
+ * 数据都来自原生服务器：`tps` 是两次统计快照之间的实测速率，`hosts` 是该 uid 命中的
+ * 域（见 webserver.c 的 app_note_host()）。风暴几乎总是"被拦 → 立即重试"的循环，
+ * 所以止血只有两条路：放行整个应用（uid，写 allowlist.txt），或只放行它死磕的那个
+ * 域（写 domain_allowlist.txt —— 原生每请求重读，立即生效）。
+ */
+@Composable
+private fun StormCard(
+    apps: List<AppStat>,
+    uptimeSeconds: Long,
+    onAllowApp: (Int) -> Unit,
+    onAllowDomain: (String) -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val storms = apps
+        .filter { it.isStorming(uptimeSeconds) }
+        .sortedByDescending { it.ratePerSecond(uptimeSeconds) }
+    if (storms.isEmpty()) return
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.compose_stats_storm_title, storms.size),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                stringResource(R.string.compose_stats_storm_hint, AppStat.STORM_TPS),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.height(8.dp))
+            storms.take(8).forEach { app ->
+                val rate = app.ratePerSecond(uptimeSeconds)
+                val pct = if (app.requests > 0) (app.blocked * 100 / app.requests).toInt() else 0
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    Text(
+                        appLabelOf(context, app.uid) + "  ·  " +
+                            stringResource(R.string.compose_stats_storm_rate, rate),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        stringResource(R.string.compose_stats_storm_blocked, pct) + "  ·  " +
+                            app.hosts.joinToString("  ") { it.first }.ifEmpty { "—" },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { onAllowApp(app.uid) }) {
+                            Text(stringResource(R.string.compose_stats_storm_allow_app))
+                        }
+                        app.hosts.take(2).forEach { (host, _) ->
+                            TextButton(onClick = { onAllowDomain(host) }) {
+                                Text(stringResource(R.string.compose_stats_storm_allow_domain, host))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun ActiveAppsCard(apps: List<AppStat>, uptimeSeconds: Long) {
     /* Requests/second above which an app is flagged as a retry storm. */
     val stormThreshold = 20L

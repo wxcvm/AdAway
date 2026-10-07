@@ -67,6 +67,12 @@
     <string name="compose_stats_app_storm">重试风暴 %1$d 次/秒</string>
     <string name="compose_stats_app_tls_rejected">证书被拒 %1$d 次（固定证书）</string>
     <string name="compose_stats_app_allowed">已放行（不拦截）</string>
+    <string name="compose_stats_storm_title">请求风暴（%1$d 个应用）</string>
+    <string name="compose_stats_storm_hint">速率 ≥ %1$d 次/秒：几乎都是"被拦下后立即重试"的循环。放行整个应用，或只放行它死磕的那个域即可止血。</string>
+    <string name="compose_stats_storm_rate">%1$d 次/秒</string>
+    <string name="compose_stats_storm_blocked">拦截率 %1$d%%</string>
+    <string name="compose_stats_storm_allow_app">放行应用</string>
+    <string name="compose_stats_storm_allow_domain">放行 %1$s</string>
     <string name="compose_stats_app_pin_refused">已改为廉价拒绝（固定证书）</string>
     <string name="compose_stats_recent_certs">最近签发的证书</string>
     <string name="compose_stats_certs_hint">各应用请求签发的域名（SNI）</string>

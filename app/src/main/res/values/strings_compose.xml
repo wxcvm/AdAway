@@ -67,6 +67,12 @@
     <string name="compose_stats_app_storm">retry storm %1$d/s</string>
     <string name="compose_stats_app_tls_rejected">cert rejected %1$d× (pinning)</string>
     <string name="compose_stats_app_allowed">allowed (not blocked)</string>
+    <string name="compose_stats_storm_title">Retry storms (%1$d apps)</string>
+    <string name="compose_stats_storm_hint">Rate ≥ %1$d req/s: nearly always a "blocked, then retried immediately" loop. Allow the whole app, or just the host it keeps hitting.</string>
+    <string name="compose_stats_storm_rate">%1$d req/s</string>
+    <string name="compose_stats_storm_blocked">blocked %1$d%%</string>
+    <string name="compose_stats_storm_allow_app">Allow app</string>
+    <string name="compose_stats_storm_allow_domain">Allow %1$s</string>
     <string name="compose_stats_app_pin_refused">refused without interception (pinning)</string>
     <string name="compose_stats_recent_certs">Recently issued certs</string>
     <string name="compose_stats_certs_hint">Domains apps asked us to sign (SNI)</string>
