@@ -684,6 +684,39 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+                    // ── 固定证书的应用：由用户决定怎么处理 ──
+                    Spacer(Modifier.height(8.dp))
+                    var pinDeny by remember {
+                        mutableStateOf(
+                            org.adaway.util.WebServerUtils.getPinPolicyMode(context) == "deny",
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_pin_policy),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_pin_policy_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = pinDeny,
+                            onCheckedChange = { v ->
+                                pinDeny = v
+                                org.adaway.util.WebServerUtils.setPinPolicyMode(
+                                    context,
+                                    if (v) "deny" else "off",
+                                )
+                            },
+                        )
+                    }
                     // ── 开机自动启动 ──
                     Spacer(Modifier.height(8.dp))
                     var autostart by remember {

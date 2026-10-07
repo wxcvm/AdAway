@@ -36,6 +36,12 @@ data class AppStat(
      */
     val tlsOk: Long = 0,
     val tlsFail: Long = 0,
+    /**
+     * True while the server is refusing this uid's CONNECT requests without
+     * interception because it was detected pinning certificates (only ever set
+     * when the user enabled that policy in the settings).
+     */
+    val pinRefused: Boolean = false,
 ) {
     /** Requests per second since the server started (0 when unknown). */
     fun requestsPerSecond(uptimeSeconds: Long): Long =
@@ -158,6 +164,7 @@ data class ServerStats(
                         tlsHosts = o.optLong("tls_hosts", 0),
                         tlsOk = o.optLong("tls_ok", 0),
                         tlsFail = o.optLong("tls_fail", 0),
+                        pinRefused = o.optBoolean("pin_refused", false),
                     )
                 }
             }

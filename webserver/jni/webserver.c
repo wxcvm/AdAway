@@ -774,6 +774,10 @@ struct appstat {
      */
     uint64_t tls_ok;
     uint64_t tls_fail;
+    /* Pin detector state: failure count inside the current window (see
+       pin_note_tls_failure). Not persisted - it is a runtime signal. */
+    uint64_t tls_fail_win_start;
+    uint32_t tls_fail_win;
 };
 static struct appstat s_apps[APP_STATS_MAX];
 static int s_app_count = 0;
@@ -1057,9 +1061,116 @@ static struct appstat *app_find_or_add(uid_t uid) {
     return NULL;  /* table full — drop counters for new uids */
 }
 
+/* ── PIN-BYPASS POLICY (the user decides) ────────────────────────────
+ *
+ * Some apps pin certificates: they can never be intercepted, and every
+ * blocked request becomes a TLS handshake failure followed by an immediate
+ * retry. Measured on a real device, one system component alone reached ~240
+ * requests/second that way, each one a full handshake plus a freshly signed
+ * leaf - the single largest cost the blocker caused.
+ *
+ * What to do about such an app is the user's decision, written by the app to
+ * <resource_dir>/pin_policy.txt (same pattern as allowlist.txt):
+ *
+ *   mode=off    (default) keep the current behaviour: intercept and block.
+ *   mode=deny   once an app is detected pinning, refuse its CONNECT request
+ *               outright. No TLS handshake, no certificate, no retry-driven
+ *               crypto - the app is still blocked, just far more cheaply.
+ *
+ * Detection is windowed over the per-uid handshake failures the statistics
+ * already count, so it needs no /proc scan.
+ */
+#define PIN_FAIL_WINDOW_MS 10000u    /* sliding-ish window for the detector */
+#define PIN_FAIL_THRESHOLD 5u        /* failures within the window that count as pinning */
+#define PIN_BYPASS_MS      600000u   /* stay refused for 10 minutes, then re-probe */
+#define PIN_POLICY_FILE    "pin_policy.txt"
+#define PIN_MODE_MAX       8
+
+static char s_pin_mode[PIN_MODE_MAX] = "off";
+static uint64_t s_pin_mode_loaded_ms;
+static struct { uid_t uid; uint64_t until_ms; } s_pin_bypass[APP_STATS_MAX];
+static int s_pin_bypass_count;
+
+/*
+ * Resource directory, kept here for the TLS-failure hook only.
+ *
+ * The event handler cannot use c->fn_data for it: outbound connections created
+ * by the proxy path store their own state there, so casting it to
+ * struct settings * and reading resource_dir would be undefined behaviour on
+ * exactly the connections we care about.
+ */
+static char s_pin_resource_dir[PATH_MAX];
+
+/* Re-read the policy file at most once per second (it only changes when the
+   user flips the switch in the app). */
+static void pin_policy_reload(const char *resource_dir) {
+    uint64_t now = mg_millis();
+    if (now - s_pin_mode_loaded_ms < 1000u && s_pin_mode_loaded_ms != 0) return;
+    s_pin_mode_loaded_ms = now;
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/%s", resource_dir, PIN_POLICY_FILE);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return;
+    char line[64];
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *val = eq + 1;
+        while (*val == ' ' || *val == '\t') val++;
+        char *end = val + strlen(val);
+        while (end > val && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ')) *--end = '\0';
+        if (strcmp(line, "mode") == 0) {
+            snprintf(s_pin_mode, sizeof(s_pin_mode), "%s",
+                     strcmp(val, "deny") == 0 ? "deny" : "off");
+        }
+    }
+    fclose(fp);
+}
+
+static bool pin_mode_deny(void) { return strcmp(s_pin_mode, "deny") == 0; }
+
+/* Is this uid currently refused without interception? */
+static bool pin_uid_bypassed(uid_t uid) {
+    if (uid == (uid_t)-1) return false;
+    uint64_t now = mg_millis();
+    for (int i = 0; i < s_pin_bypass_count; i++) {
+        if (s_pin_bypass[i].uid == uid && s_pin_bypass[i].until_ms > now) return true;
+    }
+    return false;
+}
+
+/* Called for every failed TLS handshake: remember it per uid and, once the
+   failures pile up inside the window, treat the app as pinning. */
+static void pin_note_tls_failure(uid_t uid, const char *resource_dir) {
+    if (uid == (uid_t)-1 || uid == 0) return;
+    pin_policy_reload(resource_dir);
+    if (!pin_mode_deny()) return;
+    if (pin_uid_bypassed(uid)) return;
+    struct appstat *a = app_find_or_add(uid);
+    if (a == NULL) return;
+    uint64_t now = mg_millis();
+    if (now - a->tls_fail_win_start > PIN_FAIL_WINDOW_MS) {
+        a->tls_fail_win_start = now;
+        a->tls_fail_win = 0;
+    }
+    a->tls_fail_win++;
+    if (a->tls_fail_win < PIN_FAIL_THRESHOLD) return;
+    /* Detected: refuse this uid without interception for the cooldown. */
+    if (s_pin_bypass_count < APP_STATS_MAX) {
+        s_pin_bypass[s_pin_bypass_count].uid = uid;
+        s_pin_bypass[s_pin_bypass_count].until_ms = now + PIN_BYPASS_MS;
+        s_pin_bypass_count++;
+    }
+    LOG_WARN("pin: uid %d fails TLS handshakes (%u in %us) - refusing its "
+             "CONNECT requests without interception for %us (policy=%s)",
+             (int)uid, (unsigned)a->tls_fail_win, PIN_FAIL_WINDOW_MS / 1000u,
+             PIN_BYPASS_MS / 1000u, s_pin_mode);
+}
+
 /* Remember that uid asked for a TLS cert for host (SNI). */
-static void app_record_tls_host(uid_t uid, const char *host) {
-    if (uid == (uid_t)-1 || !host || !*host) return;
+static void app_record_tls_host(uid_t uid, const char *host) {    if (uid == (uid_t)-1 || !host || !*host) return;
     for (int i = 0; i < RECENT_TLS_MAX; i++) {
         if (s_recent_tls[i].host[0] && s_recent_tls[i].uid == uid &&
             strcmp(s_recent_tls[i].host, host) == 0) {
@@ -2270,10 +2381,11 @@ static void ws_push_broadcast(struct settings *s) {
 static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     char apps_json[4096] = "";
     int off = 0;
-    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 160; i++) {
+    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 200; i++) {
         int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
             "%s{\"uid\":%d,\"connections\":%llu,\"requests\":%llu,"
-            "\"blocked\":%llu,\"tls_hosts\":%llu,\"tls_ok\":%llu,\"tls_fail\":%llu}",
+            "\"blocked\":%llu,\"tls_hosts\":%llu,\"tls_ok\":%llu,\"tls_fail\":%llu,"
+            "\"pin_refused\":%s}",
             off ? "," : "",
             (int)s_apps[i].uid,
             (unsigned long long)s_apps[i].connections,
@@ -2281,7 +2393,8 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
             (unsigned long long)s_apps[i].blocked,
             (unsigned long long)s_apps[i].tls_hosts,
             (unsigned long long)s_apps[i].tls_ok,
-            (unsigned long long)s_apps[i].tls_fail);
+            (unsigned long long)s_apps[i].tls_fail,
+            pin_uid_bypassed(s_apps[i].uid) ? "true" : "false");
         if (n > 0) off += n;
     }
     /* static: a few KB that must never sit on the event-loop stack */
@@ -3145,8 +3258,13 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
     if (ev == MG_EV_ERROR && c->is_tls) {
         s_stats.tls_failures++;
-        struct appstat *fa = app_find_or_add(conn_load_uid(c));
+        uid_t fu = conn_load_uid(c);
+        struct appstat *fa = app_find_or_add(fu);
         if (fa) fa->tls_fail++;
+        /* Pin detector: enough failures from one uid and its CONNECT requests
+           are refused without interception (policy is the user's, see
+           pin_policy_reload). */
+        pin_note_tls_failure(fu, s_pin_resource_dir);
         return;
     }
 
@@ -3432,6 +3550,22 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         }
     }
 
+    /*
+     * PIN-BYPASS POLICY (user-decidable, see pin_policy_reload): when an app
+     * has been detected pinning certificates and the user picked mode=deny,
+     * answer its CONNECT with a plain 403 instead of completing a TLS
+     * handshake and signing a leaf for a host that is going to be blocked
+     * anyway. The app is refused exactly as before - the retry just stops
+     * costing a handshake plus a certificate every time.
+     */
+    if (pin_mode_deny() && pin_uid_bypassed(chk_uid) && hm->method.len == 7 &&
+        memcmp(hm->method.buf, "CONNECT", 7) == 0) {
+        LOG_WARN("pin: refusing CONNECT from uid %d without interception", (int)chk_uid);
+        mg_http_reply(c, 403, "Content-Type: text/plain\r\nCache-Control: no-store\r\n",
+                      "pinned certificate: refused without interception\n");
+        return;
+    }
+
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
         qlog_add(req_uid, QLOG_ALLOW, hm);
         mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
@@ -3705,6 +3839,10 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             }
             LOG_INFO("localhost leaf cert issued OK");
             snprintf(s.resource_dir, sizeof(s.resource_dir), "%s", rpath);
+            /* The TLS-failure hook (pin detector) needs the resource dir
+               without going through c->fn_data - see the note next to the
+               pin-policy state. Set here, where the dir is final. */
+            snprintf(s_pin_resource_dir, sizeof(s_pin_resource_dir), "%s", rpath);
             snprintf(s.test_path,    sizeof(s.test_path),    "%s/test.html", rpath);
             s.block_image_count = scan_block_images(rpath, s.block_images);
             s.init = true;

@@ -67,6 +67,7 @@
     <string name="compose_stats_app_storm">retry storm %1$d/s</string>
     <string name="compose_stats_app_tls_rejected">cert rejected %1$d× (pinning)</string>
     <string name="compose_stats_app_allowed">allowed (not blocked)</string>
+    <string name="compose_stats_app_pin_refused">refused without interception (pinning)</string>
     <string name="compose_stats_recent_certs">Recently issued certs</string>
     <string name="compose_stats_certs_hint">Domains apps asked us to sign (SNI)</string>
     <string name="compose_stats_recent_requests">Recent requests</string>
@@ -147,6 +148,8 @@
     <string name="compose_settings_ws_bind">LAN access</string>
     <string name="compose_settings_light_mode">Light mode (save RAM)</string>
     <string name="compose_settings_light_mode_hint">Smallest footprint: after a boot start confirms the server is up, the app process exits once it is in the background (the server keeps running as a native process, blocking is unaffected), and the recovery check drops from every 5 minutes to every 6 hours. Ignored while the keep-alive notification is on; hijack mode always keeps the frequent check.</string>
+    <string name="compose_settings_pin_policy">Apps that pin certificates: refuse cheaply</string>
+    <string name="compose_settings_pin_policy_hint">Off by default. When on, an app detected pinning certificates (repeated failed handshakes) has its CONNECT requests refused without interception: it stays blocked, but each retry costs one line of HTTP instead of a TLS handshake plus a signed certificate. Measured before this option: one system component alone reached ~240 requests/second, all blocked. The app list shows which apps are affected.</string>
     <string name="compose_settings_ws_bind_all">Listening on all interfaces</string>
     <string name="compose_settings_ws_bind_loop">Loopback only</string>
     <string name="compose_settings_ws_http_port">HTTP port</string>

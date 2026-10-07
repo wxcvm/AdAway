@@ -255,6 +255,68 @@ public class WebServerUtils {
     }
 
     /**
+     * Preference key of the pin-bypass policy (see {@link #getPinPolicyMode}).
+     */
+    private static final String PIN_POLICY_MODE = "pin_policy_mode";
+
+    /**
+     * Pin-bypass policy: what to do about apps that pin certificates.
+     *
+     * <p>Such an app can never be intercepted, and every blocked request turns
+     * into a failed handshake plus an immediate retry. Measured on a real
+     * device, one system component alone reached ~240 requests/second that way
+     * (237k requests, all blocked, 3451 TLS hosts in 16 minutes). The server
+     * implements two behaviours and the choice is the user's:</p>
+     * <ul>
+     *     <li>{@code off} (default): keep intercepting and blocking;</li>
+     *     <li>{@code deny}: once an app is detected pinning, refuse its CONNECT
+     *     requests without interception - the app stays blocked, but a retry
+     *     costs one line of HTTP instead of a handshake and a signed
+     *     certificate.</li>
+     * </ul>
+     *
+     * @param context The application context.
+     * @return The configured mode; {@code "off"} when unset.
+     */
+    public static String getPinPolicyMode(Context context) {
+        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .getString(PIN_POLICY_MODE, "off");
+    }
+
+    /**
+     * Store the pin-bypass policy and write it where the server reads it.
+     *
+     * @param context The application context.
+     * @param mode    {@code "off"} or {@code "deny"}.
+     */
+    public static void setPinPolicyMode(Context context, String mode) {
+        String value = "deny".equals(mode) ? "deny" : "off";
+        context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .edit().putString(PIN_POLICY_MODE, value).apply();
+        syncPinPolicyFile(context);
+    }
+
+    /**
+     * Write {@code <resources>/pin_policy.txt} for the running server.
+     *
+     * @param context The application context.
+     */
+    public static void syncPinPolicyFile(Context context) {
+        try {
+            java.io.File dir = getResourcePath(context).toFile();
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            try (java.io.FileWriter writer = new java.io.FileWriter(
+                    new java.io.File(dir, "pin_policy.txt"), false)) {
+                writer.write("mode=" + getPinPolicyMode(context) + "\n");
+            }
+        } catch (Throwable throwable) {
+            Timber.w(throwable, "Failed to write pin_policy.txt");
+        }
+    }
+
+    /**
      * Ensure allowlist.txt contains UIDs for captive portal login packages
      * so they can work properly (their traffic must pass through unblocked).
      * This fixes the issue where AdGuard blocks captive portal login apps
@@ -353,6 +415,8 @@ public static void startWebServer(Context context) {
 
         // Ensure captive portal login UIDs are in allowlist.txt
         ensureCaptivePortalAllowlist(context);
+        // And publish the user's pin-bypass policy for this server run
+        syncPinPolicyFile(context);
 
         // --proxy-filter: requests that are not for a blocked host (they only
         // arrive here in the "hijack" blocking mode, where iptables redirects

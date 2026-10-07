@@ -1663,7 +1663,7 @@ private fun ActiveAppsCard(apps: List<AppStat>, uptimeSeconds: Long) {
                              *  - handshakes we failed (the pinning signal),
                              *  - a uid on the allowlist, i.e. traffic we do not touch.
                              */
-                            if (storm || app.tlsFail > 0 || allowed) {
+                            if (storm || app.tlsFail > 0 || allowed || app.pinRefused) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (storm) {
                                         Text(
@@ -1672,8 +1672,16 @@ private fun ActiveAppsCard(apps: List<AppStat>, uptimeSeconds: Long) {
                                             color = MaterialTheme.colorScheme.error,
                                         )
                                     }
-                                    if (app.tlsFail > 0) {
+                                    if (app.pinRefused) {
                                         if (storm) Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            stringResource(R.string.compose_stats_app_pin_refused),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                    if (app.tlsFail > 0) {
+                                        if (storm || app.pinRefused) Spacer(Modifier.width(8.dp))
                                         Text(
                                             stringResource(
                                                 R.string.compose_stats_app_tls_rejected,
@@ -1684,7 +1692,9 @@ private fun ActiveAppsCard(apps: List<AppStat>, uptimeSeconds: Long) {
                                         )
                                     }
                                     if (allowed) {
-                                        if (storm || app.tlsFail > 0) Spacer(Modifier.width(8.dp))
+                                        if (storm || app.tlsFail > 0 || app.pinRefused) {
+                                            Spacer(Modifier.width(8.dp))
+                                        }
                                         Text(
                                             stringResource(R.string.compose_stats_app_allowed),
                                             style = MaterialTheme.typography.labelSmall,
