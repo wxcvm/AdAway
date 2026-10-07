@@ -488,35 +488,79 @@ static uint64_t uptime_seconds(void) {
  * cheaper than keeping an in-memory copy in sync).
  */
 /*
- * Selective allow list by HOST name - <resources>/domain_allowlist.txt, one host
- * per line ("#" starts a comment). Re-read on every request like the uid list,
- * because the file is tiny and edits must apply without a restart.
+ * Selective exemption rules - <resources>/domain_allowlist.txt, one rule per
+ * line. The page that edits this file is only offered in hijack mode, because
+ * only there does the server forward to the real origin, which is what makes an
+ * exemption actually restore a host. The parser, however, accepts every syntax
+ * users already have in their filter lists so a rule can be pasted unchanged:
  *
- * A line matches its exact host and, thanks to the leading-dot check below,
- * every subdomain of it. This is the fine-grained counterpart of
- * uid_is_allowed(): exempting a whole app is often too much when a single
- * domain is what the app cannot live without.
+ *   example.com                 plain host (also covers its subdomains)
+ *   .example.com  *.example.com the same, written explicitly
+ *   @@||example.com^            AdGuard / uBlock exception
+ *   ||example.com^              block syntax pasted by mistake - same meaning here
+ *   0.0.0.0 example.com         hosts line (any leading IP, IPv6 "::" too)
+ *   https://example.com/path    full URL - the host is extracted
+ *   example.com:8443            port is stripped
+ *   # comment      ! comment    ignored
+ *
+ * Matching is case-insensitive and means "the host itself or a subdomain of it".
  */
+static void domain_rule_normalize(const char *in, char *out, size_t outsz) {
+    size_t o = 0;
+    const char *p = in;
+    if (outsz == 0) return;
+    out[0] = '\0';
+    /* leading decoration: @@, ||, |, whitespace (a leading dot is kept as
+       decoration for "this domain and below", and skipped below) */
+    while (*p == '@' || *p == '|' || *p == ' ' || *p == '\t') p++;
+    /* hosts style "0.0.0.0 host" / ":: host": the field after the whitespace wins */
+    {
+        const char *sp = strpbrk(p, " \t");
+        if (sp != NULL) {
+            const char *q = sp;
+            while (*q == ' ' || *q == '\t') q++;
+            if (*q != '\0') p = q;
+        }
+    }
+    {
+        const char *scheme = strstr(p, "://");
+        if (scheme != NULL) p = scheme + 3;
+    }
+    while (*p == '*' || *p == '.') p++;
+    while (*p != '\0' && *p != '/' && *p != '?' && *p != '#' && *p != ':' &&
+           *p != '^' && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') {
+        char ch = *p;
+        if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+        if (o + 1 < outsz) out[o++] = ch;
+        p++;
+    }
+    out[o] = '\0';
+}
+
 static bool domain_is_allowed(const char *host, const char *resource_dir) {
     if (host == NULL || host[0] == '\0' || resource_dir == NULL) return false;
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/domain_allowlist.txt", resource_dir);
     FILE *f = fopen(path, "r");
     if (f == NULL) return false;
-    char line[256];
+    char line[256], rule[192];
     bool found = false;
     size_t hl = strlen(host);
     while (!found && fgets(line, sizeof(line), f) != NULL) {
         size_t n = strlen(line);
-        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' ')) {
-            line[--n] = '\0';
-        }
-        if (n == 0 || line[0] == '#') continue;
-        size_t nl = strlen(line);
-        if (nl == hl && strcasecmp(line, host) == 0) {
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = '\0';
+        char *s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s == '\0' || *s == '#' || *s == '!') continue;
+        domain_rule_normalize(s, rule, sizeof(rule));
+        size_t rl = strlen(rule);
+        /* Reject overly broad rules; a bare TLD ("com") or a wildcard would
+           otherwise exempt most of the internet. */
+        if (rl < 4 || strchr(rule, '.') == NULL || strchr(rule, '*') != NULL) continue;
+        if (rl == hl && strcasecmp(rule, host) == 0) {
             found = true;
-        } else if (nl < hl && host[hl - nl - 1] == '.' &&
-                   strcasecmp(line, host + (hl - nl)) == 0) {
+        } else if (rl < hl && host[hl - rl - 1] == '.' &&
+                   strcasecmp(rule, host + (hl - rl)) == 0) {
             found = true;
         }
     }
