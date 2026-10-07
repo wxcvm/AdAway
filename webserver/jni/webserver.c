@@ -487,6 +487,43 @@ static uint64_t uptime_seconds(void) {
  * only when the user toggles a switch, so a few extra syscalls are
  * cheaper than keeping an in-memory copy in sync).
  */
+/*
+ * Selective allow list by HOST name - <resources>/domain_allowlist.txt, one host
+ * per line ("#" starts a comment). Re-read on every request like the uid list,
+ * because the file is tiny and edits must apply without a restart.
+ *
+ * A line matches its exact host and, thanks to the leading-dot check below,
+ * every subdomain of it. This is the fine-grained counterpart of
+ * uid_is_allowed(): exempting a whole app is often too much when a single
+ * domain is what the app cannot live without.
+ */
+static bool domain_is_allowed(const char *host, const char *resource_dir) {
+    if (host == NULL || host[0] == '\0' || resource_dir == NULL) return false;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/domain_allowlist.txt", resource_dir);
+    FILE *f = fopen(path, "r");
+    if (f == NULL) return false;
+    char line[256];
+    bool found = false;
+    size_t hl = strlen(host);
+    while (!found && fgets(line, sizeof(line), f) != NULL) {
+        size_t n = strlen(line);
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' ')) {
+            line[--n] = '\0';
+        }
+        if (n == 0 || line[0] == '#') continue;
+        size_t nl = strlen(line);
+        if (nl == hl && strcasecmp(line, host) == 0) {
+            found = true;
+        } else if (nl < hl && host[hl - nl - 1] == '.' &&
+                   strcasecmp(line, host + (hl - nl)) == 0) {
+            found = true;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
 static bool uid_is_allowed(uid_t uid, const char *resource_dir) {
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/allowlist.txt", resource_dir);
@@ -753,6 +790,9 @@ static int buckets_to_json(char *out, size_t out_sz,
  * one thread and plain counters are safe.
  */
 #define APP_STATS_MAX  32   /* distinct uids tracked */
+/* Hosts remembered per app, so "who is hammering what" is visible directly in
+   the app list instead of only as a global top_blocked table. */
+#define APP_HOSTS_MAX  3
 #define RECENT_TLS_MAX 64   /* distinct (uid, host) pairs remembered */
 #define TLS_HOST_MAX   128
 
@@ -778,6 +818,14 @@ struct appstat {
        pin_note_tls_failure). Not persisted - it is a runtime signal. */
     uint64_t tls_fail_win_start;
     uint32_t tls_fail_win;
+    /* Storm detection: requests counted at the previous stats snapshot, so the
+       rate between two snapshots can be reported without any timer. Runtime
+       only (the on-disk record stores it as zeros). */
+    uint64_t req_snap;
+    uint32_t tps;
+    /* Per-app top hosts ("what is this app actually hitting"), runtime only. */
+    char     top_hosts[APP_HOSTS_MAX][64];
+    uint32_t top_host_counts[APP_HOSTS_MAX];
 };
 static struct appstat s_apps[APP_STATS_MAX];
 static int s_app_count = 0;
@@ -788,7 +836,7 @@ static int s_app_count = 0;
    and load at startup, so the per-app list also survives reboots. */
 /* Magic carries a format version: v1 had four counters per uid, v2 adds the
    TLS outcomes. An old apps.dat is ignored instead of being misread. */
-#define APPS_MAGIC 0x41505032u  /* "APP2" */
+#define APPS_MAGIC 0x41505033u  /* "APP2" */
 struct apps_file {
     uint32_t magic;
     uint32_t count;
@@ -1046,6 +1094,37 @@ static uid_t conn_load_uid(struct mg_connection *c) {
     uid_t uid;
     memcpy(&uid, c->data + UID_OFFSET, sizeof(uid));
     return uid;
+}
+
+/*
+ * Remember which hosts an app is hitting (largest counts are kept).
+ *
+ * The global top_blocked table answers "which domains are blocked"; this answers
+ * "which app is generating them", which is what a retry storm investigation
+ * needs (one uid can produce hundreds of requests per second against a host it
+ * will never be allowed to reach).
+ */
+static void app_note_host(struct appstat *a, const char *host) {
+    if (a == NULL || host == NULL || host[0] == '\0') return;
+    int free_slot = -1, smallest = 0;
+    for (int i = 0; i < APP_HOSTS_MAX; i++) {
+        if (a->top_hosts[i][0] == '\0') { free_slot = i; break; }
+        if (strcmp(a->top_hosts[i], host) == 0) {
+            a->top_host_counts[i]++;
+            return;
+        }
+        if (a->top_host_counts[i] < a->top_host_counts[smallest]) smallest = i;
+    }
+    if (free_slot >= 0) {
+        snprintf(a->top_hosts[free_slot], sizeof(a->top_hosts[free_slot]), "%s", host);
+        a->top_host_counts[free_slot] = 1;
+    } else if (a->top_host_counts[smallest] < 2) {
+        /* Keep the table biased towards repeated hosts: a one-off request is
+           not evidence of a storm loop, so only replace when the slot holds a
+           single hit as well. */
+        snprintf(a->top_hosts[smallest], sizeof(a->top_hosts[smallest]), "%s", host);
+        a->top_host_counts[smallest] = 1;
+    }
 }
 
 static struct appstat *app_find_or_add(uid_t uid) {
@@ -2381,11 +2460,32 @@ static void ws_push_broadcast(struct settings *s) {
 static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     char apps_json[4096] = "";
     int off = 0;
-    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 200; i++) {
+    /*
+     * Storm detection: the request rate between two stats snapshots. The
+     * statistics screen polls this endpoint, so the interval is simply the UI
+     * refresh period; no timer is needed. Static so it survives across calls.
+     */
+    static uint64_t apps_tick_ms;
+    uint64_t apps_now_ms = mg_millis();
+    if (apps_tick_ms != 0 && apps_now_ms > apps_tick_ms) {
+        uint32_t dt = (uint32_t)(apps_now_ms - apps_tick_ms);
+        if (dt >= 500) {
+            for (int i = 0; i < s_app_count; i++) {
+                uint64_t d = s_apps[i].requests - s_apps[i].req_snap;
+                s_apps[i].tps = (uint32_t)(d * 1000u / dt);
+                s_apps[i].req_snap = s_apps[i].requests;
+            }
+            apps_tick_ms = apps_now_ms;
+        }
+    } else {
+        apps_tick_ms = apps_now_ms;
+    }
+
+    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 400; i++) {
         int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
             "%s{\"uid\":%d,\"connections\":%llu,\"requests\":%llu,"
             "\"blocked\":%llu,\"tls_hosts\":%llu,\"tls_ok\":%llu,\"tls_fail\":%llu,"
-            "\"pin_refused\":%s}",
+            "\"tps\":%u,\"hosts\":[",
             off ? "," : "",
             (int)s_apps[i].uid,
             (unsigned long long)s_apps[i].connections,
@@ -2394,6 +2494,19 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
             (unsigned long long)s_apps[i].tls_hosts,
             (unsigned long long)s_apps[i].tls_ok,
             (unsigned long long)s_apps[i].tls_fail,
+            (unsigned)s_apps[i].tps);
+        if (n > 0) off += n;
+        for (int h = 0; h < APP_HOSTS_MAX; h++) {
+            if (s_apps[i].top_hosts[h][0] == '\0') break;
+            int hn = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
+                "%s{\"h\":\"%s\",\"n\":%u}",
+                h ? "," : "",
+                s_apps[i].top_hosts[h],
+                (unsigned)s_apps[i].top_host_counts[h]);
+            if (hn > 0) off += hn;
+        }
+        n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
+            "],\"pin_refused\":%s}",
             pin_uid_bypassed(s_apps[i].uid) ? "true" : "false");
         if (n > 0) off += n;
     }
@@ -3566,6 +3679,25 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
+    /*
+     * Selective allow by host (user-decided, editable while running): a host in
+     * <resources>/domain_allowlist.txt is passed through instead of blocked.
+     * In the AdGuard-forwarding setup the server cannot fetch the real content,
+     * so the request gets a plain 200 "ok" and is recorded as ALLOW in the query
+     * log; the setting that truly restores a domain there is AdGuard's own
+     * exemption, and this list is what makes our side stop blocking it.
+     */
+    if (req_uid != (uid_t)-1) {
+        char allow_host[192];
+        req_host_of(hm, allow_host, sizeof(allow_host));
+        if (domain_is_allowed(allow_host, s->resource_dir)) {
+            qlog_add(req_uid, QLOG_ALLOW, hm);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
+                                  "Cache-Control: no-store\r\n", "ok");
+            return;
+        }
+    }
+
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
         qlog_add(req_uid, QLOG_ALLOW, hm);
         mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
@@ -3728,6 +3860,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             char bh[192];
             req_host_of(hm, bh, sizeof(bh));
             top_host_add(bh);
+            /* Also attribute the host to the app, so a storm can be traced to
+               both the requester and the target. */
+            app_note_host(ba, bh);
         }
         qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
         ws_push_broadcast(s);  /* real-time push to WS subscribers */
@@ -3755,6 +3890,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         char bh[192];
         req_host_of(hm, bh, sizeof(bh));
         top_host_add(bh);
+        app_note_host(ba, bh);
     }
     qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
     ws_push_broadcast(s);  /* real-time push to WS subscribers */
