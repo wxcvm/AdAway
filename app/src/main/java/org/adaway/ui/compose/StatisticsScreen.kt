@@ -1584,7 +1584,6 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>, onOpenLogs: () -> U
     }
 }
 
-@Composable
 /**
  * 活跃应用卡：按 拦截+请求 总数降序展示各 uid 的
  * 连接数/请求数/拦截数。uid → 应用名通过 PackageManager 解析。
@@ -1673,6 +1672,7 @@ private fun StormCard(
     }
 }
 
+@Composable
 private fun ActiveAppsCard(apps: List<AppStat>, uptimeSeconds: Long) {
     /* Requests/second above which an app is flagged as a retry storm. */
     val stormThreshold = 20L
