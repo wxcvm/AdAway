@@ -345,6 +345,10 @@
     <string name="compose_settings_dedup_hint">When the same app asks for the same host again within one second, answer once and fast-fail the repeats. Normal requests are unaffected; off by default.</string>
     <string name="compose_settings_retry_guard">Retry-storm guard</string>
     <string name="compose_settings_retry_guard_hint">If one app hits the same host more than 40 times in 10 seconds, fast-fail it for 30 seconds and log it, then probe again. Off by default.</string>
+    <string name="compose_settings_cache_reuse">Decision cache</string>
+    <string name="compose_settings_cache_reuse_hint">Reuse the previous verdict when the same host is requested again within 2 seconds, skipping the classification work. Blocking behaviour is unchanged; off by default.</string>
+    <string name="compose_settings_circuit_breaker">Per-host circuit breaker</string>
+    <string name="compose_settings_circuit_breaker_hint">If a host gets fast-failed more than 60 times in 10 seconds by any app, fast-fail it for 20 seconds. Complements the retry guard, which only looks at one app. Off by default.</string>
     <string name="compose_exempt_effective_note">What an exemption does here: this server stops blocking that host (it answers 204 No Content). In the setup where AdGuard sends its blocked domains to this server, the server has no way to fetch the real content, so to make the host truly usable, exempt it in AdGuard as well. The app warns about the fake 200 it used to return — that is gone now.</string>
     <string name="compose_settings_autostart_battery_button">Battery settings</string>
     <string name="compose_settings_autostart_retry">Start the server again</string>

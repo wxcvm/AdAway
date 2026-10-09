@@ -950,6 +950,13 @@ private static String computeSubjectHashOld(Path certFile)
             appendBlockReplyField(sb, "retry_guard_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                             .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "retry_guard", false));
+            /* F5 续：决策缓存与按域熔断 —— 同样默认关 */
+            appendBlockReplyField(sb, "cache_reuse_enabled",
+                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "cache_reuse", false));
+            appendBlockReplyField(sb, "circuit_breaker_enabled",
+                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "circuit_breaker", false));
             sb.append((char) 0x7d).append((char) 0x0a);
             Files.write(dir.resolve("block_config.json"), sb.toString().getBytes("UTF-8"));
             WebServerControl.sendControlCommand("reload_config");
@@ -1009,6 +1016,37 @@ private static String computeSubjectHashOld(Path certFile)
     public static void setRetryGuardEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "retry_guard", enabled).apply();
+        applyBlockReplyConfig(context);
+    }
+
+    /** F5：决策缓存是否开启（默认关）。 */
+    public static boolean isCacheReuseEnabled(Context context) {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "cache_reuse", false);
+    }
+
+    /** 打开/关闭决策缓存（默认关）：同一域 2 秒内重复请求直接复用上次的判定。 */
+    public static void setCacheReuseEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "cache_reuse", enabled).apply();
+        applyBlockReplyConfig(context);
+    }
+
+    /** F5：按域熔断是否开启（默认关）。 */
+    public static boolean isCircuitBreakerEnabled(Context context) {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "circuit_breaker", false);
+    }
+
+    /**
+     * 打开/关闭按域熔断（默认关）。
+     *
+     * <p>与重试风暴护栏的分工：护栏看"某个应用 × 某个域"，熔断看"整个域" —— 同一个域被
+     * 多个应用一起打成死循环时，只有熔断能兜住。</p>
+     */
+    public static void setCircuitBreakerEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "circuit_breaker", enabled).apply();
         applyBlockReplyConfig(context);
     }
 

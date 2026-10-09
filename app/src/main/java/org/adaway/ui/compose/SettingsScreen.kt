@@ -919,6 +919,61 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+                    // ── F5 续：决策缓存 / 按域熔断（各自独立，默认都关）──
+                    Spacer(Modifier.height(8.dp))
+                    var cacheOn by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.isCacheReuseEnabled(context))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_cache_reuse),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_cache_reuse_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = cacheOn,
+                            onCheckedChange = { v ->
+                                cacheOn = v
+                                org.adaway.util.WebServerUtils.setCacheReuseEnabled(context, v)
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    var breakerOn by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.isCircuitBreakerEnabled(context))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_circuit_breaker),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_circuit_breaker_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = breakerOn,
+                            onCheckedChange = { v ->
+                                breakerOn = v
+                                org.adaway.util.WebServerUtils.setCircuitBreakerEnabled(context, v)
+                            },
+                        )
+                    }
                     // ── 开机自动启动 ──
                     Spacer(Modifier.height(8.dp))
                     var autostart by remember {

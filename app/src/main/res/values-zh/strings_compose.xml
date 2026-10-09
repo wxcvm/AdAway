@@ -339,6 +339,10 @@
     <string name="compose_logs_export">导出日志（CSV）</string>
     <string name="compose_logs_export_failed">导出失败：%1$s</string>
     <string name="compose_logs_load_more">加载更早的记录（已显示 %1$d / 共 %2$d）</string>
+    <string name="compose_settings_cache_reuse">决策缓存</string>
+    <string name="compose_settings_cache_reuse_hint">同一个域在 2 秒内再次请求时直接复用上次的判定，跳过分类计算。拦截行为不变；默认关闭。</string>
+    <string name="compose_settings_circuit_breaker">按域熔断</string>
+    <string name="compose_settings_circuit_breaker_hint">任意应用在 10 秒内让同一个域被快速失败超过 60 次时，对该域快速失败 20 秒。与「重试风暴护栏」互补 —— 护栏只看单个应用。默认关闭。</string>
     <string name="compose_settings_dedup">请求去重</string>
     <string name="compose_settings_dedup_hint">同一个应用在 1 秒内重复请求同一个域时只处理一次，其余快速失败。正常请求不受影响；默认关闭。</string>
     <string name="compose_settings_retry_guard">重试风暴护栏</string>
