@@ -3992,10 +3992,28 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     /* TLS handshake outcome statistics (new metric). */
     if (ev == MG_EV_TLS_HS) {
         s_stats.tls_handshakes++;
+        /* 按 uid 归因（best effort）：连接已经能确定 uid 时，才算得上"这个应用握手成功"。
+           未知 uid 一律跳过 —— 否则会凭空造出一个 uid = -1 的假应用条目。 */
+        {
+            uid_t hs_uid = conn_load_uid(c);
+            if (hs_uid != (uid_t) -1) {
+                struct appstat *ha = app_find_or_add(hs_uid);
+                if (ha) ha->tls_ok++;
+            }
+        }
         return;
     }
     if (ev == MG_EV_ERROR && c->is_tls) {
         s_stats.tls_failures++;
+        /* 证书被拒的关键信号：握手失败按 uid 计数。做证书固定（pinning）的客户端会
+           tls_fail >> tls_ok —— 界面靠它显示「证书被拒」，也是请求风暴判定的输入之一。 */
+        {
+            uid_t fail_uid = conn_load_uid(c);
+            if (fail_uid != (uid_t) -1) {
+                struct appstat *fa = app_find_or_add(fail_uid);
+                if (fa) fa->tls_fail++;
+            }
+        }
         return;
     }
 
