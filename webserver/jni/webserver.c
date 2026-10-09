@@ -4451,8 +4451,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         req_host_of(hm, allow_host, sizeof(allow_host));
         if (domain_is_allowed(allow_host, s->resource_dir)) {
             qlog_add(req_uid, QLOG_ALLOW, hm);
-            mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
-                                  "Cache-Control: no-store\r\n", "ok");
+            /* 204 而不是伪造的 200 "ok"：AdGuard 转发式部署下服务器拿不到真实内容，
+               回 200 空正文是在骗客户端。来源：master ce9a940。 */
+            mg_http_reply(c, 204, "Cache-Control: no-store\r\n", "");
             return;
         }
     }
@@ -4471,8 +4472,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
 
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
-        mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
-                              "Cache-Control: no-store\r\n", "ok");
+        /* 与 master 一致：放行也记一条 ALLOW 便于追溯；回 204 而不是伪造的 200
+           （来源：master ce9a940） */
+        qlog_add(req_uid, QLOG_ALLOW, hm);
+        mg_http_reply(c, 204, "Cache-Control: no-store\r\n", "");
         return;
     }
 
