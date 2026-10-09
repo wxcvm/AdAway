@@ -52,6 +52,8 @@ object Destinations {
     const val EXEMPT = "rules/exempt"
     /** 二级页：按域覆盖响应（仍然拦截，只是换一种回答方式），同样从规则页进入。 */
     const val OVERRIDES = "rules/overrides"
+    /** 三级页：单个应用的明细，从统计页「活跃应用」点进去；路由带 uid 参数。 */
+    const val APP_DETAIL = "stats/app"
 }
 
 private data class Destination(
@@ -107,7 +109,11 @@ fun AdAwayApp() {
                 OverviewScreen(viewModel)
             }
             composable(Destinations.STATS) {
-                StatisticsScreen(viewModel, onOpenLogs = { navController.navigate(Destinations.LOGS) })
+                StatisticsScreen(
+                    viewModel,
+                    onOpenLogs = { navController.navigate(Destinations.LOGS) },
+                    onOpenApp = { uid -> navController.navigate("${Destinations.APP_DETAIL}/$uid") },
+                )
             }
             composable(Destinations.RULES) {
                 RulesScreen(
@@ -124,6 +130,11 @@ fun AdAwayApp() {
             }
             composable(Destinations.OVERRIDES) {
                 RuleOverridesScreen(onBack = { navController.popBackStack() })
+            }
+            /* 三级页：uid 走路径参数；无效 uid 交给详情页显示空状态，不崩 */
+            composable("${Destinations.APP_DETAIL}/{uid}") { entry ->
+                val uid = entry.arguments?.getString("uid")?.toIntOrNull() ?: -1
+                AppDetailScreen(viewModel, uid, onBack = { navController.popBackStack() })
             }
             composable(Destinations.LOGS) {
                 QueryLogScreen(viewModel, onBack = { navController.popBackStack() })

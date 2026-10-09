@@ -128,7 +128,12 @@ internal fun buildCategories(stats: ServerStats): List<BlockCategory> {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatisticsScreen(viewModel: StatsViewModel, onOpenLogs: () -> Unit = {}) {
+fun StatisticsScreen(
+    viewModel: StatsViewModel,
+    onOpenLogs: () -> Unit = {},
+    /* 三级页入口：点「活跃应用」里的某一项 → 该应用详情（onOpenApp(uid)） */
+    onOpenApp: (Int) -> Unit = {},
+) {
     // ── 从 ViewModel 收集数据流（每 10s 轮询一次 webserver）──
     val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
@@ -345,7 +350,7 @@ fun StatisticsScreen(viewModel: StatsViewModel, onOpenLogs: () -> Unit = {}) {
                     onAllowApp = { uid -> viewModel.allowAppForever(uid) },
                     onAllowDomain = { host -> viewModel.allowHost(host) },
                 )
-                ActiveAppsCard(serverStats!!.apps, serverStats!!.uptimeSeconds)
+                ActiveAppsCard(serverStats!!.apps, serverStats!!.uptimeSeconds, onOpenApp)
             }
 
             // Recent requests: what was asked for and what the filter did with it
@@ -1678,7 +1683,11 @@ private fun StormCard(
 }
 
 @Composable
-private fun ActiveAppsCard(apps: List<AppStat>, uptimeSeconds: Long) {
+private fun ActiveAppsCard(
+    apps: List<AppStat>,
+    uptimeSeconds: Long,
+    onOpenApp: (Int) -> Unit = {},
+) {
     /* Requests/second above which an app is flagged as a retry storm. */
     val stormThreshold = 20L
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -1727,6 +1736,8 @@ private fun ActiveAppsCard(apps: List<AppStat>, uptimeSeconds: Long) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                /* 点进三级页看这个应用的明细（每秒速率/握手失败/是否被廉价拒绝） */
+                                .clickable { onOpenApp(app.uid) }
                                 .padding(vertical = 4.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
