@@ -1,5 +1,7 @@
 package org.adaway.ui.compose
 
+import androidx.compose.foundation.layout.Arrangement
+
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
