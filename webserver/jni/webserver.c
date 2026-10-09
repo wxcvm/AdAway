@@ -2998,8 +2998,30 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
             toff += w;
         }
     }
+    /*
+     * 请求风暴：两次统计快照之间的实测速率。界面就是按这个间隔轮询的，
+     * 因此不需要任何定时器；static 让它在多次调用之间存活。
+     */
+    static uint64_t apps_tick_ms;
+    uint64_t apps_now_ms = mg_millis();
+    if (apps_tick_ms != 0 && apps_now_ms > apps_tick_ms) {
+        uint32_t dt = (uint32_t)(apps_now_ms - apps_tick_ms);
+        if (dt >= 500) {
+            for (int i = 0; i < s_app_count; i++) {
+                uint64_t d = s_apps[i].requests - s_apps[i].req_snap;
+                s_apps[i].tps = (uint32_t)(d * 1000u / dt);
+                s_apps[i].req_snap = s_apps[i].requests;
+            }
+            apps_tick_ms = apps_now_ms;
+        }
+    } else {
+        apps_tick_ms = apps_now_ms;
+    }
+
     int off = 0;
-    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 96; i++) {
+    /* 余量从 96 提到 400：每个应用现在还会带 tls_ok/tls_fail/tps 与最多
+       APP_HOSTS_MAX 个目标域，余量太小会把最后一个应用截断。 */
+    for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 400; i++) {
         /* Android maps the uid to a package name on the app side; Windows has
            no such lookup, so the executable name is resolved here (additive
            field - older clients simply ignore it). */
@@ -3011,14 +3033,29 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         json_safe_copy(app_name, sizeof(app_name), app_name_raw);
         int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
             "%s{\"uid\":%d,\"name\":\"%s\",\"connections\":%llu,\"requests\":%llu,"
-            "\"blocked\":%llu,\"tls_hosts\":%llu}",
+            "\"blocked\":%llu,\"tls_hosts\":%llu,\"tls_ok\":%llu,\"tls_fail\":%llu,"
+            "\"tps\":%u,\"hosts\":[",
             off ? "," : "",
             (int)s_apps[i].uid,
             app_name,
             (unsigned long long)s_apps[i].connections,
             (unsigned long long)s_apps[i].requests,
             (unsigned long long)s_apps[i].blocked,
-            (unsigned long long)s_apps[i].tls_hosts);
+            (unsigned long long)s_apps[i].tls_hosts,
+            (unsigned long long)s_apps[i].tls_ok,
+            (unsigned long long)s_apps[i].tls_fail,
+            (unsigned)s_apps[i].tps);
+        if (n > 0) off += n;
+        /* 该应用正在打的域（app_note_host 记录，最多 APP_HOSTS_MAX 个）：
+           Windows/Android 的「请求风暴」都靠它把风暴追到具体目标。 */
+        for (int h = 0; h < APP_HOSTS_MAX; h++) {
+            if (s_apps[i].top_hosts[h][0] == '\0') break;
+            int hn = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
+                "%s{\"h\":\"%s\",\"n\":%u}", h ? "," : "",
+                s_apps[i].top_hosts[h], (unsigned)s_apps[i].top_host_counts[h]);
+            if (hn > 0) off += hn;
+        }
+        n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off, "]}");
         if (n > 0) off += n;
     }
     char tls_json[2048] = "";
