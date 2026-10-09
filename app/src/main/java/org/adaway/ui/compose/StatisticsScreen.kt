@@ -1026,7 +1026,12 @@ private fun TrafficTrendCard(
         0 -> hourly
         1 -> daily.takeLast(7)
         2 -> daily
-        else -> hourly + daily // 永久：全部历史（小时 + 日）
+        /*
+         * 永久：以前是 hourly + daily 直接拼接，但两个系列的时间刻度不同（小时 vs 天），
+         * 拼出来的时间戳不是递增的 —— X 轴日期因此出现"两头对称、来回跳"的假象。
+         * 长周期视图用日粒度即可（刻度均匀）；日数据不足两个点时退回小时序列。
+         */
+        else -> if (daily.size >= 2) daily else hourly
     }
     if (data.isEmpty()) return
 
