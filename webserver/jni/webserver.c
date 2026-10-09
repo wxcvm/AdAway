@@ -361,6 +361,8 @@ static bool cfg_visible = false;
    dedup_enabled / retry_guard_enabled。 */
 static bool cfg_dedup = false;
 static bool cfg_guard = false;
+static bool cfg_cache = false;
+static bool cfg_breaker = false;
 
 /*
  * Which policy type the last reply_blocked_by_type() matched, and how that type
@@ -1949,6 +1951,8 @@ static void load_block_cfg(const char *dir) {
     cfg_visible = false;   /* 可见型占位默认关：关闭时行为与历史版本一致 */
     cfg_dedup = false;     /* F5 请求去重默认关 */
     cfg_guard = false;     /* F5 重试护栏默认关 */
+    cfg_cache = false;     /* F5 决策缓存默认关 */
+    cfg_breaker = false;   /* F5 按域熔断默认关 */
         cfg_media = true; cfg_struct = true; cfg_api = true; cfg_tele = true;
         cfg_conf = true; cfg_ws = true;
         return;
@@ -1963,6 +1967,8 @@ static void load_block_cfg(const char *dir) {
     /* F5：默认 false（缺键即关闭），老配置的语义不变 */
     cfg_dedup = jbool(b, "dedup_enabled", false);
     cfg_guard = jbool(b, "retry_guard_enabled", false);
+    cfg_cache = jbool(b, "cache_reuse_enabled", false);
+    cfg_breaker = jbool(b, "circuit_breaker_enabled", false);
     cfg_scripts = jbool(b, "reply_scripts", true);
     cfg_styles = jbool(b, "reply_styles", true);
     cfg_fonts = jbool(b, "reply_fonts", true);
@@ -2077,8 +2083,66 @@ static bool f5_guard_tripped(uid_t uid, uint32_t hh) {
     return false;
 }
 
+/* ============ F5 续：决策缓存与按域熔断（各自开关，默认关） ============
+   两者都只在上面那个挂钩点内实现，**不改分类函数**，因此关闭时与之前完全一致。
+
+   - cache_reuse：同一 (uid, 域) 在 2s 内再次出现时，直接复用上一次的"类型+回答方式"，
+     跳过整套分类判定（省的是 CPU，不是行为：仍然是被拦、仍然记 blocked_*）。
+     类型取自上一次调用进入时的 s_last_type，因此是一对一的"同域复用"。
+   - circuit_breaker：同一域（不限 uid）在 10s 内被快速失败超过 60 次 → 判定为
+     "这个域在当前客户端上已成死循环"，随后 20s 内对该域的请求直接快速失败。
+     与 retry_guard 的区别：retry_guard 看的是"单个应用 × 单个域"，熔断看的是"整个域"。
+   ====================================================================== */
+#define F5_CACHE_TTL_MS      2000u
+#define F5_BREAK_WINDOW_MS   10000u
+#define F5_BREAK_THRESHOLD   60u
+#define F5_BREAK_COOLDOWN_MS 20000u
+#define F5_BREAKS            32
+
+static uint64_t s_f5_cache_hits, s_f5_breaker_hits;   /* RAM-only */
+static uint32_t s_f5_prev_hash;                       /* 上一次进入挂钩点的域（配对用） */
+static uint64_t s_f5_prev_ts;
+struct f5_break { uint32_t host_hash; uint64_t win_start; uint32_t count; uint64_t until_ms; };
+static struct f5_break s_f5_breaks[F5_BREAKS];
+
+/* 按域熔断：窗口内计数，超阈值进入冷却；冷却期内返回 true。 */
+static bool f5_breaker_tripped(uint32_t hh, uint64_t now) {
+    for (int i = 0; i < F5_BREAKS; i++) {
+        if (s_f5_breaks[i].host_hash == hh && s_f5_breaks[i].win_start != 0) {
+            if (s_f5_breaks[i].until_ms > now) return true;
+            if (now - s_f5_breaks[i].win_start > F5_BREAK_WINDOW_MS) {
+                s_f5_breaks[i].win_start = now;
+                s_f5_breaks[i].count = 0;
+            }
+            s_f5_breaks[i].count++;
+            if (s_f5_breaks[i].count >= F5_BREAK_THRESHOLD) {
+                s_f5_breaks[i].until_ms = now + F5_BREAK_COOLDOWN_MS;
+                LOG_WARN("breaker: host hash %08x fast-failed %u times in %us - "
+                         "fast-failing it for %us",
+                         (unsigned)hh, (unsigned)s_f5_breaks[i].count,
+                         F5_BREAK_WINDOW_MS / 1000u, F5_BREAK_COOLDOWN_MS / 1000u);
+            }
+            return false;
+        }
+    }
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < F5_BREAKS; i++) {
+        if (s_f5_breaks[i].win_start == 0) { slot = i; break; }
+        if (s_f5_breaks[i].win_start < s_f5_breaks[oldest].win_start) oldest = i;
+    }
+    if (slot < 0) slot = oldest;
+    s_f5_breaks[slot].host_hash = hh;
+    s_f5_breaks[slot].win_start = now;
+    s_f5_breaks[slot].count = 1;
+    s_f5_breaks[slot].until_ms = 0;
+    return false;
+}
+
 static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
     struct mg_str u = hm->uri;
+    /* 进入时先记下上一次的决策类型（下一行就会被清成 -1），供 cache_reuse 配对使用。
+       不这么做就得在每个 return 点各加一次记录，改动面大得多。 */
+    const int f5_prev_type = s_last_type;
     /* Cleared per request so a caller that falls through to the generic
        placeholder does not inherit the previous request's type. */
     s_last_type = -1;
@@ -2089,12 +2153,32 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
      * （连 req_host_of 的额外调用都不会发生）。deny_quick 自己会累加计数器，
      * 所以这里不再手动加，避免重复计数。
      */
-    if (cfg_dedup || cfg_guard) {
+    if (cfg_dedup || cfg_guard || cfg_cache || cfg_breaker) {
         char f5_host[192];
         uid_t f5_uid = conn_load_uid(c);
+        uint64_t f5_now = mg_millis();
         uint32_t f5_hh;
         req_host_of(hm, f5_host, sizeof(f5_host));
         f5_hh = f5_hash(f5_host);
+        if (cfg_breaker && f5_breaker_tripped(f5_hh, f5_now)) {
+            s_f5_breaker_hits++;
+            s_last_type = LT_STRUCT;
+            s_last_mode = RB_DENY;
+            return deny_quick(&s_stats.blocked_other, c);
+        }
+        /*
+         * cache_reuse：同一域在 TTL 内再次到来且上一次的决策已知 → 直接复用。
+         * 只在"上一次也是同一个域"时配对，避免把别的域的决策套过来。
+         */
+        if (cfg_cache && f5_hh == s_f5_prev_hash && f5_prev_type >= 0 &&
+            f5_now - s_f5_prev_ts <= F5_CACHE_TTL_MS) {
+            s_f5_cache_hits++;
+            s_last_type = f5_prev_type;
+            s_last_mode = RB_DENY;
+            return deny_quick(&s_stats.blocked_other, c);
+        }
+        s_f5_prev_hash = f5_hh;
+        s_f5_prev_ts = f5_now;
         if (cfg_guard && f5_guard_tripped(f5_uid, f5_hh)) {
             s_f5_guard_hits++;
             s_last_type = LT_STRUCT;
@@ -2842,6 +2926,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"tls_handshakes\":%llu,"
         "\"tls_failures\":%llu,"
         "\"dedup_hits\":%llu,\"guard_hits\":%llu,"
+        "\"cache_hits\":%llu,\"breaker_hits\":%llu,"
         "\"sni_cache_hits\":%llu,"
         "\"sni_hit_rate\":%.1f,"
         "\"block_rate\":%.1f,"
@@ -2877,6 +2962,8 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         (unsigned long long)s_stats.tls_failures,
         (unsigned long long)s_f5_dedup_hits,
         (unsigned long long)s_f5_guard_hits,
+        (unsigned long long)s_f5_cache_hits,
+        (unsigned long long)s_f5_breaker_hits,
         (unsigned long long)hits,
         hit_rate,
         block_rate,
