@@ -339,6 +339,10 @@
     <string name="compose_logs_export">导出日志（CSV）</string>
     <string name="compose_logs_export_failed">导出失败：%1$s</string>
     <string name="compose_logs_load_more">加载更早的记录（已显示 %1$d / 共 %2$d）</string>
+    <string name="compose_settings_dedup">请求去重</string>
+    <string name="compose_settings_dedup_hint">同一个应用在 1 秒内重复请求同一个域时只处理一次，其余快速失败。正常请求不受影响；默认关闭。</string>
+    <string name="compose_settings_retry_guard">重试风暴护栏</string>
+    <string name="compose_settings_retry_guard_hint">同一个应用在 10 秒内对同一个域超过 40 次就判为风暴，随后 30 秒快速失败并记日志，之后自动恢复探测。默认关闭。</string>
     <string name="compose_settings_visible_reply">可见型占位</string>
     <string name="compose_settings_visible_reply_hint">页面本身或 iframe 被拦时也返回占位图，页面不会整片塌陷而是显示一个可见的占位。默认关闭；关闭时行为与之前完全一致。</string>
     <string name="compose_exempt_effective_note">这里"解除过滤"的真实效果：本服务器不再拦截该域名（回 204 No Content）。在"AdGuard 把拦截 IP 指向本服务器"的部署里，服务器拿不到真实内容，所以要让该域真正可用，还需要在 AdGuard 侧同步豁免。以前那种伪造的成功响应已经去掉了。</string>

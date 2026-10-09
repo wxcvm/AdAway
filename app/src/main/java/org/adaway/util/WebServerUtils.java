@@ -942,6 +942,14 @@ private static String computeSubjectHashOld(Path certFile)
             boolean visibleReply = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                     .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "visible", false);
             appendBlockReplyField(sb, "reply_visible", visibleReply);
+            /* F5：请求去重与重试护栏 —— 同样默认关（用链式读取，避免在这里引入
+               SharedPreferences 的类型导入）。 */
+            appendBlockReplyField(sb, "dedup_enabled",
+                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "dedup", false));
+            appendBlockReplyField(sb, "retry_guard_enabled",
+                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "retry_guard", false));
             sb.append((char) 0x7d).append((char) 0x0a);
             Files.write(dir.resolve("block_config.json"), sb.toString().getBytes("UTF-8"));
             WebServerControl.sendControlCommand("reload_config");
@@ -965,6 +973,42 @@ private static String computeSubjectHashOld(Path certFile)
     public static void setBlockReplyVisible(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "visible", enabled).apply();
+        applyBlockReplyConfig(context);
+    }
+
+    /** F5：请求去重是否开启（默认关）。 */
+    public static boolean isDedupEnabled(Context context) {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "dedup", false);
+    }
+
+    /**
+     * 打开/关闭请求去重（默认关）。
+     *
+     * <p>开启后，同一 (uid, 域) 在 1 秒窗口内重复出现时直接快速拒绝：正常请求的结果
+     * 不变，只是把"同一秒里反复重试"的开销压下去。</p>
+     */
+    public static void setDedupEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "dedup", enabled).apply();
+        applyBlockReplyConfig(context);
+    }
+
+    /** F5：重试护栏是否开启（默认关）。 */
+    public static boolean isRetryGuardEnabled(Context context) {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "retry_guard", false);
+    }
+
+    /**
+     * 打开/关闭重试护栏（默认关）。
+     *
+     * <p>开启后，同一 uid 在 10 秒内对同一域超过 40 次即判定为风暴，随后 30 秒直接快速
+     * 失败并记录日志；冷却结束自动恢复探测。</p>
+     */
+    public static void setRetryGuardEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "retry_guard", enabled).apply();
         applyBlockReplyConfig(context);
     }
 

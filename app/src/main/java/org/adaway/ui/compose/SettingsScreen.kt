@@ -864,6 +864,61 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+                    // ── F5：请求去重 / 重试护栏（各自独立，默认都关）──
+                    Spacer(Modifier.height(8.dp))
+                    var dedupOn by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.isDedupEnabled(context))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_dedup),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_dedup_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = dedupOn,
+                            onCheckedChange = { v ->
+                                dedupOn = v
+                                org.adaway.util.WebServerUtils.setDedupEnabled(context, v)
+                            },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    var guardOn by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.isRetryGuardEnabled(context))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_retry_guard),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_retry_guard_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = guardOn,
+                            onCheckedChange = { v ->
+                                guardOn = v
+                                org.adaway.util.WebServerUtils.setRetryGuardEnabled(context, v)
+                            },
+                        )
+                    }
                     // ── 开机自动启动 ──
                     Spacer(Modifier.height(8.dp))
                     var autostart by remember {
