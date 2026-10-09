@@ -346,6 +346,16 @@ static bool cfg_api = true;
 static bool cfg_tele = true;
 static bool cfg_conf = true;
 static bool cfg_ws = true;
+/*
+ * 「可见型占位」：页面本身、iframe、嵌入对象（Sec-Fetch-Dest = document/iframe/
+ * embed/object）默认**不特殊处理**，继续走原有三级判定 —— 所以关闭时行为与今天
+ * 完全一致。打开后，这类"可见内容"也回占位图，页面不会因为主文档被拦而整页塌陷，
+ * 而是出现一个可见的占位（用户一眼能看出"这里被拦了"，而不是一片空白）。
+ *
+ * 注意：它刻意不新增 LT_* 类型 —— 类型枚举的顺序与 App 设置页的策略表、以及
+ * blocked_* 计数一一对应，凭空插一个类型会让两边错位。这里复用"其它"计数。
+ */
+static bool cfg_visible = false;
 
 /*
  * Which policy type the last reply_blocked_by_type() matched, and how that type
@@ -1931,6 +1941,7 @@ static void load_block_cfg(const char *dir) {
     FILE *f = fopen(path, "r");
     if (!f) {
         cfg_images = true; cfg_scripts = true; cfg_styles = true; cfg_fonts = true;
+    cfg_visible = false;   /* 可见型占位默认关：关闭时行为与历史版本一致 */
         cfg_media = true; cfg_struct = true; cfg_api = true; cfg_tele = true;
         cfg_conf = true; cfg_ws = true;
         return;
@@ -1940,6 +1951,8 @@ static void load_block_cfg(const char *dir) {
     b[n] = 0;
     fclose(f);
     cfg_images = jbool(b, "reply_images", true);
+    /* 可见型占位：默认 false（缺键即关闭），所以老配置文件的语义不变 */
+    cfg_visible = jbool(b, "reply_visible", false);
     cfg_scripts = jbool(b, "reply_scripts", true);
     cfg_styles = jbool(b, "reply_styles", true);
     cfg_fonts = jbool(b, "reply_fonts", true);
@@ -2113,6 +2126,22 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        already tells us the type. */
     struct mg_str *dest = mg_http_get_header(hm, "Sec-Fetch-Dest");
     if (dest != NULL && dest->len > 0) {
+        /*
+         * 可见内容（页面 / iframe / 嵌入对象）：只有用户显式打开 reply_visible
+         * 才在这里接管；否则**不进这个分支**，让它继续走下面的类型判定，行为与
+         * 打开之前一字不差。
+         */
+        if (cfg_visible &&
+            (mg_strcasecmp(*dest, mg_str("document")) == 0 ||
+             mg_strcasecmp(*dest, mg_str("iframe")) == 0 ||
+             mg_strcasecmp(*dest, mg_str("embed")) == 0 ||
+             mg_strcasecmp(*dest, mg_str("object")) == 0)) {
+            s_stats.blocked_other++;
+            s_last_type = LT_STRUCT;    /* 不计入任何单一类型，避免 App 策略表错位 */
+            s_last_mode = RB_REPLY;
+            /* false = 交给调用方回占位图（与"无扩展名的图片请求"同一条路径）。 */
+            return false;
+        }
         if (mg_strcasecmp(*dest, mg_str("image")) == 0) {
         RB_TYPE(LT_IMAGES, cfg_images);
         if (!cfg_images) return deny_quick(&s_stats.blocked_images, c);
