@@ -934,12 +934,38 @@ private static String computeSubjectHashOld(Path certFile)
             appendBlockReplyField(sb, "reply_telemetry", blockReplyEnabled(context, "telemetry"));
             appendBlockReplyField(sb, "reply_config", blockReplyEnabled(context, "config"));
             appendBlockReplyField(sb, "reply_ws_sse", blockReplyEnabled(context, "ws_sse"));
+            /*
+             * 可见型占位（页面 / iframe 被拦时也回占位图，页面不塌陷）：默认**关**。
+             * 这里不能用 blockReplyEnabled()，它的默认值是 true —— 那会让老用户一升级
+             * 就被打开，违背"新功能默认关闭"。
+             */
+            boolean visibleReply = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                    .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "visible", false);
+            appendBlockReplyField(sb, "reply_visible", visibleReply);
             sb.append((char) 0x7d).append((char) 0x0a);
             Files.write(dir.resolve("block_config.json"), sb.toString().getBytes("UTF-8"));
             WebServerControl.sendControlCommand("reload_config");
         } catch (Exception e) {
             Timber.w(e, "Failed to write block_config.json");
         }
+    }
+
+    /** 当前是否开启「可见型占位」（默认关）。 */
+    public static boolean isBlockReplyVisible(Context context) {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "visible", false);
+    }
+
+    /**
+     * 打开/关闭「可见型占位」并立刻生效。
+     *
+     * <p>开启后，页面本身 / iframe / 嵌入对象被拦时也返回占位图：用户能一眼看出
+     * "这里被拦了"，而不是整片空白或破图。默认关闭，关闭时行为与历史版本完全一致。</p>
+     */
+    public static void setBlockReplyVisible(Context context, boolean enabled) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "visible", enabled).apply();
+        applyBlockReplyConfig(context);
     }
 
     private static void appendBlockReplyField(StringBuilder sb, String key, boolean value) {
