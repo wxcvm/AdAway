@@ -341,7 +341,6 @@
     <string name="compose_logs_load_more">加载更早的记录（已显示 %1$d / 共 %2$d）</string>
     <string name="compose_stats_app_rate">每秒请求数</string>
     <string name="compose_stats_app_tls_fail">握手失败 %1$d 次（证书固定/被拒的信号）</string>
-    <string name="compose_stats_app_pin_refused">已改为廉价拒绝（不再做中间人）</string>
     <string name="compose_stats_app_detail_hint">这些数字来自服务端的按应用统计；它具体在请求哪些域，请看查询日志。</string>
     <string name="compose_settings_rule_override">按域覆盖响应</string>
     <string name="compose_settings_rule_override_hint">让指定域名改用你选的状态码回答（403 / 404 / 410 / 503 / 204 / 200），而不是默认的占位。请求仍然算被拦。默认关闭；关闭时连规则文件都不会被读取。</string>
