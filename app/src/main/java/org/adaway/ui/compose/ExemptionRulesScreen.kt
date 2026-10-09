@@ -59,12 +59,19 @@ fun ExemptionRulesScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     var input by remember { mutableStateOf("") }
     var parsed by remember { mutableStateOf<Pair<List<String>, List<String>>?>(null) }
     var rules by remember { mutableStateOf<List<HostListItem>>(emptyList()) }
+    /* 按域覆盖响应（rule_overrides.txt）：输入 + 选中策略 + 现有规则 */
+    var ovInput by remember { mutableStateOf("") }
+    var ovPolicy by remember { mutableStateOf(ExemptionRules.OVERRIDE_POLICIES.first()) }
+    var overrides by remember { mutableStateOf<List<String>>(emptyList()) }
     val allowedType = ListType.ALLOWED.value
 
     fun reload() {
         viewModel.loadRulesByType(allowedType, 500) { items, _ -> rules = items }
     }
-    LaunchedEffect(Unit) { reload() }
+    LaunchedEffect(Unit) {
+        reload()
+        overrides = ExemptionRules.listOverrides(context)
+    }
 
     Scaffold(
         topBar = {
@@ -105,6 +112,66 @@ fun ExemptionRulesScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    /*
+                     * 按域覆盖响应：被拦请求改用指定状态码回答（仍然算被拦）。
+                     * 只写 rule_overrides.txt；服务端要打开「按域覆盖响应」开关才会读它
+                     * （默认关，界面上是该开关的说明，这里不重复解释）。
+                     */
+                    Text(
+                        stringResource(R.string.compose_settings_rule_override),
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_rule_override_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = ovInput,
+                        onValueChange = { ovInput = it },
+                        enabled = enabled,
+                        label = { Text("example.com") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        /* 策略直接用状态码当标签：不需要新增文案，也不会与原生认的名字漂移 */
+                        ExemptionRules.OVERRIDE_POLICIES.forEach { p ->
+                            androidx.compose.material3.FilterChip(
+                                selected = ovPolicy == p,
+                                onClick = { ovPolicy = p },
+                                label = { Text(p) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            ExemptionRules.addOverride(context, ovInput, ovPolicy)
+                            ovInput = ""
+                            overrides = ExemptionRules.listOverrides(context)
+                        },
+                        enabled = enabled && ovInput.isNotBlank(),
+                    ) { Text(stringResource(R.string.compose_exempt_apply)) }
+                    if (overrides.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        overrides.forEach { line ->
+                            Row {
+                                Text(
+                                    line,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = {
+                                    ExemptionRules.removeOverride(context, line)
+                                    overrides = ExemptionRules.listOverrides(context)
+                                }) { Text(stringResource(R.string.compose_settings_allowlist_remove)) }
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = input,

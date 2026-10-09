@@ -139,4 +139,80 @@ object ExemptionRules {
             Timber.w(e, "ExemptionRules: cannot rewrite %s", f.absolutePath)
         }
     }
+
+    // ─────────────────── 按域覆盖响应（rule_overrides.txt） ───────────────────
+
+    /** 覆盖规则文件名，必须与原生 webserver.c 的 RULE_OVERRIDE_FILE 一致。 */
+    const val FILE_OVERRIDES = "rule_overrides.txt"
+
+    /**
+     * 可选的覆盖策略，与原生 `rule_status_from_name()` 认的名字完全一致。
+     *
+     * <p>`placeholder` 不在列表里：它等于"这条不生效"，界面上没有意义。</p>
+     */
+    val OVERRIDE_POLICIES = listOf("403", "404", "410", "503", "204", "200")
+
+    /** 覆盖规则文件（可能不存在）。 */
+    fun overridesFile(context: Context): File =
+        File(org.adaway.util.WebServerUtils.getResourcePath(context).toFile(), FILE_OVERRIDES)
+
+    /** 当前覆盖规则原文（忽略注释与空行）。 */
+    fun listOverrides(context: Context): List<String> {
+        val f = overridesFile(context)
+        if (!f.exists()) return emptyList()
+        return try {
+            f.readLines().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.distinct()
+        } catch (e: Exception) {
+            Timber.w(e, "ExemptionRules: cannot read %s", f.absolutePath)
+            emptyList()
+        }
+    }
+
+    /**
+     * 写入一条覆盖规则：`<域> = <策略>`。
+     *
+     * <p>同一个域已存在时**先删旧行再写新行**（覆盖语义），否则用户改策略会留下两条
+     * 互相矛盾的规则，而原生侧是按文件顺序取第一个命中的。</p>
+     *
+     * @param host   用户输入的域（与豁免共用同一套归一化与"过宽即拒绝"标准）。
+     * @param policy 必须是 [OVERRIDE_POLICIES] 之一。
+     * @return 实际写入的域；空字符串表示没有写入。
+     */
+    fun addOverride(context: Context, host: String, policy: String): String {
+        val domain = normalize(host) ?: return ""
+        if (policy !in OVERRIDE_POLICIES) return ""
+        val f = overridesFile(context)
+        return try {
+            if (!f.parentFile.exists()) f.parentFile.mkdirs()
+            val kept = if (f.exists()) {
+                f.readLines().filter { line ->
+                    val t = line.trim()
+                    if (t.isEmpty() || t.startsWith("#")) return@filter true
+                    /* 保留域不同的行；同一个域的旧行被丢掉，由下面重写 —— 覆盖语义 */
+                    t.substringBefore('=').trim().lowercase() != domain
+                }
+            } else {
+                listOf("# ADBlock 按域覆盖响应规则（<域> = <策略>，原生服务器每次请求都会重读）")
+            }
+            f.writeText(kept.joinToString("\n", postfix = "\n") + "$domain = $policy\n")
+            domain
+        } catch (e: Exception) {
+            Timber.w(e, "ExemptionRules: cannot write %s", f.absolutePath)
+            ""
+        }
+    }
+
+    /** 删除一条覆盖规则（按域匹配，忽略策略部分）。 */
+    fun removeOverride(context: Context, line: String) {
+        val f = overridesFile(context)
+        if (!f.exists()) return
+        val domain = line.substringBefore('=').trim().lowercase()
+        if (domain.isEmpty()) return
+        try {
+            val kept = f.readLines().filter { it.substringBefore('=').trim().lowercase() != domain }
+            f.writeText(kept.joinToString("\n", postfix = "\n"))
+        } catch (e: Exception) {
+            Timber.w(e, "ExemptionRules: cannot rewrite %s", f.absolutePath)
+        }
+    }
 }
