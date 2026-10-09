@@ -1186,27 +1186,32 @@ private fun TrafficTrendCard(
                     n <= 24 -> 4
                     else -> n / 6
                 }
+                /*
+                 * X 轴日期标签。
+                 *
+                 * 之前三个范围共用两种格式（24h 用 HH:mm，其余一律 MM/dd），于是：
+                 *  - "全部/永久"范围只有月/日，跨年时分不清是哪一年；
+                 *  - 时间戳无效的桶（ts<=0）会被格式化成 01/01 甚至 1970，看着像数据错了；
+                 *  - 24h 范围如果桶间隔不是整点，HH:mm 会让人误以为是"当前时间"。
+                 * 现在按范围区分：24h → HH:mm，7d/30d → MM/dd，全部 → yyyy-MM（带年份），
+                 * 并且 ts<=0 的标签直接留空（宁可不画，也不画出假日期）。
+                 */
+                val fmt = when (mode) {
+                    0 -> java.text.SimpleDateFormat("HH:mm", Locale.US)
+                    in 1..2 -> java.text.SimpleDateFormat("MM/dd", Locale.US)
+                    else -> java.text.SimpleDateFormat("yyyy-MM", Locale.US)
+                }
                 for (i in 0 until n step labelStep) {
-                    val ts = data[i].ts * 1000L
-                    val text = if (mode == 0) {
-                        // 24h: HH:mm
-                        java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(ts))
-                    } else {
-                        // 7d/30d/all: MM/dd
-                        java.text.SimpleDateFormat("MM/dd", Locale.US).format(java.util.Date(ts))
-                    }
+                    val ts = data[i].ts
+                    if (ts <= 0L) continue
+                    val text = fmt.format(java.util.Date(ts * 1000L))
                     drawContext.canvas.nativeCanvas.drawText(
                         text, xAt(i), base + 14.dp.toPx(), timePaint,
                     )
                 }
                 // 最后一个点也标注（避免标签缺失）
-                if (n > 1 && (n - 1) % labelStep != 0) {
-                    val ts = data[n - 1].ts * 1000L
-                    val text = if (mode == 0) {
-                        java.text.SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(ts))
-                    } else {
-                        java.text.SimpleDateFormat("MM/dd", Locale.US).format(java.util.Date(ts))
-                    }
+                if (n > 1 && (n - 1) % labelStep != 0 && data[n - 1].ts > 0L) {
+                    val text = fmt.format(java.util.Date(data[n - 1].ts * 1000L))
                     drawContext.canvas.nativeCanvas.drawText(
                         text, xAt(n - 1), base + 14.dp.toPx(), timePaint,
                     )
