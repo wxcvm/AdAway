@@ -1504,7 +1504,14 @@ static int g_https_port = 8443;
 static bool g_bind_all = false;
 static bool g_start_minimized = false;
 static int g_tab = 0;               /* 0 = statistics, 1 = 应用日志, 2 = settings */
-static wchar_t g_status[4096] = L"";
+/*
+ * 打开窗口第一眼就能看到"装的是哪一版、这版有什么"：状态栏（底部常驻一行，见
+ * draw_statusbar）直接以"本版新增"开头，直到被某个操作覆盖。此前这里只显示
+ * "等待首次统计…"，用户根本看不出更新有没有生效、这版加了什么。
+ */
+static wchar_t g_status[4096] =
+    L"v" ADBLOCK_APP_VERSION_W L" 本版新增：证书被拒/请求风暴显示、日志可翻 1000 行、"
+    L"更新改用安装包（不再解压 zip）、设置页新增六项可选开关";
 static HWND s_ctrls[64];
 static int s_ctrl_count = 0;
 static HFONT g_ctl_font = NULL;
