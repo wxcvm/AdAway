@@ -140,6 +140,11 @@ struct app_row {
     long long connections;
     long long requests;
     long long blocked;
+    /* 「请求风暴」与「证书被拒」的服务端字段（本分支 webserver.c 已产出）：
+       tps = 两次统计快照之间的实测速率（字段缺失时为 0），
+       tls_fail = 该应用的 TLS 握手失败次数（证书固定/pinning 的信号）。 */
+    long long tps;
+    long long tls_fail;
 };
 
 /* One entry of the server's query log ring buffer (newest first). */
@@ -413,6 +418,9 @@ static void json_apps(const char *body, struct snapshot *sn) {
         a->connections = json_num(item, "connections");
         a->requests = json_num(item, "requests");
         a->blocked = json_num(item, "blocked");
+        /* 服务端新增字段：旧服务器不产出它们 → json_num 返回 0，行为与之前一致 */
+        a->tps = json_num(item, "tps");
+        a->tls_fail = json_num(item, "tls_fail");
         q = strstr(item, "\"name\":\"");
         if (q != NULL) {
             q += 8;
@@ -2415,6 +2423,12 @@ static void draw_activity_page(HDC hdc) {
             fmt_num(num, 32, sn->apps[i].connections);
             TextOutW(hdc, S(690), S(y), num, (int) wcslen(num));
             fmt_num(num, 32, sn->apps[i].requests);
+            /* 「请求风暴」标记：速率 ≥ 20 次/秒（与 Android 端同一阈值；速率由服务端在
+               两次统计快照之间实测，旧服务器没有该字段时为 0 → 不显示）。
+               num 在相邻几行里都以 32 为界使用，所以拼接前先查长度，绝不溢出。 */
+            if (sn->apps[i].tps >= 20 && wcslen(num) <= 32 - 8) {
+                wcscat(num, L"(风暴)");
+            }
             TextOutW(hdc, S(780), S(y), num, (int) wcslen(num));
             if (sn->apps[i].blocked > 0) SetTextColor(hdc, C_RED);
             fmt_num(num, 32, sn->apps[i].blocked);
