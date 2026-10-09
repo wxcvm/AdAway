@@ -26,7 +26,33 @@ public final class WebServerStats {
      */
     @Nullable
     public static JSONObject getStats() {
-        String request = "GET /internal-stats HTTP/1.1\r\n" +
+        return getJson("/internal-stats");
+    }
+
+    /**
+     * 分页读取服务端的明细日志。
+     *
+     * <p>服务端保留最近 10000 条（QLOG_MAX），offset 从"最新"往回数，所以翻页期间
+     * 新请求到达不会让已翻过的页内容漂移。单页上限 1000 条（服务端会夹紧）。</p>
+     *
+     * @param offset 跳过最新的多少条。
+     * @param limit  本次最多取多少条。
+     * @return {"offset","limit","total","entries":[…]}；不可达时为 null。
+     */
+    @Nullable
+    public static JSONObject getQueryLogPage(int offset, int limit) {
+        int off = Math.max(0, offset);
+        int lim = Math.max(1, limit);
+        return getJson("/internal-qlog?offset=" + off + "&limit=" + lim);
+    }
+
+    /**
+     * 按路径取 JSON：nc 子进程（保留 v4-mapped socket 的真实 uid）优先，OkHttp 兜底。
+     * getStats()/getQueryLogPage() 都走这里，保证两者取数栈完全一致。
+     */
+    @Nullable
+    private static JSONObject getJson(String path) {
+        String request = "GET " + path + " HTTP/1.1\r\n" +
                 "Host: adaway\r\n" +
                 "Connection: close\r\n\r\n";
         // 9 组合：3 种 nc 二进制 x 3 种宿主（::1 / v4-mapped / v4）
@@ -49,7 +75,7 @@ public final class WebServerStats {
             try {
                 return new JSONObject(json);
             } catch (Exception e) {
-                Timber.w(e, "Failed to parse nc stats response from %s", a[2]);
+                Timber.w(e, "Failed to parse nc response from %s (%s)", a[2], path);
             }
         }
         // 终极兜底：OkHttp 双栈直连（与探活同栈，进程存活则必可达）
@@ -58,12 +84,12 @@ public final class WebServerStats {
                     WebServerNet.newLocalClient(),
                     WebServerNet.HTTP_HOSTS,
                     WebServerUtils.getStatsHttpPort(),
-                    "/internal-stats");
+                    path);
             if (body != null) {
                 return new JSONObject(body);
             }
         } catch (Exception e) {
-            Timber.w(e, "Failed to fetch web server stats (OkHttp)");
+            Timber.w(e, "Failed to fetch %s (OkHttp)", path);
         }
         return null;
     }

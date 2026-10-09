@@ -244,6 +244,18 @@ public class WebServerUtils {
     public static org.json.JSONObject getStats() {
         return WebServerStats.getStats();
     }
+
+    /**
+     * 分页读取服务端明细日志（服务端保留最近 10000 条）。
+     *
+     * @param offset 从最新往回跳过的条数。
+     * @param limit  本次最多取多少条（服务端上限 1000）。
+     * @return {"offset","limit","total","entries":[…]}；不可达时为 {@code null}。
+     */
+    @androidx.annotation.Nullable
+    public static org.json.JSONObject getQueryLogPage(int offset, int limit) {
+        return WebServerStats.getQueryLogPage(offset, limit);
+    }
     private static void showToast(Context context, @StringRes int resId) {
         new android.os.Handler(android.os.Looper.getMainLooper())
                 .post(() -> Toast.makeText(context, resId, Toast.LENGTH_LONG).show());

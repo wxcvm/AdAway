@@ -492,6 +492,47 @@ fun refreshServerStats() {
     
 
     /**
+     * 分页读取服务端的明细日志（最多 10000 条）。
+     *
+     * <p>offset 从"最新"往回数，所以翻页期间新请求到达不会让已翻过的内容漂移；
+     * 取数走 /internal-qlog（服务端专为分页新增），与 /internal-stats 同一取数栈。</p>
+     *
+     * @param offset   跳过最新的多少条。
+     * @param limit    本次最多取多少条。
+     * @param onResult 该页条目 + 服务端总数。
+     */
+    fun loadQueryLogPage(offset: Int, limit: Int, onResult: (List<QueryLogEntry>, Int) -> Unit) {
+        viewModelScope.launch {
+            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val json = org.adaway.util.WebServerStats.getQueryLogPage(offset, limit)
+                    val total = json?.optInt("total", 0) ?: 0
+                    val arr = json?.optJSONArray("entries")
+                    val out = ArrayList<QueryLogEntry>(arr?.length() ?: 0)
+                    if (arr != null) {
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            out += QueryLogEntry(
+                                ts = o.optLong("ts", 0),
+                                uid = o.optInt("uid", -1),
+                                action = o.optInt("action", 0),
+                                type = o.optInt("type", -1),
+                                mode = o.optInt("mode", 0),
+                                host = o.optString("host", ""),
+                            )
+                        }
+                    }
+                    out to total
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to load a query log page")
+                    emptyList<QueryLogEntry>() to 0
+                }
+            }
+            onResult(result.first, result.second)
+        }
+    }
+
+    /**
      * Load user-defined rule entries (source_id == 1: manual whitelist,
      * blacklist and redirect rules) on a background thread.
      */
