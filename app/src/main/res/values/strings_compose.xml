@@ -339,6 +339,8 @@
     <string name="compose_logs_export">Export log (CSV)</string>
     <string name="compose_logs_export_failed">Export failed: %1$s</string>
     <string name="compose_logs_load_more">Load older entries (showing %1$d of %2$d)</string>
+    <string name="compose_settings_visible_reply">Visible-content placeholder</string>
+    <string name="compose_settings_visible_reply_hint">Also answer blocked pages and iframes with the placeholder image, so the page shows a visible placeholder instead of collapsing. Off by default; while off, behaviour is unchanged.</string>
     <string name="compose_exempt_effective_note">What an exemption does here: this server stops blocking that host (it answers 204 No Content). In the setup where AdGuard sends its blocked domains to this server, the server has no way to fetch the real content, so to make the host truly usable, exempt it in AdGuard as well. The app warns about the fake 200 it used to return — that is gone now.</string>
     <string name="compose_settings_autostart_battery_button">Battery settings</string>
     <string name="compose_settings_autostart_retry">Start the server again</string>

@@ -836,6 +836,34 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+                    // ── 可见型占位（默认关；关闭时行为与历史版本一致）──
+                    Spacer(Modifier.height(8.dp))
+                    var visibleReply by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.isBlockReplyVisible(context))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_visible_reply),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_visible_reply_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = visibleReply,
+                            onCheckedChange = { v ->
+                                visibleReply = v
+                                org.adaway.util.WebServerUtils.setBlockReplyVisible(context, v)
+                            },
+                        )
+                    }
                     // ── 开机自动启动 ──
                     Spacer(Modifier.height(8.dp))
                     var autostart by remember {
