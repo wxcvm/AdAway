@@ -558,6 +558,7 @@ jobs:
             echo "uploaded to existing release"
           else
             gh release create "$TAG" adblock-webserver-win64.zip --repo "${{ github.repository }}" \
+              --latest=false \
               --title "ADBlock Web Server - Windows 11 (x64)" \
               --notes "ADBlock Web Server for Windows 11 (x64)：托盘常驻 + 开机自启、CA 一键信任、系统代理式拦截（拦截模式填 127.0.0.1 / 0.0.0.0，可配合 AdGuard）、劫持过滤（全流量 + HTTPS MITM + 类 AdGuard 规则）、应用内自动更新（SHA-256 校验 + API 兜底下载）、统计与诊断导出。统计口径修正：管理流量不再计入连接/请求，拦截率与拦截量一致。" || true
           fi
@@ -573,7 +574,7 @@ jobs:
         shell: bash
         run: |
           gh release edit "$TAG" --repo "${{ github.repository }}" --latest=false \
-            && echo "$TAG is no longer the latest release" || true
+            && echo "$TAG is no longer the latest release"
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -685,6 +686,7 @@ jobs:
           cat windows-manifest.json
           gh release view win11-latest --repo "${{ github.repository }}" >/dev/null 2>&1 \
             || gh release create win11-latest --repo "${{ github.repository }}" \
+            --latest=false \
                  --title "Windows 最新版（固定标签）" \
                  --notes "固定标签：windows-manifest.json 每次发布时由 CI 覆盖，应用内更新直接读它，不经过 GitHub API，因此不受 60 次/小时限流影响。"
           gh release upload win11-latest windows-manifest.json --repo "${{ github.repository }}" --clobber
