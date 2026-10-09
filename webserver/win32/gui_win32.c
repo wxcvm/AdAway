@@ -116,7 +116,12 @@ static void utf8_to_wide(const char *src, wchar_t *dst, size_t n) {
 /* Rows kept from /internal-stats. The server sends up to 400 newest entries
    (QLOG_RENDER_MAX); only 11 of them are visible at a time and the card
    scrolls with the mouse wheel. */
-#define GUI_QLOG_MAX 400
+/* 日志窗口保留的行数。/internal-stats 只带最新 400 条，日志窗口现在改从
+   /internal-qlog 取第一页（服务端保留最近 10000 条），所以这里放宽到 1000 行：
+   可翻历史更长，同时 GUI 侧内存仍然有界（1000 × sizeof(qlog_row) ≈ 280 KB）。 */
+#define GUI_QLOG_MAX 1000
+/* /internal-qlog 单页响应的接收缓冲（1000 条约 120 KB，留足余量）。 */
+#define QLOG_PULL_BUF (192 * 1024)
 /* Top blocked hosts shown on the ranking page. The server sends at most 20. */
 #define GUI_TOP_MAX 20
 
@@ -491,8 +496,10 @@ static void json_top(const char *body, struct snapshot *sn) {
     }
 }
 
-static void json_qlog(const char *body, struct snapshot *sn) {
-    const char *p = strstr(body, "\"query_log\":[");
+/* key 参数化：/internal-stats 用 "query_log":[…]（最新 400 条），分页接口
+   /internal-qlog 用 "entries":[…]（offset/limit 由调用方决定）。解析逻辑完全相同。 */
+static void json_qlog_key(const char *body, struct snapshot *sn, const char *key) {
+    const char *p = strstr(body, key);
     sn->qlog_count = 0;
     if (p == NULL) return;
     p = strchr(p, '[');
@@ -534,6 +541,15 @@ static void json_qlog(const char *body, struct snapshot *sn) {
         sn->qlog_count++;
         p = close + 1;
     }
+}
+
+static void json_qlog(const char *body, struct snapshot *sn) {
+    json_qlog_key(body, sn, "\"query_log\":[");
+}
+
+/* 分页接口的响应：{"offset":…,"limit":…,"total":…,"entries":[…]} */
+static void json_qlog_entries(const char *body, struct snapshot *sn) {
+    json_qlog_key(body, sn, "\"entries\":[");
 }
 
 static int http_get(int port, const char *path, char *out, size_t outsz) {
@@ -653,6 +669,19 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     json_apps(buf, sn);
     json_top(buf, sn);
     json_qlog(buf, sn);
+    /*
+     * 日志窗口改走 /internal-qlog：/internal-stats 只带最新 400 条，而服务端保留最近
+     * 10000 条。这里取第一页（offset=0，limit 就是窗口上限），可翻历史更长，且 GUI 侧
+     * 内存始终有界；请求失败（例如旧版服务器没有该接口）就沿用上面那 400 条。
+     */
+    {
+        static char qbuf[QLOG_PULL_BUF];
+        char qpath[96];
+        snprintf(qpath, sizeof(qpath), "/internal-qlog?offset=0&limit=%d", GUI_QLOG_MAX);
+        if (http_get(port, qpath, qbuf, sizeof(qbuf)) == 0) {
+            json_qlog_entries(qbuf, sn);
+        }
+    }
     sn->valid = 1;
 }
 
