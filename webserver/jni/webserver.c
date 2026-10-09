@@ -1239,6 +1239,9 @@ static int buckets_to_json(char *out, size_t out_sz,
 #define APP_STATS_MAX  32   /* distinct uids tracked */
 #define RECENT_TLS_MAX 64   /* distinct (uid, host) pairs remembered */
 #define TLS_HOST_MAX   128
+/* Hosts remembered per app: lets the app list answer "who is hammering what"
+   instead of only offering a global top_blocked ranking. */
+#define APP_HOSTS_MAX  3
 
 struct appstat {
     uid_t    uid;            /* Android app uid (AID_APP_*) */
@@ -1246,6 +1249,21 @@ struct appstat {
     uint64_t requests;       /* HTTP requests seen          */
     uint64_t blocked;        /* requests answered as blocked */
     uint64_t tls_hosts;      /* distinct SNI hosts requested */
+    /* TLS outcome per uid (best effort: attributed when the connection already
+       knew its uid). A client pinning certificates shows tls_fail >> tls_ok -
+       the "ignoring the block page and retrying forever" signal. */
+    uint64_t tls_ok;
+    uint64_t tls_fail;
+    /* Pin detector window state (runtime only, not persisted). */
+    uint64_t tls_fail_win_start;
+    uint32_t tls_fail_win;
+    /* Storm detection: requests at the previous stats snapshot, so the rate
+       between two snapshots needs no timer. Runtime only. */
+    uint64_t req_snap;
+    uint32_t tps;
+    /* Per-app top hosts ("what is this app actually hitting"), runtime only. */
+    char     top_hosts[APP_HOSTS_MAX][64];
+    uint32_t top_host_counts[APP_HOSTS_MAX];
 };
 static struct appstat s_apps[APP_STATS_MAX];
 static int s_app_count = 0;
@@ -1254,7 +1272,7 @@ static int s_app_count = 0;
    zeroed on every webserver restart. Save to <resource_dir>/apps.dat at
    the same cadence as stats.dat (each /internal-stats poll + on exit)
    and load at startup, so the per-app list also survives reboots. */
-#define APPS_MAGIC 0x41505053u  /* "APPS" */
+#define APPS_MAGIC 0x41505033u  /* "APP3": tls_ok/tls_fail + storm fields added */
 struct apps_file {
     uint32_t magic;
     uint32_t count;
@@ -1640,6 +1658,33 @@ static uid_t conn_load_uid(struct mg_connection *c) {
     uid_t uid;
     memcpy(&uid, c->data + UID_OFFSET, sizeof(uid));
     return uid;
+}
+
+/*
+ * Remember which hosts an app is hitting (largest counts kept).
+ *
+ * top_blocked answers "which domains are blocked"; this answers "which app is
+ * generating them", which is what a retry-storm investigation needs: one uid can
+ * produce hundreds of requests per second against a host it will never reach.
+ */
+static void app_note_host(struct appstat *a, const char *host) {
+    if (a == NULL || host == NULL || host[0] == '\0') return;
+    int free_slot = -1, smallest = 0;
+    for (int i = 0; i < APP_HOSTS_MAX; i++) {
+        if (a->top_hosts[i][0] == '\0') { free_slot = i; break; }
+        if (strcmp(a->top_hosts[i], host) == 0) {
+            a->top_host_counts[i]++;
+            return;
+        }
+        if (a->top_host_counts[i] < a->top_host_counts[smallest]) smallest = i;
+    }
+    if (free_slot >= 0) {
+        snprintf(a->top_hosts[free_slot], sizeof(a->top_hosts[free_slot]), "%s", host);
+        a->top_host_counts[free_slot] = 1;
+    } else if (a->top_host_counts[smallest] < 2) {
+        snprintf(a->top_hosts[smallest], sizeof(a->top_hosts[smallest]), "%s", host);
+        a->top_host_counts[smallest] = 1;
+    }
 }
 
 static struct appstat *app_find_or_add(uid_t uid) {
@@ -4511,6 +4556,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             char bh[192];
             req_host_of(hm, bh, sizeof(bh));
             top_host_add(bh);
+            /* Attribute the host to the app too, so a storm can be traced to
+               both the requester and the target. */
+            app_note_host(ba, bh);
         }
         ws_push_broadcast(s);  /* real-time push to WS subscribers */
         return;
