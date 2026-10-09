@@ -4589,6 +4589,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         char bh[192];
         req_host_of(hm, bh, sizeof(bh));
         top_host_add(bh);
+        /* 归因到具体应用：风暴要同时追到"谁"与"打哪里"。
+           这里没有现成的 ba 变量（与另一个拦截站点的结构不同），
+           因此直接取该 uid 的条目，避免引用作用域外的符号。 */
+        app_note_host(app_find_or_add(conn_load_uid(c)), bh);
     }
     ws_push_broadcast(s);  /* real-time push to WS subscribers */
     struct mg_http_serve_opts o = {0};
