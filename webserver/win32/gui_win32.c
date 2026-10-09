@@ -162,6 +162,9 @@ struct snapshot {
     long long total_requests;
     long long total_connections;
     long long tls_handshakes;
+    /* 证书被拒：TLS 握手失败总数。做证书固定（pinning）的客户端会持续失败，
+       这是"证书被拒"最直接的可见信号（服务端自 master 起就产出该字段）。 */
+    long long tls_failures;
     long long sni_certs_issued;
     long long sni_cache_hits;
     long long total_blocked;
@@ -623,6 +626,7 @@ static void snapshot_fetch(int port, struct snapshot *sn) {
     sn->total_requests = json_num(buf, "total_requests");
     sn->total_connections = json_num(buf, "total_connections");
     sn->tls_handshakes = json_num(buf, "tls_handshakes");
+    sn->tls_failures = json_num(buf, "tls_failures");
     sn->sni_certs_issued = json_num(buf, "sni_certs_issued");
     sn->sni_cache_hits = json_num(buf, "sni_cache_hits");
     sn->total_blocked = json_num(buf, "total_blocked");
@@ -2312,6 +2316,18 @@ static void draw_ranking_page(HDC hdc) {
     SelectObject(hdc, hf);
     SetTextColor(hdc, g_pal.text);
     TextOutW(hdc, S(218), S(384), L"拦截类型分布", 6);
+    {
+        /* 「证书被拒」：握手失败/成功总数。这里用全局 g_sn —— 本区块没有局部快照
+           指针（写 sn 会编译不过）。失败数远大于成功数，通常意味着客户端在做
+           证书固定（pinning）。 */
+        const struct snapshot *tsn = g_sn;
+        wchar_t tls_line[160];
+        swprintf(tls_line, 160,
+                 L"证书被拒（握手失败）%lld 次 · 握手成功 %lld 次",
+                 tsn ? tsn->tls_failures : 0LL,
+                 tsn ? tsn->tls_handshakes : 0LL);
+        TextOutW(hdc, S(430), S(384), tls_line, (int) wcslen(tls_line));
+    }
     SelectObject(hdc, lf);
     SetTextColor(hdc, g_pal.muted);
     {
