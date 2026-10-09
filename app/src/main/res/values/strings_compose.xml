@@ -338,6 +338,7 @@
     <!-- Request log export -->
     <string name="compose_logs_export">Export log (CSV)</string>
     <string name="compose_logs_export_failed">Export failed: %1$s</string>
+    <string name="compose_logs_load_more">Load older entries (showing %1$d of %2$d)</string>
     <string name="compose_settings_autostart_battery_button">Battery settings</string>
     <string name="compose_settings_autostart_retry">Start the server again</string>
     <string name="compose_settings_autostart_retry_toast">Queued again - it starts within a few seconds</string>

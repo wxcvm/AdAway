@@ -30,6 +30,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,6 +68,17 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     val entries = stats?.queryLog.orEmpty()
     var filter by remember { mutableIntStateOf(FILTER_ALL) }
     val shown = if (filter == FILTER_ALL) entries else entries.filter { it.action == filter }
+
+    /*
+     * /internal-stats 只带最新 400 条（保持状态体积不变）；更早的明细由服务端的
+     * /internal-qlog 分页取回（服务端保留最近 10000 条）。offset 从"最新"往回数，
+     * 因此翻页期间新请求到达不会让已翻过的内容漂移；起点取 entries.size，既不重复
+     * 也已经把最新那 400 条算进去了。
+     */
+    var older by remember { mutableStateOf<List<QueryLogEntry>>(emptyList()) }
+    var olderTotal by remember { mutableIntStateOf(0) }
+    var loadingOlder by remember { mutableStateOf(false) }
+    val shownOlder = if (filter == FILTER_ALL) older else older.filter { it.action == filter }
 
     Scaffold(
         topBar = {
@@ -152,6 +164,41 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 ) {
                     items(shown) { entry -> QueryLogRow(entry) }
+                    items(shownOlder) { entry -> QueryLogRow(entry) }
+                    /* 只在这里按需取更早的页：本地列表再长，也不会一次性把 10000 条
+                       全塞进状态里（内存与 compose 重组成本都可控）。 */
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            androidx.compose.material3.TextButton(
+                                enabled = !loadingOlder,
+                                onClick = {
+                                    loadingOlder = true
+                                    viewModel.loadQueryLogPage(
+                                        offset = entries.size + older.size,
+                                        limit = 300,
+                                    ) { page, total ->
+                                        older = older + page
+                                        olderTotal = total
+                                        loadingOlder = false
+                                    }
+                                },
+                            ) {
+                                Text(
+                                    stringResource(
+                                        R.string.compose_logs_load_more,
+                                        entries.size + older.size,
+                                        if (olderTotal > 0) olderTotal else entries.size,
+                                    ),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

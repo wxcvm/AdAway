@@ -338,6 +338,7 @@
     <!-- 请求日志导出 -->
     <string name="compose_logs_export">导出日志（CSV）</string>
     <string name="compose_logs_export_failed">导出失败：%1$s</string>
+    <string name="compose_logs_load_more">加载更早的记录（已显示 %1$d / 共 %2$d）</string>
     <string name="compose_settings_autostart_battery_button">电池优化设置</string>
     <string name="compose_settings_autostart_retry">重新启动服务器</string>
     <string name="compose_settings_autostart_retry_toast">已重新排队，几秒后自动启动</string>
