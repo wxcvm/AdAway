@@ -145,6 +145,9 @@ struct app_row {
        tls_fail = 该应用的 TLS 握手失败次数（证书固定/pinning 的信号）。 */
     long long tps;
     long long tls_fail;
+    /* 「已改为廉价拒绝」：固定证书策略命中后，服务端对该应用只回 403、不再做中间人
+       （拦截效果不变，但省掉每次重试的握手与新签证书）。 */
+    int pin_refused;
 };
 
 /* One entry of the server's query log ring buffer (newest first). */
@@ -421,6 +424,8 @@ static void json_apps(const char *body, struct snapshot *sn) {
         /* 服务端新增字段：旧服务器不产出它们 → json_num 返回 0，行为与之前一致 */
         a->tps = json_num(item, "tps");
         a->tls_fail = json_num(item, "tls_fail");
+        /* 布尔字段：没有 json_bool，直接查字面量（旧服务器不产出 → 0） */
+        a->pin_refused = strstr(item, "\"pin_refused\":true") != NULL ? 1 : 0;
         q = strstr(item, "\"name\":\"");
         if (q != NULL) {
             q += 8;
@@ -2428,6 +2433,11 @@ static void draw_activity_page(HDC hdc) {
                num 在相邻几行里都以 32 为界使用，所以拼接前先查长度，绝不溢出。 */
             if (sn->apps[i].tps >= 20 && wcslen(num) <= 32 - 8) {
                 wcscat(num, L"(风暴)");
+            }
+            /* 「已改为廉价拒绝」：固定证书策略命中（用户在设置里开了该策略才可能出现）。
+               两次拼接都先查长度，32 字节的 num 绝不溢出。 */
+            if (sn->apps[i].pin_refused && wcslen(num) <= 32 - 12) {
+                wcscat(num, L"(仅拒绝)");
             }
             TextOutW(hdc, S(780), S(y), num, (int) wcslen(num));
             if (sn->apps[i].blocked > 0) SetTextColor(hdc, C_RED);
