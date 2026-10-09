@@ -1687,6 +1687,161 @@ static void app_note_host(struct appstat *a, const char *host) {
     }
 }
 
+/* ==================== 固定证书（pinning）策略 ====================
+   来源：master 提交 178f02e。把"检测到证书固定后怎么办"交给用户决定：
+   策略文件 <resources>/pin_policy.txt，mode=off（默认，保持原行为）或 mode=deny
+   （命中后对该 uid 的 CONNECT 直接 403 —— 拦截结果不变，但每次重试只花一行 HTTP，
+   而不是一次 TLS 握手 + 一张新签证书）。检测复用已有的 per-uid 握手失败计数，
+   不新增任何 /proc 扫描。 */
+#define PIN_FAIL_WINDOW_MS 10000u    /* 检测窗口 */
+#define PIN_FAIL_THRESHOLD 5u        /* 窗口内失败多少次判定为固定证书 */
+#define PIN_BYPASS_MS      600000u   /* 拒绝 10 分钟，然后重新探测 */
+#define PIN_POLICY_FILE    "pin_policy.txt"
+#define PIN_MODE_MAX       8
+
+static char s_pin_mode[PIN_MODE_MAX] = "off";
+static uint64_t s_pin_mode_loaded_ms;
+static struct { uid_t uid; uint64_t until_ms; } s_pin_bypass[APP_STATS_MAX];
+static int s_pin_bypass_count;
+
+/* 资源目录，专供 TLS 失败钩子使用：事件处理里不能靠 c->fn_data 拿它 ——
+   转发出去的上行连接把 fn_data 存的是代理状态，强转成 settings* 读
+   resource_dir 是未定义行为。 */
+static char s_pin_resource_dir[PATH_MAX];
+
+/* 前置声明：本块写在 app_find_or_add 之前（域名豁免不需要它，pin 检测需要）。 */
+static struct appstat *app_find_or_add(uid_t uid);
+
+/* 策略文件最多每秒重读一次（它只在用户在设置里切换开关时才变）。 */
+static void pin_policy_reload(const char *resource_dir) {
+    uint64_t now = mg_millis();
+    if (now - s_pin_mode_loaded_ms < 1000u && s_pin_mode_loaded_ms != 0) return;
+    s_pin_mode_loaded_ms = now;
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/%s", resource_dir, PIN_POLICY_FILE);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return;
+    char line[64];
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char *val = eq + 1;
+        while (*val == ' ' || *val == '\t') val++;
+        char *end = val + strlen(val);
+        while (end > val && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ')) *--end = '\0';
+        if (strcmp(line, "mode") == 0) {
+            snprintf(s_pin_mode, sizeof(s_pin_mode), "%s",
+                     strcmp(val, "deny") == 0 ? "deny" : "off");
+        }
+    }
+    fclose(fp);
+}
+
+static bool pin_mode_deny(void) { return strcmp(s_pin_mode, "deny") == 0; }
+
+/* 这个 uid 当前是否处于"不做中间人、直接拒绝"状态？ */
+static bool pin_uid_bypassed(uid_t uid) {
+    if (uid == (uid_t)-1) return false;
+    uint64_t now = mg_millis();
+    for (int i = 0; i < s_pin_bypass_count; i++) {
+        if (s_pin_bypass[i].uid == uid && s_pin_bypass[i].until_ms > now) return true;
+    }
+    return false;
+}
+
+/* 每次 TLS 握手失败都会走到这里：按 uid 记数，窗口内累积到阈值即视为固定证书。 */
+static void pin_note_tls_failure(uid_t uid, const char *resource_dir) {
+    if (uid == (uid_t)-1 || uid == 0) return;
+    pin_policy_reload(resource_dir);
+    if (!pin_mode_deny()) return;
+    if (pin_uid_bypassed(uid)) return;
+    struct appstat *a = app_find_or_add(uid);
+    if (a == NULL) return;
+    uint64_t now = mg_millis();
+    if (now - a->tls_fail_win_start > PIN_FAIL_WINDOW_MS) {
+        a->tls_fail_win_start = now;
+        a->tls_fail_win = 0;
+    }
+    a->tls_fail_win++;
+    if (a->tls_fail_win < PIN_FAIL_THRESHOLD) return;
+    if (s_pin_bypass_count < APP_STATS_MAX) {
+        s_pin_bypass[s_pin_bypass_count].uid = uid;
+        s_pin_bypass[s_pin_bypass_count].until_ms = now + PIN_BYPASS_MS;
+        s_pin_bypass_count++;
+    }
+    LOG_WARN("pin: uid %d fails TLS handshakes (%u in %us) - refusing its "
+             "CONNECT requests without interception for %us (policy=%s)",
+             (int)uid, (unsigned)a->tls_fail_win, PIN_FAIL_WINDOW_MS / 1000u,
+             PIN_BYPASS_MS / 1000u, s_pin_mode);
+}
+
+/* ==================== 按域名的选择性放行 ====================
+   来源：master 提交 52762c7。<resources>/domain_allowlist.txt，一行一条，
+   接受多种语法（照抄用户手里的规则即可）：example.com / .example.com /
+   *.example.com / @@||example.com^ / ||example.com^ / 0.0.0.0 example.com /
+   :: example.com / https://example.com/path / example.com:8443 / # 与 ! 注释。
+   匹配大小写不敏感，语义是"该域本身及其所有子域"；过宽的规则（长度<4、不含点、
+   含 *）一律拒绝，否则一行 "com" 等于放行半个互联网。 */
+static void domain_rule_normalize(const char *in, char *out, size_t outsz) {
+    size_t o = 0;
+    const char *p = in;
+    if (outsz == 0) return;
+    out[0] = '\0';
+    while (*p == '@' || *p == '|' || *p == ' ' || *p == '\t') p++;
+    {
+        const char *sp = strpbrk(p, " \t");
+        if (sp != NULL) {
+            const char *q = sp;
+            while (*q == ' ' || *q == '\t') q++;
+            if (*q != '\0') p = q;
+        }
+    }
+    {
+        const char *scheme = strstr(p, "://");
+        if (scheme != NULL) p = scheme + 3;
+    }
+    while (*p == '*' || *p == '.') p++;
+    while (*p != '\0' && *p != '/' && *p != '?' && *p != '#' && *p != ':' &&
+           *p != '^' && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') {
+        char ch = *p;
+        if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+        if (o + 1 < outsz) out[o++] = ch;
+        p++;
+    }
+    out[o] = '\0';
+}
+
+static bool domain_is_allowed(const char *host, const char *resource_dir) {
+    if (host == NULL || host[0] == '\0' || resource_dir == NULL) return false;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/domain_allowlist.txt", resource_dir);
+    FILE *f = fopen(path, "r");
+    if (f == NULL) return false;
+    char line[256], rule[192];
+    bool found = false;
+    size_t hl = strlen(host);
+    while (!found && fgets(line, sizeof(line), f) != NULL) {
+        size_t n = strlen(line);
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = '\0';
+        char *s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s == '\0' || *s == '#' || *s == '!') continue;
+        domain_rule_normalize(s, rule, sizeof(rule));
+        size_t rl = strlen(rule);
+        if (rl < 4 || strchr(rule, '.') == NULL || strchr(rule, '*') != NULL) continue;
+        if (rl == hl && strcasecmp(rule, host) == 0) {
+            found = true;
+        } else if (rl < hl && host[hl - rl - 1] == '.' &&
+                   strcasecmp(rule, host + (hl - rl)) == 0) {
+            found = true;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
 static struct appstat *app_find_or_add(uid_t uid) {
     if (uid == (uid_t)-1 || uid == 0) return NULL;  /* unknown/root */
     for (int i = 0; i < s_app_count; i++)
@@ -3055,7 +3210,11 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
                 s_apps[i].top_hosts[h], (unsigned)s_apps[i].top_host_counts[h]);
             if (hn > 0) off += hn;
         }
-        n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off, "]}");
+        /* pin_refused：该 uid 是否正处于"不再中间人、直接 403"状态
+           （只有用户在设置里开了该策略时才可能为 true）。 */
+        n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
+                     "],\"pin_refused\":%s}",
+                     pin_uid_bypassed(s_apps[i].uid) ? "true" : "false");
         if (n > 0) off += n;
     }
     char tls_json[2048] = "";
@@ -4012,6 +4171,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             if (fail_uid != (uid_t) -1) {
                 struct appstat *fa = app_find_or_add(fail_uid);
                 if (fa) fa->tls_fail++;
+                /* 固定证书策略：够了就对该 uid 改为"不做中间人、直接 403" */
+                pin_note_tls_failure(fail_uid, s_pin_resource_dir);
             }
         }
         return;
@@ -4279,6 +4440,34 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                 }
             }
         }
+    }
+
+    /*
+     * 按域名选择性放行（用户可编辑 <resources>/domain_allowlist.txt）：命中即不再拦截，
+     * 并记一条 ALLOW。它是 uid 放行的细粒度对应物 —— 整个应用放行往往过头。
+     */
+    if (req_uid != (uid_t)-1) {
+        char allow_host[192];
+        req_host_of(hm, allow_host, sizeof(allow_host));
+        if (domain_is_allowed(allow_host, s->resource_dir)) {
+            qlog_add(req_uid, QLOG_ALLOW, hm);
+            mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
+                                  "Cache-Control: no-store\r\n", "ok");
+            return;
+        }
+    }
+
+    /*
+     * 固定证书策略（用户可决定，见 pin_policy_reload）：检测到某应用在做证书固定、
+     * 且用户选了 mode=deny 时，直接 403 拒绝它的 CONNECT，不再完成握手、不再签发证书
+     * —— 拦截结果不变，只是每次重试便宜得多。
+     */
+    if (pin_mode_deny() && pin_uid_bypassed(chk_uid) && hm->method.len == 7 &&
+        memcmp(hm->method.buf, "CONNECT", 7) == 0) {
+        LOG_WARN("pin: refusing CONNECT from uid %d without interception", (int)chk_uid);
+        mg_http_reply(c, 403, "Content-Type: text/plain\r\nCache-Control: no-store\r\n",
+                      "pinned certificate: refused without interception\n");
+        return;
     }
 
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
@@ -4788,6 +4977,9 @@ static bool setup_resources_dir(struct settings *s, const char *rpath) {
     LOG_INFO("localhost leaf cert issued OK");
     snprintf(s->resource_dir, sizeof(s->resource_dir), "%s", rpath);
     snprintf(s->test_path,    sizeof(s->test_path),    "%s/test.html", rpath);
+    /* 固定证书策略的 TLS 失败钩子需要资源目录，而事件处理里拿不到 settings* ——
+       在这里记一份（来源：master 178f02e）。 */
+    snprintf(s_pin_resource_dir, sizeof(s_pin_resource_dir), "%s", rpath);
     s->block_image_count = scan_block_images(rpath, s->block_images);
     s->init = true;
     return true;
