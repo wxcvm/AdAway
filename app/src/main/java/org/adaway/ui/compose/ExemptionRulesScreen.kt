@@ -98,6 +98,13 @@ fun ExemptionRulesScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
+                    /* 说清"解除过滤"的真实效果：只停在本机这一层，AdGuard 那层要另行豁免 */
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.compose_exempt_effective_note),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = input,

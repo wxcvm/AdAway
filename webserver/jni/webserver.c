@@ -3793,16 +3793,22 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         req_host_of(hm, allow_host, sizeof(allow_host));
         if (domain_is_allowed(allow_host, s->resource_dir)) {
             qlog_add(req_uid, QLOG_ALLOW, hm);
-            mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
-                                  "Cache-Control: no-store\r\n", "ok");
+            /*
+             * 204 而不是伪造的 200 "ok"：在"AdGuard 把拦截 IP 指向本服务器"的部署里，
+             * 服务器拿不到真实内容，回一个 200 空正文等于对客户端撒谎（它以为成功、
+             * 拿到空内容，行为不可预期）。204 诚实表示"我这里没有内容"，客户端会按
+             * 正常的"无内容"处理；要让该域真正可用，需在 AdGuard 侧同步豁免
+             * （应用内已有该提示）。
+             */
+            mg_http_reply(c, 204, "Cache-Control: no-store\r\n", "");
             return;
         }
     }
 
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
         qlog_add(req_uid, QLOG_ALLOW, hm);
-        mg_http_reply(c, 200, "Content-Type: text/plain\r\n"
-                              "Cache-Control: no-store\r\n", "ok");
+        /* 同上：放行不等于"有内容可给"，用 204 而不是伪造的 200。 */
+        mg_http_reply(c, 204, "Cache-Control: no-store\r\n", "");
         return;
     }
 
