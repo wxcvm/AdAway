@@ -144,6 +144,53 @@ fun AppDetailScreen(viewModel: StatsViewModel, uid: Int, onBack: () -> Unit) {
                 }
             }
 
+            /*
+             * 它命中最多的域（原生侧 app_note_host 记录，最多 3 个）——
+             * 这才是"这个应用到底在打哪里"，也是判断"是不是在重试同一个域"的依据。
+             */
+            if (app.hosts.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            stringResource(R.string.compose_stats_app_hosts),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        app.hosts.forEach { (host, count) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    host,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    count.toString(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                        /* 服务端实测速率（两次统计快照之间），不是界面自己估算的 */
+                        if (app.tps > 0) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                stringResource(R.string.compose_stats_app_storm, app.tps),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+
             /* 只在有话说的时候才显示：避免把"0 次"这种噪音塞给用户 */
             if (app.tlsFail > 0L || app.pinRefused || allowed) {
                 Spacer(Modifier.height(10.dp))
