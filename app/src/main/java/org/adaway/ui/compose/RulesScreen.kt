@@ -106,7 +106,11 @@ private data class RuleTab(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RulesScreen(viewModel: StatsViewModel, onOpenExempt: () -> Unit = {}) {
+fun RulesScreen(
+    viewModel: StatsViewModel,
+    onOpenExempt: () -> Unit = {},
+    onOpenOverrides: () -> Unit = {},
+) {
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
@@ -255,6 +259,24 @@ fun RulesScreen(viewModel: StatsViewModel, onOpenExempt: () -> Unit = {}) {
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = onOpenExempt) {
+                    Text(stringResource(R.string.compose_exempt_open))
+                }
+            }
+
+            // 二级入口：按域覆盖响应（仍然拦截，只是改用指定状态码回答）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.compose_settings_rule_override),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onOpenOverrides) {
                     Text(stringResource(R.string.compose_exempt_open))
                 }
             }
