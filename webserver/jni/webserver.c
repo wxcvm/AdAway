@@ -363,6 +363,7 @@ static bool cfg_dedup = false;
 static bool cfg_guard = false;
 static bool cfg_cache = false;
 static bool cfg_breaker = false;
+static bool cfg_rule_override = false;
 
 /*
  * Which policy type the last reply_blocked_by_type() matched, and how that type
@@ -1953,6 +1954,7 @@ static void load_block_cfg(const char *dir) {
     cfg_guard = false;     /* F5 重试护栏默认关 */
     cfg_cache = false;     /* F5 决策缓存默认关 */
     cfg_breaker = false;   /* F5 按域熔断默认关 */
+    cfg_rule_override = false;   /* F4 按域覆盖默认关（关闭时连文件都不读） */
         cfg_media = true; cfg_struct = true; cfg_api = true; cfg_tele = true;
         cfg_conf = true; cfg_ws = true;
         return;
@@ -1969,6 +1971,7 @@ static void load_block_cfg(const char *dir) {
     cfg_guard = jbool(b, "retry_guard_enabled", false);
     cfg_cache = jbool(b, "cache_reuse_enabled", false);
     cfg_breaker = jbool(b, "circuit_breaker_enabled", false);
+    cfg_rule_override = jbool(b, "rule_override_enabled", false);
     cfg_scripts = jbool(b, "reply_scripts", true);
     cfg_styles = jbool(b, "reply_styles", true);
     cfg_fonts = jbool(b, "reply_fonts", true);
@@ -2138,6 +2141,104 @@ static bool f5_breaker_tripped(uint32_t hh, uint64_t now) {
     return false;
 }
 
+/* ============ F4 续：按域的响应覆盖 rule_override（默认关） ============
+   <resources>/rule_overrides.txt，一行一条：
+
+       <域规则> = <策略>
+
+   域规则接受 domain_allowlist.txt 的全部写法（直接复用 domain_rule_normalize，
+   因此 @@||d^ / hosts 行 / 完整 URL / 通配 / 端口 / 注释 都能照抄）。
+   策略 ∈ { placeholder, 204, 403, 404, 410, 503 }：
+     placeholder → 保持默认（交给占位图逻辑，等于这一条不生效）
+     其它        → 被拦请求改用该状态码回答
+
+   覆盖只决定"被拦请求用哪种方式回"，**不改变"是否被拦"**：仍然记 blocked_*、仍然写
+   查询日志（type/mode 都在日志里，所以不用额外加计数）。文件不存在 = 没有任何覆盖 =
+   行为与之前完全一致；cfg_rule_override 默认 false，关闭时连文件都不会去读。
+   ====================================================================== */
+#define RULE_OVERRIDE_FILE  "rule_overrides.txt"
+#define RULE_OVERRIDE_MAX   64
+#define RULE_RULE_MAX       128
+
+/* cfg_rule_override 的声明在文件前部的 cfg_* 区（配置读取函数要用到它）。 */
+static struct { char rule[RULE_RULE_MAX]; int status; } s_overrides[RULE_OVERRIDE_MAX];
+static int s_override_count;
+static uint64_t s_override_loaded_ms;
+
+/* 策略名 → 状态码；0 表示"没听懂，忽略这一行" */
+static int rule_status_from_name(const char *v, size_t n) {
+    struct { const char *n; int st; } tab[] = {
+        {"placeholder", 0}, {"204", 204}, {"403", 403}, {"404", 404},
+        {"410", 410}, {"503", 503}, {"200", 200},
+    };
+    for (size_t i = 0; i < sizeof(tab) / sizeof(tab[0]); i++) {
+        if (strlen(tab[i].n) == n && strncasecmp(v, tab[i].n, n) == 0) return tab[i].st;
+    }
+    return -1;   /* 认不出来 → 忽略该行（不静默变成 0） */
+}
+
+/* 最多每秒重读一次（文件和 pin_policy.txt 一样只在用户改规则时才变） */
+static void rule_overrides_reload(const char *resource_dir) {
+    uint64_t now = mg_millis();
+    if (now - s_override_loaded_ms < 1000u && s_override_loaded_ms != 0) return;
+    s_override_loaded_ms = now;
+    s_override_count = 0;
+    if (!resource_dir || !resource_dir[0]) return;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/%s", resource_dir, RULE_OVERRIDE_FILE);
+    FILE *fp = fopen(path, "r");
+    if (!fp) return;
+    char line[256];
+    while (s_override_count < RULE_OVERRIDE_MAX && fgets(line, sizeof(line), fp) != NULL) {
+        char *s = line;
+        while (*s == ' ' || *s == '\t') s++;
+        if (*s == '\0' || *s == '#' || *s == '!') continue;
+        char *eq = strchr(s, '=');
+        if (eq == NULL) continue;
+        *eq = '\0';
+        char *val = eq + 1;
+        while (*val == ' ' || *val == '\t') val++;
+        size_t vn = strlen(val);
+        while (vn > 0 && (val[vn - 1] == '\n' || val[vn - 1] == '\r' || val[vn - 1] == ' ')) val[--vn] = '\0';
+        int st = rule_status_from_name(val, vn);
+        if (st < 0) continue;
+        char norm[RULE_RULE_MAX];
+        domain_rule_normalize(s, norm, sizeof(norm));
+        size_t rl = strlen(norm);
+        /* 与豁免同一套宽严标准：过宽的规则（com / * / 太短）一律忽略 */
+        if (rl < 4 || strchr(norm, '.') == NULL || strchr(norm, '*') != NULL) continue;
+        snprintf(s_overrides[s_override_count].rule, RULE_RULE_MAX, "%s", norm);
+        s_overrides[s_override_count].status = st;
+        s_override_count++;
+    }
+    fclose(fp);
+}
+
+/* 命中的覆盖状态码；0 = 无覆盖（或该规则是 placeholder）。 */
+static int rule_override_status(const char *host, const char *resource_dir) {
+    if (host == NULL || host[0] == '\0' || !cfg_rule_override) return 0;
+    rule_overrides_reload(resource_dir);
+    size_t hl = strlen(host);
+    for (int i = 0; i < s_override_count; i++) {
+        if (s_overrides[i].status == 0) continue;
+        const char *r = s_overrides[i].rule;
+        size_t rl = strlen(r);
+        if (rl == hl && strcasecmp(r, host) == 0) return s_overrides[i].status;
+        if (rl < hl && host[hl - rl - 1] == '.' && strcasecmp(r, host + (hl - rl)) == 0)
+            return s_overrides[i].status;
+    }
+    return 0;
+}
+
+/* 按覆盖策略回答：计数仍然算进 blocked_*（"被拦"这个结论不变）。 */
+static bool deny_status(uint64_t *counter, struct mg_connection *co, int status) {
+    (*counter)++;
+    const char *body = (status == 204) ? "" : "blocked by rule override\n";
+    mg_http_reply(co, status, "Content-Type: text/plain\r\nCache-Control: no-store\r\n",
+                  "%s", body);
+    return true;
+}
+
 static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
     struct mg_str u = hm->uri;
     /* 进入时先记下上一次的决策类型（下一行就会被清成 -1），供 cache_reuse 配对使用。
@@ -2153,13 +2254,26 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
      * （连 req_host_of 的额外调用都不会发生）。deny_quick 自己会累加计数器，
      * 所以这里不再手动加，避免重复计数。
      */
-    if (cfg_dedup || cfg_guard || cfg_cache || cfg_breaker) {
+    if (cfg_dedup || cfg_guard || cfg_cache || cfg_breaker || cfg_rule_override) {
         char f5_host[192];
         uid_t f5_uid = conn_load_uid(c);
         uint64_t f5_now = mg_millis();
         uint32_t f5_hh;
         req_host_of(hm, f5_host, sizeof(f5_host));
         f5_hh = f5_hash(f5_host);
+        /*
+         * rule_override：用户在 rule_overrides.txt 里为这个域指定了回答方式 →
+         * 直接用该状态码回（仍然算被拦）。placeholder 的策略在解析阶段就被过滤成 0，
+         * 所以这里命中的一定是明确的状态码。
+         */
+        if (cfg_rule_override) {
+            int ov = rule_override_status(f5_host, s_pin_resource_dir);
+            if (ov > 0) {
+                s_last_type = LT_STRUCT;
+                s_last_mode = RB_DENY;
+                return deny_status(&s_stats.blocked_other, c, ov);
+            }
+        }
         if (cfg_breaker && f5_breaker_tripped(f5_hh, f5_now)) {
             s_f5_breaker_hits++;
             s_last_type = LT_STRUCT;
