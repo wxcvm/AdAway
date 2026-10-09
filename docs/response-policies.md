@@ -53,7 +53,7 @@
 | `image_placeholder` | 返回占位图 | ✅（既有：按类型回内置占位图） |
 | `compatibility` | 按类型自适应（默认） | ✅ 默认档 |
 | **`visible_image_placeholder`** | 对"可见内容"请求也回占位图（而不是让页面塌陷） | ✅ 已实现（`reply_visible`，**默认关**；见 §4.1） |
-| **`rules` / `rule_override`** | 用户按域/类型覆盖策略 | ❌ **未实现** |
+| **`rules` / `rule_override`** | 用户按域/类型覆盖策略 | 🟡 服务端已实现（`rule_override_enabled` + `rule_overrides.txt`，默认关）；**App 内编辑界面未做** |
 | **`request_dedup`** | 短窗口内相同请求只处理一次 | ✅ 已实现（`dedup_enabled`，默认关；1s 窗口） |
 | **`retry_guard`** | 同上请求高频重试时降级应答 | ✅ 已实现（`retry_guard_enabled`，默认关；10s/40 次 → 冷却 30s） |
 | **`cache_reuse`** | 同域同类型的响应短期复用 | ✅ 已实现（`cache_reuse_enabled`，默认关；2s TTL，复用判定而非响应体） |
@@ -121,7 +121,8 @@ Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配�
 | 文件 | 作用 | 缺省行为 |
 |---|---|---|
 | `pin_policy.txt` | `mode=off｜deny` | 视为 `off` |
-| `block_config.json` | 每类型的 `reply_*` + 四个降载开关（`reply_visible`、`dedup_enabled`、`retry_guard_enabled`、`cache_reuse_enabled`、`circuit_breaker_enabled`） | 全部按"关闭/默认档"处理 |
+| `rule_overrides.txt` | 按域覆盖响应：`<域规则> = <策略>`，策略 ∈ `placeholder｜204｜403｜404｜410｜503｜200`；域规则与豁免同语法、同"过宽即忽略"标准；认不出的策略名忽略该行 | 文件不存在 = 无覆盖 |
+| `block_config.json` | 每类型的 `reply_*` + 五个降载/覆盖开关（`reply_visible`、`dedup_enabled`、`retry_guard_enabled`、`cache_reuse_enabled`、`circuit_breaker_enabled`、`rule_override_enabled`） | 全部按"关闭/默认档"处理 |
 | `domain_allowlist.txt` | 按域名豁免（多语法） | 不存在 = 无豁免 |
 | `allowlist.txt` | 按 uid 放行（每行一个十进制 uid） | 不存在 = 无放行 |
 | 拦截策略配置 | 每类型的 `reply_*` / `mode_*` | 使用内置默认档 |
