@@ -957,6 +957,10 @@ private static String computeSubjectHashOld(Path certFile)
             appendBlockReplyField(sb, "circuit_breaker_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                             .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "circuit_breaker", false));
+            /* F4 续：按域覆盖响应策略 —— 默认关（关闭时服务端连 rule_overrides.txt 都不读） */
+            appendBlockReplyField(sb, "rule_override_enabled",
+                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "rule_override", false));
             sb.append((char) 0x7d).append((char) 0x0a);
             Files.write(dir.resolve("block_config.json"), sb.toString().getBytes("UTF-8"));
             WebServerControl.sendControlCommand("reload_config");
@@ -1047,6 +1051,25 @@ private static String computeSubjectHashOld(Path certFile)
     public static void setCircuitBreakerEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                 .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "circuit_breaker", enabled).apply();
+        applyBlockReplyConfig(context);
+    }
+
+    /** F4：按域覆盖响应策略是否开启（默认关）。 */
+    public static boolean isRuleOverrideEnabled(Context context) {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "rule_override", false);
+    }
+
+    /**
+     * 打开/关闭按域覆盖响应策略（默认关）。
+     *
+     * <p>开启后，服务端会读 &lt;resources&gt;/rule_overrides.txt（一行一条
+     * {@code <域> = <状态码>}），命中的域改用指定状态码回答 —— 仍然是"被拦"，
+     * 只是回法由用户决定。旧的 unclassified 请求不受影响。</p>
+     */
+    public static void setRuleOverrideEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "rule_override", enabled).apply();
         applyBlockReplyConfig(context);
     }
 

@@ -339,6 +339,8 @@
     <string name="compose_logs_export">导出日志（CSV）</string>
     <string name="compose_logs_export_failed">导出失败：%1$s</string>
     <string name="compose_logs_load_more">加载更早的记录（已显示 %1$d / 共 %2$d）</string>
+    <string name="compose_settings_rule_override">按域覆盖响应</string>
+    <string name="compose_settings_rule_override_hint">让指定域名改用你选的状态码回答（403 / 404 / 410 / 503 / 204 / 200），而不是默认的占位。请求仍然算被拦。默认关闭；关闭时连规则文件都不会被读取。</string>
     <string name="compose_settings_cache_reuse">决策缓存</string>
     <string name="compose_settings_cache_reuse_hint">同一个域在 2 秒内再次请求时直接复用上次的判定，跳过分类计算。拦截行为不变；默认关闭。</string>
     <string name="compose_settings_circuit_breaker">按域熔断</string>

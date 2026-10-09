@@ -974,6 +974,34 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+                    // ── F4 续：按域覆盖响应策略（默认关）──
+                    Spacer(Modifier.height(8.dp))
+                    var overrideOn by remember {
+                        mutableStateOf(org.adaway.util.WebServerUtils.isRuleOverrideEnabled(context))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_rule_override),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_rule_override_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = overrideOn,
+                            onCheckedChange = { v ->
+                                overrideOn = v
+                                org.adaway.util.WebServerUtils.setRuleOverrideEnabled(context, v)
+                            },
+                        )
+                    }
                     // ── 开机自动启动 ──
                     Spacer(Modifier.height(8.dp))
                     var autostart by remember {
