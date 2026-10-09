@@ -906,6 +906,18 @@ private static String computeSubjectHashOld(Path certFile)
         }
     }
 
+    /*
+     * 设置键后缀（SonarCloud java:S1192）：同一个字面量原本散在三处 —— 写 block_config.json、
+     * 读设置、以及 setter 里再写一次。抽成常量后既满足规则，也消掉"改一处漏两处"的风险
+     * （这三处必须始终一致，否则开关会在界面显示已开、服务端却读不到）。
+     */
+    private static final String REPLY_VISIBLE = "visible";
+    private static final String REPLY_DEDUP = "dedup";
+    private static final String REPLY_RETRY_GUARD = "retry_guard";
+    private static final String REPLY_CACHE_REUSE = "cache_reuse";
+    private static final String REPLY_CIRCUIT_BREAKER = "circuit_breaker";
+    private static final String REPLY_RULE_OVERRIDE = "rule_override";
+
     private static boolean blockReplyEnabled(Context context, String type) {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                 .getBoolean(PREFS_BLOCK_REPLY_PREFIX + type, true);
@@ -940,27 +952,27 @@ private static String computeSubjectHashOld(Path certFile)
              * 就被打开，违背"新功能默认关闭"。
              */
             boolean visibleReply = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                    .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "visible", false);
+                    .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_VISIBLE, false);
             appendBlockReplyField(sb, "reply_visible", visibleReply);
             /* F5：请求去重与重试护栏 —— 同样默认关（用链式读取，避免在这里引入
                SharedPreferences 的类型导入）。 */
             appendBlockReplyField(sb, "dedup_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "dedup", false));
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_DEDUP, false));
             appendBlockReplyField(sb, "retry_guard_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "retry_guard", false));
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RETRY_GUARD, false));
             /* F5 续：决策缓存与按域熔断 —— 同样默认关 */
             appendBlockReplyField(sb, "cache_reuse_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "cache_reuse", false));
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CACHE_REUSE, false));
             appendBlockReplyField(sb, "circuit_breaker_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "circuit_breaker", false));
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CIRCUIT_BREAKER, false));
             /* F4 续：按域覆盖响应策略 —— 默认关（关闭时服务端连 rule_overrides.txt 都不读） */
             appendBlockReplyField(sb, "rule_override_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "rule_override", false));
+                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RULE_OVERRIDE, false));
             sb.append((char) 0x7d).append((char) 0x0a);
             Files.write(dir.resolve("block_config.json"), sb.toString().getBytes("UTF-8"));
             WebServerControl.sendControlCommand("reload_config");
@@ -972,7 +984,7 @@ private static String computeSubjectHashOld(Path certFile)
     /** 当前是否开启「可见型占位」（默认关）。 */
     public static boolean isBlockReplyVisible(Context context) {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "visible", false);
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_VISIBLE, false);
     }
 
     /**
@@ -983,14 +995,14 @@ private static String computeSubjectHashOld(Path certFile)
      */
     public static void setBlockReplyVisible(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "visible", enabled).apply();
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_VISIBLE, enabled).apply();
         applyBlockReplyConfig(context);
     }
 
     /** F5：请求去重是否开启（默认关）。 */
     public static boolean isDedupEnabled(Context context) {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "dedup", false);
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_DEDUP, false);
     }
 
     /**
@@ -1001,14 +1013,14 @@ private static String computeSubjectHashOld(Path certFile)
      */
     public static void setDedupEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "dedup", enabled).apply();
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_DEDUP, enabled).apply();
         applyBlockReplyConfig(context);
     }
 
     /** F5：重试护栏是否开启（默认关）。 */
     public static boolean isRetryGuardEnabled(Context context) {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "retry_guard", false);
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RETRY_GUARD, false);
     }
 
     /**
@@ -1019,27 +1031,27 @@ private static String computeSubjectHashOld(Path certFile)
      */
     public static void setRetryGuardEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "retry_guard", enabled).apply();
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RETRY_GUARD, enabled).apply();
         applyBlockReplyConfig(context);
     }
 
     /** F5：决策缓存是否开启（默认关）。 */
     public static boolean isCacheReuseEnabled(Context context) {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "cache_reuse", false);
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CACHE_REUSE, false);
     }
 
     /** 打开/关闭决策缓存（默认关）：同一域 2 秒内重复请求直接复用上次的判定。 */
     public static void setCacheReuseEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "cache_reuse", enabled).apply();
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CACHE_REUSE, enabled).apply();
         applyBlockReplyConfig(context);
     }
 
     /** F5：按域熔断是否开启（默认关）。 */
     public static boolean isCircuitBreakerEnabled(Context context) {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "circuit_breaker", false);
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CIRCUIT_BREAKER, false);
     }
 
     /**
@@ -1050,14 +1062,14 @@ private static String computeSubjectHashOld(Path certFile)
      */
     public static void setCircuitBreakerEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "circuit_breaker", enabled).apply();
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CIRCUIT_BREAKER, enabled).apply();
         applyBlockReplyConfig(context);
     }
 
     /** F4：按域覆盖响应策略是否开启（默认关）。 */
     public static boolean isRuleOverrideEnabled(Context context) {
         return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + "rule_override", false);
+                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RULE_OVERRIDE, false);
     }
 
     /**
@@ -1069,7 +1081,7 @@ private static String computeSubjectHashOld(Path certFile)
      */
     public static void setRuleOverrideEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + "rule_override", enabled).apply();
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RULE_OVERRIDE, enabled).apply();
         applyBlockReplyConfig(context);
     }
 
