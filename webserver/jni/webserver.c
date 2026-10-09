@@ -356,6 +356,11 @@ static bool cfg_ws = true;
  * blocked_* 计数一一对应，凭空插一个类型会让两边错位。这里复用"其它"计数。
  */
 static bool cfg_visible = false;
+/* F5 去重与重试护栏的开关。声明必须放在这里（配置读取函数在本文件靠前的位置，
+   放后面会变成"先用后声明"）。两者默认关，见 block_config.json 的
+   dedup_enabled / retry_guard_enabled。 */
+static bool cfg_dedup = false;
+static bool cfg_guard = false;
 
 /*
  * Which policy type the last reply_blocked_by_type() matched, and how that type
@@ -1942,6 +1947,8 @@ static void load_block_cfg(const char *dir) {
     if (!f) {
         cfg_images = true; cfg_scripts = true; cfg_styles = true; cfg_fonts = true;
     cfg_visible = false;   /* 可见型占位默认关：关闭时行为与历史版本一致 */
+    cfg_dedup = false;     /* F5 请求去重默认关 */
+    cfg_guard = false;     /* F5 重试护栏默认关 */
         cfg_media = true; cfg_struct = true; cfg_api = true; cfg_tele = true;
         cfg_conf = true; cfg_ws = true;
         return;
@@ -1953,6 +1960,9 @@ static void load_block_cfg(const char *dir) {
     cfg_images = jbool(b, "reply_images", true);
     /* 可见型占位：默认 false（缺键即关闭），所以老配置文件的语义不变 */
     cfg_visible = jbool(b, "reply_visible", false);
+    /* F5：默认 false（缺键即关闭），老配置的语义不变 */
+    cfg_dedup = jbool(b, "dedup_enabled", false);
+    cfg_guard = jbool(b, "retry_guard_enabled", false);
     cfg_scripts = jbool(b, "reply_scripts", true);
     cfg_styles = jbool(b, "reply_styles", true);
     cfg_fonts = jbool(b, "reply_fonts", true);
@@ -1976,12 +1986,128 @@ static bool deny_quick(uint64_t *c, struct mg_connection *co) {
     return true;
 }
 
+/* ======================= F5：请求去重与重试护栏 =======================
+   目标：把"同一个客户端在极短时间内对同一个域反复重试"变便宜，而不改变正常请求的
+   结果。两个开关互相独立，**默认都关** —— 关闭时这条代码路径完全不会被走到。
+
+   - request_dedup：同一 (uid, host) 在 1s 窗口内重复出现时直接快速拒绝，不再走
+     分类/占位那套开销。
+   - retry_guard：同一 uid 在 10s 内对同一域超过 40 次 → 判定为重试风暴，随后 30s
+     对其直接快速失败，冷却结束自动恢复探测。
+
+   两张表都是固定大小的数组（64 / 16），无分配、无锁（单线程事件循环）；
+   两者都只改变"被拦流量的应答代价"，不改变拦截与否的结论（仍记 blocked_*），
+   因此放行/豁免等既有优先级完全不受影响。
+   ===================================================================== */
+#define F5_DEDUP_WINDOW_MS   1000u
+#define F5_GUARD_WINDOW_MS   10000u
+#define F5_GUARD_THRESHOLD   40u
+#define F5_GUARD_COOLDOWN_MS 30000u
+#define F5_KEYS              64
+#define F5_GUARDS            16
+
+static uint64_t s_f5_dedup_hits, s_f5_guard_hits;   /* 只放内存，进 /internal-stats */
+/* cfg_dedup / cfg_guard 的声明在文件前部的 cfg_* 区（配置读取函数要用到）。 */
+
+struct f5_key   { uid_t uid; uint32_t host_hash; uint64_t ts; };
+struct f5_guard { uid_t uid; uint32_t host_hash; uint64_t win_start; uint32_t count; uint64_t until_ms; };
+static struct f5_key   s_f5_keys[F5_KEYS];
+static struct f5_guard s_f5_guards[F5_GUARDS];
+static int s_f5_key_pos;
+
+/* req_host_of 定义在本函数之后，这里前置声明（与 app_find_or_add 同样的处理） */
+static void req_host_of(struct mg_http_message *hm, char *out, size_t cap);
+
+static uint32_t f5_hash(const char *s) {
+    uint32_t h = 2166136261u;
+    while (s != NULL && *s != '\0') { h ^= (uint32_t)(unsigned char)*s++; h *= 16777619u; }
+    return h ? h : 1u;
+}
+
+/* 同一 (uid, host) 在去重窗口内是否刚出现过？命中则刷新时间戳。 */
+static bool f5_dedup_hit(uid_t uid, uint32_t hh) {
+    uint64_t now = mg_millis();
+    for (int i = 0; i < F5_KEYS; i++) {
+        if (s_f5_keys[i].host_hash == hh && s_f5_keys[i].uid == uid &&
+            s_f5_keys[i].ts != 0 && now - s_f5_keys[i].ts <= F5_DEDUP_WINDOW_MS) {
+            s_f5_keys[i].ts = now;
+            return true;
+        }
+    }
+    s_f5_keys[s_f5_key_pos].uid = uid;
+    s_f5_keys[s_f5_key_pos].host_hash = hh;
+    s_f5_keys[s_f5_key_pos].ts = now;
+    s_f5_key_pos = (s_f5_key_pos + 1) % F5_KEYS;
+    return false;
+}
+
+/* 重试护栏：窗口内计数，超阈值进入冷却；冷却期内返回 true。 */
+static bool f5_guard_tripped(uid_t uid, uint32_t hh) {
+    uint64_t now = mg_millis();
+    for (int i = 0; i < F5_GUARDS; i++) {
+        if (s_f5_guards[i].uid == uid && s_f5_guards[i].host_hash == hh &&
+            s_f5_guards[i].win_start != 0) {
+            if (s_f5_guards[i].until_ms > now) return true;
+            if (now - s_f5_guards[i].win_start > F5_GUARD_WINDOW_MS) {
+                s_f5_guards[i].win_start = now;
+                s_f5_guards[i].count = 0;
+            }
+            s_f5_guards[i].count++;
+            if (s_f5_guards[i].count >= F5_GUARD_THRESHOLD) {
+                s_f5_guards[i].until_ms = now + F5_GUARD_COOLDOWN_MS;
+                LOG_WARN("guard: uid %d hammered %u requests in %us - fast-failing for %us",
+                         (int)uid, (unsigned)s_f5_guards[i].count,
+                         F5_GUARD_WINDOW_MS / 1000u, F5_GUARD_COOLDOWN_MS / 1000u);
+            }
+            return false;
+        }
+    }
+    /* 新条目：优先空位，否则覆盖最久未更新的那个（有界） */
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < F5_GUARDS; i++) {
+        if (s_f5_guards[i].win_start == 0) { slot = i; break; }
+        if (s_f5_guards[i].win_start < s_f5_guards[oldest].win_start) oldest = i;
+    }
+    if (slot < 0) slot = oldest;
+    s_f5_guards[slot].uid = uid;
+    s_f5_guards[slot].host_hash = hh;
+    s_f5_guards[slot].win_start = now;
+    s_f5_guards[slot].count = 1;
+    s_f5_guards[slot].until_ms = 0;
+    return false;
+}
+
 static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
     struct mg_str u = hm->uri;
     /* Cleared per request so a caller that falls through to the generic
        placeholder does not inherit the previous request's type. */
     s_last_type = -1;
     s_last_mode = RB_REPLY;
+
+    /*
+     * F5：只有开关打开时才计算 host —— 默认关时这里整段跳过，行为与之前一字不差
+     * （连 req_host_of 的额外调用都不会发生）。deny_quick 自己会累加计数器，
+     * 所以这里不再手动加，避免重复计数。
+     */
+    if (cfg_dedup || cfg_guard) {
+        char f5_host[192];
+        uid_t f5_uid = conn_load_uid(c);
+        uint32_t f5_hh;
+        req_host_of(hm, f5_host, sizeof(f5_host));
+        f5_hh = f5_hash(f5_host);
+        if (cfg_guard && f5_guard_tripped(f5_uid, f5_hh)) {
+            s_f5_guard_hits++;
+            s_last_type = LT_STRUCT;
+            s_last_mode = RB_DENY;
+            return deny_quick(&s_stats.blocked_other, c);
+        }
+        if (cfg_dedup && f5_dedup_hit(f5_uid, f5_hh)) {
+            s_f5_dedup_hits++;
+            s_last_type = LT_STRUCT;
+            s_last_mode = RB_DENY;
+            return deny_quick(&s_stats.blocked_other, c);
+        }
+    }
 
     /* Images & video thumbnails: fall through to the user-configured
        placeholder images (they're meant to be seen). */
@@ -2715,6 +2841,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"active_connections\":%d,"
         "\"tls_handshakes\":%llu,"
         "\"tls_failures\":%llu,"
+        "\"dedup_hits\":%llu,\"guard_hits\":%llu,"
         "\"sni_cache_hits\":%llu,"
         "\"sni_hit_rate\":%.1f,"
         "\"block_rate\":%.1f,"
@@ -2748,6 +2875,8 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         atomic_load(&s_active_connections),
         (unsigned long long)hs,
         (unsigned long long)s_stats.tls_failures,
+        (unsigned long long)s_f5_dedup_hits,
+        (unsigned long long)s_f5_guard_hits,
         (unsigned long long)hits,
         hit_rate,
         block_rate,
