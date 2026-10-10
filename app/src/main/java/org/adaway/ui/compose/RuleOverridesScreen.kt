@@ -111,9 +111,17 @@ fun RuleOverridesScreen(onBack: () -> Unit) {
                                  * 文件里有规则不等于服务端会应用：真正生效还要靠总开关
                                  * rule_override_enabled，所以提示里必须把这条依赖说清楚。
                                  */
+                                /*
+                                 * 按真实状态提示：规则写进文件不等于生效，生效还要看总开关。
+                                 * isRuleOverrideEnabled() 读的就是写进 block_config.json 的那个键，
+                                 * 所以这里给出的是当前事实，而不是一句泛泛的说明。
+                                 */
+                                val overrideOn =
+                                    org.adaway.util.WebServerUtils.isRuleOverrideEnabled(context)
                                 android.widget.Toast.makeText(
                                     context,
-                                    R.string.compose_override_saved,
+                                    if (overrideOn) R.string.compose_override_saved
+                                    else R.string.compose_override_saved_disabled,
                                     android.widget.Toast.LENGTH_LONG,
                                 ).show()
                             } else {
