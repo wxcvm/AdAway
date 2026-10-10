@@ -170,6 +170,16 @@
     <string name="compose_settings_clear_stats_ok">服务端统计已清除</string>
     <string name="compose_settings_clear_stats_fail">连不上服务端 —— 没有清除任何数据</string>
     <string name="compose_settings_backup">Backup</string>
+    <string name="compose_export_cert_missing">Certificate not found — start the web server first</string>
+    <string name="compose_export_no_slot">Export failed: no MediaStore slot</string>
+    <string name="compose_export_cert_ok">Certificate exported: Download/adblock-ca.crt</string>
+    <string name="compose_export_failed">Export failed: %1$s</string>
+    <string name="compose_backup_no_slot">Backup failed: no MediaStore slot</string>
+    <string name="compose_backup_ok">Backup saved: Download/adblock-backup.json</string>
+    <string name="compose_backup_failed">Backup failed: %1$s</string>
+    <string name="compose_backup_none">No backup file found in Downloads</string>
+    <string name="compose_backup_restored">Backup restored — restarting…</string>
+    <string name="compose_restore_failed">Restore failed: %1$s</string>
     <string name="compose_settings_restore">Restore</string>
     <string name="compose_settings_about_title">About</string>
     <string name="compose_settings_about_version">Version %1$s</string>

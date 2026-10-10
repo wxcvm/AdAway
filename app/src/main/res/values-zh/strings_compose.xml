@@ -163,6 +163,16 @@
     <string name="compose_settings_clear_stats_ok">服务端统计已清除</string>
     <string name="compose_settings_clear_stats_fail">连不上服务端 —— 没有清除任何数据</string>
     <string name="compose_settings_backup">备份</string>
+    <string name="compose_export_cert_missing">找不到证书 —— 请先启动 Web 服务器</string>
+    <string name="compose_export_no_slot">导出失败：没有可用的写入位置</string>
+    <string name="compose_export_cert_ok">证书已导出：Download/adblock-ca.crt</string>
+    <string name="compose_export_failed">导出失败：%1$s</string>
+    <string name="compose_backup_no_slot">备份失败：没有可用的写入位置</string>
+    <string name="compose_backup_ok">备份已保存：Download/adblock-backup.json</string>
+    <string name="compose_backup_failed">备份失败：%1$s</string>
+    <string name="compose_backup_none">Downloads 里没有找到备份文件</string>
+    <string name="compose_backup_restored">备份已恢复 —— 正在重启…</string>
+    <string name="compose_restore_failed">恢复失败：%1$s</string>
     <string name="compose_settings_restore">恢复</string>
     <string name="compose_settings_about_title">关于</string>
     <string name="compose_settings_about_version">版本 %1$s</string>

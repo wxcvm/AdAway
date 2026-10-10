@@ -2226,7 +2226,7 @@ private fun exportCertificate(context: Context) {
     try {
         val src = java.io.File(context.filesDir, "webserver/localhost-2410.crt")
         if (!src.exists()) {
-            Toast.makeText(context, "Certificate not found — start the web server first", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, context.getString(R.string.compose_export_cert_missing), Toast.LENGTH_LONG).show()
             return
         }
         val resolver = context.contentResolver
@@ -2237,16 +2237,16 @@ private fun exportCertificate(context: Context) {
         }
         val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
         if (uri == null) {
-            Toast.makeText(context, "Export failed: no MediaStore slot", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, context.getString(R.string.compose_export_no_slot), Toast.LENGTH_LONG).show()
             return
         }
         resolver.openOutputStream(uri)?.use { out ->
             src.inputStream().use { it.copyTo(out) }
         } ?: throw java.io.IOException("cannot open output stream")
-        Toast.makeText(context, "Certificate exported: Download/adblock-ca.crt", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.compose_export_cert_ok), Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
         Timber.w(e, "Failed to export certificate")
-        Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.compose_export_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
     }
 }
 
@@ -2282,16 +2282,16 @@ private fun exportBackup(context: Context) {
         }
         val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
         if (uri == null) {
-            Toast.makeText(context, "Backup failed: no MediaStore slot", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, context.getString(R.string.compose_backup_no_slot), Toast.LENGTH_LONG).show()
             return
         }
         resolver.openOutputStream(uri)?.use { out ->
             out.write(json.toString(2).toByteArray())
         } ?: throw java.io.IOException("cannot open output stream")
-        Toast.makeText(context, "Backup saved: Download/adblock-backup.json", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.compose_backup_ok), Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
         Timber.w(e, "Failed to export backup")
-        Toast.makeText(context, "Backup failed: ${e.message}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.compose_backup_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
     }
 }
 
@@ -2324,7 +2324,7 @@ private fun importBackup(
             }
         }
         if (text == null) {
-            Toast.makeText(context, "No backup file found in Downloads", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, context.getString(R.string.compose_backup_none), Toast.LENGTH_LONG).show()
             return
         }
         val json = org.json.JSONObject(text)
@@ -2354,11 +2354,11 @@ private fun importBackup(
             }
             editor.apply()
         }
-        Toast.makeText(context, "Backup restored — restarting…", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.compose_backup_restored), Toast.LENGTH_LONG).show()
         onDone()
     } catch (e: Exception) {
         Timber.w(e, "Failed to import backup")
-        Toast.makeText(context, "Restore failed: ${e.message}", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, context.getString(R.string.compose_restore_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
     }
 }
 
