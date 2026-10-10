@@ -177,7 +177,7 @@ Replaced the minimal existing config with a comprehensive setup:
 - Auto-rebase enabled
 - Timezone: Asia/Shanghai
 
-### 2.2 Mongoose Version Check (`.github/workflows/check-mongoose-update.yml`)
+### 2.2 Mongoose Version Check（说明：`.github/workflows/check-mongoose-update.yml` 当前分支未提供，本节描述的是历史方案）
 
 Weekly scheduled workflow that:
 1. Reads the vendored `MG_VERSION` from `webserver/jni/mongoose/mongoose.h`
