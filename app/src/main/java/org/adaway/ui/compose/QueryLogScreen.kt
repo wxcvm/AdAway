@@ -97,7 +97,8 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                        log off the phone at all - the Windows dashboard has an
                        export, the app had nothing. */
                     IconButton(
-                        onClick = { shareQueryLogCsv(context, shown) },
+                        /* 导出当前筛选下的两段：最新一页 + 用户已经加载出来的历史 */
+                        onClick = { shareQueryLogCsv(context, shown + shownOlder) },
                         enabled = shown.isNotEmpty(),
                     ) {
                         Icon(
@@ -150,7 +151,8 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                     label = { Text(stringResource(R.string.compose_stats_recent_action_proxied)) },
                 )
             }
-            if (shown.isEmpty()) {
+            /* 空状态要看两段：只判断 shown 会在最新一页没有命中筛选时把已加载的历史整段藏起来 */
+            if (shown.isEmpty() && shownOlder.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         stringResource(R.string.compose_logs_empty),
@@ -176,7 +178,10 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.Center,
                         ) {
                             androidx.compose.material3.TextButton(
-                                enabled = !loadingOlder,
+                                /* 到最早一条之后禁用：此前只在加载中禁用，到底还能一直点，
+                                   每点一次都白跑一轮原生请求 */
+                                enabled = !loadingOlder &&
+                                    (olderTotal == 0 || older.size < olderTotal),
                                 onClick = {
                                     loadingOlder = true
                                     viewModel.loadQueryLogPage(
