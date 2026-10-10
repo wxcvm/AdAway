@@ -203,7 +203,7 @@ Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配�
 
 本节描述的是**当前实现真实支持**的语法，依据是 `webserver/jni/webserver.c` 里的
 `domain_rule_normalize()`（规则归一化，L531）、`domain_is_allowed()`（放行匹配，L563）与
-`block_set_contains()`（拦截匹配，L3271）。两端（Android 原生服务端与 Windows 服务端）共用同一份
+`block_set_contains()`（拦截匹配，L3271），以及 App 侧的 `app/src/main/java/org/adaway/model/source/SourceLoader.java`（订阅源解析，含 `HostListItemParser`）。两端（Android 原生服务端与 Windows 服务端）共用同一份
 C 代码，因此下面的语义在两端一致；跨端测试向量应钉住这些行为。
 
 ### 支持（会被正确归一化）
@@ -224,10 +224,14 @@ C 代码，因此下面的语义在两端一致；跨端测试向量应钉住这
    放行侧（`domain_is_allowed`）的语义是"该域**及其子域**"；拦截侧（`block_set_contains`）是
    **主机名哈希精确匹配**，**不覆盖子域**。因此 `\|\|example.com^` 在拦截侧**不会**顺带拦住
    `a.example.com`。这是已知差异，不要按 ABP 的"主域覆盖子域"来预期。
-2. **含资源类型修饰符的规则会退化为整域拦截。**
-   归一化在 `^`、`$`、`/` 等处截断，只保留主机名。例如 `\|\|cdn.example.com^$script` 会变成
-   "整个 `cdn.example.com` 都被拦"，而不是"只拦脚本请求"。**这属于静默改变规则含义**，
-   是当前最需要修的一处。
+2. **含资源类型修饰符的规则会退化为整域拦截。**（归属如下，两处都要注意）
+   - **主拦截列表**：由 App 侧的 `SourceLoader.HostListItemParser` 解析后写入主机名集合，
+     服务端 `block_set_contains()` 只做主机名精确匹配。因此 `\|\|cdn.example.com^$script`
+     会变成"整个 `cdn.example.com` 都被拦"，而不是"只拦脚本请求"。
+   - **豁免/放行列表与 `rule_overrides.txt`**：由服务端 `domain_rule_normalize()` 归一化，
+     同样在 `^`、`$`、`/` 等处截断，只保留主机名。
+   两者都属于**静默改变规则含义**，是当前最需要修的一处：正确做法是识别出带修饰符的规则后
+   **跳过并计数**，而不是降级成语义不同的主机名拦截。
 3. **`@@` 例外前缀只被当作装饰剥掉**，不实现例外语义：`@@\|\|example.com^` 与
    `\|\|example.com^` 归一化结果相同。
 4. **`##` / `#@#` / `#$#` 这类元素隐藏与脚本注入规则不参与网络层匹配**（`#` 是截断字符）。
