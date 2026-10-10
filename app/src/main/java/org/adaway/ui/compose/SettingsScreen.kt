@@ -845,8 +845,15 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                         context, bindAll,
                                         org.adaway.util.WebServerUtils.getHttpPort(context), p,
                                     )
-                                    org.adaway.util.WebServerUtils.stopWebServer()
-                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                    /*
+                                     * 与 HTTP 端口那一组同样处理：停止与启动会走 root shell、检查进程、
+                                     * 拷贝并设置可执行位，偏好已经写完，重启开销放到后台线程。
+                                     * 闭包在重启之后没有依赖服务器状态的代码，因此顺序不影响语义。
+                                     */
+                                    Thread {
+                                        org.adaway.util.WebServerUtils.stopWebServer()
+                                        org.adaway.util.WebServerUtils.startWebServer(context)
+                                    }.start()
                                 },
                                 label = { Text("$p") },
                             )
@@ -881,7 +888,10 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 org.adaway.broadcast.ServerWatchdogWorker.ensureScheduled(context)
                                 if (!v) {
                                     // Leaving light mode: make sure it is running.
-                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                    // startWebServer 会走 root shell，放到后台线程执行。
+                                    Thread {
+                                        org.adaway.util.WebServerUtils.startWebServer(context)
+                                    }.start()
                                 }
                             },
                         )
