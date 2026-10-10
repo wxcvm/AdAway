@@ -121,6 +121,9 @@
     <string name="compose_settings_apps_hint">Choose which apps appear in the per-app statistics</string>
     <string name="compose_settings_apps_empty">No apps detected yet — browse the web and apps will show up here.</string>
     <string name="compose_settings_app_allow">Allow</string>
+    <string name="compose_settings_app_allow_explain">Allowed: this app now bypasses blocking entirely. Flip the switch back to undo.</string>
+    <string name="compose_settings_app_allow_hint">Allowed: this app bypasses blocking (flip back to undo)</string>
+    <string name="compose_settings_app_allow_undone">Undone: this app is filtered again</string>
     <string name="compose_settings_app_monitor">Show in statistics</string>
     <string name="compose_settings_allowlist_title">Allowlist (bypass blocking)</string>
     <string name="compose_settings_debug_title">Debug</string>

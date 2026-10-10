@@ -2020,13 +2020,41 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                // 放行开关：该应用流量完全绕过拦截
+                                /*
+                                 * 放行开关：该应用流量完全绕过拦截 —— 这不是普通显示偏好，而是会改变
+                                 * 拦截效果的策略变更。首次放行时解释后果，并说明怎么撤销（把开关拨回去
+                                 * 即可）；解释只弹一次，之后不再打扰。
+                                 */
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Switch(
                                         checked = allowed,
                                         onCheckedChange = { v ->
                                             setAppAllowed(context, app.uid, v)
                                             refreshKey++
+                                            val sp = context.getSharedPreferences(
+                                                PREFS_GENERAL,
+                                                Context.MODE_PRIVATE,
+                                            )
+                                            if (v) {
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(
+                                                        if (sp.getBoolean("app_allow_explained", false)) {
+                                                            R.string.compose_settings_app_allow_hint
+                                                        } else {
+                                                            R.string.compose_settings_app_allow_explain
+                                                        },
+                                                    ),
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
+                                                sp.edit().putBoolean("app_allow_explained", true).apply()
+                                            } else {
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.compose_settings_app_allow_undone),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                            }
                                         },
                                     )
                                     Text(

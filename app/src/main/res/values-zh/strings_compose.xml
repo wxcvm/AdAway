@@ -121,6 +121,9 @@
     <string name="compose_settings_apps_hint">选择要在应用统计中显示的应用</string>
     <string name="compose_settings_apps_empty">暂未检测到应用——浏览网页后应用会显示在这里。</string>
     <string name="compose_settings_app_allow">放行</string>
+    <string name="compose_settings_app_allow_explain">已放行：该应用的流量将不再被拦截。把开关拨回去即可撤销。</string>
+    <string name="compose_settings_app_allow_hint">已放行：该应用绕过拦截（拨回开关可撤销）</string>
+    <string name="compose_settings_app_allow_undone">已撤销：该应用重新被拦截</string>
     <string name="compose_settings_app_monitor">在统计中显示</string>
     <string name="compose_settings_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
     <string name="compose_settings_charts_title">统计图表</string>
