@@ -24,6 +24,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -232,6 +233,14 @@ class SourceLoader {
                     } // Check comments
                     else if (line.isEmpty() || line.charAt(0) == '#') {
                         Timber.d("Skip comment: %s.", line);
+                    } else if (!allowedList && hasUnsupportedModifier(line)) {
+                        /*
+                         * 带资源类型修饰符的规则（例如 ||cdn.example.com^$script）我们并不实现。
+                         * 解析只会取出主机名，把它变成“整个域名都拦” —— 那是静默改变规则含义，
+                         * 同时造成该拦的没拦、不该拦的被拦。这里直接跳过并计数，不改含义。
+                         */
+                        SKIPPED_MODIFIER_RULES.incrementAndGet();
+                        Timber.d("Skip rule with unsupported modifier: %s.", line);
                     } else {
                         HostListItem item = allowedList ? parseAllowListItem(line) : parseHostListItem(line);
                         if (item != null && isRedirectionValid(item) && isHostValid(item)) {
@@ -255,6 +264,29 @@ class SourceLoader {
                     Thread.currentThread().interrupt();
                 }
             }
+        }
+
+        /** 因带未实现的资源类型修饰符而被跳过的规则数（按线程安全计数）。 */
+        private static final AtomicLong SKIPPED_MODIFIER_RULES = new AtomicLong();
+
+        /**
+         * 该行是否带我们不实现的资源类型修饰符（$script、$image、$third-party 等）。
+         *
+         * <p>判据：出现 {@code $}，且它位于主机名之后（即 {@code ^} 之后；没有 {@code ^} 时也算）。
+         * 这类规则的正确处理是跳过，而不是截断成主机名 —— 后者会把它变成“整个域名都拦”。</p>
+         */
+        private boolean hasUnsupportedModifier(String line) {
+            int dollar = line.indexOf('$');
+            if (dollar < 0) {
+                return false;
+            }
+            int caret = line.indexOf('^');
+            return caret < 0 || dollar > caret;
+        }
+
+        /** 本次运行累计跳过多少条带修饰符的规则（供诊断与测试使用）。 */
+        static long skippedModifierRules() {
+            return SKIPPED_MODIFIER_RULES.get();
         }
 
         private HostListItem parseHostListItem(String line) {
