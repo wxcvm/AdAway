@@ -787,7 +787,14 @@ fun refreshServerStats() {
         }
     }
 
-    fun addUserRule(host: String, type: Int, redirection: String?, onDone: () -> Unit) {
+    /**
+     * 新增用户规则，并把成功/失败交给调用方。
+     *
+     * <p>此前回调不带结果：重复规则、域名格式非法或数据库写入失败时，界面只会看到对话框
+     * 关闭（用户以为添加成功）。改签名而不是复制一份实现 —— Kotlin 允许把无参 lambda 传给
+     * 单参函数类型（忽略 it 即可），所以既有调用点不需要改动。</p>
+     */
+    fun addUserRule(host: String, type: Int, redirection: String?, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
             val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
@@ -817,7 +824,7 @@ fun refreshServerStats() {
                     false
                 }
             }
-            onDone()
+            onDone(ok)
         }
     }
 
