@@ -4365,6 +4365,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             s_f5_dedup_hits = s_f5_guard_hits = s_f5_cache_hits = s_f5_breaker_hits = 0;
             s_f5_fastfail = 0;
             s_f5_override_hits = 0;
+            /*
+             * 历史曲线（24 个小时桶 + 30 个日桶）：一并清空并重新起算。
+             * 只清计数不清曲线，用户会觉得"统计没清干净"（曲线还挂着旧数据）。
+             * s_hist_slot_start 置 0 后，下一次 hist_tick() 会以当前时间重新起算，
+             * 所以不需要在这里自己算时间片。
+             */
+            memset(s_hist, 0, sizeof(s_hist));
+            memset(s_daily, 0, sizeof(s_daily));
+            s_hist_pos = 0;
+            s_daily_pos = 0;
+            s_hist_slot_start = 0;
         }
         mg_http_reply(c, 200, "Content-Type: application/json\r\nCache-Control: no-store\r\n",
                       "{\"ok\":true,\"qlog\":%s,\"apps\":%s,\"stats\":%s}\n",
