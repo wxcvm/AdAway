@@ -3922,6 +3922,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     /* The management port only answers the internal endpoints. */
     if (s->stats_port != 0 && c->loc.port == (uint16_t) s->stats_port) {
         bool internal = mg_match(hm->uri, mg_str("/internal-stats"), NULL) ||
+                        mg_match(hm->uri, mg_str("/internal-reset"), NULL) ||
                         mg_match(hm->uri, mg_str("/internal-qlog"), NULL) ||
                         mg_match(hm->uri, mg_str("/internal-ws"), NULL) ||
                         mg_match(hm->uri, mg_str("/internal-test"), NULL) ||
@@ -4327,6 +4328,37 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      * app/desktop UI can walk all QLOG_MAX entries in chunks instead of asking
      * for one huge document.
      */
+   /*
+     * 管理用重置：/internal-reset?what=qlog|apps|all
+     *
+     * 为什么需要它："清除所有统计"此前只删了 App 的两个设置键 —— 真正的计数、历史曲线、
+     * 应用统计与查询日志都在本进程的内存里（并各自有一份 .dat 持久化），所以用户点了等于没点。
+     *
+     * 与其它 /internal-* 一样只在回环管理端口可达（见上面的 internal 白名单），并且加 1 秒节流，
+     * 避免与每秒一次的 /internal-stats 轮询打架（重置只清内存，随后的轮询会立刻写出新快照）。
+     */
+    if (mg_match(hm->uri, mg_str("/internal-reset"), NULL)) {
+        static uint64_t s_reset_last_ms;
+        char what[16] = "";
+        uint64_t now_ms = mg_millis();
+        mg_http_get_var(&hm->query, "what", what, sizeof(what));
+        if (s_reset_last_ms != 0 && now_ms - s_reset_last_ms < 1000) {
+            mg_http_reply(c, 429, "Content-Type: application/json\r\nCache-Control: no-store\r\n",
+                          "{\"ok\":false,\"error\":\"throttled\"}\n");
+            return;
+        }
+        s_reset_last_ms = now_ms;
+        bool all = (what[0] == 0) || (strcmp(what, "all") == 0);
+        bool did_qlog = all || (strcmp(what, "qlog") == 0);
+        bool did_apps = all || (strcmp(what, "apps") == 0);
+        if (did_qlog) qlog_clear();
+        if (did_apps) memset(s_apps, 0, sizeof(s_apps));
+        mg_http_reply(c, 200, "Content-Type: application/json\r\nCache-Control: no-store\r\n",
+                      "{\"ok\":true,\"qlog\":%s,\"apps\":%s}\n",
+                      did_qlog ? "true" : "false", did_apps ? "true" : "false");
+        return;
+    }
+
     if (mg_match(hm->uri, mg_str("/internal-qlog"), NULL)) {
         char var[16];
         uint32_t offset = 0;
