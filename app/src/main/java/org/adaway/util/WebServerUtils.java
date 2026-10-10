@@ -683,6 +683,19 @@ public static void installUserCertificate(Context context) {
     }
 
     /**
+     * 名字忠实的别名：它写的是**用户库**（{@code /data/misc/user/0/cacerts-added}），
+     * 不是系统库。
+     *
+     * <p>旧名 {@link #installCertificateToSystemStore} 保留是为了不打断既有调用点，
+     * 但界面文案必须说清"用户信任库"—— targetSdk&gt;=24 的 App 默认不信任用户库，
+     * 用户以为装了系统级证书、HTTPS 却仍然失败，正是这个错位造成的。
+     * 真实级别请用 {@link #certificateTrustLevel} 判定（它会把 APEX / apexdata 也算上）。</p>
+     */
+    public static boolean installCertificateToUserStore(Context context) {
+        return installCertificateToSystemStore(context);
+    }
+
+    /**
      * Remove the CA again from Android's user-added trust store (root devices).
      *
      * <p>Until now the app could only *add* the CA: a user who no longer wanted
@@ -713,6 +726,64 @@ public static void installUserCertificate(Context context) {
         }
         // Verify instead of trusting the shell result.
         return !isUserCertificateInstalled(context);
+    }
+
+    /** 信任级别：证书不在任何库里。 */
+    public static final int TRUST_NONE = 0;
+    /** 只在用户库（/data/misc/user/0/cacerts-added）：targetSdk>=24 的 App 默认不信任它。 */
+    public static final int TRUST_USER = 1;
+    /** 在系统库里（/system 或 APEX 或 apexdata）：系统级信任，才是"系统证书"。 */
+    public static final int TRUST_SYSTEM = 2;
+
+    /**
+     * 探测本应用 CA 的真实信任级别。
+     *
+     * <p>为什么需要它：{@link #installCertificateToUserStore} 实际只写**用户库**，
+     * 而界面文案长期写作"系统信任库"—— 用户以为装了系统级证书，实际上 targetSdk>=24
+     * 的 App 默认根本不信任用户库，HTTPS 中间人照样失败。这个方法把事实查清楚：</p>
+     *
+     * <ul>
+     *   <li>{@code /data/misc/user/0/cacerts-added/}&nbsp;— 用户库（需手动/一键写入）</li>
+     *   <li>{@code /system/etc/security/cacerts/}&nbsp;— 传统系统库（只读分区）</li>
+     *   <li>{@code /apex/com.android.conscrypt/cacerts/}&nbsp;— Android 14+ 实际读取的 APEX 库</li>
+     *   <li>{@code /data/misc/apexdata/com.android.conscrypt/cacerts/}&nbsp;— <b>可更新证书库：
+     *       它一旦非空，Conscrypt 优先读它</b>，所以只覆盖 APEX 是不够的</li>
+     * </ul>
+     *
+     * <p>一次 root 调用查完四处，避免多次 shell 往返。</p>
+     *
+     * @return {@link #TRUST_SYSTEM} / {@link #TRUST_USER} / {@link #TRUST_NONE}；
+     *         无 root 或命令失败时按"用户库是否存在"降级判断。
+     */
+    public static int certificateTrustLevel(Context context) {
+        Path certFile = getResourcePath(context).resolve(CA_CERT_FILE);
+        if (!Files.isRegularFile(certFile)) return TRUST_NONE;
+        String hash;
+        try {
+            hash = computeSubjectHashOld(certFile);
+        } catch (IOException | CertificateException | NoSuchAlgorithmException e) {
+            Timber.w(e, "Failed to compute certificate hash.");
+            return TRUST_NONE;
+        }
+        String name = hash + ".0";
+        boolean userStore = isUserCertificateInstalled(context);
+        /* 系统库三条路径任一命中即视为系统级；APEX 目录带动态版本号，用 glob 兜住。 */
+        String cmd =
+                "S=/system/etc/security/cacerts/" + name + "; "
+                        + "A=/apex/com.android.conscrypt/cacerts/" + name + "; "
+                        + "D=/data/misc/apexdata/com.android.conscrypt/cacerts/" + name + "; "
+                        + "if [ -f \"$S\" ] || [ -f \"$A\" ] || [ -f \"$D\" ] "
+                        + "|| ls /apex/com.android.conscrypt@*/cacerts/" + name + " >/dev/null 2>&1; "
+                        + "then echo TRUST_SYSTEM; else echo TRUST_USER_ONLY; fi";
+        try {
+            Shell.Result r = Shell.cmd(cmd).exec();
+            String out = r.getOut() == null ? "" : r.getOut();
+            if (out.contains("TRUST_SYSTEM")) return TRUST_SYSTEM;
+            if (out.contains("TRUST_USER_ONLY")) return userStore ? TRUST_USER : TRUST_NONE;
+        } catch (Exception e) {
+            Timber.w(e, "Trust-level probe failed.");
+        }
+        return userStore ? TRUST_USER : TRUST_NONE;
     }
 
     /**
