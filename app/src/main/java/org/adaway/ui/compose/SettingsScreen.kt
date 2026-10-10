@@ -475,8 +475,23 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         FilterChip(
                             selected = blockMode == org.adaway.util.BlockMode.LOCALHOST,
                             onClick = {
-                                blockMode = org.adaway.util.BlockMode.LOCALHOST
-                                viewModel.applyBlockMode(org.adaway.util.BlockMode.LOCALHOST)
+                                val want = org.adaway.util.BlockMode.LOCALHOST
+                                blockMode = want
+                                viewModel.applyBlockMode(want) { ok ->
+                                    /*
+                                     * 失败时不能留着已选中的假象：hosts 应用失败或没有 root 时
+                                     * 用户会以为已经切过去了。这里统一回读真实模式并如实提示，
+                                     * 不再只有 HIJACK 才报错。
+                                     */
+                                    blockMode = viewModel.currentBlockMode()
+                                    if (!ok) {
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.compose_settings_block_mode_apply_failed),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                }
                             },
                             label = {
                                 // S5：推荐档提到最前并改名——它是"回答被拦域"的最省资源方式
@@ -486,8 +501,23 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         FilterChip(
                             selected = blockMode == org.adaway.util.BlockMode.NULL_ROUTE,
                             onClick = {
-                                blockMode = org.adaway.util.BlockMode.NULL_ROUTE
-                                viewModel.applyBlockMode(org.adaway.util.BlockMode.NULL_ROUTE)
+                                val want = org.adaway.util.BlockMode.NULL_ROUTE
+                                blockMode = want
+                                viewModel.applyBlockMode(want) { ok ->
+                                    /*
+                                     * 失败时不能留着已选中的假象：hosts 应用失败或没有 root 时
+                                     * 用户会以为已经切过去了。这里统一回读真实模式并如实提示，
+                                     * 不再只有 HIJACK 才报错。
+                                     */
+                                    blockMode = viewModel.currentBlockMode()
+                                    if (!ok) {
+                                        Toast.makeText(
+                                            context,
+                                            context.getString(R.string.compose_settings_block_mode_apply_failed),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                }
                             },
                             label = {
                                 Text(stringResource(R.string.compose_settings_block_mode_null))
