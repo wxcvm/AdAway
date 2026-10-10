@@ -121,6 +121,7 @@
     <string name="compose_settings_apps_hint">Choose which apps appear in the per-app statistics</string>
     <string name="compose_settings_apps_empty">No apps detected yet — browse the web and apps will show up here.</string>
     <string name="compose_settings_app_allow">Allow</string>
+    <string name="compose_settings_app_monitor">Show in statistics</string>
     <string name="compose_settings_allowlist_title">Allowlist (bypass blocking)</string>
     <string name="compose_settings_debug_title">Debug</string>
     <string name="compose_settings_debug_hint">Crash log and telemetry options</string>

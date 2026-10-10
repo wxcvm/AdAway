@@ -2037,13 +2037,26 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                     )
                                 }
                                 Spacer(Modifier.width(4.dp))
-                                Switch(
-                                    checked = monitored,
-                                    onCheckedChange = { newValue ->
-                                        setAppMonitored(context, app.uid, newValue)
-                                        refreshKey++
-                                    },
-                                )
+                                /*
+                                 * 第二个开关此前是裸 Switch：没有可见文字、也没有无障碍标签，
+                                 * 读屏只会念"开关，开启/关闭"，用户分不清它和左边的放行开关各管什么。
+                                 * 这里照放行开关的样式补上文字标签（并被左侧放行开关形成对照）。
+                                 */
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Switch(
+                                        checked = monitored,
+                                        onCheckedChange = { newValue ->
+                                            setAppMonitored(context, app.uid, newValue)
+                                            refreshKey++
+                                        },
+                                    )
+                                    Text(
+                                        stringResource(R.string.compose_settings_app_monitor),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (monitored) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                         }
