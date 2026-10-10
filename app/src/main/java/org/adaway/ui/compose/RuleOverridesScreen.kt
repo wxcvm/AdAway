@@ -99,9 +99,30 @@ fun RuleOverridesScreen(onBack: () -> Unit) {
                     Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = {
-                            ExemptionRules.addOverride(context, input, policy)
-                            input = ""
-                            lines = ExemptionRules.listOverrides(context)
+                            /*
+                             * 保存要按结果决定后续动作：addOverride() 在域名无效或写文件失败时
+                             * 返回空串，旧代码不看返回值就清空输入，用户会以为已经保存成功。
+                             */
+                            val saved = ExemptionRules.addOverride(context, input, policy)
+                            if (saved.isNotEmpty()) {
+                                input = ""
+                                lines = ExemptionRules.listOverrides(context)
+                                /*
+                                 * 文件里有规则不等于服务端会应用：真正生效还要靠总开关
+                                 * rule_override_enabled，所以提示里必须把这条依赖说清楚。
+                                 */
+                                android.widget.Toast.makeText(
+                                    context,
+                                    R.string.compose_override_saved,
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    R.string.compose_override_invalid,
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
                         },
                         enabled = input.isNotBlank(),
                     ) { Text(stringResource(R.string.compose_exempt_apply)) }

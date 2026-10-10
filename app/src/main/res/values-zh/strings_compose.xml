@@ -82,6 +82,8 @@
     <string name="compose_exempt_input_label">要添加的规则</string>
     <string name="compose_exempt_preview">解析预览</string>
     <string name="compose_exempt_apply">添加</string>
+    <string name="compose_override_saved">已写入规则文件（需在设置里开启「按域覆盖响应」才会生效）</string>
+    <string name="compose_override_invalid">未保存：域名无效或规则文件写入失败</string>
     <string name="compose_exempt_preview_ok">将添加 %1$d 条规则</string>
     <string name="compose_exempt_preview_bad">%1$d 行被拒绝（注释、空行或过宽）：</string>
     <string name="compose_exempt_added">已添加 %1$d 条解除过滤规则</string>

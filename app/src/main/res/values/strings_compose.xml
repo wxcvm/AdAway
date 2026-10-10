@@ -82,6 +82,8 @@
     <string name="compose_exempt_input_label">Rules to add</string>
     <string name="compose_exempt_preview">Preview</string>
     <string name="compose_exempt_apply">Add</string>
+    <string name="compose_override_saved">Saved to the rule file (it only takes effect while the per-domain override switch is on)</string>
+    <string name="compose_override_invalid">Not saved: the domain is invalid or the file could not be written</string>
     <string name="compose_exempt_preview_ok">%1$d rule(s) will be added</string>
     <string name="compose_exempt_preview_bad">%1$d line(s) refused (comment, empty, or too broad):</string>
     <string name="compose_exempt_added">Added %1$d exemption(s)</string>
