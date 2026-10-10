@@ -560,6 +560,20 @@ static void domain_rule_normalize(const char *in, char *out, size_t outsz) {
     out[o] = '\0';
 }
 
+/*
+ * 带资源类型修饰符的规则（例如 ||cdn.example.com^$script）不实现。
+ *
+ * 归一化只取主机名，会让这类规则变成“整个域名都命中”，属于静默改变规则含义 ——
+ * 既漏拦（本该只拦脚本）又误拦（同域的正常资源）。返回 true 时调用方应跳过该规则，
+ * 这正是 docs/response-policies.md 里写的处理原则。
+ */
+static bool rule_has_unsupported_modifier(const char *in) {
+    const char *dollar = strchr(in, '$');
+    if (dollar == NULL) return false;
+    const char *caret = strchr(in, '^');
+    return caret == NULL || dollar > caret;
+}
+
 static bool domain_is_allowed(const char *host, const char *resource_dir) {
     if (host == NULL || host[0] == '\0' || resource_dir == NULL) return false;
     char path[PATH_MAX];
@@ -2219,6 +2233,8 @@ static void rule_overrides_reload(const char *resource_dir) {
         while (vn > 0 && (val[vn - 1] == '\n' || val[vn - 1] == '\r' || val[vn - 1] == ' ')) val[--vn] = '\0';
         int st = rule_status_from_name(val, vn);
         if (st < 0) continue;
+        /* 带修饰符的规则不实现：跳过而不是降级成整域命中（见函数注释与支持清单） */
+        if (rule_has_unsupported_modifier(s)) continue;
         char norm[RULE_RULE_MAX];
         domain_rule_normalize(s, norm, sizeof(norm));
         size_t rl = strlen(norm);
