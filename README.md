@@ -27,7 +27,8 @@
 
 从 [Releases](https://github.com/wxcvm/AdAway/releases/latest) 下载最新 APK 直接安装。
 
-> **要求**：Android 8.0+，Magisk 或其他 Root 方案
+> **要求**：Android 11+（minSdk 30，仅 arm64-v8a 架构），Magisk / KernelSU / APatch 等 Root 方案。
+> 无 Root 时只能覆盖 DNS/hosts 层，无法接管全部流量；HTTPS 内容过滤还依赖本地 CA 被系统信任。
 
 ## 证书安装（HTTPS 拦截必须）
 
