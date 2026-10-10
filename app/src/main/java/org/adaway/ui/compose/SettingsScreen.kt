@@ -1309,11 +1309,22 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     )
                     Spacer(Modifier.height(4.dp))
                     // 证书状态（后台获取避免主线程网络）
+                    /*
+                     * 四态 + 可刷新：之前只在进页面时算一次，安装/删除之后不更新，用户看到的是旧结论；
+                     * 而且"已安装"只看用户库 —— targetSdk>=24 的 App 默认不信任用户库，必须把
+                     * "用户级"与"系统级"分开显示（系统级要写 /system 或 APEX，或 apexdata ——
+                     * 后者非空时 Conscrypt 优先读它，只覆盖 APEX 是不够的）。
+                     */
                     var certStateRes by remember { mutableIntStateOf(R.string.pref_webserver_state_not_running) }
-                    LaunchedEffect(Unit) {
-                        certStateRes = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            org.adaway.util.WebServerUtils.getWebServerState(context)
+                    var certTrust by remember { mutableIntStateOf(0) }
+                    var certRefresh by remember { mutableIntStateOf(0) }
+                    LaunchedEffect(certRefresh) {
+                        val probe = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            org.adaway.util.WebServerUtils.getWebServerState(context) to
+                                org.adaway.util.WebServerUtils.certificateTrustLevel(context)
                         }
+                        certStateRes = probe.first
+                        certTrust = probe.second
                     }
                     Text(
                         stringResource(certStateRes),
@@ -1323,13 +1334,23 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.error,
                     )
-                    // ── 一键信任（root 系统信任库）/ 手动安装 ──
-                    var certTrusted by remember { mutableStateOf(false) }
-                    LaunchedEffect(Unit) {
-                        certTrusted = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            org.adaway.util.WebServerUtils.isUserCertificateInstalled(context)
-                        }
+                    if (certTrust > 0) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            stringResource(
+                                if (certTrust >= org.adaway.util.WebServerUtils.TRUST_SYSTEM)
+                                    R.string.compose_settings_cert_level_system
+                                else R.string.compose_settings_cert_level_user,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (certTrust >= org.adaway.util.WebServerUtils.TRUST_SYSTEM)
+                                MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
+                    // ── 一键信任（写入用户库）/ 手动安装 ──
+                    /* 复用同一次探测的结果，避免两处各自查一遍还互相不一致 */
+                    val certTrusted = certTrust > 0
                     Spacer(Modifier.height(8.dp))
                     if (certTrusted) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1352,7 +1373,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             Button(
                                 onClick = {
                                     val ok = org.adaway.util.WebServerUtils
-                                        .installCertificateToSystemStore(context)
+                                        .installCertificateToUserStore(context)
                                     /*
                                      * Verify instead of trusting the return
                                      * value: the root copy can "succeed" while
@@ -1370,7 +1391,9 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                         else R.string.compose_settings_cert_trust_fail,
                                         Toast.LENGTH_LONG
                                     ).show()
-                                    certTrusted = verified
+                                    /* 重新探测：状态与信任级别都要按事实刷新，而不是沿用旧结论。
+                                       certTrusted 现在是派生值（certTrust > 0），不能再赋值。 */
+                                    certRefresh++
                                 },
                                 modifier = Modifier.weight(1f),
                             ) {

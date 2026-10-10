@@ -355,6 +355,8 @@
     <string name="compose_stats_app_tls_fail">Failed handshakes: %1$d (the certificate-pinning signal)</string>
     <string name="compose_stats_app_detail_hint">These figures come from the per-app statistics of the server. The hosts it hits most often are listed above; the full history is in the request log.</string>
     <string name="compose_stats_app_hosts">Hosts it hits most often</string>
+    <string name="compose_settings_cert_level_user">User trust store (most apps do not trust it by default — system-level needs /system or APEX, and apexdata wins once it is non-empty)</string>
+    <string name="compose_settings_cert_level_system">System trust store (trusted system-wide)</string>
     <string name="compose_exempt_effective_note">What an exemption does here: this server stops blocking that host (it answers 204 No Content). In the setup where AdGuard sends its blocked domains to this server, the server has no way to fetch the real content, so to make the host truly usable, exempt it in AdGuard as well. The app warns about the fake 200 it used to return — that is gone now.</string>
     <string name="compose_settings_autostart_battery_button">Battery settings</string>
     <string name="compose_settings_autostart_retry">Start the server again</string>
