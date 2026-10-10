@@ -2108,7 +2108,19 @@ static bool f5_guard_tripped(uid_t uid, uint32_t hh) {
 #define F5_BREAKS            32
 
 static uint64_t s_f5_cache_hits, s_f5_breaker_hits;   /* RAM-only */
-static uint32_t s_f5_prev_hash;                       /* 上一次进入挂钩点的域（配对用） */
+/*
+ * cache_reuse 的判定缓存：按 (uid, host_hash) 的有界表（64 条，最旧优先淘汰）。
+ *
+ * 早期实现只保存上一条请求的域哈希+时间戳：交替访问两个域时永远不命中（那就不是缓存），
+ * 也无法区分 uid（可能把别的应用的判定套过来）。现在键含 uid，且可同时缓存多条；
+ * 类型由上一次同键请求写入 —— 跨键绝不互相写入。
+ */
+#define F5_CACHE_MAX 64
+struct f5_cache_entry { uid_t uid; uint32_t host_hash; int type; uint64_t ts; };
+static struct f5_cache_entry s_f5_cache[F5_CACHE_MAX];
+static int s_f5_cache_pos;
+static uid_t s_f5_prev_uid;
+static uint32_t s_f5_prev_hash;
 static uint64_t s_f5_prev_ts;
 struct f5_break { uint32_t host_hash; uint64_t win_start; uint32_t count; uint64_t until_ms; };
 static struct f5_break s_f5_breaks[F5_BREAKS];
@@ -2258,6 +2270,24 @@ static bool deny_fast(uint64_t *mechanism_hits, struct mg_connection *co) {
     return true;
 }
 
+/* 在缓存表里找 (uid, host) 的槽位；create != 0 时按"最旧优先"补一个。 */
+static struct f5_cache_entry *f5_cache_slot(uid_t uid, uint32_t hh, int create) {
+    struct f5_cache_entry *oldest = &s_f5_cache[0];
+    for (int i = 0; i < F5_CACHE_MAX; i++) {
+        struct f5_cache_entry *e = &s_f5_cache[i];
+        if (e->type != 0 && e->uid == uid && e->host_hash == hh) return e;
+        if (e->ts < oldest->ts) oldest = e;
+    }
+    if (!create) return NULL;
+    struct f5_cache_entry *e = &s_f5_cache[s_f5_cache_pos];
+    s_f5_cache_pos = (s_f5_cache_pos + 1) % F5_CACHE_MAX;
+    e->uid = uid;
+    e->host_hash = hh;
+    e->type = 0;          /* 0 = 还没有已知判定（LT_IMAGES 也是 0，所以用 type!=0 当"有效"标记） */
+    e->ts = 0;
+    return e;
+}
+
 static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
     struct mg_str u = hm->uri;
     /* 进入时先记下上一次的决策类型（下一行就会被清成 -1），供 cache_reuse 配对使用。
@@ -2299,15 +2329,25 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             return deny_fast(&s_f5_breaker_hits, c);
         }
         /*
-         * cache_reuse：同一域在 TTL 内再次到来且上一次的决策已知 → 直接复用。
-         * 只在"上一次也是同一个域"时配对，避免把别的域的决策套过来。
+         * cache_reuse（键 = uid + 域）：
+         *   1) 先把"上一次同键请求"的判定写进缓存 —— 只有 uid 与域都相同才写，
+         *      跨键绝不互相写入，因此不会把别的应用/别的域的结论套过来；
+         *   2) 再查缓存：同一 (uid, 域) 在 TTL 内重复出现 → 直接复用该判定。
          */
-        if (cfg_cache && f5_hh == s_f5_prev_hash && f5_prev_type >= 0 &&
-            f5_now - s_f5_prev_ts <= F5_CACHE_TTL_MS) {
-            s_last_type = f5_prev_type;
-            s_last_mode = RB_DENY;
-            return deny_fast(&s_f5_cache_hits, c);
+        if (cfg_cache && f5_prev_type >= 0 && s_f5_prev_ts != 0 &&
+            s_f5_prev_uid == f5_uid && s_f5_prev_hash == f5_hh) {
+            struct f5_cache_entry *w = f5_cache_slot(f5_uid, f5_hh, 1);
+            if (w) { w->type = f5_prev_type + 1; w->ts = s_f5_prev_ts; }
         }
+        if (cfg_cache) {
+            struct f5_cache_entry *e = f5_cache_slot(f5_uid, f5_hh, 0);
+            if (e && e->type != 0 && f5_now - e->ts <= F5_CACHE_TTL_MS) {
+                s_last_type = e->type - 1;
+                s_last_mode = RB_DENY;
+                return deny_fast(&s_f5_cache_hits, c);
+            }
+        }
+        s_f5_prev_uid = f5_uid;
         s_f5_prev_hash = f5_hh;
         s_f5_prev_ts = f5_now;
         if (cfg_guard && f5_guard_tripped(f5_uid, f5_hh)) {
