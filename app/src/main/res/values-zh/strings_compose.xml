@@ -235,6 +235,8 @@
     <string name="compose_stats_7d_window">每天 · 7天</string>
     <string name="compose_stats_history_connections">连接</string>
     <string name="compose_stats_style_bars">柱状</string>
+    <string name="compose_settings_chart_top_hosts">热门拦截域名</string>
+    <string name="compose_settings_chart_top_hosts_hint">显示被拦截次数最多的域名</string>
     <string name="compose_stats_style_line">折线</string>
     <string name="compose_stats_style_stacked">堆叠</string>
     <string name="compose_stats_style_area">面积</string>

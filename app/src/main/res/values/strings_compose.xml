@@ -234,6 +234,8 @@
     <string name="compose_stats_7d_window">daily · 7d</string>
     <string name="compose_stats_history_connections">Connections</string>
     <string name="compose_stats_style_bars">Bars</string>
+    <string name="compose_settings_chart_top_hosts">Top blocked hosts</string>
+    <string name="compose_settings_chart_top_hosts_hint">Show which domains were blocked most often</string>
     <string name="compose_stats_style_line">Line</string>
     <string name="compose_stats_style_stacked">Stacked</string>
     <string name="compose_stats_style_area">Area</string>

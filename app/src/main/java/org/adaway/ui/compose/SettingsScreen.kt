@@ -255,6 +255,15 @@ internal fun setChartEnabled(context: Context, key: String, enabled: Boolean) {
 }
 
 /** Bar chart style: 0 = side-by-side, 1 = stacked, 2 = area. Default 0. */
+/*
+ * 趋势图样式的唯一映射 —— 设置页与趋势图共用（此前设置页的排列是
+ * 柱状=0/堆叠=1/面积=2，而 StatisticsScreen 按 0=折线/1=面积/2=柱状绘制，
+ * 于是用户选"柱状图"实际看到的是折线图）。
+ */
+internal const val CHART_STYLE_LINE = 0
+internal const val CHART_STYLE_AREA = 1
+internal const val CHART_STYLE_BARS = 2
+
 internal fun chartStyle(context: Context): Int {
     return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
         .getInt("chart_style", 0)
@@ -1500,6 +1509,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         Triple("chart_trend", R.string.compose_settings_chart_trend, R.string.compose_settings_chart_trend_hint),
                         Triple("chart_conn", R.string.compose_settings_chart_conn, R.string.compose_settings_chart_conn_hint),
                         Triple("chart_apps", R.string.compose_settings_chart_apps, R.string.compose_settings_chart_apps_hint),
+                        Triple("chart_top_hosts", R.string.compose_settings_chart_top_hosts, R.string.compose_settings_chart_top_hosts_hint),
                         Triple("chart_certs", R.string.compose_settings_chart_certs, R.string.compose_settings_chart_certs_hint),
                         Triple("chart_qlog", R.string.compose_settings_chart_qlog, R.string.compose_settings_chart_qlog_hint),
                     )
@@ -1540,9 +1550,9 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     LaunchedEffect(Unit) { style = chartStyle(context) }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf(
-                            R.string.compose_stats_style_bars to 0,
-                            R.string.compose_stats_style_stacked to 1,
-                            R.string.compose_stats_style_area to 2,
+                            R.string.compose_stats_style_line to CHART_STYLE_LINE,
+                            R.string.compose_stats_style_area to CHART_STYLE_AREA,
+                            R.string.compose_stats_style_bars to CHART_STYLE_BARS,
                         ).forEach { (labelRes, s) ->
                             FilterChip(
                                 selected = style == s,

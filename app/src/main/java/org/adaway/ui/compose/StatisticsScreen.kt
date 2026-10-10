@@ -146,9 +146,11 @@ fun StatisticsScreen(
     val showRate = isChartEnabled(context, "chart_rate")
     val showDonut = isChartEnabled(context, "chart_donut")
     val showTrend = isChartEnabled(context, "chart_trend")
-    val showBars = isChartEnabled(context, "chart_bars")
     val showApps = isChartEnabled(context, "chart_apps")
     val showCerts = isChartEnabled(context, "chart_certs")
+    /* 热门拦截域名与最近证书是两类信息，各自一个开关（此前共用 showCerts，
+       关掉"最近证书"会把热门域名一起藏掉）。 */
+    val showTopHosts = isChartEnabled(context, "chart_top_hosts")
     val showConn = isChartEnabled(context, "chart_conn")
     val showQlog = isChartEnabled(context, "chart_qlog")
 
@@ -359,7 +361,7 @@ fun StatisticsScreen(
             }
 
             // Top intercepted domains (ranked by how often they were blocked)
-            if (showCerts && serverStats != null && serverStats!!.topBlocked.isNotEmpty()) {
+            if (showTopHosts && serverStats != null && serverStats!!.topBlocked.isNotEmpty()) {
                 TopHostsCard(serverStats!!.topBlocked)
             }
             // Recently issued SNI certs
