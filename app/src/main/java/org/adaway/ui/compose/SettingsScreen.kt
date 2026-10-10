@@ -1942,7 +1942,9 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         }
                         Icon(
                             imageVector = if (appsExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                            contentDescription = if (appsExpanded) "Collapse" else "Expand",
+                            contentDescription = stringResource(
+                                if (appsExpanded) R.string.compose_action_collapse else R.string.compose_action_expand,
+                            ),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -2392,7 +2394,7 @@ private fun openBatterySettings(context: Context) {
         )
     } catch (e: Exception) {
         Timber.w(e, "No battery optimization settings activity")
-        Toast.makeText(context, e.message ?: "unavailable", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, e.message ?: context.getString(R.string.compose_unavailable), Toast.LENGTH_SHORT).show()
     }
 }
 

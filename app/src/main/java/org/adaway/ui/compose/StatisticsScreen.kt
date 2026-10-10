@@ -1531,7 +1531,9 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>, onOpenLogs: () -> U
                 Icon(
                     imageVector = if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess
                     else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    contentDescription = stringResource(
+                        if (expanded) R.string.compose_action_collapse else R.string.compose_action_expand,
+                    ),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -1729,7 +1731,9 @@ private fun ActiveAppsCard(
                 Icon(
                     imageVector = if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess
                     else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    contentDescription = stringResource(
+                        if (expanded) R.string.compose_action_collapse else R.string.compose_action_expand,
+                    ),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -1859,7 +1863,9 @@ private fun RecentCertsCard(hosts: List<TlsHost>) {
                 Icon(
                     imageVector = if (expanded) androidx.compose.material.icons.Icons.Outlined.ExpandLess
                     else androidx.compose.material.icons.Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    contentDescription = stringResource(
+                        if (expanded) R.string.compose_action_collapse else R.string.compose_action_expand,
+                    ),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

@@ -170,6 +170,9 @@
     <string name="compose_settings_clear_stats_ok">服务端统计已清除</string>
     <string name="compose_settings_clear_stats_fail">连不上服务端 —— 没有清除任何数据</string>
     <string name="compose_settings_backup">Backup</string>
+    <string name="compose_action_expand">Expand</string>
+    <string name="compose_action_collapse">Collapse</string>
+    <string name="compose_unavailable">unavailable</string>
     <string name="compose_export_cert_missing">Certificate not found — start the web server first</string>
     <string name="compose_export_no_slot">Export failed: no MediaStore slot</string>
     <string name="compose_export_cert_ok">Certificate exported: Download/adblock-ca.crt</string>
