@@ -298,6 +298,33 @@ private fun queryActionSummary(entry: QueryLogEntry): String {
  * 之前日志只能在应用里看，出问题没法拿出来对比；Windows 端有“诊断导出”，
  * 这里补上同样的能力。文件写在 cacheDir，通过 FileProvider 授权读取。
  */
+/*
+ * CSV 用的可读名称。
+ *
+ * 这里刻意不用 stringResource：导出函数不是 Composable，而且导出的文件更适合语言无关的
+ * 稳定标识（同事/工具拿到 CSV 时不会因为系统语言不同而对不上）。数字编码仍然保留在
+ * 单独的 type_code / mode_code 列里，方便机器处理。
+ */
+private fun csvTypeName(type: Int): String = when (type) {
+    0 -> "images"
+    1 -> "scripts"
+    2 -> "styles"
+    3 -> "fonts"
+    4 -> "media"
+    5 -> "other"
+    6 -> "api"
+    7 -> "telemetry"
+    8 -> "config"
+    9 -> "ws_sse"
+    else -> ""
+}
+
+private fun csvModeName(mode: Int): String = when (mode) {
+    1 -> "204"
+    2 -> "allowed"
+    else -> "placeholder"
+}
+
 private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
     if (entries.isEmpty()) return
     try {
@@ -305,7 +332,8 @@ private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
         val file = java.io.File(context.cacheDir, "adblock-query-log-$stamp.csv")
         val timeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         file.bufferedWriter(Charsets.UTF_8).use { out ->
-            out.write("time,result,type,mode,uid,host\n")
+            /* 同时给可读名与机器用的编码，两个受众都不吃亏 */
+            out.write("time,result,type_code,type_name,mode_code,mode_name,uid,host\n")
             entries.forEach { entry ->
                 val time = if (entry.ts > 0) timeFmt.format(Date(entry.ts * 1000L)) else ""
                 val result = when (entry.action) {
@@ -318,7 +346,9 @@ private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
                         time,
                         result,
                         if (entry.type in 0..9) entry.type.toString() else "",
+                        csvTypeName(entry.type),
                         entry.mode.toString(),
+                        csvModeName(entry.mode),
                         if (entry.uid >= 0) entry.uid.toString() else "",
                         entry.host,
                     ).joinToString(",") { csvField(it) } + "\n",
