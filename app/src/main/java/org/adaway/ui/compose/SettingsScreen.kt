@@ -779,8 +779,15 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                     org.adaway.util.WebServerUtils.getHttpPort(context),
                                     org.adaway.util.WebServerUtils.getHttpsPort(context),
                                 )
-                                org.adaway.util.WebServerUtils.stopWebServer()
-                                org.adaway.util.WebServerUtils.startWebServer(context)
+                                /*
+                                 * 停止与启动会走 root shell、检查进程、拷贝并设置可执行文件权限 ——
+                                 * 放在 UI 线程上，慢设备或 root 管理器响应慢时会卡住，严重时 ANR。
+                                 * 偏好已经写完，重启开销丢到后台线程，界面立即恢复可交互。
+                                 */
+                                Thread {
+                                    org.adaway.util.WebServerUtils.stopWebServer()
+                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                }.start()
                             },
                         )
                     }
@@ -804,8 +811,15 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                         context, bindAll, p,
                                         org.adaway.util.WebServerUtils.getHttpsPort(context),
                                     )
-                                    org.adaway.util.WebServerUtils.stopWebServer()
-                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                    /*
+                                     * 停止与启动会走 root shell、检查进程、拷贝并设置可执行文件权限 ——
+                                     * 放在 UI 线程上，慢设备或 root 管理器响应慢时会卡住，严重时 ANR。
+                                     * 偏好已经写完，重启开销丢到后台线程，界面立即恢复可交互。
+                                     */
+                                    Thread {
+                                        org.adaway.util.WebServerUtils.stopWebServer()
+                                        org.adaway.util.WebServerUtils.startWebServer(context)
+                                    }.start()
                                 },
                                 label = { Text("$p") },
                             )
