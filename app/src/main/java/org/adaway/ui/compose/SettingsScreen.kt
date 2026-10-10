@@ -621,14 +621,44 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     )
                     Spacer(Modifier.height(8.dp))
                     val prefs = context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+                    /*
+                     * 二次确认 + 真正调用原生重置。
+                     *
+                     * 之前这里只删了 s_hist_pos / s_daily_pos 两个设置键 —— 真正的计数、历史曲线、
+                     * 应用统计与查询日志都在原生进程内存里（并各自有 .dat 文件），所以按钮点了
+                     * 等于没点、也没有任何反馈。现在：第一次点击进入确认态，第二次才真正清除；
+                     * 清除走回环管理端口（8686）的 /internal-reset?what=all，并如实反馈结果。
+                     * 刻意不用协程/新 import：后台线程 + Handler 回主线程即可。
+                     */
+                    var clearArmed by remember { mutableStateOf(false) }
                     Button(
                         onClick = {
-                            prefs.edit().remove("s_hist_pos").remove("s_daily_pos").apply()
+                            if (!clearArmed) {
+                                clearArmed = true
+                            } else {
+                                clearArmed = false
+                                Thread {
+                                    val done = org.adaway.util.WebServerUtils.resetStatistics(context)
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        Toast.makeText(
+                                            context,
+                                            if (done) R.string.compose_settings_clear_stats_ok
+                                            else R.string.compose_settings_clear_stats_fail,
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }.start()
+                            }
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                     ) {
-                        Text(stringResource(R.string.compose_settings_clear_stats))
+                        Text(
+                            stringResource(
+                                if (clearArmed) R.string.compose_settings_clear_stats_confirm
+                                else R.string.compose_settings_clear_stats,
+                            )
+                        )
                     }
                     Spacer(Modifier.height(8.dp))
                     // 备份/恢复：导出规则+设置到文件，或从文件恢复

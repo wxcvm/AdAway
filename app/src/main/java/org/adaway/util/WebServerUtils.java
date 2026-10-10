@@ -691,6 +691,34 @@ public static void installUserCertificate(Context context) {
      * 用户以为装了系统级证书、HTTPS 却仍然失败，正是这个错位造成的。
      * 真实级别请用 {@link #certificateTrustLevel} 判定（它会把 APEX / apexdata 也算上）。</p>
      */
+    /**
+     * 真正清除服务端统计：计数（保留运行时长起点）、历史曲线、查询日志、按应用统计。
+     *
+     * <p>走回环管理端口（{@link #STATS_PORT}）的 /internal-reset，与统计轮询同一入口，
+     * 因此不受对外监听端口/HTTPS 配置影响；1 秒节流由服务端负责。</p>
+     *
+     * @return 仅当服务端返回 200 时为 true；连不上（服务未启动）返回 false。
+     */
+    public static boolean resetStatistics(Context context) {
+        java.net.HttpURLConnection conn = null;
+        try {
+            java.net.URL url = new java.net.URL(
+                    "http://127.0.0.1:" + STATS_PORT + "/internal-reset?what=all");
+            conn = (java.net.HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
+            conn.setRequestMethod("GET");
+            int code = conn.getResponseCode();
+            Timber.d("statistics reset: HTTP %d", code);
+            return code == 200;
+        } catch (Exception e) {
+            Timber.w(e, "statistics reset failed");
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
     public static boolean installCertificateToUserStore(Context context) {
         return installCertificateToSystemStore(context);
     }

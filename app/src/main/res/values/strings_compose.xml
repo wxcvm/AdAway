@@ -163,6 +163,9 @@
     <string name="compose_settings_data_title">Data</string>
     <string name="compose_settings_data_hint">Clear statistics and history</string>
     <string name="compose_settings_clear_stats">Clear all stats</string>
+    <string name="compose_settings_clear_stats_confirm">Clear all statistics (asks again to confirm)</string>
+    <string name="compose_settings_clear_stats_ok">服务端统计已清除</string>
+    <string name="compose_settings_clear_stats_fail">连不上服务端 —— 没有清除任何数据</string>
     <string name="compose_settings_backup">Backup</string>
     <string name="compose_settings_restore">Restore</string>
     <string name="compose_settings_about_title">About</string>
