@@ -363,6 +363,11 @@ static bool cfg_dedup = false;
 static bool cfg_guard = false;
 static bool cfg_cache = false;
 static bool cfg_breaker = false;
+/* 降载（去重/护栏/缓存/熔断）快速失败的请求数：它们确实被拦了，所以计入总拦截量，
+   但**不计入任何 blocked_* 类型** —— 否则开启降载后类型分布会失真（原实现的 bug）。 */
+static uint64_t s_f5_fastfail;
+/* 按域覆盖命中数：同样不属于任何请求类型，单列计数以免污染类型分布。 */
+static uint64_t s_f5_override_hits;
 static bool cfg_rule_override = false;
 
 /*
@@ -391,7 +396,7 @@ static uint64_t stats_total_blocked(void) {
            s_stats.blocked_fonts + s_stats.blocked_media + s_stats.blocked_api +
            s_stats.blocked_telemetry + s_stats.blocked_heartbeat + s_stats.blocked_config +
            s_stats.blocked_ws_sse + s_stats.blocked_other + s_stats.blocked_crypto +
-           s_stats.blocked_clickbait;
+           s_stats.blocked_clickbait + s_f5_fastfail + s_f5_override_hits;   /* 降载快速失败与按域覆盖也算被拦，类型分布仍保持真实 */
 }
 
 /* ── Persistent lifetime counters ─────────────────────────────── */
@@ -2239,6 +2244,20 @@ static bool deny_status(uint64_t *counter, struct mg_connection *co, int status)
     return true;
 }
 
+/*
+ * 降载快速失败：与 deny_quick 的区别是**不累加任何 blocked_* 类型计数**。
+ *
+ * 为什么需要它：去重/护栏/缓存/熔断命中时，请求确实被拦了（要计入总拦截量与拦截率），
+ * 但它并不属于任何一个请求类型 —— 早期实现统一累加 blocked_other，导致"开启降载后类型
+ * 分布失真"（例如图片类看起来变少了）。现在机制命中只看 *_hits，类型分布保持真实。
+ */
+static bool deny_fast(uint64_t *mechanism_hits, struct mg_connection *co) {
+    if (mechanism_hits) (*mechanism_hits)++;
+    s_f5_fastfail++;
+    mg_http_reply(co, 204, "Cache-Control: no-store\r\n", "");
+    return true;
+}
+
 static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
     struct mg_str u = hm->uri;
     /* 进入时先记下上一次的决策类型（下一行就会被清成 -1），供 cache_reuse 配对使用。
@@ -2271,14 +2290,13 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             if (ov > 0) {
                 s_last_type = LT_STRUCT;
                 s_last_mode = RB_DENY;
-                return deny_status(&s_stats.blocked_other, c, ov);
+                return deny_status(&s_f5_override_hits, c, ov);
             }
         }
         if (cfg_breaker && f5_breaker_tripped(f5_hh, f5_now)) {
-            s_f5_breaker_hits++;
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
-            return deny_quick(&s_stats.blocked_other, c);
+            return deny_fast(&s_f5_breaker_hits, c);
         }
         /*
          * cache_reuse：同一域在 TTL 内再次到来且上一次的决策已知 → 直接复用。
@@ -2286,24 +2304,21 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
          */
         if (cfg_cache && f5_hh == s_f5_prev_hash && f5_prev_type >= 0 &&
             f5_now - s_f5_prev_ts <= F5_CACHE_TTL_MS) {
-            s_f5_cache_hits++;
             s_last_type = f5_prev_type;
             s_last_mode = RB_DENY;
-            return deny_quick(&s_stats.blocked_other, c);
+            return deny_fast(&s_f5_cache_hits, c);
         }
         s_f5_prev_hash = f5_hh;
         s_f5_prev_ts = f5_now;
         if (cfg_guard && f5_guard_tripped(f5_uid, f5_hh)) {
-            s_f5_guard_hits++;
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
-            return deny_quick(&s_stats.blocked_other, c);
+            return deny_fast(&s_f5_guard_hits, c);
         }
         if (cfg_dedup && f5_dedup_hit(f5_uid, f5_hh)) {
-            s_f5_dedup_hits++;
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
-            return deny_quick(&s_stats.blocked_other, c);
+            return deny_fast(&s_f5_dedup_hits, c);
         }
     }
 
