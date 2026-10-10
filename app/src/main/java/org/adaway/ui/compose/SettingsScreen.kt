@@ -1136,22 +1136,27 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                     org.adaway.broadcast.BootReceiver.ensureEnabled(context)
                                     org.adaway.broadcast.BootReceiver
                                         .scheduleStart(context, "user enabled autostart")
-                                    org.adaway.util.WebServerUtils.startWebServer(context)
-                                    // root shell 不能跑在主线程上
+                                    /*
+                                     * 启动服务器本身就会走 root shell、检查进程、拷贝并设置可执行位，
+                                     * 而此前只有安装开机脚本进了 IO —— 注释写着 root shell 不能跑在主线程
+                                     * 上，启动调用却还留在主线程。两者互不依赖，一起放进 IO。
+                                     */
                                     autostartScope.launch {
                                         val supported = kotlinx.coroutines.withContext(
                                             kotlinx.coroutines.Dispatchers.IO,
                                         ) {
+                                            org.adaway.util.WebServerUtils.startWebServer(context)
                                             org.adaway.model.root.MagiskBootScript.install(context)
                                         }
                                         bootScriptState = if (supported) 1 else -1
                                     }
                                 } else {
-                                    org.adaway.util.WebServerUtils.stopWebServer()
+                                    /* 停止同样会走 root shell，与卸载开机脚本一起放到 IO */
                                     autostartScope.launch {
                                         kotlinx.coroutines.withContext(
                                             kotlinx.coroutines.Dispatchers.IO,
                                         ) {
+                                            org.adaway.util.WebServerUtils.stopWebServer()
                                             org.adaway.model.root.MagiskBootScript.uninstall()
                                         }
                                         bootScriptState = 0
