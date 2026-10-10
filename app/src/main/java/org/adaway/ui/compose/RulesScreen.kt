@@ -554,13 +554,27 @@ fun RulesScreen(
                         val host = ruleHostInput
                         val type = ruleType
                         val redirect = ruleRedirectInput
-                        showAddRuleDialog = false
-                        ruleHostInput = ""
-                        ruleRedirectInput = ""
-                        viewModel.addUserRule(host, type, redirect) {
-                            viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items2, total2 ->
-                                rules = items2
-                                totalCount = total2
+                        /*
+                         * 等结果回来再决定收尾动作：此前是先关对话框、清空输入，再去异步写入 ——
+                         * 失败时用户既不知道原因，也丢了刚填的内容（重复规则、域名格式不合法、
+                         * 数据库写入失败都表现为对话框关了但列表里没有）。
+                         */
+                        viewModel.addUserRule(host, type, redirect) { added ->
+                            if (added) {
+                                showAddRuleDialog = false
+                                ruleHostInput = ""
+                                ruleRedirectInput = ""
+                                viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items2, total2 ->
+                                    rules = items2
+                                    totalCount = total2
+                                }
+                            } else {
+                                /* 失败：保留对话框与输入，用户可以直接改一改再试 */
+                                Toast.makeText(
+                                    context,
+                                    R.string.compose_rules_add_failed,
+                                    Toast.LENGTH_LONG,
+                                ).show()
                             }
                         }
                     },

@@ -315,6 +315,7 @@
     <string name="compose_rules_view_hosts_copy">Copy</string>
     <string name="compose_rules_view_hosts_copied">Copied to the clipboard</string>
     <string name="compose_rules_cancel">Cancel</string>
+    <string name="compose_rules_add_failed">Not added: the rule may already exist, the domain may be invalid, or the database write failed</string>
     <string name="compose_rules_source_size">%1$d items</string>
     <string name="compose_rules_sources_empty">No subscriptions yet — add one to start blocking.</string>
     <string name="compose_stats_kpi_connections">Connections</string>
