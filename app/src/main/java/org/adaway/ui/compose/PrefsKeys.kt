@@ -12,8 +12,17 @@ object PrefsKeys {
     const val PREFS_WEBSERVER = "compose_webserver"
 
     // ── 通用设置 ──
-    const val LOG_LIMIT = "log_limit"          // 日志条数上限（默认500）
-    const val LOG_RETENTION = "log_retention"  // 日志保留小时数（0=永久）
+    /*
+     * 这里原本有 LOG_LIMIT / LOG_RETENTION 两个键（注释写着"日志条数上限（默认500）"与
+     * "日志保留小时数（0=永久）"）。但全工程没有任何地方读取它们：既没有设置界面，也没有
+     * 传到原生服务端 —— 属于"看起来可配置、实际不生效"的死配置，因此删除，避免下一个人
+     * 以为改这里就能控制日志留存。
+     *
+     * 当前真实行为（值取自 webserver/jni/webserver.c 里的宏，改这里不生效）：
+     *   内存查询日志环：QLOG_MAX = 10000 条
+     *   落盘保留：QLOG_PERSIST_MAX = 4096 条
+     * 若将来要实现可配置的条数与保留时长，需要同时改造这两处宏、原生端读取方式与设置界面。
+     */
     const val THEME_MODE = "theme_mode"        // 0=跟随系统 1=浅色 2=深色
 
     // ── 图表设置 ──
