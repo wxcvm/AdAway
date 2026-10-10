@@ -4329,7 +4329,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      * for one huge document.
      */
    /*
-     * 管理用重置：/internal-reset?what=qlog|apps|all
+     * 管理用重置：/internal-reset?what=stats|qlog|apps|all
      *
      * 为什么需要它："清除所有统计"此前只删了 App 的两个设置键 —— 真正的计数、历史曲线、
      * 应用统计与查询日志都在本进程的内存里（并各自有一份 .dat 持久化），所以用户点了等于没点。
@@ -4351,11 +4351,25 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         bool all = (what[0] == 0) || (strcmp(what, "all") == 0);
         bool did_qlog = all || (strcmp(what, "qlog") == 0);
         bool did_apps = all || (strcmp(what, "apps") == 0);
+        bool did_stats = all || (strcmp(what, "stats") == 0);
         if (did_qlog) qlog_clear();
         if (did_apps) memset(s_apps, 0, sizeof(s_apps));
+        if (did_stats) {
+            /*
+             * 计数整体清零，但**保留 start_time_ms** —— 它是运行时长的起点，
+             * 归零会让"已运行"变成天文数字。降载计数（F5）同属统计，一并清零。
+             */
+            uint64_t keep_start = s_stats.start_time_ms;
+            memset(&s_stats, 0, sizeof(s_stats));
+            s_stats.start_time_ms = keep_start;
+            s_f5_dedup_hits = s_f5_guard_hits = s_f5_cache_hits = s_f5_breaker_hits = 0;
+            s_f5_fastfail = 0;
+            s_f5_override_hits = 0;
+        }
         mg_http_reply(c, 200, "Content-Type: application/json\r\nCache-Control: no-store\r\n",
-                      "{\"ok\":true,\"qlog\":%s,\"apps\":%s}\n",
-                      did_qlog ? "true" : "false", did_apps ? "true" : "false");
+                      "{\"ok\":true,\"qlog\":%s,\"apps\":%s,\"stats\":%s}\n",
+                      did_qlog ? "true" : "false", did_apps ? "true" : "false",
+                      did_stats ? "true" : "false");
         return;
     }
 
