@@ -805,9 +805,23 @@ public static void installUserCertificate(Context context) {
                         + "then echo TRUST_SYSTEM; else echo TRUST_USER_ONLY; fi";
         try {
             Shell.Result r = Shell.cmd(cmd).exec();
-            String out = r.getOut() == null ? "" : r.getOut();
-            if (out.contains("TRUST_SYSTEM")) return TRUST_SYSTEM;
-            if (out.contains("TRUST_USER_ONLY")) return userStore ? TRUST_USER : TRUST_NONE;
+            /*
+             * Shell.Result#getOut() 返回的是 List<String>（每行一项），不是单个 String ——
+             * 之前按字符串拼接写，编译期就报 "List<String> cannot be converted to String"。
+             * 这里逐行匹配，且用全限定类型名，避免为一行代码新增 import。
+             */
+            java.util.List<String> lines = r.getOut();
+            boolean systemHit = false;
+            boolean userOnlyHit = false;
+            if (lines != null) {
+                for (String line : lines) {
+                    if (line == null) continue;
+                    if (line.contains("TRUST_SYSTEM")) systemHit = true;
+                    if (line.contains("TRUST_USER_ONLY")) userOnlyHit = true;
+                }
+            }
+            if (systemHit) return TRUST_SYSTEM;
+            if (userOnlyHit) return userStore ? TRUST_USER : TRUST_NONE;
         } catch (Exception e) {
             Timber.w(e, "Trust-level probe failed.");
         }
