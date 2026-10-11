@@ -24,8 +24,15 @@ class RuleVectorsTest {
         return found ?: error("找不到 rule_vectors.txt，找过：" + candidates.joinToString { it.path })
     }
 
+    /**
+     * 行尾注释的分隔符必须与 C 侧一致（rule_norm_test.c 里用 strstr(line, "   #")）：
+     * 三个空格加一个 #。改这里就要同步改那边，否则两端会读成不同的向量。
+     */
+    private val commentMarker = "   #"
+
     private fun vectors(): List<Triple<String, String, Int>> =
         vectorFile().readLines()
+            .map { it.substringBefore(commentMarker) }          // 先剥行尾注释，再判断是不是空行
             .filter { it.isNotBlank() && !it.startsWith("#") }
             .map { line ->
                 val parts = line.split("\t")
