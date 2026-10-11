@@ -1193,12 +1193,21 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 org.adaway.broadcast.BootReceiver.ensureEnabled(context)
                                 org.adaway.broadcast.BootReceiver
                                     .scheduleStart(context, "user retried")
-                                org.adaway.util.WebServerUtils.startWebServer(context)
-                                Toast.makeText(
-                                    context,
-                                    R.string.compose_settings_autostart_retry_toast,
-                                    Toast.LENGTH_SHORT,
-                                ).show()
+                                /*
+                                 * 启动服务器会走 root shell、检查进程、拷贝并设置可执行位 ——
+                                 * 放到后台线程；提示放在启动动作之后回主线程弹，避免"提示说已重试、
+                                 * 实际还没开始"这种早于事实的反馈。最后两处 C6 收尾。
+                                 */
+                                Thread {
+                                    org.adaway.util.WebServerUtils.startWebServer(context)
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        Toast.makeText(
+                                            context,
+                                            R.string.compose_settings_autostart_retry_toast,
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                }.start()
                             },
                             modifier = Modifier.weight(1f),
                         ) {
