@@ -23,6 +23,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # G1：原生纯函数的宿主机测试。只依赖标准库与 ubuntu-latest 自带的 cc，
+      # 不碰 NDK/mongoose/OpenSSL，因此几秒钟就能跑完，适合放在最前面尽早失败。
+      # 关键点：规则归一化与修饰符判据由服务端与测试共用同一份实现
+      # （webserver/jni/rule_norm.h，服务端 include 它），所以这一步失败就意味着
+      # 线上语义被改动，而不是"测试和实现各写一份"。
+      # 刻意不加 -Werror：警告要看得见，但不该用无关警告把构建弄红；结论由测试退出码给出。
+      - name: Native rule-normalisation tests
+        run: |
+          cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/rule_norm_test" webserver/jni/rule_norm_test.c
+          "$RUNNER_TEMP/rule_norm_test"
+
       - name: set up JDK 21
         uses: actions/setup-java@v5
         with:
