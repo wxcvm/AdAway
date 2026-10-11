@@ -1334,12 +1334,12 @@ static void crash_handler(int sig) {
                      "\n[CRASH] webserver killed by signal %d\n", sig);
     if (n > 0) {
         int fd = open("/data/local/tmp/webserver_start.log",
-                      O_WRONLY | O_APPEND | O_CREAT, 0644);
+                      O_WRONLY | O_APPEND | O_CREAT, 0644);  /* NOSONAR(c:S2612): 崩溃诊断日志，内容不含机密，故意让用户与抓日志的工具能读 */
         if (fd >= 0) { ssize_t w = write(fd, header, (size_t) n); (void) w; close(fd); }
         if (s_crash_dir[0]) {
             char path[PATH_MAX];
             snprintf(path, sizeof(path), "%s/native_crash.log", s_crash_dir);
-            fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+            fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);  /* NOSONAR(c:S2612): 崩溃诊断日志，内容不含机密，故意让用户与抓日志的工具能读 */
             if (fd >= 0) {
                 ssize_t w = write(fd, header, (size_t) n);
                 (void) w;

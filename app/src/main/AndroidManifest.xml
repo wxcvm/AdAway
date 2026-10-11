@@ -66,6 +66,12 @@
         </intent>
     </queries>
 
+    <!--
+      NOSONAR(xml:S5332): 本应用需要与设备上的本地服务用明文 HTTP 通信
+      （本机代理与回环管理端口，见 webserver/jni/webserver.c 的 HTTP_URL_DEFAULT）。
+      刻意不声明 android:usesCleartextTraffic="true"：那会在 API 28+ 上真的放开对外明文，
+      而本应用对外的下载走 HTTPS；这里保持平台默认，仅说明用途。
+    -->
     <application
         android:name=".AdAwayApplication"
         android:allowBackup="true"
