@@ -599,7 +599,7 @@ public static int getWebServerState(Context context) {
                 cert = (java.security.cert.X509Certificate) cf.generateCertificate(is);
             }
             byte[] subjectDer = cert.getSubjectX500Principal().getEncoded();
-            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");  // NOSONAR: 证书主体哈希必须用 MD5，Android 的 c_rehash 文件名算法规定如此，不是安全用途
             byte[] digest = md.digest(subjectDer);
             long hash = ((long)(digest[0] & 0xFF)) 
                       | ((digest[1] & 0xFFL) << 8) 
@@ -997,7 +997,7 @@ private static String computeSubjectHashOld(Path certFile)
             cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(is);
         }
         byte[] subjectDer = cert.getSubjectX500Principal().getEncoded();
-        byte[] digest = MessageDigest.getInstance("MD5").digest(subjectDer);
+        byte[] digest = MessageDigest.getInstance("MD5").digest(subjectDer);  // NOSONAR: subject_hash_old 按 OpenSSL/Android 规定就是 MD5(DER subject)，改动会让证书文件名对不上系统
         long hash = (digest[0] & 0xFFL)
                 | ((digest[1] & 0xFFL) << 8)
                 | ((digest[2] & 0xFFL) << 16)

@@ -141,7 +141,13 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
             return R.string.update_verify_unparsable;
         } finally {
             //noinspection ResultOfMethodCallIgnored
-            copy.delete();
+            /*
+             * 不能忽略 delete() 的返回值：清理失败时要留下痕迹，否则缓存里会一直留着
+             * 上次下载的 APK（占用空间，也可能让下一次校验看到过期文件）。
+             */
+            if (!copy.delete()) {
+                android.util.Log.w("ApkDownloadReceiver", "Failed to delete cached update APK: " + copy);
+            }
         }
     }
 
