@@ -46,6 +46,12 @@ static inline void domain_rule_normalize(const char *in, char *out, size_t outsz
         if (o + 1 < outsz) out[o++] = ch;
         p++;
     }
+    /*
+     * ABP 的尾锚点 |（|ads.example.com|）：主机名不可能以 | 结尾，所以它是装饰而不是内容。
+     * 不剥掉的话会得到 "ads.example.com|" —— 这样的主机名永远匹配不上，规则静默失效。
+     * 这个缺陷是宿主机测试（rule_norm_test.c）跑出来的第一个真问题。
+     */
+    while (o > 0 && out[o - 1] == '|') o--;
     out[o] = '\0';
 }
 
