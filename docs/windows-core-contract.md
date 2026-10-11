@@ -138,10 +138,14 @@ webserver/jni/rule_norm_test.c 在 CI 中执行。
   `adblock-webserver-setup.exe`，并发布固定标签 `win11-latest` 的 `windows-manifest.json`（应用内更新入口）。
 - 已从 AdAway 仓库的 `feat/win11-webserver-release` 分支移除 `webserver/win32/`（12 个文件）与
   `.github/workflows/windows-release.yml`；`webserver/jni`（C 服务端核心）**保留**，未抽成共享 Core。
-- Windows 仓库的 CI 按**固定提交** `147f9a108c14b8d13b7786014aad3a507fb987ef`（该分支迁出前的 HEAD）
+- Windows 仓库的 CI 按**固定提交** `4470606366e614abdb308fdfe94734d28167439c`（该分支**迁出后**的 HEAD，即移除 webserver/win32 与 windows-release.yml 的那次提交）
   取出 `webserver/jni` 与 `app/src/main/assets`（webroot 资源），目的路径与 AdAway 内一致，因此两端
   引用同一份源码；取完立即 `rev-parse` 断言取到的就是被 pin 的那一个提交 —— 分支前移会**大声失败**，
   强制有意识地重新 pin（改 pin 时请同步更新本节的提交号）。
+- **pin 的更新记录**：最初 pin 的是迁出前的 HEAD `147f9a10…`；随后从该分支移除 Windows 目录的那次提交
+  把分支推进到 `4470606366e614abdb308fdfe94734d28167439c`（仍保留 `webserver/jni`，jni 9 个文件、assets 13 个
+  文件），新仓库 CI 的 pin 断言因此**大声失败**并要求重新 pin —— 这正是期望行为：分支一动就停止构建，而不是
+  悄悄换上别的代码。重新 pin 前已核实新 HEAD 仍含 C 核心与 webroot 资源。
 - `gh release create` 一律带 `--latest=false`：已从外部核实 AdAway 仓库的 latest 仍是 Android 的发布，
   Windows 的发布不会抢走它（历史上真的发生过，这条是硬约束）。
 
