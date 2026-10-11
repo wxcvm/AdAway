@@ -51,3 +51,15 @@ cd AdAway
 ## 许可证
 
 [GPL-3.0](LICENSE) · 原作者 [AdAway Team](https://github.com/AdAway/AdAway)
+
+## Windows 11 端（独立仓库）
+
+Windows 端的 Web 服务端、Win32 控制面板与安装器已迁到独立仓库维护：
+**https://github.com/wxcvm/AdAway-Windows** （独立 CI / 版本号 / Release）
+
+- 它**不接管全流量**：只用 DNS / hosts / 系统代理这一层，不安装 VPN 或 TUN 适配器（与 Android 端一样，
+  本项目的任何一端都不使用 VPN 接管方式）；
+- 端上能读的配置与统计口径与 Android 端一致，契约见本仓库 `docs/windows-core-contract.md`
+  （`block_config.json` 键名、`/internal-stats` 字段、规则/策略文件、规则语义子集）；
+- 该仓库按**固定提交**从本仓库取用 `webserver/jni`（C 服务端核心）与 webroot 资源，因此两端引用同一份
+  源码；分支前移会让它的 CI 大声失败，需要有人有意识地更新 pin 并同步契约。
