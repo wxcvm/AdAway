@@ -127,3 +127,28 @@ webserver/jni/rule_norm_test.c 在 CI 中执行。
   （否则会抢走 Android 的 latest，曾经真的发生过）；
 - 所有 Action 固定到 commit SHA，文件行尾 LF；
 - 迁出后原仓库移除 Windows 目录与流水线，README 指向新仓库。
+
+## 6. 迁出状态（F 项）
+
+**已完成**（2026-10-11）：
+
+- 独立仓库：https://github.com/wxcvm/AdAway-Windows （public，默认分支 main），保存 Windows 端的
+  12 个文件 + 发布流水线；版本号仍三处一致（gui_win32.h / installer.iss / windows-release.yml 的 TAG）。
+- 独立 CI 已跑通一次完整发布：`win11-webserver-v1.74` 产出 `adblock-webserver-win64.zip` 与
+  `adblock-webserver-setup.exe`，并发布固定标签 `win11-latest` 的 `windows-manifest.json`（应用内更新入口）。
+- 已从 AdAway 仓库的 `feat/win11-webserver-release` 分支移除 `webserver/win32/`（12 个文件）与
+  `.github/workflows/windows-release.yml`；`webserver/jni`（C 服务端核心）**保留**，未抽成共享 Core。
+- Windows 仓库的 CI 按**固定提交** `147f9a108c14b8d13b7786014aad3a507fb987ef`（该分支迁出前的 HEAD）
+  取出 `webserver/jni` 与 `app/src/main/assets`（webroot 资源），目的路径与 AdAway 内一致，因此两端
+  引用同一份源码；取完立即 `rev-parse` 断言取到的就是被 pin 的那一个提交 —— 分支前移会**大声失败**，
+  强制有意识地重新 pin（改 pin 时请同步更新本节的提交号）。
+- `gh release create` 一律带 `--latest=false`：已从外部核实 AdAway 仓库的 latest 仍是 Android 的发布，
+  Windows 的发布不会抢走它（历史上真的发生过，这条是硬约束）。
+
+**尚未完成 / 已知事项**（如实记录，不要当成已完成）：
+
+- Windows 仓库的 `Code-sign webserver.exe` 步骤是 bash 语法但未声明 `shell: bash`：目前因缺少签名
+  密钥而被条件跳过，所以未暴露；**一旦配置签名密钥，必须先补 `shell: bash`**，否则会在 PowerShell 下解析失败。
+- Windows 仓库的 `Check wide-printf specifiers` 静态检查跑在"取上游"之前，因此暂时**不覆盖** C 核心文件
+  （只覆盖 gui_win32.c / update_win32.c）；覆盖由"取上游"步骤自身的存在性与大小断言（>100KB）兜底。
+- 原仓库 README 中关于 Windows 端的段落尚未改写为指向新仓库（纯文案，未做）。
