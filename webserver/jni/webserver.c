@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include "rule_norm.h"
 #include "pin_window.h"
+#include "f5_guard.h"
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -1208,7 +1209,8 @@ static struct appstat *app_find_or_add(uid_t uid) {
 
 static char s_pin_mode[PIN_MODE_MAX] = "off";
 static uint64_t s_pin_mode_loaded_ms;
-static struct { uid_t uid; uint64_t until_ms; } s_pin_bypass[APP_STATS_MAX];
+/* 直接用 pin_window.h 里的具名结构体：布局由头文件保证，不再需要强制转换。 */
+static struct pin_bypass_entry s_pin_bypass[APP_STATS_MAX];
 static int s_pin_bypass_count;
 
 /*
@@ -1254,7 +1256,7 @@ static bool pin_mode_deny(void) { return strcmp(s_pin_mode, "deny") == 0; }
 /* Is this uid currently refused without interception? */
 static bool pin_uid_bypassed(uid_t uid) {
     /* 判定逻辑在 pin_window.h 里（有宿主测试）；这里的结构体字段与原来的匿名结构体一致。 */
-    return pin_bypass_hit((const struct pin_bypass_entry *) s_pin_bypass, s_pin_bypass_count,
+    return pin_bypass_hit(s_pin_bypass, s_pin_bypass_count,
                           (unsigned int) uid, mg_millis());
 }
 
@@ -1995,7 +1997,7 @@ static uint64_t s_f5_dedup_hits, s_f5_guard_hits;   /* 只放内存，进 /inter
 struct f5_key   { uid_t uid; uint32_t host_hash; uint64_t ts; };
 struct f5_guard { uid_t uid; uint32_t host_hash; uint64_t win_start; uint32_t count; uint64_t until_ms; };
 static struct f5_key   s_f5_keys[F5_KEYS];
-static struct f5_guard s_f5_guards[F5_GUARDS];
+static struct f5_guard_entry s_f5_guards[F5_GUARDS];
 static int s_f5_key_pos;
 
 /* req_host_of 定义在本函数之后，这里前置声明（与 app_find_or_add 同样的处理） */
@@ -2026,38 +2028,16 @@ static bool f5_dedup_hit(uid_t uid, uint32_t hh) {
 
 /* 重试护栏：窗口内计数，超阈值进入冷却；冷却期内返回 true。 */
 static bool f5_guard_tripped(uid_t uid, uint32_t hh) {
-    uint64_t now = mg_millis();
-    for (int i = 0; i < F5_GUARDS; i++) {
-        if (s_f5_guards[i].uid == uid && s_f5_guards[i].host_hash == hh &&
-            s_f5_guards[i].win_start != 0) {
-            if (s_f5_guards[i].until_ms > now) return true;
-            if (now - s_f5_guards[i].win_start > F5_GUARD_WINDOW_MS) {
-                s_f5_guards[i].win_start = now;
-                s_f5_guards[i].count = 0;
-            }
-            s_f5_guards[i].count++;
-            if (s_f5_guards[i].count >= F5_GUARD_THRESHOLD) {
-                s_f5_guards[i].until_ms = now + F5_GUARD_COOLDOWN_MS;
-                LOG_WARN("guard: uid %d hammered %u requests in %us - fast-failing for %us",
-                         (int)uid, (unsigned)s_f5_guards[i].count,
-                         F5_GUARD_WINDOW_MS / 1000u, F5_GUARD_COOLDOWN_MS / 1000u);
-            }
-            return false;
-        }
+    const struct f5_guard_cfg cfg = { F5_GUARD_WINDOW_MS, F5_GUARD_THRESHOLD, F5_GUARD_COOLDOWN_MS };
+    bool tripped = false;
+    bool fast_fail = f5_guard_step(s_f5_guards, F5_GUARDS, (unsigned int) uid, hh,
+                                   mg_millis(), &cfg, &tripped);
+    if (tripped) {
+        LOG_WARN("guard: uid %d hammered %u requests in %us - fast-failing for %us",
+                 (int)uid, (unsigned)F5_GUARD_THRESHOLD,
+                 F5_GUARD_WINDOW_MS / 1000u, F5_GUARD_COOLDOWN_MS / 1000u);
     }
-    /* 新条目：优先空位，否则覆盖最久未更新的那个（有界） */
-    int slot = -1, oldest = 0;
-    for (int i = 0; i < F5_GUARDS; i++) {
-        if (s_f5_guards[i].win_start == 0) { slot = i; break; }
-        if (s_f5_guards[i].win_start < s_f5_guards[oldest].win_start) oldest = i;
-    }
-    if (slot < 0) slot = oldest;
-    s_f5_guards[slot].uid = uid;
-    s_f5_guards[slot].host_hash = hh;
-    s_f5_guards[slot].win_start = now;
-    s_f5_guards[slot].count = 1;
-    s_f5_guards[slot].until_ms = 0;
-    return false;
+    return fast_fail;
 }
 
 /* ============ F5 续：决策缓存与按域熔断（各自开关，默认关） ============

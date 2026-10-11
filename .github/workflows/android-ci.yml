@@ -35,6 +35,8 @@ jobs:
           "$RUNNER_TEMP/rule_norm_test"
           cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/pin_window_test" webserver/jni/pin_window_test.c
           "$RUNNER_TEMP/pin_window_test"
+          cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/f5_guard_test" webserver/jni/f5_guard_test.c
+          "$RUNNER_TEMP/f5_guard_test"
 
       - name: set up JDK 21
         uses: actions/setup-java@v5
