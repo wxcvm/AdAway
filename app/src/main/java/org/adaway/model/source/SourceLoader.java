@@ -281,7 +281,7 @@ class SourceLoader {
          * <p>判据：出现 {@code $}，且它位于主机名之后（即 {@code ^} 之后；没有 {@code ^} 时也算）。
          * 这类规则的正确处理是跳过，而不是截断成主机名 —— 后者会把它变成“整个域名都拦”。</p>
          */
-        private boolean hasUnsupportedModifier(String line) {
+        static boolean hasUnsupportedModifier(String line) {
             int dollar = line.indexOf('$');
             if (dollar < 0) {
                 return false;

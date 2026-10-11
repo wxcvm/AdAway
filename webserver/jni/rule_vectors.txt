@@ -1,0 +1,22 @@
+# 跨端规则测试向量（G1/D）：C 宿主测试与 Android 单元测试共用这一份。
+#
+# 列：输入规则 <TAB> 归一化结果 <TAB> 是否含不支持的修饰符（1=跳过并计数）
+# 说明：Android 侧没有归一化这一步（它只做分类），所以 Android 测试只断言第三列；
+#       C 侧两列都断言。第三列是两端**必须一致**的判定：含资源类型修饰符的规则在两条路径上
+#       都跳过并计数，绝不静默降级成整域拦截。
+# 这些期望值来自 rule_norm_test.c 里此前已经在 CI 中通过运行的断言。
+0.0.0.0 ads.example.com	ads.example.com	0
+:: ads.example.com	ads.example.com	0
+Ads.Example.COM	ads.example.com	0
+||ads.example.com^	ads.example.com	0
+|ads.example.com|	ads.example.com	0
+@@||ads.example.com^	ads.example.com	0
+https://ads.example.com/path?q=1	ads.example.com	0
+*.ads.example.com	ads.example.com	0
+		0
+#comment		0
+||cdn.example.com^$script	cdn.example.com	1
+||cdn.example.com$script	cdn.example.com	1
+||cdn.example.com^$image,third-party	cdn.example.com	1
+cdn.example.com	cdn.example.com	0
+$$||ads.example.com^	ads.example.com	0

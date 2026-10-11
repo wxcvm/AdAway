@@ -6,6 +6,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "rule_norm.h"
 
@@ -31,7 +32,51 @@ static void expect_modifier(const char *in, int want) {
     }
 }
 
+
+/*
+ * 共享向量的驱动（G1/D）：从 rule_vectors.txt 读取「输入 / 期望归一化 / 期望修饰符」，
+ * 让两端用同一份数据断言。默认路径按仓库根目录解析（CI 里就是仓库根）。
+ */
+static void run_vectors(const char *path) {
+    FILE *f = fopen(path, "r");
+    if (f == NULL) {
+        failures++;
+        printf("FAIL cannot open vector file: %s\n", path);
+        return;
+    }
+    char line[512];
+    int n = 0;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (line[0] == '#' || line[0] == '\n') continue;
+        /* 去掉行尾换行 */
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) line[--len] = 0;
+        if (len == 0) continue;
+        char *tab1 = strchr(line, '\t');
+        if (tab1 == NULL) continue;
+        *tab1 = 0;
+        char *tab2 = strchr(tab1 + 1, '\t');
+        if (tab2 == NULL) continue;
+        *tab2 = 0;
+        const char *in = line;
+        const char *want_norm = tab1 + 1;
+        int want_mod = atoi(tab2 + 1);
+        n++;
+        expect_norm(in, want_norm);
+        expect_modifier(in, want_mod);
+    }
+    fclose(f);
+    if (n < 10) {
+        failures++;
+        printf("FAIL vector file has only %d vectors\n", n);
+    } else {
+        printf("vectors: %d loaded from %s\n", n, path);
+    }
+}
+
 int main(void) {
+    run_vectors("webserver/jni/rule_vectors.txt");
+
     /* hosts 格式：取空白之后的那个字段 */
     expect_norm("0.0.0.0 ads.example.com", "ads.example.com");
     expect_norm(":: ads.example.com", "ads.example.com");
