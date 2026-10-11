@@ -147,8 +147,11 @@ webserver/jni/rule_norm_test.c 在 CI 中执行。
 
 **尚未完成 / 已知事项**（如实记录，不要当成已完成）：
 
-- Windows 仓库的 `Code-sign webserver.exe` 步骤是 bash 语法但未声明 `shell: bash`：目前因缺少签名
-  密钥而被条件跳过，所以未暴露；**一旦配置签名密钥，必须先补 `shell: bash`**，否则会在 PowerShell 下解析失败。
+- ~~Code-sign 步骤缺 shell~~ **已核实为误报，无需修改**：Windows 仓库里每个含 `run` 的步骤都显式声明了
+  解释器 —— `shell: bash`（版本断言 / 静态检查 / 取上游 / 打包 / 发布 / 清单 / 清理）、
+  `shell: msys2 {0}`（编译、PE 加固断言、**Code-sign**，即 MSYS2 的 bash）、
+  `shell: pwsh`（冒烟测试、端口冲突、自启动、Inno Setup 打包与挂载）。
+  这条曾被我写成"已知问题"，原因是我的检查只认 `shell == "bash"`，把 `msys2 {0}` 误判为"未声明"；核实后撤回。
 - Windows 仓库的 `Check wide-printf specifiers` 静态检查跑在"取上游"之前，因此暂时**不覆盖** C 核心文件
   （只覆盖 gui_win32.c / update_win32.c）；覆盖由"取上游"步骤自身的存在性与大小断言（>100KB）兜底。
 - 原仓库 README 中关于 Windows 端的段落尚未改写为指向新仓库（纯文案，未做）。
