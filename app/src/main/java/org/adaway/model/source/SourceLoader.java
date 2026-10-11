@@ -182,7 +182,13 @@ class SourceLoader {
                 // shutdown that's never going to be read.
                 for (int i = 0; i < this.parserCount; i++) {
                     try {
-                        this.queue.offer(END_OF_QUEUE_MARKER, 30, java.util.concurrent.TimeUnit.SECONDS);
+                        /*
+                         * 不能忽略 offer 的返回值：队列满且 30 秒内无人取走时，这个解析线程的
+                         * 结束标记就送不出去，插入线程会一直等它（原来直接丢弃返回值，失败无声）。
+                         */
+                        if (!this.queue.offer(END_OF_QUEUE_MARKER, 30, java.util.concurrent.TimeUnit.SECONDS)) {
+                            Timber.w("End-of-queue marker not delivered within 30s; the inserter may wait.");
+                        }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         break;
@@ -220,7 +226,7 @@ class SourceLoader {
                     String line = this.lineQueue.take();
                     // Check end of queue marker
                     //noinspection StringEquality
-                    if (line == END_OF_QUEUE_MARKER) {
+                    if (END_OF_QUEUE_MARKER.equals(line)) {
                         endOfSource = true;
                         // Send end of queue marker to inserter
                         HostListItem endItem = new HostListItem();
@@ -470,7 +476,7 @@ class SourceLoader {
                     HostListItem item = this.hostListItemQueue.take();
                     // Check end of queue marker
                     //noinspection StringEquality
-                    if (item.getHost() == END_OF_QUEUE_MARKER) {
+                    if (END_OF_QUEUE_MARKER.equals(item.getHost())) {
                         workerStopped++;
                         if (workerStopped >= this.parserCount) {
                             queueEmptied = true;
