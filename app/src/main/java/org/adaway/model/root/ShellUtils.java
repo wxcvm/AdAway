@@ -148,7 +148,9 @@ public final class ShellUtils {
                 // next launch anyway, so leaving it in place costs nothing.
                 return true;
             }
-            try { Thread.sleep(200); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(200); } catch (InterruptedException ignored) {
+            /* 恢复中断标志：吞掉 InterruptedException 会让上层的取消/退出逻辑失效（Sonar java:S2142）。 */
+            Thread.currentThread().interrupt();}
         }
         
         // If process didn't start, dump last lines from log for diagnostics.

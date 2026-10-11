@@ -422,7 +422,9 @@ public static void startWebServer(Context context) {
         if (isBundledExecutableRunning(WEB_SERVER_EXECUTABLE)) {
             Timber.d("Stopping stale webserver instance before restart.");
             killBundledExecutable(WEB_SERVER_EXECUTABLE);
-            try { Thread.sleep(600); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(600); } catch (InterruptedException ignored) {
+            /* 恢复中断标志：吞掉 InterruptedException 会让上层的取消/退出逻辑失效（Sonar java:S2142）。 */
+            Thread.currentThread().interrupt();}
         }
 
         // Ensure captive portal login UIDs are in allowlist.txt
