@@ -44,7 +44,7 @@ class RuleVectorsTest {
         var checked = 0
         for ((rule, _norm, wantMod) in vectors()) {
             if (rule.isEmpty() || rule.startsWith("#")) continue   // 空行与注释不是规则
-            val got = if (SourceLoader.hasUnsupportedModifier(rule)) 1 else 0
+            val got = if (RuleModifiers.hasUnsupportedModifier(rule)) 1 else 0
             assertEquals("规则 " + rule + " 的修饰符判定与 C 侧不一致", wantMod, got)
             checked++
         }
@@ -56,7 +56,7 @@ class RuleVectorsTest {
         val withModifier = vectors().filter { it.third == 1 }
         assertTrue("向量里至少要有一条带修饰符的规则", withModifier.isNotEmpty())
         for ((rule, _, _) in withModifier) {
-            assertTrue(rule + " 应被判为含修饰符", SourceLoader.hasUnsupportedModifier(rule))
+            assertTrue(rule + " 应被判为含修饰符", RuleModifiers.hasUnsupportedModifier(rule))
         }
     }
 }
