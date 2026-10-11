@@ -7,6 +7,7 @@
 #define _GNU_SOURCE 1
 #endif
 #include <stdio.h>
+#include "rule_norm.h"
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -528,51 +529,9 @@ static uint64_t uptime_seconds(void) {
  *
  * Matching is case-insensitive and means "the host itself or a subdomain of it".
  */
-static void domain_rule_normalize(const char *in, char *out, size_t outsz) {
-    size_t o = 0;
-    const char *p = in;
-    if (outsz == 0) return;
-    out[0] = '\0';
-    /* leading decoration: @@, ||, |, whitespace (a leading dot is kept as
-       decoration for "this domain and below", and skipped below) */
-    while (*p == '@' || *p == '|' || *p == ' ' || *p == '\t') p++;
-    /* hosts style "0.0.0.0 host" / ":: host": the field after the whitespace wins */
-    {
-        const char *sp = strpbrk(p, " \t");
-        if (sp != NULL) {
-            const char *q = sp;
-            while (*q == ' ' || *q == '\t') q++;
-            if (*q != '\0') p = q;
-        }
-    }
-    {
-        const char *scheme = strstr(p, "://");
-        if (scheme != NULL) p = scheme + 3;
-    }
-    while (*p == '*' || *p == '.') p++;
-    while (*p != '\0' && *p != '/' && *p != '?' && *p != '#' && *p != ':' &&
-           *p != '^' && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') {
-        char ch = *p;
-        if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
-        if (o + 1 < outsz) out[o++] = ch;
-        p++;
-    }
-    out[o] = '\0';
-}
+/* 归一化实现已抽到 rule_norm.h（服务端与宿主测试共用同一份，见该文件说明）。 */
 
-/*
- * 带资源类型修饰符的规则（例如 ||cdn.example.com^$script）不实现。
- *
- * 归一化只取主机名，会让这类规则变成“整个域名都命中”，属于静默改变规则含义 ——
- * 既漏拦（本该只拦脚本）又误拦（同域的正常资源）。返回 true 时调用方应跳过该规则，
- * 这正是 docs/response-policies.md 里写的处理原则。
- */
-static bool rule_has_unsupported_modifier(const char *in) {
-    const char *dollar = strchr(in, '$');
-    if (dollar == NULL) return false;
-    const char *caret = strchr(in, '^');
-    return caret == NULL || dollar > caret;
-}
+/* 修饰符判据同样来自 rule_norm.h（与测试共用一份）。 */
 
 static bool domain_is_allowed(const char *host, const char *resource_dir) {
     if (host == NULL || host[0] == '\0' || resource_dir == NULL) return false;
