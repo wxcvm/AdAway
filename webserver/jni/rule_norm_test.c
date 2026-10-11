@@ -52,6 +52,9 @@ static void run_vectors(const char *path) {
         size_t len = strlen(line);
         while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) line[--len] = 0;
         if (len == 0) continue;
+        /* strip trailing comment: "   # ..." (vector file documents each row) */
+        char *hash = strstr(line, "   #");
+        if (hash != NULL) { *hash = 0; }
         char *tab1 = strchr(line, '\t');
         if (tab1 == NULL) continue;
         *tab1 = 0;
