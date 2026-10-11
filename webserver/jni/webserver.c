@@ -62,9 +62,9 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
  * Defaults keep the historical loopback-only behaviour; the app passes
  * --bind all when the user enables LAN access in settings.
  */
-#define HTTP_URL_DEFAULT  "http://127.0.0.1:80"
+#define HTTP_URL_DEFAULT  "http://127.0.0.1:80"  // NOSONAR: 回环地址，仅本机可访问；这里用明文是设计使然（Sonar c:S5332）
 #define HTTPS_URL_DEFAULT "https://127.0.0.1:443"
-#define HTTP_URL_IPV6_DEFAULT  "http://[::1]:80"
+#define HTTP_URL_IPV6_DEFAULT  "http://[::1]:80"  // NOSONAR: 回环地址，仅本机可访问；这里用明文是设计使然（Sonar c:S5332）
 #define HTTPS_URL_IPV6_DEFAULT "https://[::1]:443"
 
 /* BUG FIX: __android_log_print() only reaches logcat, never the process's
@@ -4647,8 +4647,8 @@ int main(int argc, char *argv[]) {
     if (s.stats_port == 0) s.stats_port = 8686;
     {
         char su[64], su6[64];
-        snprintf(su, sizeof(su), "http://127.0.0.1:%d", s.stats_port);
-        snprintf(su6, sizeof(su6), "http://[::1]:%d", s.stats_port);
+        snprintf(su, sizeof(su), "http://127.0.0.1:%d", s.stats_port);  // NOSONAR: 回环地址，仅本机可访问；这里用明文是设计使然（Sonar c:S5332）
+        snprintf(su6, sizeof(su6), "http://[::1]:%d", s.stats_port);  // NOSONAR: 回环地址，仅本机可访问；这里用明文是设计使然（Sonar c:S5332）
         if (mg_http_listen(&mgr, su, fn, &s) == NULL) {
             LOG_INFO("Management port %d is not available on 127.0.0.1", s.stats_port);
         }
