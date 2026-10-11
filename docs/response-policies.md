@@ -213,7 +213,8 @@ C 代码，因此下面的语义在两端一致；跨端测试向量应钉住这
 | `0.0.0.0 ads.example.com` / `:: ads.example.com` | `ads.example.com` | hosts 格式：取空白之后的那个字段 |
 | `ads.example.com` | `ads.example.com` | 裸域名 |
 | `\|\|ads.example.com^` | `ads.example.com` | 取主机名部分（`^` 之后的内容一律忽略） |
-| `\|ads.example.com\|` | `ads.example.com` | 前导 `@@`、`\|`、空白与前导 `.`、`*` 会被剥掉 |
+| `\|ads.example.com\|` | `ads.example.com` | 头尾锚点都会被剥掉（尾部 `\|` 的剥离是宿主机测试跑出来的修复：此前会得到 `ads.example.com\|`，写进主机集合却永远匹配不上） |
+| `@@\|\|ads.example.com^` | `ads.example.com` | 前导 `@@`、`\|`、空白与前导 `.`、`*` 会被剥掉（`@@` 只当装饰，不实现例外语义） |
 | `https://ads.example.com/path` | `ads.example.com` | scheme 与路径被剥掉 |
 
 比较是**大小写不敏感**的。
