@@ -8,6 +8,7 @@
 #endif
 #include <stdio.h>
 #include "rule_norm.h"
+#include "pin_window.h"
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -1252,12 +1253,9 @@ static bool pin_mode_deny(void) { return strcmp(s_pin_mode, "deny") == 0; }
 
 /* Is this uid currently refused without interception? */
 static bool pin_uid_bypassed(uid_t uid) {
-    if (uid == (uid_t)-1) return false;
-    uint64_t now = mg_millis();
-    for (int i = 0; i < s_pin_bypass_count; i++) {
-        if (s_pin_bypass[i].uid == uid && s_pin_bypass[i].until_ms > now) return true;
-    }
-    return false;
+    /* 判定逻辑在 pin_window.h 里（有宿主测试）；这里的结构体字段与原来的匿名结构体一致。 */
+    return pin_bypass_hit((const struct pin_bypass_entry *) s_pin_bypass, s_pin_bypass_count,
+                          (unsigned int) uid, mg_millis());
 }
 
 /* Called for every failed TLS handshake: remember it per uid and, once the
@@ -1270,16 +1268,14 @@ static void pin_note_tls_failure(uid_t uid, const char *resource_dir) {
     struct appstat *a = app_find_or_add(uid);
     if (a == NULL) return;
     uint64_t now = mg_millis();
-    if (now - a->tls_fail_win_start > PIN_FAIL_WINDOW_MS) {
-        a->tls_fail_win_start = now;
-        a->tls_fail_win = 0;
-    }
-    a->tls_fail_win++;
-    if (a->tls_fail_win < PIN_FAIL_THRESHOLD) return;
+    /* 窗口推进与阈值判定的纯逻辑在 pin_window.h 里（语义与抽取前逐字等价，有宿主测试）。 */
+    a->tls_fail_win = pin_fail_window_step(&a->tls_fail_win_start, a->tls_fail_win,
+                                           now, PIN_FAIL_WINDOW_MS);
+    if (!pin_fail_window_reached(a->tls_fail_win, PIN_FAIL_THRESHOLD)) return;
     /* Detected: refuse this uid without interception for the cooldown. */
     if (s_pin_bypass_count < APP_STATS_MAX) {
         s_pin_bypass[s_pin_bypass_count].uid = uid;
-        s_pin_bypass[s_pin_bypass_count].until_ms = now + PIN_BYPASS_MS;
+        s_pin_bypass[s_pin_bypass_count].until_ms = pin_bypass_until(now, PIN_BYPASS_MS);
         s_pin_bypass_count++;
     }
     LOG_WARN("pin: uid %d fails TLS handshakes (%u in %us) - refusing its "
