@@ -1,0 +1,65 @@
+name: Official OpenSSL 3.5 LTS migration
+
+on:
+  push:
+    branches: [feat/openssl-3-5-lts]
+  pull_request:
+    branches: [master]
+    paths:
+      - 'webserver/jni/Android.mk'
+      - 'webserver/build.gradle'
+      - 'webserver/scripts/build-official-openssl.sh'
+      - 'gradle/libs.versions.toml'
+      - '.github/workflows/openssl-lts-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Install official OpenSSL build prerequisites
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q perl make git
+      - name: Build Android debug APK against upstream OpenSSL
+        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Verify embedded OpenSSL version and static linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE=webserver/build/official-openssl/arm64-v8a
+          test -s "$ARCHIVE/libssl.a"
+          test -s "$ARCHIVE/libcrypto.a"
+          test "$(cat "$ARCHIVE/BUILD-COMMIT")" = 45e844fa2a14ec92d146bd8f5778ac130b6625fb
+          EXE=$(find webserver/build -type f -name 'webserver' | head -1)
+          if [ -z "$EXE" ]; then
+            echo "::error::Native webserver executable not found"; exit 1
+          fi
+          if ! strings "$EXE" | grep -Fq 'OpenSSL 3.5.9'; then
+            echo "::error::OpenSSL 3.5.9 signature absent from executable"; exit 1
+          fi
+          if readelf -d "$EXE" | grep -E 'NEEDED.*(libssl|libcrypto)'; then
+            echo "::error::The webserver unexpectedly depends on dynamic OpenSSL"; exit 1
+          fi
+          if find app/build/outputs/apk/debug -name '*.apk' | grep -q .; then
+            echo "Official OpenSSL 3.5.9 linked and APK generated"
+          else
+            exit 1
+          fi
+      - name: Upload test-only APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: openssl-3-5-lts-android-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
