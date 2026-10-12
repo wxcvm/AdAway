@@ -98,8 +98,8 @@
     <string name="compose_settings_custom_saved">Custom target applied</string>
     <string name="compose_settings_custom_failed">Could not apply the custom target</string>
     <string name="compose_settings_block_mode_recommended">Optimised (recommended)</string>
-    <string name="compose_settings_adguard_title">AdGuard detected — you can route everything through this app</string>
-    <string name="compose_settings_adguard_steps">In AdGuard: Settings → DNS filtering → Blocking mode (DNS blocking response) → Custom IP address, and fill in IPv4 %1$s / IPv6 %2$s (that is this app\'s web server). From then on every domain AdGuard blocks is answered by this app: one shared block page plus per-app statistics. Nothing else is needed here — keep this app on 127.0.0.1 and do not pick 0.0.0.0. If you made the web server listen on all interfaces for other devices, use this phone\'s LAN address instead of %1$s.</string>
+    <string name="compose_settings_adguard_title">AdGuard installed and a VPN is active (VPN owner not verified)</string>
+    <string name="compose_settings_adguard_steps">Optional DNS-level cooperation: If your AdGuard version supports Custom IP address under DNS protection blocking modes, consider A = %1$s and AAAA = %2$s only when the corresponding local listener is reachable. This affects blocked DNS rules, not every AdGuard filter decision. DNS returns an IP but no port: the local server must actually answer on 80/443 (or have verified port redirection). HTTPS also requires client CA trust, and certificate-pinned apps may fail. Confirm the VPN owner and test the DNS and HTTPS paths before claiming cooperation works.</string>
     <string name="compose_settings_adguard_copy">Copy the addresses</string>
     <string name="compose_settings_adguard_copied">Addresses copied</string>
     <string name="compose_settings_adguard_dismiss">Do not show again</string>
@@ -353,11 +353,11 @@
     <string name="compose_rules_pick_file">Choose a local rules file</string>
     <string name="compose_rules_pick_file_hint">hosts or rules text files; local files are read offline.</string>
     <string name="compose_rules_add_source_failed">Could not add: invalid URL or the subscription already exists</string>
-    <string name="compose_settings_block_mode_adguard_hint">Works together with AdGuard and similar tools: set AdGuard\'s own blocking mode (DNS blocked response) to "Custom IP address" and enter 127.0.0.1 for IPv4 and ::1 for IPv6 - domains AdGuard blocks are then sent to this local server, which answers with the common block page / placeholder and counts them. On this app keep 127.0.0.1 or "Hijack + filter" (do not pick 0.0.0.0).</string>
+    <string name="compose_settings_block_mode_adguard_hint">AdGuard DNS-level custom blocking IP may point blocked DNS domains at the local response server, but only if the version supports the option and the IP, standard ports, and certificate trust are verified. The presence of AdGuard or another VPN alone does not confirm cooperation. Never overlap transparent hijack with another active VPN.</string>
     <string name="compose_settings_block_mode_hijack">Hijack + filter</string>
     <string name="compose_settings_block_mode_hijack_hint">Hijack + filter (AdGuard-like): the device\'s 80/443 traffic is redirected into the bundled server; hosts that are not blocked are forwarded to the real site and the page is filtered (ad slots hidden, ad scripts removed), with HTTPS decrypted through the local CA. Cost: all web traffic goes through the local server, so CPU/memory are higher than in 127.0.0.1 mode - use 127.0.0.1 mode when you only need ad blocking without in-page element hiding. Switching to another mode removes the hijack rules immediately; apps that pin certificates may lose connectivity.</string>
     <string name="compose_settings_block_mode_hijack_ca">Local CA not trusted yet: trust it under "Network server → certificate", otherwise HTTPS pages will report certificate errors.</string>
-    <string name="compose_settings_block_mode_hijack_failed">Hijack not applied: nothing is listening on ports 80/443 (or the ports you configured) - AdGuard or another app may hold them, or root was denied. Switch the network server to 8080/8443 and retry (hijack mode does not depend on 80/443).</string>
+    <string name="compose_settings_block_mode_hijack_failed">Transparent hijack did not start. Another active VPN or unverified VPN ownership may have prevented interception; alternatively the server ports may be unavailable or root access may be denied. Check the VPN and local listener before trying again.</string>
     <string name="compose_settings_block_mode_apply_failed">Could not apply the mode - the previous mode is still in effect</string>
     <!-- Start after reboot and its diagnostics -->
     <string name="compose_settings_autostart">Start after reboot</string>
