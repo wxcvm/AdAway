@@ -19,6 +19,32 @@ public final class DiagnosticTunProbe {
      * The responder XORs the first byte; direct TUN echo leaves it unchanged.
      * This lets the user distinguish real relay I/O from packet reflection.
      */
+    /**
+     * Public-network diagnostic for exactly example.com A via the OS-selected
+     * underlying network DNS resolver. Only initiated by the user, and only
+     * through the test-only TUN IP and UDP port.
+     */
+    public static boolean dnsRoundTrip() {
+        if (!DiagnosticVpnService.isActive()) return false;
+        byte[] request = DiagnosticDnsCodec.query(new SecureRandom().nextInt(65536));
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.setSoTimeout(2500);
+            InetAddress address = InetAddress.getByName(DiagnosticTunPlan.DIAGNOSTIC_TARGET);
+            socket.send(new DatagramPacket(request, request.length,
+                    address, DiagnosticDnsCodec.PORT));
+            byte[] data = new byte[DiagnosticDnsCodec.MAX_DATAGRAM + 1];
+            DatagramPacket packet = new DatagramPacket(data, data.length);
+            socket.receive(packet);
+            if (!address.equals(packet.getAddress())
+                    || packet.getPort() != DiagnosticDnsCodec.PORT) return false;
+            byte[] answer = Arrays.copyOf(data, packet.getLength());
+            return DiagnosticDnsCodec.matchesResponse(request, answer)
+                    && DiagnosticDnsCodec.responseCode(answer) == 0;
+        } catch (IOException | RuntimeException ignored) {
+            return false;
+        }
+    }
+
     public static boolean relayRoundTrip() {
         if (!DiagnosticVpnService.isActive()) return false;
         byte[] nonce = new byte[16];
