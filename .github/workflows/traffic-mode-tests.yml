@@ -30,4 +30,4 @@ jobs:
           java-version: '21'
           cache: gradle
       - name: Run traffic mode regression tests
-        run: ./gradlew :app:testDebugUnitTest --tests org.adaway.model.traffic.TrafficModePolicyTest --no-daemon
+        run: ./gradlew :app:testDebugUnitTest --tests org.adaway.model.traffic.TrafficModePolicyTest --tests org.adaway.model.traffic.VpnConflictDebouncerTest --no-daemon
