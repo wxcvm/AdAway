@@ -14,6 +14,34 @@ import java.util.Arrays;
 public final class DiagnosticTunProbe {
     private DiagnosticTunProbe() {}
 
+    /**
+     * Verify protected UDP transport via the service's small local responder.
+     * The responder XORs the first byte; direct TUN echo leaves it unchanged.
+     * This lets the user distinguish real relay I/O from packet reflection.
+     */
+    public static boolean relayRoundTrip() {
+        if (!DiagnosticVpnService.isActive()) return false;
+        byte[] nonce = new byte[16];
+        new SecureRandom().nextBytes(nonce);
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.setSoTimeout(2000);
+            InetAddress addr = InetAddress.getByName(DiagnosticTunPlan.DIAGNOSTIC_TARGET);
+            socket.send(new DatagramPacket(nonce, nonce.length,
+                    addr, DiagnosticUdpRelay.PORT));
+            byte[] response = new byte[64];
+            DatagramPacket reply = new DatagramPacket(response, response.length);
+            socket.receive(reply);
+            byte[] expected = nonce.clone();
+            expected[0] ^= 0x5a;
+            return reply.getLength() == expected.length
+                    && reply.getPort() == DiagnosticUdpRelay.PORT
+                    && addr.equals(reply.getAddress())
+                    && Arrays.equals(expected, Arrays.copyOf(response, expected.length));
+        } catch (IOException | RuntimeException exception) {
+            return false;
+        }
+    }
+
     public static boolean roundTrip() {
         if (!DiagnosticVpnService.isActive()) return false;
         byte[] nonce = new byte[16];
