@@ -1,5 +1,14 @@
 # Windows / Android 共享核心契约（F 第一步：先冻结，再迁出）
 
+## M0/M1 草稿升级说明
+
+Android #45 与 Windows #3 是 M0 安全修复草稿；Android #46 提出新的域名决策/数据接口。
+Windows 后续 M1 草稿会将核心 pin 主动升级到包含 `traffic_core_contract.h`、23 条共享决策样例及原有规则向量的冻结提交。
+实际 40 位 pin 以该草稿的 `fetch-upstream.sh` 与已验证缓存 manifest 为准；默认发布分支仍未改变。
+M0 新脚本直接 fetch 提交对象，不依赖移动分支当前 HEAD；下面的“分支前移即失败”是旧脚本的历史行为。
+升级须通过固定对象/缓存哈希校验、规则与核心契约测试、完整 Windows 编译和冒烟；不得自动合并或发布。
+详情：[M1 统一接口与决策](traffic-core-contract-v1.md)。
+
 本文件由脚本从真实源码抽取生成（不是手写清单）：两个端口的实现若与本文不一致，以代码为准并立刻更新本文。
 
 ## 1. block_config.json（阻断响应策略）
