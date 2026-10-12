@@ -333,6 +333,25 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     val context = LocalContext.current
     val apps = serverStats?.apps.orEmpty()
     var refreshKey by remember { mutableStateOf(0) }
+    var tunRefreshKey by remember { mutableIntStateOf(0) }
+    var tunStatus by remember { mutableStateOf("") }
+    val tunScope = rememberCoroutineScope()
+    val diagnosticConsentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            try {
+                org.adaway.model.traffic.DiagnosticVpnService.start(context)
+                tunStatus = context.getString(R.string.compose_tun_diagnostic_start_requested)
+            } catch (exception: RuntimeException) {
+                Timber.w(exception, "Diagnostic VPN start failed")
+                tunStatus = context.getString(R.string.compose_tun_diagnostic_start_failed)
+            }
+        } else {
+            tunStatus = context.getString(R.string.compose_tun_diagnostic_not_authorized)
+        }
+        tunRefreshKey++
+    }
 
     Scaffold(
         topBar = {
@@ -389,6 +408,149 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 label = { Text(stringResource(labelRes)) },
                             )
                         }
+                    }
+                }
+            }
+
+            // Explicitly opt-in network-path diagnostic. Routes only one
+            // benchmark destination; no default route, DNS or TCP/UDP forwarding.
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_tun_diagnostic_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_tun_diagnostic_explanation),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // Re-evaluate on explicit Refresh or a UI action. The OS
+                    // notification also provides a persistent Stop control.
+                    val diagnosticActive = remember(tunRefreshKey) {
+                        org.adaway.model.traffic.DiagnosticVpnService.isActive()
+                    }
+                    val packets = remember(tunRefreshKey) {
+                        org.adaway.model.traffic.DiagnosticVpnService.getPacketCount()
+                    }
+                    Text(
+                        stringResource(
+                            if (diagnosticActive)
+                                R.string.compose_tun_diagnostic_running
+                            else
+                                R.string.compose_tun_diagnostic_stopped,
+                            packets,
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = !diagnosticActive,
+                            onClick = {
+                                tunScope.launch {
+                                    // Root's isEnabled() runs a shell: never do
+                                    // this blocking check on the Compose UI thread.
+                                    val noConflict = withContext(Dispatchers.IO) {
+                                        val owner = org.adaway.model.traffic.AndroidVpnObserver
+                                            .read(context, false)
+                                        owner == org.adaway.model.traffic.TrafficModePolicy.VpnOwner.NONE &&
+                                            !org.adaway.model.root.HijackModel.isEnabled()
+                                    }
+                                    if (!noConflict) {
+                                        tunStatus = context.getString(
+                                            R.string.compose_tun_diagnostic_conflict,
+                                        )
+                                    } else {
+                                        try {
+                                            val consent = android.net.VpnService.prepare(context)
+                                            if (consent == null) {
+                                                org.adaway.model.traffic.DiagnosticVpnService.start(context)
+                                                tunStatus = context.getString(
+                                                    R.string.compose_tun_diagnostic_start_requested,
+                                                )
+                                                tunRefreshKey++
+                                            } else {
+                                                diagnosticConsentLauncher.launch(consent)
+                                            }
+                                        } catch (exception: RuntimeException) {
+                                            Timber.w(exception, "Diagnostic VPN consent failed")
+                                            tunStatus = context.getString(
+                                                R.string.compose_tun_diagnostic_start_failed,
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        ) { Text(stringResource(R.string.compose_tun_diagnostic_start)) }
+                        OutlinedButton(
+                            enabled = diagnosticActive,
+                            onClick = {
+                                org.adaway.model.traffic.DiagnosticVpnService.stop(context)
+                                tunStatus = context.getString(R.string.compose_tun_diagnostic_stop_requested)
+                                tunRefreshKey++
+                            },
+                        ) { Text(stringResource(R.string.compose_tun_diagnostic_stop)) }
+                        TextButton(onClick = { tunRefreshKey++ }) {
+                            Text(stringResource(R.string.compose_settings_hijack_refresh_status))
+                        }
+                    }
+                    TextButton(
+                        enabled = diagnosticActive,
+                        onClick = {
+                            tunScope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    org.adaway.model.traffic.DiagnosticTunProbe.roundTrip()
+                                }
+                                tunStatus = context.getString(
+                                    if (ok) R.string.compose_tun_diagnostic_echo_ok
+                                    else R.string.compose_tun_diagnostic_echo_failed,
+                                )
+                                tunRefreshKey++
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.compose_tun_diagnostic_test_echo))
+                    }
+                    TextButton(
+                        enabled = diagnosticActive,
+                        onClick = {
+                            tunScope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    org.adaway.model.traffic.DiagnosticTunProbe.relayRoundTrip()
+                                }
+                                tunStatus = context.getString(
+                                    if (ok) R.string.compose_tun_diagnostic_relay_ok
+                                    else R.string.compose_tun_diagnostic_relay_failed,
+                                )
+                                tunRefreshKey++
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.compose_tun_diagnostic_test_relay))
+                    }
+                    TextButton(
+                        enabled = diagnosticActive,
+                        onClick = {
+                            tunScope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    org.adaway.model.traffic.DiagnosticTunProbe.dnsRoundTrip()
+                                }
+                                tunStatus = context.getString(
+                                    if (ok) R.string.compose_tun_diagnostic_dns_ok
+                                    else R.string.compose_tun_diagnostic_dns_failed,
+                                )
+                                tunRefreshKey++
+                            }
+                        },
+                    ) { Text(stringResource(R.string.compose_tun_diagnostic_test_dns)) }
+                    if (tunStatus.isNotBlank()) {
+                        Text(tunStatus, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -471,6 +633,22 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     }
                     Spacer(Modifier.height(8.dp))
                     var blockMode by remember { mutableStateOf(viewModel.currentBlockMode()) }
+                    var modeProbeKey by remember { mutableIntStateOf(0) }
+                    var observedVpn by remember {
+                        mutableStateOf(org.adaway.model.traffic.TrafficModePolicy.VpnOwner.UNKNOWN)
+                    }
+                    var redirectInstalled by remember { mutableStateOf<Boolean?>(null) }
+                    LaunchedEffect(blockMode, modeProbeKey) {
+                        val status = withContext(Dispatchers.IO) {
+                            val owner = org.adaway.model.traffic.AndroidVpnObserver.read(context, false)
+                            val active = if (blockMode == org.adaway.util.BlockMode.HIJACK) {
+                                org.adaway.model.root.HijackModel.isEnabled()
+                            } else false
+                            owner to active
+                        }
+                        observedVpn = status.first
+                        redirectInstalled = status.second
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(
                             selected = blockMode == org.adaway.util.BlockMode.LOCALHOST,
@@ -523,14 +701,16 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 Text(stringResource(R.string.compose_settings_block_mode_null))
                             },
                         )
-                        // 新增：劫持全部流量并由本机服务器过滤（类 AdGuard）
+                        // Root 透明重定向当前仅覆盖符合条件的 TCP 80/443，不包含全部 UDP/QUIC
                         FilterChip(
                             selected = blockMode == org.adaway.util.BlockMode.HIJACK,
                             onClick = {
                                 blockMode = org.adaway.util.BlockMode.HIJACK
                                 viewModel.applyBlockMode(org.adaway.util.BlockMode.HIJACK) { ok ->
+                                    blockMode = viewModel.currentBlockMode()
+                                    modeProbeKey++
                                     if (!ok) {
-                                        // 端口没监听 / 无 root：不要静默失败
+                                        // VPN 冲突 / 端口 / Root 失败都不能当作已接管
                                         Toast.makeText(
                                             context,
                                             context.getString(R.string.compose_settings_block_mode_hijack_failed),
@@ -543,6 +723,26 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 Text(stringResource(R.string.compose_settings_block_mode_hijack))
                             },
                         )
+                    }
+                    if (blockMode == org.adaway.util.BlockMode.HIJACK) {
+                        val stateMessage = when {
+                            observedVpn == org.adaway.model.traffic.TrafficModePolicy.VpnOwner.OTHER ->
+                                R.string.compose_settings_hijack_paused_for_vpn
+                            observedVpn == org.adaway.model.traffic.TrafficModePolicy.VpnOwner.UNKNOWN ->
+                                R.string.compose_settings_hijack_owner_unknown
+                            redirectInstalled == true ->
+                                R.string.compose_settings_hijack_active_verified
+                            else ->
+                                R.string.compose_settings_hijack_inactive
+                        }
+                        Text(
+                            stringResource(stateMessage),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = { modeProbeKey++ }) {
+                            Text(stringResource(R.string.compose_settings_hijack_refresh_status))
+                        }
                     }
                     // ── 自定义重定向地址（hosts 档：被拦域指向哪里）──
                     var customIpv4 by remember { mutableStateOf(org.adaway.util.BlockMode.ipv4Target(context)) }

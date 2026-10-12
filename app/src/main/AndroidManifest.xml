@@ -137,6 +137,21 @@
             android:parentActivityName=".ui.compose.MainActivity"
             android:theme="@style/Theme.AdAway.NoActionBar.Red" />
 
+        <!-- Explicitly opted-in test TUN: only 198.18.0.1/32, never a default route.
+             Android grants VPN consent via VpnService.prepare(); no boot startup. -->
+        <service
+            android:name=".model.traffic.DiagnosticVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Opt-in scoped benchmark-address TUN diagnostic. Does not route or forward normal user traffic." />
+        </service>
+
         <service
             android:name=".broadcast.ServerBootService"
             android:exported="false"
