@@ -11,6 +11,10 @@
 - 本地服务器被关闭时，看门狗会尝试清理本产品自身遗留的透明重定向。
 - AdGuard DNS custom IP 使用提示已纠正：仅 DNS 层规则命中、80/443 可达和 HTTPS CA 信任均需分别验证；不能仅凭 DNS 返回 IP 宣布“全部流量已过滤”。
 - Windows 独立仓库已含 AdGuard Home 协同配置向导与只读进程探测，相关 PR 通过 CI；**尚无** Windows TUN/WFP 全局接管。
+- 新增经用户手动 VPN 授权的 Android `DiagnosticVpnService`：仅建立 `198.18.0.2/30` 地址和 `198.18.0.1/32` 专用路由，不设置默认路由、不更改 DNS、不自动开机启动。
+- `DiagnosticUdpEcho` 对测试地址的 UDP 53535 端口进行 IPv4/UDP 校验和正确的原样回显，测试按钮使用随机 nonce 进行本地双向收发验证；任何其他测试流量都不转发。仅用于证明 TUN 的收发管线。
+- Windows 新增只读 `wintun_probe_win32`，安全加载本地 DLL 并检查必要的 Wintun API、驱动是否运行；`windows_capture_plan` 在转发、DNS 或回滚尚未就绪时拒绝进入真实接管。
+
 
 ## 目标和非目标
 
@@ -65,6 +69,13 @@ AdGuard Home 自定义阻断 IP 的基本要求：
 - 实现独立、无系统副作用的模式决策函数和测试。
 - 输入至少覆盖：用户选择、VPN 状态、AdGuard 安装、AdGuard 活动接管证据、端口冲突、权限。
 - 验证“仅安装 AdGuard”不会触发切换；“不确定”不会覆盖系统设置。
+
+### 当前 Android TUN 诊断操作
+
+1. 先停止其他 VPN 和本应用 Root 透明劫持。
+2. 在 Android 设置页的“隔离 TUN 诊断”中点击“授权并启动测试”，只在用户明确许可后调用 `VpnService.Builder.establish()`。
+3. 点击“发送 UDP 往返测试”；显示成功代表仅测试 IP 的 UDP 包已通过 TUN 双向收发，不代表实际公网 TCP/UDP、DNS 或 HTTPS 过滤已生效。
+4. 用“停止测试”或常驻通知的 Stop 按钮关闭接口。禁止将 `198.18.0.1/32` 升级为默认路由，直到用户态转发器、DNS 处理、IPv6/QUIC 和失败回滚经过设备实测。
 
 ### M2：Android 流量接管
 - 引入 VpnService 所需权限、前台服务与用户授权流程。
