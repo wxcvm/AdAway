@@ -122,7 +122,7 @@ public final class DiagnosticVpnService extends VpnService {
             reader.start();
             Timber.i("Diagnostic TUN up: only %s/%d routed (no forwarding)",
                     DiagnosticTunPlan.DIAGNOSTIC_TARGET, DiagnosticTunPlan.TARGET_PREFIX);
-        } catch (RuntimeException | SecurityException exception) {
+        } catch (RuntimeException exception) {
             Timber.w(exception, "Cannot start diagnostic TUN");
             shutdown();
         }
