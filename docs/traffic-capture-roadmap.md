@@ -1,6 +1,16 @@
 # 跨平台全流量过滤：第一阶段实施规范
 
-状态：设计基线（未启用新的流量接管功能）。Android 当前主分支为 Root 优先；Windows 实现另行迁移，不在本 PR 中修改系统网络设置。
+状态：M1 决策和 Root 冲突防护已实现并通过 CI；Android VpnService 全路由与 Windows TUN/WFP 尚未接入。Windows 已迁移至独立仓库 wxcvm/AdAway-Windows，开发见其 PR #1。本 PR 不安装新的网络驱动，也不修改第三方设置。
+
+## 当前实现进度（2026-10-12）
+
+- Android 端加入 `TrafficModePolicy`、`AndroidVpnObserver`：分别判断建议模式与只读 VPN 信号，不将 AdGuard 安装误判为已确认接管。
+- Root `HijackModel.enable` 在安装规则前检查 VPN。检测到外部 VPN 时撤销本产品自己的重定向链并保留监听服务器；VPN 状态未知时不安装新的重定向。
+- `StatsViewModel` 在持久化 HIJACK 偏好前检查归属；设置页显示真实 iptables 规则是否存在，而不只显示选择过的模式。
+- `AndroidVpnConflictMonitor` 在应用进程存活时监听 VPN 默认网络变化，节流后交由现有看门狗复核，另有 5 项防抖单测。
+- 本地服务器被关闭时，看门狗会尝试清理本产品自身遗留的透明重定向。
+- AdGuard DNS custom IP 使用提示已纠正：仅 DNS 层规则命中、80/443 可达和 HTTPS CA 信任均需分别验证；不能仅凭 DNS 返回 IP 宣布“全部流量已过滤”。
+- Windows 独立仓库已含 AdGuard Home 协同配置向导与只读进程探测，相关 PR 通过 CI；**尚无** Windows TUN/WFP 全局接管。
 
 ## 目标和非目标
 
