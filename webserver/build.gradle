@@ -24,8 +24,21 @@ android {
 // Build the official OpenSSL static archives before any native compilation.
 // Keeping the output under build/ avoids committing opaque binary libraries.
 def officialOpenSsl = tasks.register('buildOfficialOpenSsl', Exec) {
-    def ndkRoot = android.ndkDirectory
-    environment 'ANDROID_NDK_ROOT', ndkRoot.absolutePath
+    // AGP 9 no longer exposes android.ndkDirectory in the DSL. Resolve
+    // the pinned NDK from the same SDK location AGP uses on CI and locally.
+    def sdkPath = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT')
+    if (!sdkPath) {
+        def props = new Properties()
+        def localProps = rootProject.file('local.properties')
+        if (localProps.exists()) {
+            localProps.withInputStream { props.load(it) }
+            sdkPath = props.getProperty('sdk.dir')
+        }
+    }
+    if (!sdkPath) {
+        throw new GradleException('Android SDK not found: set ANDROID_HOME or sdk.dir')
+    }
+    environment 'ANDROID_NDK_ROOT', new File(sdkPath, 'ndk/28.1.13356709').absolutePath
     workingDir projectDir
     commandLine 'bash', file('scripts/build-official-openssl.sh').absolutePath
     inputs.property('opensslRelease', '3.5.9')
