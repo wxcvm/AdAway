@@ -31,3 +31,12 @@ jobs:
           cache: gradle
       - name: Run traffic mode regression tests
         run: ./gradlew :app:testDebugUnitTest --tests org.adaway.model.traffic.TrafficModePolicyTest --tests org.adaway.model.traffic.VpnConflictDebouncerTest --tests org.adaway.model.traffic.DiagnosticTunPlanTest --tests org.adaway.model.traffic.DiagnosticUdpEchoTest --no-daemon
+      - name: Build debug APK for device testing
+        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adblock-tun-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
