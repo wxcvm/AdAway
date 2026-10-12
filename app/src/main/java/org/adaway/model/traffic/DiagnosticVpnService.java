@@ -96,7 +96,10 @@ public final class DiagnosticVpnService extends VpnService {
             }
             // Revocation, Root transparent redirect and an active foreign VPN
             // are separate conflict checks. Never request/replace VPN consent here.
-            if (VpnService.prepare(this) != null || HijackModel.isEnabled()) {
+            if (VpnService.prepare(this) != null
+                    || AndroidVpnObserver.read(this, false)
+                            != TrafficModePolicy.VpnOwner.NONE
+                    || HijackModel.isEnabled()) {
                 Timber.w("Diagnostic TUN refused: VPN not authorized or root hijack active");
                 shutdown();
                 return START_NOT_STICKY;
