@@ -471,6 +471,22 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     }
                     Spacer(Modifier.height(8.dp))
                     var blockMode by remember { mutableStateOf(viewModel.currentBlockMode()) }
+                    var modeProbeKey by remember { mutableIntStateOf(0) }
+                    var observedVpn by remember {
+                        mutableStateOf(org.adaway.model.traffic.TrafficModePolicy.VpnOwner.UNKNOWN)
+                    }
+                    var redirectInstalled by remember { mutableStateOf<Boolean?>(null) }
+                    LaunchedEffect(blockMode, modeProbeKey) {
+                        val status = withContext(Dispatchers.IO) {
+                            val owner = org.adaway.model.traffic.AndroidVpnObserver.read(context, false)
+                            val active = if (blockMode == org.adaway.util.BlockMode.HIJACK) {
+                                org.adaway.model.root.HijackModel.isEnabled()
+                            } else false
+                            owner to active
+                        }
+                        observedVpn = status.first
+                        redirectInstalled = status.second
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         FilterChip(
                             selected = blockMode == org.adaway.util.BlockMode.LOCALHOST,
@@ -523,14 +539,16 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 Text(stringResource(R.string.compose_settings_block_mode_null))
                             },
                         )
-                        // 新增：劫持全部流量并由本机服务器过滤（类 AdGuard）
+                        // Root 透明重定向当前仅覆盖符合条件的 TCP 80/443，不包含全部 UDP/QUIC
                         FilterChip(
                             selected = blockMode == org.adaway.util.BlockMode.HIJACK,
                             onClick = {
                                 blockMode = org.adaway.util.BlockMode.HIJACK
                                 viewModel.applyBlockMode(org.adaway.util.BlockMode.HIJACK) { ok ->
+                                    blockMode = viewModel.currentBlockMode()
+                                    modeProbeKey++
                                     if (!ok) {
-                                        // 端口没监听 / 无 root：不要静默失败
+                                        // VPN 冲突 / 端口 / Root 失败都不能当作已接管
                                         Toast.makeText(
                                             context,
                                             context.getString(R.string.compose_settings_block_mode_hijack_failed),
@@ -543,6 +561,26 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 Text(stringResource(R.string.compose_settings_block_mode_hijack))
                             },
                         )
+                    }
+                    if (blockMode == org.adaway.util.BlockMode.HIJACK) {
+                        val stateMessage = when {
+                            observedVpn == org.adaway.model.traffic.TrafficModePolicy.VpnOwner.OTHER ->
+                                R.string.compose_settings_hijack_paused_for_vpn
+                            observedVpn == org.adaway.model.traffic.TrafficModePolicy.VpnOwner.UNKNOWN ->
+                                R.string.compose_settings_hijack_owner_unknown
+                            redirectInstalled == true ->
+                                R.string.compose_settings_hijack_active_verified
+                            else ->
+                                R.string.compose_settings_hijack_inactive
+                        }
+                        Text(
+                            stringResource(stateMessage),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = { modeProbeKey++ }) {
+                            Text(stringResource(R.string.compose_settings_hijack_refresh_status))
+                        }
                     }
                     // ── 自定义重定向地址（hosts 档：被拦域指向哪里）──
                     var customIpv4 by remember { mutableStateOf(org.adaway.util.BlockMode.ipv4Target(context)) }
