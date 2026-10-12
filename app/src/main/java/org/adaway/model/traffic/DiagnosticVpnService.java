@@ -23,6 +23,13 @@ import org.adaway.ui.compose.MainActivity;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.SocketAddress;
+import java.net.SocketTimeoutException;
+import java.util.Arrays;
+import android.os.SystemClock;
 import java.util.concurrent.atomic.AtomicLong;
 
 import timber.log.Timber;
@@ -31,8 +38,9 @@ import timber.log.Timber;
  * Explicitly opt-in diagnostic TUN, *not* a full-traffic VPN.
  *
  * Only routes 198.18.0.1/32 to this service. It echoes valid IPv4 UDP
- * test packets addressed to port 53535, and discards all others. This verifies
- * bidirectional TUN I/O but provides no Internet forwarding or general DNS.
+ * packets to port 53535 and relays small packets addressed to port 53536
+ * through a protected socket to a device-local UDP responder. No Internet
+ * forwarding or general DNS is enabled.
  * All normal traffic retains its original system route.
  *
  * Do not add a default route, DNS server, automatic restart or on-boot startup.
@@ -50,6 +58,9 @@ public final class DiagnosticVpnService extends VpnService {
     private volatile boolean stopped = false;
     private ParcelFileDescriptor tun;
     private Thread reader;
+    private DiagnosticLoopbackUdpServer udpLoopback;
+    private volatile long lastRelayAtMs = -200L;
+    private static final AtomicLong RELAY_COUNT = new AtomicLong();
 
     public static boolean isActive() {
         return active;
@@ -61,6 +72,10 @@ public final class DiagnosticVpnService extends VpnService {
 
     public static long getEchoCount() {
         return ECHO_COUNT.get();
+    }
+
+    public static long getRelayCount() {
+        return RELAY_COUNT.get();
     }
 
     /** Must only be called from UI after successful VpnService.prepare() consent. */
@@ -126,6 +141,8 @@ public final class DiagnosticVpnService extends VpnService {
             stopped = false;
             PACKET_COUNT.set(0L);
             ECHO_COUNT.set(0L);
+            RELAY_COUNT.set(0L);
+            udpLoopback = new DiagnosticLoopbackUdpServer();
             active = true;
             ParcelFileDescriptor fd = tun;
             reader = new Thread(() -> readDiagnosticPackets(fd), "diagnostic-tun-reader");
@@ -133,7 +150,7 @@ public final class DiagnosticVpnService extends VpnService {
             reader.start();
             Timber.i("Diagnostic TUN up: only %s/%d routed (no forwarding)",
                     DiagnosticTunPlan.DIAGNOSTIC_TARGET, DiagnosticTunPlan.TARGET_PREFIX);
-        } catch (RuntimeException exception) {
+        } catch (IOException | RuntimeException exception) {
             Timber.w(exception, "Cannot start diagnostic TUN");
             shutdown();
         }
@@ -141,19 +158,33 @@ public final class DiagnosticVpnService extends VpnService {
     }
 
     private void readDiagnosticPackets(ParcelFileDescriptor fd) {
-        try (FileInputStream input = new FileInputStream(fd.getFileDescriptor());
-             FileOutputStream output = new FileOutputStream(fd.getFileDescriptor())) {
+        // Separate descriptor ownership for the reader and writer: closing the
+        // output stream must not prematurely invalidate a still-active input.
+        try (ParcelFileDescriptor writerFd = fd.dup();
+             FileInputStream input = new FileInputStream(fd.getFileDescriptor());
+             FileOutputStream output = new FileOutputStream(writerFd.getFileDescriptor())) {
             byte[] packet = new byte[2048];
             while (!stopped) {
                 int length = input.read(packet);
                 if (length < 0) break;
-                if (length > 0) {
-                    PACKET_COUNT.incrementAndGet();
-                    byte[] response = DiagnosticUdpEcho.reply(packet, length);
-                    if (response != null) {
-                        output.write(response);
-                        ECHO_COUNT.incrementAndGet();
-                    }
+                if (length == 0) continue;
+                PACKET_COUNT.incrementAndGet();
+                byte[] response = DiagnosticUdpEcho.reply(packet, length);
+                if (response != null) {
+                    output.write(response);
+                    ECHO_COUNT.incrementAndGet();
+                    continue;
+                }
+                // A second explicit test-only port crosses a protected
+                // DatagramSocket to our loopback server and back. A single
+                // synchronous worker and cooldown bound the amount of work.
+                long now = SystemClock.elapsedRealtime();
+                if (now - lastRelayAtMs < 200) continue;
+                lastRelayAtMs = now;
+                response = DiagnosticUdpRelay.process(packet, length, this::relayLocally);
+                if (response != null) {
+                    output.write(response);
+                    RELAY_COUNT.incrementAndGet();
                 }
             }
         } catch (IOException exception) {
@@ -161,6 +192,24 @@ public final class DiagnosticVpnService extends VpnService {
         } finally {
             active = false;
             if (!stopped) stopSelf();
+        }
+    }
+
+    private byte[] relayLocally(byte[] payload) throws IOException {
+        DiagnosticLoopbackUdpServer server = udpLoopback;
+        if (server == null || stopped) throw new IOException("Relay not running");
+        InetAddress addr = InetAddress.getByName("127.0.0.1");
+        try (DatagramSocket socket = new DatagramSocket()) {
+            if (!protect(socket)) throw new IOException("Socket protection refused");
+            socket.setSoTimeout(900);
+            socket.send(new DatagramPacket(payload, payload.length, addr, server.port()));
+            byte[] received = new byte[DiagnosticUdpRelay.MAX_PAYLOAD + 1];
+            DatagramPacket reply = new DatagramPacket(received, received.length);
+            socket.receive(reply);
+            if (!addr.equals(reply.getAddress()) || reply.getPort() != server.port()) {
+                throw new IOException("Unexpected relay source");
+            }
+            return Arrays.copyOf(received, reply.getLength());
         }
     }
 
@@ -183,7 +232,7 @@ public final class DiagnosticVpnService extends VpnService {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.logo)
                 .setContentTitle("ADBlock TUN diagnostic")
-                .setContentText("Test UDP echo 198.18.0.1:53535 only; other routes unchanged")
+                .setContentText("Scoped test TUN: direct Echo 53535 / loopback UDP relay 53536")
                 .setContentIntent(open)
                 .addAction(0, "Stop", stop)
                 .setOngoing(true)
@@ -194,6 +243,10 @@ public final class DiagnosticVpnService extends VpnService {
     private synchronized void shutdown() {
         stopped = true;
         active = false;
+        if (udpLoopback != null) {
+            udpLoopback.close();
+            udpLoopback = null;
+        }
         if (tun != null) {
             try {
                 tun.close();
