@@ -1,6 +1,21 @@
 
 LOCAL_PATH := $(call my-dir)
+OPENSSL_BUILT_DIR := $(LOCAL_PATH)/../build/official-openssl/arm64-v8a
 
+
+# Prebuilt official OpenSSL 3.5 LTS archives, built from the pinned source
+# checkout by webserver/scripts/build-official-openssl.sh.
+include $(CLEAR_VARS)
+LOCAL_MODULE := official_openssl_crypto
+LOCAL_SRC_FILES := $(OPENSSL_BUILT_DIR)/libcrypto.a
+LOCAL_EXPORT_C_INCLUDES := $(OPENSSL_BUILT_DIR)/include
+include $(PREBUILT_STATIC_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := official_openssl_ssl
+LOCAL_SRC_FILES := $(OPENSSL_BUILT_DIR)/libssl.a
+LOCAL_EXPORT_C_INCLUDES := $(OPENSSL_BUILT_DIR)/include
+include $(PREBUILT_STATIC_LIBRARY)
 
 #
 # Build stub library in order to declare shared library to include to AAR
@@ -20,11 +35,11 @@ include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
 
-LOCAL_CFLAGS	       := -D MG_ENABLE_IPV6 -DMG_TLS=MG_TLS_OPENSSL -std=c99 -O2 -W -Wall -lcrypto -lssl -pthread -pipe $(COPT)
+LOCAL_CFLAGS	       := -D MG_ENABLE_IPV6 -DMG_TLS=MG_TLS_OPENSSL -std=c99 -O2 -W -Wall -pthread -pipe $(COPT)
 LOCAL_MODULE           := webserver
 LOCAL_SRC_FILES        := webserver.c mongoose/mongoose.c
-LOCAL_SHARED_LIBRARIES := ssl crypto
-LOCAL_LDLIBS           := -llog
+LOCAL_STATIC_LIBRARIES := official_openssl_ssl official_openssl_crypto
+LOCAL_LDLIBS           := -llog -ldl
 
 include $(BUILD_EXECUTABLE)
 
@@ -33,7 +48,4 @@ include $(BUILD_EXECUTABLE)
 #
 
 
-#
-# Import OpenSSL (ssl and crypto) libraries from prefab
-#
-$(call import-module,prefab/openssl)
+# OpenSSL is statically linked; no outdated Prefab OpenSSL runtime dependency.
