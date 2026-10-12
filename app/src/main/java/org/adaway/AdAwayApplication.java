@@ -59,6 +59,10 @@ public class AdAwayApplication extends Application {
         // Restart check right away: opening the app is exactly when a user
         // notices that the web server is gone.
         org.adaway.broadcast.ServerWatchdogWorker.scheduleImmediateCheck(this);
+        // If another VPN becomes active while this process is alive, ask the
+        // existing watchdog to re-evaluate ownership promptly. Only our own
+        // redirect rules may be removed; no AdGuard settings are changed.
+        org.adaway.model.traffic.AndroidVpnConflictMonitor.start(this);
         // Create models
         this.sourceModel = new SourceModel(this);
         this.updateModel = new UpdateModel(this);
