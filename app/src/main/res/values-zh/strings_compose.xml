@@ -356,8 +356,13 @@
     <string name="compose_rules_add_source_failed">添加失败：链接无效或该订阅已存在</string>
     <string name="compose_settings_block_mode_adguard_hint">AdGuard 的部分版本支持将 DNS 层拦截的域名应答为自定义 IP，但必须先确认该功能存在、本地目标地址与 80/443 可达，以及 HTTPS 证书信任。仅检测到 AdGuard 已安装或某个 VPN 正在运行，并不能说明协同已生效；其他 VPN 活动时不要叠加透明劫持。</string>
     <string name="compose_settings_block_mode_hijack">劫持过滤</string>
-    <string name="compose_settings_block_mode_hijack_hint">劫持过滤（类 AdGuard）：把本机 80/443 流量重定向到内置服务器，非拦截域名会转发回真实网站并过滤页面（隐藏广告位、剔除广告脚本），HTTPS 用本机 CA 解密后过滤。代价：整机网页流量都经过本机服务器，CPU/内存比 127.0.0.1 模式高；如果只想拦广告、不需要页面内元素隐藏，建议用 127.0.0.1 模式。切回其它模式会立即撤销劫持规则；个别做证书校验（pinning）的应用可能无法联网。</string>
+    <string name="compose_settings_block_mode_hijack_hint">劫持过滤（Root）：仅重定向符合条件的本机 TCP 80/443 连接至内置服务器；不等于接管所有 IPv4/IPv6、UDP、QUIC 或其他 VPN 的流量。HTTPS 内容处理需要信任本机 CA，证书固定的应用仍可能拒绝。其他 VPN 占用接管路径时应暂停透明劫持。</string>
     <string name="compose_settings_block_mode_hijack_ca">尚未信任本机 CA：请在“网络服务器 → 证书”里信任 CA，否则 HTTPS 页面会报证书错误。</string>
+    <string name="compose_settings_hijack_paused_for_vpn">检测到其他活动 VPN。本应用的 TCP 重定向将暂停，或等待守护任务撤销；本地服务器在监听不等于 AdGuard 已将拦截请求转来。</string>
+    <string name="compose_settings_hijack_owner_unknown">暂时无法判断 VPN 归属；不会自动安装新的透明重定向规则。</string>
+    <string name="compose_settings_hijack_active_verified">检测到本应用的 iptables OUTPUT 重定向规则；目前只覆盖符合条件的 TCP 80/443，不覆盖 UDP/QUIC 等全部流量。</string>
+    <string name="compose_settings_hijack_inactive">虽已选择劫持模式，但尚未安装对应 iptables 规则；本地服务监听不能代表全局接管。</string>
+    <string name="compose_settings_hijack_refresh_status">刷新接管状态</string>
     <string name="compose_settings_block_mode_hijack_failed">透明劫持未启用：可能检测到其他活动 VPN 或无法确认 VPN 归属，已避免抢占；也可能是服务器监听端口异常或未授予 Root 权限。请先检查 VPN 与本地监听状态再重试。</string>
     <string name="compose_settings_block_mode_apply_failed">切换失败 —— 仍然是原来的模式</string>
     <string name="compose_settings_autostart">开机自动启动</string>
