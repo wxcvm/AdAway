@@ -98,6 +98,7 @@ public final class DiagnosticVpnService extends VpnService {
             // The only route intentionally intercepted is a benchmark-only IP.
             Builder builder = new Builder()
                     .setSession("ADBlock: diagnostic TUN only")
+                    .setBlocking(true) // the packet reader uses blocking reads
                     .setMtu(DiagnosticTunPlan.MTU)
                     .addAddress(DiagnosticTunPlan.LOCAL_ADDRESS,
                             DiagnosticTunPlan.LOCAL_PREFIX);
