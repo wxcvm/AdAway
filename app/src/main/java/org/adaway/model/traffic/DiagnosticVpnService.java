@@ -39,8 +39,10 @@ import timber.log.Timber;
  *
  * Only routes 198.18.0.1/32 to this service. It echoes valid IPv4 UDP
  * packets to port 53535 and relays small packets addressed to port 53536
- * through a protected socket to a device-local UDP responder. No Internet
- * forwarding or general DNS is enabled.
+ * through a protected socket to a device-local UDP responder. UDP 53537
+ * allows ONE fixed example.com A DNS question to the system-provided
+ * underlying network DNS resolver, only on an explicit user test.
+ * No general DNS proxy or Internet forwarding is enabled.
  * All normal traffic retains its original system route.
  *
  * Do not add a default route, DNS server, automatic restart or on-boot startup.
@@ -61,6 +63,7 @@ public final class DiagnosticVpnService extends VpnService {
     private DiagnosticLoopbackUdpServer udpLoopback;
     private volatile long lastRelayAtMs = -200L;
     private static final AtomicLong RELAY_COUNT = new AtomicLong();
+    private static final AtomicLong DNS_DIAGNOSTIC_COUNT = new AtomicLong();
 
     public static boolean isActive() {
         return active;
@@ -76,6 +79,10 @@ public final class DiagnosticVpnService extends VpnService {
 
     public static long getRelayCount() {
         return RELAY_COUNT.get();
+    }
+
+    public static long getDnsDiagnosticCount() {
+        return DNS_DIAGNOSTIC_COUNT.get();
     }
 
     /** Must only be called from UI after successful VpnService.prepare() consent. */
@@ -142,6 +149,7 @@ public final class DiagnosticVpnService extends VpnService {
             PACKET_COUNT.set(0L);
             ECHO_COUNT.set(0L);
             RELAY_COUNT.set(0L);
+            DNS_DIAGNOSTIC_COUNT.set(0L);
             udpLoopback = new DiagnosticLoopbackUdpServer();
             active = true;
             ParcelFileDescriptor fd = tun;
@@ -185,6 +193,16 @@ public final class DiagnosticVpnService extends VpnService {
                 if (response != null) {
                     output.write(response);
                     RELAY_COUNT.incrementAndGet();
+                    continue;
+                }
+                // One-shot fixed example.com A DNS test against the DNS server
+                // of an already validated, non-VPN underlying network.
+                // No alternate domains, recursive proxy or arbitrary targets.
+                response = DiagnosticDnsRelay.process(packet, length,
+                        question -> DiagnosticDnsNetwork.exchange(this, question));
+                if (response != null) {
+                    output.write(response);
+                    DNS_DIAGNOSTIC_COUNT.incrementAndGet();
                 }
             }
         } catch (IOException exception) {
@@ -232,7 +250,7 @@ public final class DiagnosticVpnService extends VpnService {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.logo)
                 .setContentTitle("ADBlock TUN diagnostic")
-                .setContentText("Scoped test TUN: direct Echo 53535 / loopback UDP relay 53536")
+                .setContentText("Scoped tests 53535 Echo / 53536 local UDP / 53537 DNS")
                 .setContentIntent(open)
                 .addAction(0, "Stop", stop)
                 .setOngoing(true)
