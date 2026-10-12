@@ -517,6 +517,23 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     ) {
                         Text(stringResource(R.string.compose_tun_diagnostic_test_echo))
                     }
+                    TextButton(
+                        enabled = diagnosticActive,
+                        onClick = {
+                            tunScope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    org.adaway.model.traffic.DiagnosticTunProbe.relayRoundTrip()
+                                }
+                                tunStatus = context.getString(
+                                    if (ok) R.string.compose_tun_diagnostic_relay_ok
+                                    else R.string.compose_tun_diagnostic_relay_failed,
+                                )
+                                tunRefreshKey++
+                            }
+                        },
+                    ) {
+                        Text(stringResource(R.string.compose_tun_diagnostic_test_relay))
+                    }
                     if (tunStatus.isNotBlank()) {
                         Text(tunStatus, style = MaterialTheme.typography.labelSmall)
                     }
