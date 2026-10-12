@@ -21,6 +21,7 @@ import org.adaway.model.root.HijackModel;
 import org.adaway.ui.compose.MainActivity;
 
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -29,10 +30,10 @@ import timber.log.Timber;
 /**
  * Explicitly opt-in diagnostic TUN, *not* a full-traffic VPN.
  *
- * Only routes 198.18.0.1/32 to this service and counts packets received there.
- * Packets to that test-only address are intentionally discarded because the
- * TCP/UDP forwarding data plane has not been implemented. All other user
- * traffic keeps the original system route.
+ * Only routes 198.18.0.1/32 to this service. It echoes valid IPv4 UDP
+ * test packets addressed to port 53535, and discards all others. This verifies
+ * bidirectional TUN I/O but provides no Internet forwarding or general DNS.
+ * All normal traffic retains its original system route.
  *
  * Do not add a default route, DNS server, automatic restart or on-boot startup.
  * A real forwarding backend must be introduced and tested first.
@@ -44,6 +45,7 @@ public final class DiagnosticVpnService extends VpnService {
 
     private static final int NOTIFICATION_ID = 4784;
     private static final AtomicLong PACKET_COUNT = new AtomicLong();
+    private static final AtomicLong ECHO_COUNT = new AtomicLong();
     private static volatile boolean active = false;
     private volatile boolean stopped = false;
     private ParcelFileDescriptor tun;
@@ -55,6 +57,10 @@ public final class DiagnosticVpnService extends VpnService {
 
     public static long getPacketCount() {
         return PACKET_COUNT.get();
+    }
+
+    public static long getEchoCount() {
+        return ECHO_COUNT.get();
     }
 
     /** Must only be called from UI after successful VpnService.prepare() consent. */
@@ -116,6 +122,7 @@ public final class DiagnosticVpnService extends VpnService {
             }
             stopped = false;
             PACKET_COUNT.set(0L);
+            ECHO_COUNT.set(0L);
             active = true;
             ParcelFileDescriptor fd = tun;
             reader = new Thread(() -> readDiagnosticPackets(fd), "diagnostic-tun-reader");
@@ -131,12 +138,20 @@ public final class DiagnosticVpnService extends VpnService {
     }
 
     private void readDiagnosticPackets(ParcelFileDescriptor fd) {
-        try (FileInputStream input = new FileInputStream(fd.getFileDescriptor())) {
+        try (FileInputStream input = new FileInputStream(fd.getFileDescriptor());
+             FileOutputStream output = new FileOutputStream(fd.getFileDescriptor())) {
             byte[] packet = new byte[2048];
             while (!stopped) {
                 int length = input.read(packet);
                 if (length < 0) break;
-                if (length > 0) PACKET_COUNT.incrementAndGet();
+                if (length > 0) {
+                    PACKET_COUNT.incrementAndGet();
+                    byte[] response = DiagnosticUdpEcho.reply(packet, length);
+                    if (response != null) {
+                        output.write(response);
+                        ECHO_COUNT.incrementAndGet();
+                    }
+                }
             }
         } catch (IOException exception) {
             if (!stopped) Timber.w(exception, "Diagnostic TUN read failed");
@@ -165,7 +180,7 @@ public final class DiagnosticVpnService extends VpnService {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.logo)
                 .setContentTitle("ADBlock TUN diagnostic")
-                .setContentText("Only 198.18.0.1/32 is intercepted; normal routes unchanged")
+                .setContentText("Test UDP echo 198.18.0.1:53535 only; other routes unchanged")
                 .setContentIntent(open)
                 .addAction(0, "Stop", stop)
                 .setOngoing(true)
