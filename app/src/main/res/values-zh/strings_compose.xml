@@ -359,7 +359,7 @@
     <string name="compose_settings_block_mode_hijack_hint">劫持过滤（Root）：仅重定向符合条件的本机 TCP 80/443 连接至内置服务器；不等于接管所有 IPv4/IPv6、UDP、QUIC 或其他 VPN 的流量。HTTPS 内容处理需要信任本机 CA，证书固定的应用仍可能拒绝。其他 VPN 占用接管路径时应暂停透明劫持。</string>
     <string name="compose_settings_block_mode_hijack_ca">尚未信任本机 CA：请在“网络服务器 → 证书”里信任 CA，否则 HTTPS 页面会报证书错误。</string>
     <string name="compose_tun_diagnostic_title">隔离 TUN 诊断（实验性）</string>
-    <string name="compose_tun_diagnostic_explanation">仅在你主动授权后建立 Android VPN 测试接口，只把 198.18.0.1/32 测试地址的包送入计数器并丢弃。不添加默认路由，不更改 DNS，不过滤日常流量。有其他 VPN 或 Root 劫持时禁止启动。</string>
+    <string name="compose_tun_diagnostic_explanation">仅在你主动授权后建立 Android VPN 测试接口，只接管 198.18.0.1/32 测试地址的流量。其中 UDP 53535 端口会返回 Echo 应答，其余测试包丢弃。不添加默认路由、不更改 DNS、不过滤日常流量；其他 VPN 或 Root 劫持运行时禁止启动。</string>
     <string name="compose_tun_diagnostic_running">测试 TUN 运行中 · 收到测试包：%1$d（仅测试地址）</string>
     <string name="compose_tun_diagnostic_stopped">测试 TUN 已停止 · 上次包数：%1$d</string>
     <string name="compose_tun_diagnostic_start">授权并启动测试</string>
@@ -368,6 +368,9 @@
     <string name="compose_tun_diagnostic_not_authorized">未授予 VPN 授权，没有修改路由。</string>
     <string name="compose_tun_diagnostic_start_requested">已请求启动，刷新可确认测试接口是否已就绪。</string>
     <string name="compose_tun_diagnostic_start_failed">无法启动测试 VPN，未修改全局流量路由。</string>
+    <string name="compose_tun_diagnostic_echo_ok">UDP Echo 往返成功：测试数据包已双向通过 TUN（仅测试地址）。</string>
+    <string name="compose_tun_diagnostic_echo_failed">UDP Echo 失败：隔离 TUN 或响应通路尚未就绪，未修改日常上网路由。</string>
+    <string name="compose_tun_diagnostic_test_echo">发送 UDP 往返测试</string>
     <string name="compose_tun_diagnostic_stop_requested">已请求停止，刷新可确认测试接口已关闭。</string>
     <string name="compose_settings_hijack_paused_for_vpn">检测到其他活动 VPN。本应用的 TCP 重定向将暂停，或等待守护任务撤销；本地服务器在监听不等于 AdGuard 已将拦截请求转来。</string>
     <string name="compose_settings_hijack_owner_unknown">暂时无法判断 VPN 归属；不会自动安装新的透明重定向规则。</string>
