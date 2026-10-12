@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import com.topjohnwu.superuser.Shell;
 
 import org.adaway.util.BlockMode;
+import org.adaway.model.traffic.AndroidVpnObserver;
+import org.adaway.model.traffic.TrafficModePolicy;
 import org.adaway.util.Constants;
 import org.adaway.util.WebServerUtils;
 
@@ -93,6 +95,39 @@ public final class HijackModel {
      */
     public static boolean enable(Context context) {
         try {
+            /*
+             * Network ownership comes BEFORE the fast-path isEnabled(): a
+             * previously installed iptables chain must not remain hooked after
+             * AdGuard (or another application) has acquired Android VPN.
+             *
+             * The local web server is left running, but we do NOT claim its
+             * listener receives the other VPN's blocked DNS requests.
+             */
+            TrafficModePolicy.VpnOwner owner = AndroidVpnObserver.read(context, false);
+            TrafficModePolicy.Decision decision = TrafficModePolicy.decide(
+                    new TrafficModePolicy.Evidence(
+                            TrafficModePolicy.Preference.CAPTURE,
+                            owner,
+                            false, /* package presence alone is not proof */
+                            false, /* foreign traffic interception unverified */
+                            false, /* no verified path from foreign VPN */
+                            true,  /* root authorization checked by shell */
+                            false));
+            if (owner == TrafficModePolicy.VpnOwner.OTHER) {
+                if (isEnabled()) {
+                    if (!disable()) {
+                        Timber.e("External VPN detected; failed to remove own hijack chain");
+                        return false;
+                    }
+                }
+                clearActiveFlag(context);
+                Timber.i("External VPN active: transparent redirect paused; listener untouched");
+                return false;
+            }
+            if (decision.target != TrafficModePolicy.Target.START_CAPTURE) {
+                Timber.w("VPN ownership unverified; skip installing new redirect rules");
+                return isEnabled(); /* keep prior state unchanged, not a new takeover */
+            }
             // Already in place (the common case when the watchdog re-runs):
             // skip the ~15 iptables invocations entirely.
             if (isEnabled()) {
