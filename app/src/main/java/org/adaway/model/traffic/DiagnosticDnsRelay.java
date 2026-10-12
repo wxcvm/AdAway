@@ -17,11 +17,14 @@ public final class DiagnosticDnsRelay {
         byte[] exchange(byte[] query) throws IOException;
     }
 
-    public static byte[] process(byte[] packet, int length, Upstream upstream) {
-        if (upstream == null) return null;
+    public static byte[] process(byte[] packet, int length, DiagnosticDnsAuthorization permits,
+                                 int ownerUid, Upstream upstream) {
+        if (upstream == null || permits == null) return null;
         byte[] query = DiagnosticUdpEcho.payload(
                 packet, length, DiagnosticDnsCodec.PORT);
         if (!DiagnosticDnsCodec.isAllowedQuery(query)) return null;
+        if (!permits.consume(ownerUid, DiagnosticUdpEcho.sourcePort(packet, length,
+                DiagnosticDnsCodec.PORT), query)) return null;
         try {
             byte[] answer = upstream.exchange(query);
             if (!DiagnosticDnsCodec.matchesResponse(query, answer)) return null;

@@ -64,4 +64,20 @@ public final class DiagnosticDnsCodecTest {
         assertFalse(DiagnosticDnsCodec.matchesResponse(q, null));
         assertFalse(DiagnosticDnsCodec.isAllowedQuery(new byte[10]));
     }
+
+    @Test public void rejectsTruncatedRecordsPointersAndTrailingBytes() {
+        byte[] q = DiagnosticDnsCodec.query(1), good = response(q);
+        assertFalse(DiagnosticDnsCodec.matchesResponse(q, Arrays.copyOf(good, good.length - 1)));
+        assertFalse(DiagnosticDnsCodec.matchesResponse(q, Arrays.copyOf(good, good.length + 1)));
+        byte[] loop = good.clone();
+        loop[q.length + 1] = (byte) q.length;
+        assertFalse(DiagnosticDnsCodec.matchesResponse(q, loop));
+        byte[] missing = q.clone(); missing[2] = (byte) 0x81; missing[7] = 1;
+        assertFalse(DiagnosticDnsCodec.matchesResponse(q, missing));
+        java.util.Random random = new java.util.Random(53537);
+        for (int i = 0; i < 10000; i++) {
+            byte[] packet = new byte[random.nextInt(514)]; random.nextBytes(packet);
+            DiagnosticDnsCodec.matchesResponse(q, packet); // malformed wire must never throw
+        }
+    }
 }

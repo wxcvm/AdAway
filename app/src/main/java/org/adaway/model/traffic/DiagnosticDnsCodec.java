@@ -1,7 +1,5 @@
 package org.adaway.model.traffic;
 
-import java.util.Arrays;
-
 /**
  * Diagnostic-only DNS message validation. Exactly one fixed A question for
  * example.com is permitted. This is not a recursive/open DNS proxy and must
@@ -51,7 +49,45 @@ public final class DiagnosticDnsCodec {
                 || (response[2] & 0x02) != 0) return false;
         if ((response[4] & 0xff) != 0 || (response[5] & 0xff) != 1)
             return false;
-        return matchesQuestion(response);
+        return matchesQuestion(response) && validRecords(response);
+    }
+
+    private static int unsigned16(byte[] bytes, int offset) {
+        return ((bytes[offset] & 255) << 8) | (bytes[offset + 1] & 255);
+    }
+
+    private static int nameEnd(byte[] message, int offset) {
+        boolean[] visited = new boolean[message.length];
+        int end = -1, expanded = 1;
+        while (offset < message.length) {
+            if (visited[offset]) return -1;
+            visited[offset] = true;
+            int size = message[offset] & 255;
+            if (size == 0) return end < 0 ? offset + 1 : end;
+            if ((size & 192) == 192) {
+                if (offset + 1 >= message.length) return -1;
+                if (end < 0) end = offset + 2;
+                offset = ((size & 63) << 8) | (message[offset + 1] & 255);
+            } else {
+                if ((size & 192) != 0 || offset + size + 1 >= message.length) return -1;
+                expanded += size + 1;
+                if (expanded > 255) return -1;
+                offset += size + 1;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean validRecords(byte[] message) {
+        int offset = HEADER_LENGTH + QUESTION.length;
+        int count = unsigned16(message, 6) + unsigned16(message, 8) + unsigned16(message, 10);
+        for (int i = 0; i < count; i++) {
+            offset = nameEnd(message, offset);
+            if (offset < 0 || offset + 10 > message.length) return false;
+            offset += 10 + unsigned16(message, offset + 8);
+            if (offset > message.length) return false;
+        }
+        return offset == message.length;
     }
 
     private static boolean matchesQuestion(byte[] message) {

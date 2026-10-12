@@ -2,7 +2,7 @@ name: Traffic mode decision tests
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, feat/traffic-mode-foundation]
     paths:
       - 'app/src/main/java/org/adaway/model/traffic/**'
       - 'app/src/test/java/org/adaway/model/traffic/**'
@@ -30,13 +30,15 @@ jobs:
           java-version: '21'
           cache: gradle
       - name: Run traffic mode regression tests
-        run: ./gradlew :app:testDebugUnitTest --tests org.adaway.model.traffic.TrafficModePolicyTest --tests org.adaway.model.traffic.VpnConflictDebouncerTest --tests org.adaway.model.traffic.DiagnosticTunPlanTest --tests org.adaway.model.traffic.DiagnosticUdpEchoTest --tests org.adaway.model.traffic.DiagnosticUdpRelayTest --tests org.adaway.model.traffic.DiagnosticDnsCodecTest --tests org.adaway.model.traffic.DiagnosticDnsRelayTest --no-daemon
+        run: ./gradlew :app:testDebugUnitTest --tests 'org.adaway.model.traffic.*' --tests org.adaway.model.root.HijackCleanupCommandsTest --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
       - name: Build debug APK for device testing
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: adblock-tun-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/intermediates/apk/debug/*.apk
+            app/build/intermediates/apk/androidTest/debug/*.apk
           if-no-files-found: error
           retention-days: 7

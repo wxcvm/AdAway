@@ -11,6 +11,10 @@ import android.net.VpnService;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructPollfd;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -26,11 +30,10 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.SocketAddress;
-import java.net.SocketTimeoutException;
 import java.util.Arrays;
 import android.os.SystemClock;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import timber.log.Timber;
 
@@ -54,35 +57,53 @@ public final class DiagnosticVpnService extends VpnService {
     public static final String CHANNEL_ID = "DiagnosticTunChannel";
 
     private static final int NOTIFICATION_ID = 4784;
-    private static final AtomicLong PACKET_COUNT = new AtomicLong();
-    private static final AtomicLong ECHO_COUNT = new AtomicLong();
-    private static volatile boolean active = false;
+    private final AtomicLong packetCount = new AtomicLong();
+    private final AtomicLong echoCount = new AtomicLong();
     private volatile boolean stopped = false;
     private ParcelFileDescriptor tun;
     private Thread reader;
+    private FileOutputStream writerOutput;
+    private ParcelFileDescriptor writerFd;
+    private DiagnosticPacketPump pump;
+    private final DiagnosticSockets sockets = new DiagnosticSockets();
+    private final DiagnosticDnsAuthorization dnsPermits = new DiagnosticDnsAuthorization(
+            android.os.Process.myUid(), SystemClock::elapsedRealtime);
+    private static final AtomicReference<DiagnosticVpnService> RUNNING = new AtomicReference<>();
     private DiagnosticLoopbackUdpServer udpLoopback;
     private volatile long lastRelayAtMs = -200L;
-    private static final AtomicLong RELAY_COUNT = new AtomicLong();
-    private static final AtomicLong DNS_DIAGNOSTIC_COUNT = new AtomicLong();
+    private final AtomicLong relayCount = new AtomicLong();
+    private final AtomicLong dnsDiagnosticCount = new AtomicLong();
 
     public static boolean isActive() {
-        return active;
+        DiagnosticVpnService service = RUNNING.get();
+        return service != null && !service.stopped;
     }
 
     public static long getPacketCount() {
-        return PACKET_COUNT.get();
+        DiagnosticVpnService service = RUNNING.get();
+        return service == null ? 0 : service.packetCount.get();
     }
 
     public static long getEchoCount() {
-        return ECHO_COUNT.get();
+        DiagnosticVpnService service = RUNNING.get();
+        return service == null ? 0 : service.echoCount.get();
     }
 
     public static long getRelayCount() {
-        return RELAY_COUNT.get();
+        DiagnosticVpnService service = RUNNING.get();
+        return service == null ? 0 : service.relayCount.get();
     }
 
     public static long getDnsDiagnosticCount() {
-        return DNS_DIAGNOSTIC_COUNT.get();
+        DiagnosticVpnService service = RUNNING.get();
+        return service == null ? 0 : service.dnsDiagnosticCount.get();
+    }
+
+    /** In-process UI capability; no exported Intent can issue a DNS permit. */
+    public static DiagnosticDnsAuthorization.Lease authorizeDnsProbe(int sourcePort, byte[] query) {
+        DiagnosticVpnService service = RUNNING.get();
+        return service == null || service.stopped ? null
+                : service.dnsPermits.issue(android.os.Process.myUid(), sourcePort, query);
     }
 
     /** Must only be called from UI after successful VpnService.prepare() consent. */
@@ -98,6 +119,7 @@ public final class DiagnosticVpnService extends VpnService {
 
     @Override
     public int onStartCommand(@Nullable Intent intent, int flags, int startId) {
+        if (stopped) { stopSelf(); return START_NOT_STICKY; }
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
             shutdown();
             return START_NOT_STICKY;
@@ -106,16 +128,9 @@ public final class DiagnosticVpnService extends VpnService {
             shutdown();
             return START_NOT_STICKY;
         }
-        if (active) return START_NOT_STICKY;
+        if (isActive()) return START_NOT_STICKY;
         try {
-            createChannel();
-            Notification notification = createNotification();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(NOTIFICATION_ID, notification,
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-            } else {
-                startForeground(NOTIFICATION_ID, notification);
-            }
+            notifyForeground();
             // Revocation, Root transparent redirect and an active foreign VPN
             // are separate conflict checks. Never request/replace VPN consent here.
             if (VpnService.prepare(this) != null
@@ -129,7 +144,7 @@ public final class DiagnosticVpnService extends VpnService {
             // The only route intentionally intercepted is a benchmark-only IP.
             Builder builder = new Builder()
                     .setSession("ADBlock: diagnostic TUN only")
-                    .setBlocking(true) // the packet reader uses blocking reads
+                    .setBlocking(false) // cancellation never waits on a kernel read/write
                     .setMtu(DiagnosticTunPlan.MTU)
                     .addAddress(DiagnosticTunPlan.LOCAL_ADDRESS,
                             DiagnosticTunPlan.LOCAL_PREFIX);
@@ -139,6 +154,8 @@ public final class DiagnosticVpnService extends VpnService {
             }
             builder.addRoute(DiagnosticTunPlan.DIAGNOSTIC_TARGET,
                     DiagnosticTunPlan.TARGET_PREFIX);
+            // TUN packets have no trustworthy sender UID. Enforce it at routing instead.
+            builder.addAllowedApplication(getPackageName());
             tun = builder.establish();
             if (tun == null) {
                 Timber.w("Diagnostic VPN establishment failed or consent revoked");
@@ -146,71 +163,85 @@ public final class DiagnosticVpnService extends VpnService {
                 return START_NOT_STICKY;
             }
             stopped = false;
-            PACKET_COUNT.set(0L);
-            ECHO_COUNT.set(0L);
-            RELAY_COUNT.set(0L);
-            DNS_DIAGNOSTIC_COUNT.set(0L);
             udpLoopback = new DiagnosticLoopbackUdpServer();
-            active = true;
+            writerFd = tun.dup();
+            writerOutput = new FileOutputStream(writerFd.getFileDescriptor());
+            pump = new DiagnosticPacketPump(this::processSlowPacket, this::writeResponse,
+                    sockets::close, this::shutdown);
+            if (!RUNNING.compareAndSet(null, this)) throw new IOException("Diagnostic already active");
             ParcelFileDescriptor fd = tun;
             reader = new Thread(() -> readDiagnosticPackets(fd), "diagnostic-tun-reader");
             reader.setDaemon(true);
             reader.start();
             Timber.i("Diagnostic TUN up: only %s/%d routed (no forwarding)",
                     DiagnosticTunPlan.DIAGNOSTIC_TARGET, DiagnosticTunPlan.TARGET_PREFIX);
-        } catch (IOException | RuntimeException exception) {
+        } catch (IOException | RuntimeException | android.content.pm.PackageManager.NameNotFoundException exception) {
             Timber.w(exception, "Cannot start diagnostic TUN");
             shutdown();
         }
         return START_NOT_STICKY;
     }
 
+    private void notifyForeground() {
+        createChannel();
+        Notification notification = createNotification();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        } else {
+            startForeground(NOTIFICATION_ID, notification);
+        }
+    }
+
+    private void writeResponse(byte[] response) throws IOException {
+        if (stopped) return;
+        writerOutput.write(response);
+        int header = (response[0] & 15) * 4;
+        int port = ((response[header] & 255) << 8) | (response[header + 1] & 255);
+        if (port == DiagnosticUdpEcho.PORT) echoCount.incrementAndGet();
+        else if (port == DiagnosticUdpRelay.PORT) relayCount.incrementAndGet();
+        else if (port == DiagnosticDnsCodec.PORT) dnsDiagnosticCount.incrementAndGet();
+    }
+
     private void readDiagnosticPackets(ParcelFileDescriptor fd) {
-        // Separate descriptor ownership for the reader and writer: closing the
-        // output stream must not prematurely invalidate a still-active input.
-        try (ParcelFileDescriptor writerFd = fd.dup();
-             FileInputStream input = new FileInputStream(fd.getFileDescriptor());
-             FileOutputStream output = new FileOutputStream(writerFd.getFileDescriptor())) {
+        try (FileInputStream input = new FileInputStream(fd.getFileDescriptor())) {
             byte[] packet = new byte[2048];
-            while (!stopped) {
-                int length = input.read(packet);
-                if (length < 0) break;
-                if (length == 0) continue;
-                PACKET_COUNT.incrementAndGet();
-                byte[] response = DiagnosticUdpEcho.reply(packet, length);
-                if (response != null) {
-                    output.write(response);
-                    ECHO_COUNT.incrementAndGet();
-                    continue;
-                }
-                // A second explicit test-only port crosses a protected
-                // DatagramSocket to our loopback server and back. A single
-                // synchronous worker and cooldown bound the amount of work.
-                long now = SystemClock.elapsedRealtime();
-                if (now - lastRelayAtMs < 200) continue;
-                lastRelayAtMs = now;
-                response = DiagnosticUdpRelay.process(packet, length, this::relayLocally);
-                if (response != null) {
-                    output.write(response);
-                    RELAY_COUNT.incrementAndGet();
-                    continue;
-                }
-                // One-shot fixed example.com A DNS test against the DNS server
-                // of an already validated, non-VPN underlying network.
-                // No alternate domains, recursive proxy or arbitrary targets.
-                response = DiagnosticDnsRelay.process(packet, length,
-                        question -> DiagnosticDnsNetwork.exchange(this, question));
-                if (response != null) {
-                    output.write(response);
-                    DNS_DIAGNOSTIC_COUNT.incrementAndGet();
-                }
-            }
-        } catch (IOException exception) {
+            StructPollfd poll = new StructPollfd();
+            poll.fd = fd.getFileDescriptor();
+            poll.events = (short) OsConstants.POLLIN;
+            StructPollfd[] polling = {poll};
+            while (!stopped && readNext(input, polling, packet)) { /* packet I/O only */ }
+        } catch (IOException | ErrnoException | RuntimeException exception) {
             if (!stopped) Timber.w(exception, "Diagnostic TUN read failed");
         } finally {
-            active = false;
-            if (!stopped) stopSelf();
+            if (!stopped) shutdown();
         }
+    }
+
+    private boolean readNext(FileInputStream input, StructPollfd[] polling, byte[] packet)
+            throws IOException, ErrnoException {
+        if (Os.poll(polling, 100) == 0) return true;
+        if (stopped) return false;
+        int length = input.read(packet);
+        if (length < 0) return false;
+        if (length > 0) dispatch(packet, length);
+        return true;
+    }
+
+    private void dispatch(byte[] packet, int length) {
+        packetCount.incrementAndGet();
+        byte[] response = DiagnosticUdpEcho.reply(packet, length);
+        if (response != null) { pump.respond(response); return; }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastRelayAtMs < 200) return;
+        lastRelayAtMs = now;
+        pump.submit(packet, length);
+    }
+
+    private byte[] processSlowPacket(byte[] packet) {
+        byte[] response = DiagnosticUdpRelay.process(packet, packet.length, this::relayLocally);
+        if (response != null || stopped) return response;
+        return DiagnosticDnsRelay.process(packet, packet.length, dnsPermits,
+                android.os.Process.myUid(), question -> DiagnosticDnsNetwork.exchange(this, question, sockets));
     }
 
     private byte[] relayLocally(byte[] payload) throws IOException {
@@ -218,6 +249,8 @@ public final class DiagnosticVpnService extends VpnService {
         if (server == null || stopped) throw new IOException("Relay not running");
         InetAddress addr = InetAddress.getByName("127.0.0.1");
         try (DatagramSocket socket = new DatagramSocket()) {
+            sockets.register(socket);
+            try {
             if (!protect(socket)) throw new IOException("Socket protection refused");
             socket.setSoTimeout(900);
             socket.send(new DatagramPacket(payload, payload.length, addr, server.port()));
@@ -228,6 +261,7 @@ public final class DiagnosticVpnService extends VpnService {
                 throw new IOException("Unexpected relay source");
             }
             return Arrays.copyOf(received, reply.getLength());
+            } finally { sockets.remove(socket); }
         }
     }
 
@@ -260,7 +294,13 @@ public final class DiagnosticVpnService extends VpnService {
 
     private synchronized void shutdown() {
         stopped = true;
-        active = false;
+        RUNNING.compareAndSet(this, null);
+        dnsPermits.close();
+        sockets.close();
+        if (pump != null) pump.close();
+        if (reader != null) reader.interrupt();
+        try { if (writerOutput != null) writerOutput.close(); } catch (IOException ignored) { }
+        try { if (writerFd != null) writerFd.close(); } catch (IOException ignored) { }
         if (udpLoopback != null) {
             udpLoopback.close();
             udpLoopback = null;

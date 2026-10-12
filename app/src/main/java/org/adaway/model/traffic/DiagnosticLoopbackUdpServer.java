@@ -39,9 +39,7 @@ public final class DiagnosticLoopbackUdpServer implements Closeable {
             try {
                 DatagramPacket received = new DatagramPacket(bytes, bytes.length);
                 socket.receive(received);
-                if (!received.getAddress().isLoopbackAddress()
-                        || received.getLength() == 0
-                        || received.getLength() > DiagnosticUdpRelay.MAX_PAYLOAD) continue;
+                if (!allowed(received)) continue;
                 byte[] reply = new byte[received.getLength()];
                 System.arraycopy(bytes, 0, reply, 0, reply.length);
                 reply[0] ^= 0x5a;
@@ -55,6 +53,12 @@ public final class DiagnosticLoopbackUdpServer implements Closeable {
                 if (!closed) break;
             }
         }
+        close();
+    }
+
+    private static boolean allowed(DatagramPacket packet) {
+        return packet.getAddress().isLoopbackAddress() && packet.getLength() > 0
+                && packet.getLength() <= DiagnosticUdpRelay.MAX_PAYLOAD;
     }
 
     @Override

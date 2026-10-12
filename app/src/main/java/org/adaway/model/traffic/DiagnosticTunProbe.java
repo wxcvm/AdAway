@@ -12,13 +12,9 @@ import java.util.Arrays;
  * no external servers, DNS or default route are involved.
  */
 public final class DiagnosticTunProbe {
+    private static final SecureRandom RANDOM = new SecureRandom();
     private DiagnosticTunProbe() {}
 
-    /**
-     * Verify protected UDP transport via the service's small local responder.
-     * The responder XORs the first byte; direct TUN echo leaves it unchanged.
-     * This lets the user distinguish real relay I/O from packet reflection.
-     */
     /**
      * Public-network diagnostic for exactly example.com A via the OS-selected
      * underlying network DNS resolver. Only initiated by the user, and only
@@ -26,8 +22,11 @@ public final class DiagnosticTunProbe {
      */
     public static boolean dnsRoundTrip() {
         if (!DiagnosticVpnService.isActive()) return false;
-        byte[] request = DiagnosticDnsCodec.query(new SecureRandom().nextInt(65536));
+        byte[] request = DiagnosticDnsCodec.query(RANDOM.nextInt(65536));
         try (DatagramSocket socket = new DatagramSocket()) {
+            try (DiagnosticDnsAuthorization.Lease permit = DiagnosticVpnService.authorizeDnsProbe(
+                    socket.getLocalPort(), request)) {
+            if (permit == null) return false;
             socket.setSoTimeout(2500);
             InetAddress address = InetAddress.getByName(DiagnosticTunPlan.DIAGNOSTIC_TARGET);
             socket.send(new DatagramPacket(request, request.length,
@@ -40,6 +39,7 @@ public final class DiagnosticTunProbe {
             byte[] answer = Arrays.copyOf(data, packet.getLength());
             return DiagnosticDnsCodec.matchesResponse(request, answer)
                     && DiagnosticDnsCodec.responseCode(answer) == 0;
+            }
         } catch (IOException | RuntimeException ignored) {
             return false;
         }
@@ -48,7 +48,7 @@ public final class DiagnosticTunProbe {
     public static boolean relayRoundTrip() {
         if (!DiagnosticVpnService.isActive()) return false;
         byte[] nonce = new byte[16];
-        new SecureRandom().nextBytes(nonce);
+        RANDOM.nextBytes(nonce);
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.setSoTimeout(2000);
             InetAddress addr = InetAddress.getByName(DiagnosticTunPlan.DIAGNOSTIC_TARGET);
@@ -71,7 +71,7 @@ public final class DiagnosticTunProbe {
     public static boolean roundTrip() {
         if (!DiagnosticVpnService.isActive()) return false;
         byte[] nonce = new byte[16];
-        new SecureRandom().nextBytes(nonce);
+        RANDOM.nextBytes(nonce);
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.setSoTimeout(1800);
             InetAddress addr = InetAddress.getByName(DiagnosticTunPlan.DIAGNOSTIC_TARGET);

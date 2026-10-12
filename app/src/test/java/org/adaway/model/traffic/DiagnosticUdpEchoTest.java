@@ -21,7 +21,7 @@ public final class DiagnosticUdpEchoTest {
         packet[24] = 0; packet[25] = 12;
         packet[28] = 't'; packet[29] = 'e';
         packet[30] = 's'; packet[31] = 't';
-        return packet;
+        return DiagnosticPacketFixture.checksum(packet);
     }
 
     private static long sum(byte[] b, int from, int len) {
@@ -89,5 +89,26 @@ public final class DiagnosticUdpEchoTest {
         assertNull(DiagnosticUdpEcho.reply(p,p.length-1));
         assertNull(DiagnosticUdpEcho.reply(new byte[1501],1501));
         assertNull(DiagnosticUdpEcho.reply(null,32));
+    }
+
+    @Test public void rejectsZeroChecksumAndMalformedFuzzWithoutThrowing() {
+        byte[] p = sample();
+        p[10] = p[11] = 0;
+        assertNull(DiagnosticUdpEcho.reply(p, p.length));
+        java.util.Random random = new java.util.Random(4784);
+        for (int i = 0; i < 10000; i++) {
+            byte[] bytes = new byte[random.nextInt(2049)];
+            random.nextBytes(bytes);
+            assertNull(DiagnosticUdpEcho.reply(bytes, bytes.length));
+        }
+        for (int i = 0; i < 1000; i++) {
+            // Valid packets remain a positive control after randomized payloads.
+            byte[] positive = sample();
+            positive[28] = (byte) random.nextInt();
+            byte[] response = DiagnosticUdpEcho.reply(positive, positive.length);
+            assertNotNull(response);
+            assertEquals(positive[28], response[28]);
+            assertEquals(0xffff, sum(response, 0, 20));
+        }
     }
 }

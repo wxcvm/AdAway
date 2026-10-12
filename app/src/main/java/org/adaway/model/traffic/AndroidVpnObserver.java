@@ -35,6 +35,8 @@ public final class AndroidVpnObserver {
 
             boolean vpnSeen = false;
             boolean missingCapabilities = false;
+            boolean ourOwner = false;
+            boolean foreignOwner = false;
             for (Network network : networks) {
                 NetworkCapabilities capabilities = manager.getNetworkCapabilities(network);
                 if (capabilities == null) {
@@ -43,21 +45,16 @@ public final class AndroidVpnObserver {
                 }
                 if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
                     vpnSeen = true;
+                    int owner = capabilities.getOwnerUid();
+                    if (owner == android.os.Process.myUid()) ourOwner = true;
+                    else if (owner >= 0) foreignOwner = true;
+                    else missingCapabilities = true;
                 }
             }
 
-            if (vpnSeen) {
-                return ownTunnelConfirmed
-                        ? TrafficModePolicy.VpnOwner.OURS
-                        : TrafficModePolicy.VpnOwner.OTHER;
-            }
-
-            // A service-reported tunnel without an OS-visible VPN is not
-            // enough to conclude that we actually own the network.
-            if (ownTunnelConfirmed || missingCapabilities) {
-                return TrafficModePolicy.VpnOwner.UNKNOWN;
-            }
-            return TrafficModePolicy.VpnOwner.NONE;
+            boolean consentCurrent = !ownTunnelConfirmed || android.net.VpnService.prepare(context) == null;
+            return VpnOwnershipEvidence.decide(vpnSeen, ownTunnelConfirmed,
+                    ourOwner && consentCurrent, foreignOwner, missingCapabilities);
         } catch (SecurityException | IllegalStateException e) {
             return TrafficModePolicy.VpnOwner.UNKNOWN;
         }

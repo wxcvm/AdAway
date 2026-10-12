@@ -20,7 +20,13 @@ public final class DiagnosticDnsRelayTest {
         packet[24] = (byte)((8 + question.length) >>> 8);
         packet[25] = (byte)(8 + question.length);
         System.arraycopy(question, 0, packet, 28, question.length);
-        return packet;
+        return DiagnosticPacketFixture.checksum(packet);
+    }
+
+    private static byte[] process(byte[] p, int length, DiagnosticDnsRelay.Upstream upstream) {
+        DiagnosticDnsAuthorization permits = new DiagnosticDnsAuthorization(1000, () -> 0);
+        permits.issue(1000, 0x1234, Arrays.copyOfRange(p, 28, p.length));
+        return DiagnosticDnsRelay.process(p, length, permits, 1000, upstream);
     }
 
     @Test public void replyIsRepackagedAsDiagnosticUdp() {
@@ -29,7 +35,7 @@ public final class DiagnosticDnsRelayTest {
         byte[] response = Arrays.copyOf(q, q.length);
         response[2] = (byte) 0x81;
         response[3] = (byte) 0x80;
-        byte[] result = DiagnosticDnsRelay.process(p, p.length, query -> {
+        byte[] result = process(p, p.length, query -> {
             assertArrayEquals(q, query);
             return response;
         });
@@ -46,16 +52,31 @@ public final class DiagnosticDnsRelayTest {
         byte[] p = packet(q);
         p[28+13] = 'x'; // changed allowed query name
         final int[] calls = {0};
-        assertNull(DiagnosticDnsRelay.process(p, p.length, request -> {
+        assertNull(process(p, p.length, request -> {
             calls[0]++;
             return request;
         }));
         assertEquals(0, calls[0]);
         p = packet(q);
-        assertNull(DiagnosticDnsRelay.process(p, p.length, request -> new byte[0]));
-        assertNull(DiagnosticDnsRelay.process(p, p.length, request -> {
+        assertNull(process(p, p.length, request -> new byte[0]));
+        assertNull(process(p, p.length, request -> {
             throw new IOException("DNS timeout");
         }));
-        assertNull(DiagnosticDnsRelay.process(p, p.length, null));
+        assertNull(process(p, p.length, null));
+    }
+
+    @Test public void requiresServicePermitAndConsumesItEvenOnFailure() {
+        byte[] query = DiagnosticDnsCodec.query(4), p = packet(query);
+        DiagnosticDnsAuthorization permits = new DiagnosticDnsAuthorization(1000, () -> 0);
+        int[] calls = {0};
+        DiagnosticDnsRelay.Upstream upstream = request -> {
+            calls[0]++; throw new IOException("timeout");
+        };
+        assertNull(DiagnosticDnsRelay.process(p, p.length, permits, 1000, upstream));
+        assertEquals(0, calls[0]);
+        permits.issue(1000, 0x1234, query);
+        assertNull(DiagnosticDnsRelay.process(p, p.length, permits, 1000, upstream));
+        assertNull(DiagnosticDnsRelay.process(p, p.length, permits, 1000, upstream));
+        assertEquals(1, calls[0]);
     }
 }

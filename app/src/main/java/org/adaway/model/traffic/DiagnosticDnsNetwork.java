@@ -58,12 +58,15 @@ public final class DiagnosticDnsNetwork {
         throw new IOException("No validated non-VPN IPv4 DNS network");
     }
 
-    public static byte[] exchange(VpnService service, byte[] question) throws IOException {
+    public static byte[] exchange(VpnService service, byte[] question,
+                                  DiagnosticSockets sockets) throws IOException {
         if (!DiagnosticDnsCodec.isAllowedQuery(question))
             throw new IOException("DNS diagnostic query not allowed");
 
         Destination target = resolver(service);
         try (DatagramSocket socket = new DatagramSocket()) {
+            sockets.register(socket);
+            try {
             // protect before binding so packets cannot be looped back to TUN.
             if (!service.protect(socket)) throw new IOException("VPN protect failed");
             target.network.bindSocket(socket);
@@ -81,6 +84,7 @@ public final class DiagnosticDnsNetwork {
             if (!DiagnosticDnsCodec.matchesResponse(question, answer))
                 throw new IOException("Unexpected or malformed DNS answer");
             return answer;
+            } finally { sockets.remove(socket); }
         }
     }
 }

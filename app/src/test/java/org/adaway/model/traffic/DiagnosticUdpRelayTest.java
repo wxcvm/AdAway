@@ -23,7 +23,7 @@ public final class DiagnosticUdpRelayTest {
         p[24] = (byte) (udpLength >>> 8);
         p[25] = (byte) udpLength;
         System.arraycopy(payload, 0, p, 28, payload.length);
-        return p;
+        return DiagnosticPacketFixture.checksum(p);
     }
 
     private static long sum(byte[] p, int from, int length) {

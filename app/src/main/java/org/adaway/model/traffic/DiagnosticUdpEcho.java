@@ -47,11 +47,7 @@ public final class DiagnosticUdpEcho {
         if (hdr < IPV4_HEADER || hdr > 60 || hdr + UDP_HEADER > available) return -1;
         int total = u16(packet, 2);
         if (total != available || total < hdr + UDP_HEADER) return -1;
-        if (u8(packet, 9) != 17 || (u16(packet, 6) & 0x3fff) != 0) return -1;
-        if (u8(packet, 12) != 198 || u8(packet, 13) != 18
-                || u8(packet, 14) != 0 || u8(packet, 15) != 2) return -1;
-        if (u8(packet, 16) != 198 || u8(packet, 17) != 18
-                || u8(packet, 18) != 0 || u8(packet, 19) != 1) return -1;
+        if (!validIpv4(packet, hdr)) return -1;
         int udpLen = u16(packet, hdr + 4);
         if (udpLen != total - hdr || udpLen < UDP_HEADER) return -1;
         if (u16(packet, hdr) == 0 || u16(packet, hdr + 2) != port) return -1;
@@ -62,10 +58,18 @@ public final class DiagnosticUdpEcho {
             long pseudo = sum16(packet, 12, 8) + 17 + udpLen;
             if (checksum(pseudo + sum16(packet, hdr, udpLen)) != 0) return -1;
         }
-        // IPv4 checksum must be correct, except zeroed diagnostic fixtures.
-        int ipChecksum = u16(packet, 10);
-        if (ipChecksum != 0 && checksum(sum16(packet, 0, hdr)) != 0) return -1;
         return hdr;
+    }
+
+    private static boolean matchesAddress(byte[] packet, int offset, int last) {
+        return u8(packet, offset) == 198 && u8(packet, offset + 1) == 18
+                && u8(packet, offset + 2) == 0 && u8(packet, offset + 3) == last;
+    }
+
+    private static boolean validIpv4(byte[] packet, int header) {
+        return u8(packet, 9) == 17 && (u16(packet, 6) & 0xbfff) == 0
+                && matchesAddress(packet, 12, 2) && matchesAddress(packet, 16, 1)
+                && checksum(sum16(packet, 0, header)) == 0;
     }
 
     /** Copy the payload of a packet addressed to an explicitly allowed port. */
@@ -73,6 +77,11 @@ public final class DiagnosticUdpEcho {
         int hdr = validatedHeader(packet, available, port);
         if (hdr < 0) return null;
         return Arrays.copyOfRange(packet, hdr + UDP_HEADER, available);
+    }
+
+    public static int sourcePort(byte[] packet, int available, int port) {
+        int hdr = validatedHeader(packet, available, port);
+        return hdr < 0 ? -1 : u16(packet, hdr);
     }
 
     /** The original Echo operation, restricted to UDP 53535. */
