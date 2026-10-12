@@ -10,10 +10,6 @@ android {
         targetSdk 35
     }
 
-    buildFeatures {
-        prefab = true
-    }
-
     externalNativeBuild {
         ndkBuild {
             path 'jni/Android.mk'
@@ -22,8 +18,28 @@ android {
 
 }
 
-dependencies {
-    implementation libs.openssl
+// OpenSSL 3.5.9 is built from pinned official source and linked statically.
+// The old com.android.ndk.thirdparty:openssl:1.1.1q-beta-1 Prefab has been removed.
+
+// Build the official OpenSSL static archives before any native compilation.
+// Keeping the output under build/ avoids committing opaque binary libraries.
+def officialOpenSsl = tasks.register('buildOfficialOpenSsl', Exec) {
+    def ndkRoot = android.ndkDirectory
+    environment 'ANDROID_NDK_ROOT', ndkRoot.absolutePath
+    workingDir projectDir
+    commandLine 'bash', file('scripts/build-official-openssl.sh').absolutePath
+    inputs.property('opensslRelease', '3.5.9')
+    outputs.files(
+        layout.buildDirectory.file('official-openssl/arm64-v8a/libssl.a'),
+        layout.buildDirectory.file('official-openssl/arm64-v8a/libcrypto.a'),
+        layout.buildDirectory.file('official-openssl/arm64-v8a/BUILD-COMMIT')
+    )
+}
+
+tasks.configureEach { t ->
+    if (t.name.startsWith('externalNativeBuild') && !t.name.contains('Clean')) {
+        t.dependsOn officialOpenSsl
+    }
 }
 
 /**
