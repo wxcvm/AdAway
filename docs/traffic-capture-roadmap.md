@@ -16,6 +16,8 @@
 - `DiagnosticUdpRelay` 把测试地址 UDP 53536 的小报文（不超过 256 字节）交给受保护的 DatagramSocket，固定发往本机 `127.0.0.1` 的临时端口，响应再封装到 TUN。响应器将首字节异或 `0x5a`，可以与直接 Echo 区分。不存在任意公网目的地转发。
 - `DiagnosticUdpEcho` 的报文解析已加强：源/目标诊断地址固定、协议与端口白名单、分片拒绝、IP/UDP 长度一致性及非零校验和验证。
 - 入口有单工作线程及 200 ms 冷却限制，转发套接字设 900 ms 接收超时；停止服务会关闭本机 UDP 监听与 TUN。追加 JVM 用例验证包重封装、校验和、错误输入和异常隔离。
+- 新增 `DiagnosticDnsCodec`、`DiagnosticDnsRelay`、`DiagnosticDnsNetwork`：只允许 `example.com A` 的 DNS 消息，经测试 IP 的 UDP 53537 端口触发；每次用户点击才从 Android 已验证的非 VPN 底层网络选择系统 IPv4 DNS 服务器，以 `protect(socket)` 加 `Network.bindSocket` 的方式向其 53/UDP 发送一次查询。
+- DNS 查询内容、事务 ID、应答的来源地址/端口与 DNS 问题均需匹配，512 字节以上、截断/非法数据拒绝，不实现任意域名/任意服务器的通用 DNS 代理。严格 Private DNS、网络阻断 UDP 53 或无非 VPN IPv4 DNS 时允许测试失败，**不触碰系统 DNS 配置**。
 - Windows 新增只读 `wintun_probe_win32`，安全加载本地 DLL 并检查必要的 Wintun API、驱动是否运行；`windows_capture_plan` 在转发、DNS 或回滚尚未就绪时拒绝进入真实接管。
 
 
@@ -77,7 +79,7 @@ AdGuard Home 自定义阻断 IP 的基本要求：
 
 1. 先停止其他 VPN 和本应用 Root 透明劫持。
 2. 在 Android 设置页的“隔离 TUN 诊断”中点击“授权并启动测试”，只在用户明确许可后调用 `VpnService.Builder.establish()`。
-3. 先点击“发送 UDP 往返测试”检查直接 UDP Echo；再点击“测试受保护 UDP 转发”，通过本机独立 UDP 响应器验证 `protect(socket)` 和 TUN 双向包处理。两者即使显示成功，也**不能证明**已过滤公网 TCP/UDP、DNS 或 HTTPS。
+3. 先点击“发送 UDP 往返测试”检查直接 Echo，再点“测试受保护 UDP 转发”验证本机 UDP 响应器。最后可点“测试底层 DNS（example.com）”，只有这个按钮会查询当前底层网络实际指定的 DNS 服务器；它不是全流量 DNS 拦截。严格私人 DNS 或阻断 UDP 53 的网络可能正常报失败。
 4. 用“停止测试”或常驻通知的 Stop 按钮关闭接口。禁止将 `198.18.0.1/32` 升级为默认路由，直到用户态转发器、DNS 处理、IPv6/QUIC 和失败回滚经过设备实测。
 
 调试包使用 `.github/workflows/traffic-mode-tests.yml` 构建 `assembleDebug`，通过 GitHub Actions 产物（非正式 Release）分发。安装前备份原有应用数据：调试 APK 可能与已安装版本签名不同，Android 不允许不同签名直接覆盖；不要为了测试直接删除正式版数据。若仍有 AdGuard VPN 正在运行，请不要授权接管它来进行诊断。
