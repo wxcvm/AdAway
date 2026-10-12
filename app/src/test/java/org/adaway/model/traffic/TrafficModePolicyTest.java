@@ -61,7 +61,7 @@ public class TrafficModePolicyTest {
     public void adguardWithoutTrafficPathCannotBeDeclaredCompatible() {
         TrafficModePolicy.Decision decision =
                 TrafficModePolicy.decide(evidence(AUTO, NONE, true, true, false, true, false));
-        assertEquals(NO_CHANGE, decision.target);
+        assertEquals(PREPARE_COEXIST_LISTENER, decision.target);
         assertEquals(LISTENER_PATH_UNVERIFIED, decision.reason);
     }
 
@@ -69,13 +69,21 @@ public class TrafficModePolicyTest {
     public void listenerManualChoiceNeedsReachableTrafficPath() {
         TrafficModePolicy.Decision notReady =
                 TrafficModePolicy.decide(evidence(LISTEN_ONLY, NONE, false, false, false, true, false));
-        assertEquals(NO_CHANGE, notReady.target);
+        assertEquals(PREPARE_COEXIST_LISTENER, notReady.target);
         assertEquals(LISTENER_PATH_UNVERIFIED, notReady.reason);
 
         TrafficModePolicy.Decision ready =
                 TrafficModePolicy.decide(evidence(LISTEN_ONLY, NONE, false, false, true, false, false));
         assertEquals(START_COEXIST_LISTENER, ready.target);
         assertEquals(USER_REQUESTED_LISTENER, ready.reason);
+    }
+
+    @Test
+    public void externalAdguardWithoutVerifiedPathCanOnlyStartSetup() {
+        TrafficModePolicy.Decision decision =
+                TrafficModePolicy.decide(evidence(AUTO, OTHER, true, true, false, true, false));
+        assertEquals(PREPARE_COEXIST_LISTENER, decision.target);
+        assertEquals(LISTENER_PATH_UNVERIFIED, decision.reason);
     }
 
     @Test
