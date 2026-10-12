@@ -30,6 +30,7 @@ public final class TrafficModePolicy {
     /** A recommendation, not proof of an active operating mode. */
     public enum Target {
         START_CAPTURE,
+        PREPARE_COEXIST_LISTENER,
         START_COEXIST_LISTENER,
         NO_CHANGE,
         RESTORE_NETWORK
@@ -98,16 +99,21 @@ public final class TrafficModePolicy {
         if (e.preference == Preference.LISTEN_ONLY) {
             return e.listenerPathVerified
                     ? new Decision(Target.START_COEXIST_LISTENER, Reason.USER_REQUESTED_LISTENER)
-                    : new Decision(Target.NO_CHANGE, Reason.LISTENER_PATH_UNVERIFIED);
+                    : new Decision(Target.PREPARE_COEXIST_LISTENER, Reason.LISTENER_PATH_UNVERIFIED);
         }
 
+        // Preparation is only a local listener/setup operation. It must NOT
+        // report active filtering or alter routes before end-to-end verification.
         // A confirmed foreign VPN always wins the ownership contest. If it is
         // specifically an AdGuard capture with an independently verified
         // traffic path to us, offer coexistence; otherwise do not take over.
         if (e.vpnOwner == VpnOwner.OTHER) {
-            if (e.adguardInterceptionConfirmed && e.listenerPathVerified) {
-                return new Decision(Target.START_COEXIST_LISTENER,
-                        Reason.VERIFIED_ADGUARD_CONFLICT);
+            if (e.adguardInterceptionConfirmed) {
+                return e.listenerPathVerified
+                        ? new Decision(Target.START_COEXIST_LISTENER,
+                                Reason.VERIFIED_ADGUARD_CONFLICT)
+                        : new Decision(Target.PREPARE_COEXIST_LISTENER,
+                                Reason.LISTENER_PATH_UNVERIFIED);
             }
             return new Decision(Target.NO_CHANGE, Reason.OTHER_VPN_ACTIVE);
         }
@@ -118,7 +124,7 @@ public final class TrafficModePolicy {
             return e.listenerPathVerified
                     ? new Decision(Target.START_COEXIST_LISTENER,
                             Reason.VERIFIED_ADGUARD_CONFLICT)
-                    : new Decision(Target.NO_CHANGE, Reason.LISTENER_PATH_UNVERIFIED);
+                    : new Decision(Target.PREPARE_COEXIST_LISTENER, Reason.LISTENER_PATH_UNVERIFIED);
         }
 
         if (!e.captureAuthorized) {
