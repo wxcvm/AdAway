@@ -30,7 +30,7 @@ jobs:
           java-version: '21'
           cache: gradle
       - name: Run traffic mode regression tests
-        run: ./gradlew :app:testDebugUnitTest --tests org.adaway.model.traffic.TrafficModePolicyTest --tests org.adaway.model.traffic.VpnConflictDebouncerTest --tests org.adaway.model.traffic.DiagnosticTunPlanTest --tests org.adaway.model.traffic.DiagnosticUdpEchoTest --no-daemon
+        run: ./gradlew :app:testDebugUnitTest --tests org.adaway.model.traffic.TrafficModePolicyTest --tests org.adaway.model.traffic.VpnConflictDebouncerTest --tests org.adaway.model.traffic.DiagnosticTunPlanTest --tests org.adaway.model.traffic.DiagnosticUdpEchoTest --tests org.adaway.model.traffic.DiagnosticUdpRelayTest --no-daemon
       - name: Build debug APK for device testing
         run: ./gradlew :app:assembleDebug --no-daemon
       - name: Upload debug APK artifact
