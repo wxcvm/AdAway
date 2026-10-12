@@ -359,7 +359,7 @@
     <string name="compose_settings_block_mode_hijack_hint">劫持过滤（Root）：仅重定向符合条件的本机 TCP 80/443 连接至内置服务器；不等于接管所有 IPv4/IPv6、UDP、QUIC 或其他 VPN 的流量。HTTPS 内容处理需要信任本机 CA，证书固定的应用仍可能拒绝。其他 VPN 占用接管路径时应暂停透明劫持。</string>
     <string name="compose_settings_block_mode_hijack_ca">尚未信任本机 CA：请在“网络服务器 → 证书”里信任 CA，否则 HTTPS 页面会报证书错误。</string>
     <string name="compose_tun_diagnostic_title">隔离 TUN 诊断（实验性）</string>
-    <string name="compose_tun_diagnostic_explanation">仅通过手动授权建立隔离 VPN 测试路由 198.18.0.1/32。UDP 53535 为直接 TUN Echo；UDP 53536 则通过受保护的套接字与本机 UDP 响应器往返。未启用公网转发、默认路由、DNS 接管或其它应用过滤。</string>
+    <string name="compose_tun_diagnostic_explanation">仅在授权后接管隔离 TUN 目标 198.18.0.1/32：UDP 53535 直接 Echo；53536 通过受保护的本机 UDP 服务往返；53537 仅在手动点击时向当前已验证的底层网络 DNS 服务器查询 example.com 的 A 记录。不设置默认路由、不接管整机 DNS、不开放任意公网转发。</string>
     <string name="compose_tun_diagnostic_running">测试 TUN 运行中 · 收到测试包：%1$d（仅测试地址）</string>
     <string name="compose_tun_diagnostic_stopped">测试 TUN 已停止 · 上次包数：%1$d</string>
     <string name="compose_tun_diagnostic_start">授权并启动测试</string>
@@ -374,6 +374,9 @@
     <string name="compose_tun_diagnostic_test_relay">测试受保护 UDP 转发</string>
     <string name="compose_tun_diagnostic_relay_ok">本地受保护 UDP 转发测试通过：数据包经过 TUN → 本机 UDP 响应器 → TUN。</string>
     <string name="compose_tun_diagnostic_relay_failed">本地受保护 UDP 转发测试失败；未修改全局路由或 DNS。</string>
+    <string name="compose_tun_diagnostic_test_dns">测试底层 DNS（example.com）</string>
+    <string name="compose_tun_diagnostic_dns_ok">固定 example.com A 查询成功：测试包经 TUN → 受保护 UDP 套接字 → 底层 DNS。仅证明诊断链路，不代表其他应用已受过滤。</string>
+    <string name="compose_tun_diagnostic_dns_failed">DNS 测试失败或被阻止（例如严格私人 DNS、无有效 IPv4 解析器或超时）。没有修改系统 DNS 或默认路由。</string>
     <string name="compose_tun_diagnostic_stop_requested">已请求停止，刷新可确认测试接口已关闭。</string>
     <string name="compose_settings_hijack_paused_for_vpn">检测到其他活动 VPN。本应用的 TCP 重定向将暂停，或等待守护任务撤销；本地服务器在监听不等于 AdGuard 已将拦截请求转来。</string>
     <string name="compose_settings_hijack_owner_unknown">暂时无法判断 VPN 归属；不会自动安装新的透明重定向规则。</string>
