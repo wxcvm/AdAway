@@ -45,7 +45,7 @@ jobs:
           if [ -z "$EXE" ]; then
             echo "::error::Native webserver executable not found"; exit 1
           fi
-          if ! strings "$EXE" | grep -Fq 'OpenSSL 3.5.9'; then
+          if ! strings "$EXE" | grep -F 'OpenSSL 3.5.9' >/dev/null; then
             echo "::error::OpenSSL 3.5.9 signature absent from executable"; exit 1
           fi
           if readelf -d "$EXE" | grep -E 'NEEDED.*(libssl|libcrypto)'; then
