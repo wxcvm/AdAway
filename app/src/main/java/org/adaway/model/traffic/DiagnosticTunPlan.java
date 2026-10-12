@@ -9,7 +9,7 @@ package org.adaway.model.traffic;
  */
 public final class DiagnosticTunPlan {
     public static final String LOCAL_ADDRESS = "198.18.0.2";
-    public static final int LOCAL_PREFIX = 30;
+    public static final int LOCAL_PREFIX = 32;
     public static final String DIAGNOSTIC_TARGET = "198.18.0.1";
     public static final int TARGET_PREFIX = 32;
     public static final int MTU = 1500;

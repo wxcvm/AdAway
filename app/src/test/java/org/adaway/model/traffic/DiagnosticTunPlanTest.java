@@ -5,6 +5,10 @@ import org.junit.Test;
 
 /** Regression guard: the diagnostic cannot accidentally become default VPN. */
 public final class DiagnosticTunPlanTest {
+    @Test public void interfaceAddressCannotIntroduceABenchmarkSubnetRoute() {
+        assertEquals(32, DiagnosticTunPlan.LOCAL_PREFIX);
+        assertEquals(32, DiagnosticTunPlan.TARGET_PREFIX);
+    }
     @Test public void diagnosticTargetUsesIsolatedBenchmarkAddress() {
         assertEquals("198.18.0.1", DiagnosticTunPlan.DIAGNOSTIC_TARGET);
         assertEquals(32, DiagnosticTunPlan.TARGET_PREFIX);
@@ -18,9 +22,9 @@ public final class DiagnosticTunPlanTest {
         assertFalse(DiagnosticTunPlan.isSafeRoute("198.18.0.1", 24));
     }
 
-    @Test public void diagnosticAddressIsOnTheSameSmallSubnet() {
+    @Test public void diagnosticAddressIsAHostRouteWithoutABroadSubnet() {
         assertEquals("198.18.0.2", DiagnosticTunPlan.LOCAL_ADDRESS);
-        assertEquals(30, DiagnosticTunPlan.LOCAL_PREFIX);
+        assertEquals(32, DiagnosticTunPlan.LOCAL_PREFIX);
         assertEquals(1500, DiagnosticTunPlan.MTU);
     }
 }

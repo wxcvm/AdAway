@@ -4,6 +4,8 @@ Depends on draft PR #43 (`feat/traffic-mode-foundation`). This stage does not me
 
 ## Implemented safety boundaries
 
+The local interface address and test route both use /32 (no automatic benchmark subnet route). IPv6 is explicitly allowed to bypass this IPv4-only diagnostic. Always-on support is disabled in service metadata and startup refuses Always-on/Lockdown. Existing user/admin-managed Lockdown configuration must be removed by its operator before testing; this app never silently changes that policy.
+
 - A nonblocking TUN descriptor and 100 ms poll keep reads independent of DNS/UDP waits. Two transport workers have an eight-packet queue; a separate eight-response queue feeds one writer. Direct Echo does not queue behind network timeouts. Full queues drop deterministically. UDP replies can complete out of arrival order and retain their originating endpoints.
 - Only the current app package is admitted by `Builder.addAllowedApplication`. TUN bytes alone cannot establish sender UID. The UI probe allocates its source socket first and obtains an in-process, single-use DNS lease bound to that app UID, source port and exact question. Only one lease is outstanding; its 2500 ms TTL, explicit close, consumption before network I/O and service shutdown prevent retries/replay from authorizing further upstream queries. No Intent or exported IPC API can issue a lease.
 - Shutdown revokes leases, closes registered sockets to cancel receives, interrupts the writer and discards pending work. Session counters belong to the service instance; stale work cannot reset another session's statistics.
@@ -20,7 +22,7 @@ bash gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroid
   --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
 ```
 
-80 JVM tests passed, zero failures/errors/skips, including real loopback UDP transport and receive cancellation, authorization expiry/replay, queue saturation, late responses, shell failure/duplicate-hook scenarios, 20,000 deterministic malformed-IP/DNS inputs and 1,000 valid payload controls. All native modules and the Debug app/test APKs built successfully. With the IDE ABI selector these APKs are in `app/build/intermediates/apk/debug/` and `app/build/intermediates/apk/androidTest/debug/`; the CI artifact paths match the verified directories. Current CI links and exact results are recorded in the PR description.
+81 JVM tests passed, zero failures/errors/skips, including real loopback UDP transport and receive cancellation, authorization expiry/replay, queue saturation, late responses, shell failure/duplicate-hook scenarios, 20,000 deterministic malformed-IP/DNS inputs and 1,000 valid payload controls. All native modules and the Debug app/test APKs built successfully. With the IDE ABI selector these APKs are in `app/build/intermediates/apk/debug/` and `app/build/intermediates/apk/androidTest/debug/`; the CI artifact paths match the verified directories. Current CI links and exact results are recorded in the PR description.
 
 This is not an Android TUN end-to-end acceptance result. JVM loopback I/O is not the same as Android `protect()`, Network binding, VPN permission or device routing.
 

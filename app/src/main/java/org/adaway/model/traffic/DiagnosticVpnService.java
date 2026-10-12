@@ -133,7 +133,7 @@ public final class DiagnosticVpnService extends VpnService {
             notifyForeground();
             // Revocation, Root transparent redirect and an active foreign VPN
             // are separate conflict checks. Never request/replace VPN consent here.
-            if (VpnService.prepare(this) != null
+            if (isAlwaysOn() || isLockdownEnabled() || VpnService.prepare(this) != null
                     || AndroidVpnObserver.read(this, false)
                             != TrafficModePolicy.VpnOwner.NONE
                     || HijackModel.isEnabled()) {
@@ -145,6 +145,7 @@ public final class DiagnosticVpnService extends VpnService {
             Builder builder = new Builder()
                     .setSession("ADBlock: diagnostic TUN only")
                     .setBlocking(false) // cancellation never waits on a kernel read/write
+                    .allowFamily(OsConstants.AF_INET6) // IPv6 bypasses this IPv4-only diagnostic
                     .setMtu(DiagnosticTunPlan.MTU)
                     .addAddress(DiagnosticTunPlan.LOCAL_ADDRESS,
                             DiagnosticTunPlan.LOCAL_PREFIX);

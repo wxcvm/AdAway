@@ -16,8 +16,9 @@ public class DiagnosticConsentBoundaryTest {
     @Test public void operatingSystemPermissionGuardsTheExportedVpnService() throws Exception {
         Context context = ApplicationProvider.getApplicationContext();
         ServiceInfo info = context.getPackageManager().getServiceInfo(
-                new ComponentName(context, DiagnosticVpnService.class), 0);
+                new ComponentName(context, DiagnosticVpnService.class), android.content.pm.PackageManager.GET_META_DATA);
         assertEquals("android.permission.BIND_VPN_SERVICE", info.permission);
+        assertFalse(info.metaData.getBoolean("android.net.VpnService.SUPPORTS_ALWAYS_ON", true));
     }
     @Test public void inactiveServiceCannotIssueAnInProcessDnsPermit() {
         assumeFalse("requires a fresh app with no user-started diagnostic", DiagnosticVpnService.isActive());
