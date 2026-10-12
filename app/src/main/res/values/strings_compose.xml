@@ -358,7 +358,7 @@
     <string name="compose_settings_block_mode_hijack_hint">Hijack + filter (Root): redirects eligible local TCP connections on ports 80/443 to the built-in server. This does not cover all IPv4/IPv6, UDP, QUIC or traffic protected by other VPNs. HTTPS rewriting requires trusted CA and may fail with certificate pinning. Keep the mode off when another VPN owns the connection path.</string>
     <string name="compose_settings_block_mode_hijack_ca">Local CA not trusted yet: trust it under "Network server → certificate", otherwise HTTPS pages will report certificate errors.</string>
     <string name="compose_tun_diagnostic_title">Scoped TUN diagnostic (experimental)</string>
-    <string name="compose_tun_diagnostic_explanation">Opt-in isolated VPN route 198.18.0.1/32 only. UDP 53535 uses direct TUN Echo; UDP 53536 tests a protected socket round trip to a local UDP responder. No Internet relay, default route, DNS interception or other app filtering.</string>
+    <string name="compose_tun_diagnostic_explanation">Opt-in isolated TUN route 198.18.0.1/32 only: UDP 53535 direct Echo; 53536 protected local UDP loopback; 53537 sends only an example.com A lookup to the validated underlying network DNS server when you press Test. No default route, device-wide DNS interception or unrestricted Internet forwarding.</string>
     <string name="compose_tun_diagnostic_running">Diagnostic TUN active · packets received: %1$d (test IP only)</string>
     <string name="compose_tun_diagnostic_stopped">Diagnostic TUN stopped · last packet count: %1$d</string>
     <string name="compose_tun_diagnostic_start">Authorize and start</string>
@@ -373,6 +373,9 @@
     <string name="compose_tun_diagnostic_test_relay">Test protected UDP relay</string>
     <string name="compose_tun_diagnostic_relay_ok">Protected UDP socket relay passed: test packets crossed TUN → loopback responder → TUN.</string>
     <string name="compose_tun_diagnostic_relay_failed">Local protected UDP relay test failed. Global routing and DNS were not modified.</string>
+    <string name="compose_tun_diagnostic_test_dns">Test underlying DNS (example.com)</string>
+    <string name="compose_tun_diagnostic_dns_ok">Fixed example.com A query succeeded over TUN → protected UDP socket → underlying DNS. This is only a diagnostic; other apps are not filtered.</string>
+    <string name="compose_tun_diagnostic_dns_failed">DNS test failed or was blocked (strict Private DNS, no validated IPv4 resolver, or timeout). System DNS and default routes were unchanged.</string>
     <string name="compose_tun_diagnostic_stop_requested">Stop requested; refresh to confirm the test interface closed.</string>
     <string name="compose_settings_hijack_paused_for_vpn">Another VPN is active. Our own TCP redirect is paused or awaiting watchdog cleanup. The local response listener does not prove AdGuard is forwarding blocked domains here.</string>
     <string name="compose_settings_hijack_owner_unknown">VPN ownership could not be verified; new transparent redirect rules will not be installed automatically.</string>
