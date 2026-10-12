@@ -333,6 +333,25 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     val context = LocalContext.current
     val apps = serverStats?.apps.orEmpty()
     var refreshKey by remember { mutableStateOf(0) }
+    var tunRefreshKey by remember { mutableIntStateOf(0) }
+    var tunStatus by remember { mutableStateOf("") }
+    val tunScope = rememberCoroutineScope()
+    val diagnosticConsentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            try {
+                org.adaway.model.traffic.DiagnosticVpnService.start(context)
+                tunStatus = context.getString(R.string.compose_tun_diagnostic_start_requested)
+            } catch (exception: RuntimeException) {
+                Timber.w(exception, "Diagnostic VPN start failed")
+                tunStatus = context.getString(R.string.compose_tun_diagnostic_start_failed)
+            }
+        } else {
+            tunStatus = context.getString(R.string.compose_tun_diagnostic_not_authorized)
+        }
+        tunRefreshKey++
+    }
 
     Scaffold(
         topBar = {
@@ -389,6 +408,100 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 label = { Text(stringResource(labelRes)) },
                             )
                         }
+                    }
+                }
+            }
+
+            // Explicitly opt-in network-path diagnostic. Routes only one
+            // benchmark destination; no default route, DNS or TCP/UDP forwarding.
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_tun_diagnostic_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_tun_diagnostic_explanation),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    // Re-evaluate on explicit Refresh or a UI action. The OS
+                    // notification also provides a persistent Stop control.
+                    val diagnosticActive = remember(tunRefreshKey) {
+                        org.adaway.model.traffic.DiagnosticVpnService.isActive()
+                    }
+                    val packets = remember(tunRefreshKey) {
+                        org.adaway.model.traffic.DiagnosticVpnService.getPacketCount()
+                    }
+                    Text(
+                        stringResource(
+                            if (diagnosticActive)
+                                R.string.compose_tun_diagnostic_running
+                            else
+                                R.string.compose_tun_diagnostic_stopped,
+                            packets,
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = !diagnosticActive,
+                            onClick = {
+                                tunScope.launch {
+                                    // Root's isEnabled() runs a shell: never do
+                                    // this blocking check on the Compose UI thread.
+                                    val noConflict = withContext(Dispatchers.IO) {
+                                        val owner = org.adaway.model.traffic.AndroidVpnObserver
+                                            .read(context, false)
+                                        owner == org.adaway.model.traffic.TrafficModePolicy.VpnOwner.NONE &&
+                                            !org.adaway.model.root.HijackModel.isEnabled()
+                                    }
+                                    if (!noConflict) {
+                                        tunStatus = context.getString(
+                                            R.string.compose_tun_diagnostic_conflict,
+                                        )
+                                    } else {
+                                        try {
+                                            val consent = android.net.VpnService.prepare(context)
+                                            if (consent == null) {
+                                                org.adaway.model.traffic.DiagnosticVpnService.start(context)
+                                                tunStatus = context.getString(
+                                                    R.string.compose_tun_diagnostic_start_requested,
+                                                )
+                                                tunRefreshKey++
+                                            } else {
+                                                diagnosticConsentLauncher.launch(consent)
+                                            }
+                                        } catch (exception: RuntimeException) {
+                                            Timber.w(exception, "Diagnostic VPN consent failed")
+                                            tunStatus = context.getString(
+                                                R.string.compose_tun_diagnostic_start_failed,
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                        ) { Text(stringResource(R.string.compose_tun_diagnostic_start)) }
+                        OutlinedButton(
+                            enabled = diagnosticActive,
+                            onClick = {
+                                org.adaway.model.traffic.DiagnosticVpnService.stop(context)
+                                tunStatus = context.getString(R.string.compose_tun_diagnostic_stop_requested)
+                                tunRefreshKey++
+                            },
+                        ) { Text(stringResource(R.string.compose_tun_diagnostic_stop)) }
+                        TextButton(onClick = { tunRefreshKey++ }) {
+                            Text(stringResource(R.string.compose_settings_hijack_refresh_status))
+                        }
+                    }
+                    if (tunStatus.isNotBlank()) {
+                        Text(tunStatus, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
