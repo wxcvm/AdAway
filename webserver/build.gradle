@@ -50,7 +50,12 @@ def officialOpenSsl = tasks.register('buildOfficialOpenSsl', Exec) {
 }
 
 tasks.configureEach { t ->
-    if (t.name.startsWith('externalNativeBuild') && !t.name.contains('Clean')) {
+    // AGP runs configureNdkBuild* (including ndk-build -n) *before* the
+    // externalNativeBuild* compile task; prebuilt archives must exist already
+    // at configure time, otherwise AGP aborts without running the dependency.
+    if ((t.name.startsWith('configureNdkBuild') ||
+         t.name.startsWith('externalNativeBuild')) &&
+        !t.name.contains('Clean')) {
         t.dependsOn officialOpenSsl
     }
 }
