@@ -77,6 +77,8 @@ AdGuard Home 自定义阻断 IP 的基本要求：
 3. 点击“发送 UDP 往返测试”；显示成功代表仅测试 IP 的 UDP 包已通过 TUN 双向收发，不代表实际公网 TCP/UDP、DNS 或 HTTPS 过滤已生效。
 4. 用“停止测试”或常驻通知的 Stop 按钮关闭接口。禁止将 `198.18.0.1/32` 升级为默认路由，直到用户态转发器、DNS 处理、IPv6/QUIC 和失败回滚经过设备实测。
 
+调试包使用 `.github/workflows/traffic-mode-tests.yml` 构建 `assembleDebug`，通过 GitHub Actions 产物（非正式 Release）分发。安装前备份原有应用数据：调试 APK 可能与已安装版本签名不同，Android 不允许不同签名直接覆盖；不要为了测试直接删除正式版数据。若仍有 AdGuard VPN 正在运行，请不要授权接管它来进行诊断。
+
 ### M2：Android 流量接管
 - 引入 VpnService 所需权限、前台服务与用户授权流程。
 - 先支持 IPv4/IPv6 路由和 DNS，再验证 TCP/UDP、应用排除、VPN 环路与网络切换。
