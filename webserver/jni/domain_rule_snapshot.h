@@ -66,6 +66,28 @@ static inline bool dr_domain(const char *raw, char out[254], bool wildcard) {
     out[n] = 0; return true;
 }
 typedef bool (*dr_sink)(const struct dr_entry *, void *);
+static inline bool dr_hostname_valid(const char *raw) {
+    char name[254]; if (!dr_domain(raw, name, false)) return false;
+    const char *label = name; unsigned labels = 0;
+    for (;;) {
+        const char *dot = strchr(label, '.'); size_t n = dot ? (size_t)(dot - label) : strlen(label);
+        if (++labels > 127 || label[0] == '_' || label[0] == '-' || label[n - 1] == '_' || label[n - 1] == '-') return false;
+        if (!dot) return !(label[0] >= '0' && label[0] <= '9');
+        label = dot + 1;
+    }
+}
+static inline bool dr_import_domain(const char *raw, char out[254], bool wildcard) {
+    if (!dr_domain(raw, out, wildcard)) return false;
+    if (!wildcard) return dr_hostname_valid(out);
+    char cleared[254], replaced[254]; size_t length = strlen(out), written = 0;
+    for (size_t i = 0; i < length; i++) {
+        bool wild = out[i] == '*' || out[i] == '?';
+        replaced[i] = wild ? 'a' : out[i];
+        if (!wild) cleared[written++] = out[i];
+    }
+    cleared[written] = 0; replaced[length] = 0;
+    return dr_hostname_valid(cleared) || dr_hostname_valid(replaced);
+}
 static inline bool dr_ip(const char *text, int family, uint8_t address[16]) {
 #ifdef _WIN32
     return InetPtonA(family == 4 ? AF_INET : AF_INET6, text, address) == 1;
@@ -85,7 +107,13 @@ static inline enum dr_parse_status dr_parse_line(const char *raw, bool allow, bo
     n = strlen(p);
     while (n && (p[n - 1] == ' ' || p[n - 1] == '\t' || p[n - 1] == '\r' || p[n - 1] == '\n')) p[--n] = 0;
     if (!*p || *p == '!' || strncmp(p, "[Adblock", 8) == 0) return DR_OK;
-    if (strstr(p, "##") || strstr(p, "#@#") || strstr(p, "#$#")) return DR_COSMETIC;
+    char first[64]; size_t first_length = strcspn(p, " \t\r\n"); uint8_t first_ip[16];
+    bool hosts = false;
+    if (first_length < sizeof(first)) {
+        memcpy(first, p, first_length); first[first_length] = 0;
+        hosts = dr_ip(first, 4, first_ip) || dr_ip(first, 6, first_ip);
+    }
+    if (!hosts && (strstr(p, "##") || strstr(p, "#@#") || strstr(p, "#$#"))) return DR_COSMETIC;
     if (*p == '#') return DR_OK;
     struct dr_entry entry;
     memset(&entry, 0, sizeof(entry));
@@ -96,7 +124,7 @@ static inline enum dr_parse_status dr_parse_line(const char *raw, bool allow, bo
         p += 2; n = strlen(p);
         if (n && p[n - 1] == '^') p[--n] = 0;
         if (strpbrk(p, "^/$*?|#:")) return DR_UNSUPPORTED;
-        if (!dr_domain(p, entry.domain, false) || !strchr(entry.domain, '.')) return DR_INVALID;
+        if (!dr_import_domain(p, entry.domain, false) || !strchr(entry.domain, '.')) return DR_INVALID;
         entry.kind = exception || allow ? DR_ALLOW : DR_BLOCK;
         entry.suffix = true;
         return sink(&entry, context) ? DR_OK : DR_INVALID;
@@ -109,10 +137,10 @@ static inline enum dr_parse_status dr_parse_line(const char *raw, bool allow, bo
     char *space = strpbrk(p, " \t");
     if (!space) {
         if (!allow) {
-            if (!dr_domain(p, entry.domain, false) || !strchr(entry.domain, '.') || strlen(entry.domain) < 4) return DR_UNSUPPORTED;
+            if (!dr_import_domain(p, entry.domain, false) || !strchr(entry.domain, '.') || strlen(entry.domain) < 4) return DR_UNSUPPORTED;
             entry.kind = DR_BLOCK; return sink(&entry, context) ? DR_OK : DR_INVALID;
         }
-        if (!dr_domain(p, entry.domain, true)) return DR_INVALID;
+        if (!dr_import_domain(p, entry.domain, true)) return DR_INVALID;
         entry.kind = DR_ALLOW;
         return sink(&entry, context) ? DR_OK : DR_INVALID;
     }
@@ -129,7 +157,7 @@ static inline enum dr_parse_status dr_parse_line(const char *raw, bool allow, bo
         if (!*space) break;
         char *end = strpbrk(space, " \t");
         if (end) *end = 0;
-        if (!dr_domain(space, entry.domain, entry.kind == DR_REPLACE)) return DR_INVALID;
+        if (!dr_import_domain(space, entry.domain, entry.kind == DR_REPLACE)) return DR_INVALID;
         if (strcmp(entry.domain, "localhost") != 0 && (entry.kind != DR_REPLACE || redirects)) {
             if (!sink(&entry, context)) return DR_INVALID;
         }

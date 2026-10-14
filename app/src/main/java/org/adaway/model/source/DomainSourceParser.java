@@ -1,6 +1,7 @@
 package org.adaway.model.source;
 
 import com.google.common.net.InetAddresses;
+import com.google.common.net.InternetDomainName;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -39,13 +40,21 @@ public final class DomainSourceParser {
         try { ascii = IDN.toASCII(raw); } catch (IllegalArgumentException e) { return null; }
         String host = ascii.toLowerCase(Locale.ROOT);
         if (host.endsWith(".")) host = host.substring(0, host.length() - 1);
-        return canonicalDomain(host.replace('*', 'a').replace('?', 'a')) == null ? null : host;
+        String cleared = host.replace("*", "").replace("?", "");
+        String replaced = host.replace('*', 'a').replace('?', 'a');
+        return InternetDomainName.isValid(cleared) || InternetDomainName.isValid(replaced) ? host : null;
+    }
+    private static String importDomain(String raw) {
+        String domain = canonicalDomain(raw);
+        return domain != null && InternetDomainName.isValid(domain) ? domain : null;
     }
     public static Parsed parse(String raw, boolean allowSource, boolean redirects) {
         Parsed result = new Parsed();
         String line = raw.trim();
         if (line.isEmpty() || line.startsWith("!") || line.startsWith("[Adblock")) return result;
-        if (line.contains("##") || line.contains("#@#") || line.contains("#$#")) {
+        String first = line.split("\\s+", 2)[0];
+        boolean hosts = InetAddresses.isInetAddress(first);
+        if (!hosts && (line.contains("##") || line.contains("#@#") || line.contains("#$#"))) {
             result.cosmetic = true; return result;
         }
         if (line.startsWith("#")) return result;
@@ -58,7 +67,7 @@ public final class DomainSourceParser {
             if (rule.indexOf('^') >= 0 || rule.matches(".*[/$*?|#:].*")) {
                 result.unsupported = true; return result;
             }
-            String domain = canonicalDomain(rule);
+            String domain = importDomain(rule);
             if (domain == null || domain.indexOf('.') < 0) throw new IllegalArgumentException("Invalid ABP domain");
             result.entries.add(new Entry(exception || allowSource ? Kind.ALLOW : Kind.BLOCK, domain, null));
             return result;
@@ -73,7 +82,7 @@ public final class DomainSourceParser {
             result.entries.add(new Entry(Kind.ALLOW, domain, null)); return result;
         }
         if (parts.length < 2) {
-            String domain = canonicalDomain(parts[0]);
+            String domain = importDomain(parts[0]);
             if (domain != null && domain.indexOf('.') >= 0 && domain.length() >= 4)
                 result.entries.add(new Entry(Kind.BLOCK, domain, null));
             else result.unsupported = true;
@@ -84,7 +93,7 @@ public final class DomainSourceParser {
         boolean zero = ip.isAnyLocalAddress() || parts[0].equals("127.0.0.1") || parts[0].equals("::1");
         for (int i = 1; i < parts.length; i++) {
             Kind kind = allowSource ? Kind.ALLOW : zero ? Kind.BLOCK : Kind.REPLACE;
-            String domain = kind == Kind.REPLACE ? allowPattern(parts[i]) : canonicalDomain(parts[i]);
+            String domain = kind == Kind.REPLACE ? allowPattern(parts[i]) : importDomain(parts[i]);
             if (domain == null) throw new IllegalArgumentException("Invalid Hosts domain");
             if (domain.equals("localhost")) continue;
             if (kind == Kind.REPLACE && !redirects) continue;

@@ -30,3 +30,9 @@
 0	0.0.0.0 bad.test/path	INVALID	
 2	192.0.2.8 *.REDIRECT.TEST.	OK	REPLACE:*.redirect.test:192.0.2.8
 0	ADS.TEST.	OK	BLOCK:ads.test:
+0	127.0.0.1 comment.test ## inline comment	OK	BLOCK:comment.test:
+0	0.0.0.0 foo-.test	INVALID	
+0	0.0.0.0 _bar.test	INVALID	
+0	0.0.0.0 abc.12c	INVALID	
+1	foo*-.test	INVALID	
+1	abc.12*	INVALID	
