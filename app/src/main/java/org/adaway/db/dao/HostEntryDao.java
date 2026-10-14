@@ -12,7 +12,6 @@ import org.adaway.db.entity.ListType;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import static androidx.room.OnConflictStrategy.REPLACE;
 import static org.adaway.db.entity.ListType.REDIRECTED;
@@ -24,23 +23,24 @@ import static org.adaway.db.entity.ListType.REDIRECTED;
  */
 @Dao
 public interface HostEntryDao {
-    Pattern ANY_CHAR_PATTERN = Pattern.compile("\\*");
-    Pattern A_CHAR_PATTERN = Pattern.compile("\\?");
 
     @Query("DELETE FROM `host_entries`")
     void clear();
 
-    @Query("INSERT INTO `host_entries` SELECT DISTINCT `host`, `type`, `redirection` FROM `hosts_lists` WHERE `type` = 0 AND `enabled` = 1")
+    @Query("INSERT OR REPLACE INTO `host_entries` SELECT DISTINCT `host`, `type`, `redirection` FROM `hosts_lists` WHERE `type` = 0 AND `enabled` = 1")
     void importBlocked();
 
     @Query("SELECT host FROM hosts_lists WHERE type = 1 AND enabled = 1")
     List<String> getEnabledAllowedHosts();
 
-    @Query("DELETE FROM `host_entries` WHERE `host` LIKE :hostPattern")
+    @Query("DELETE FROM `host_entries` WHERE `host` LIKE :hostPattern ESCAPE '\\'")
     void allowHost(String hostPattern);
 
-    @Query("SELECT * FROM hosts_lists WHERE type = 2 AND enabled = 1 ORDER BY host ASC, source_id DESC")
+    @Query("SELECT * FROM hosts_lists WHERE type = 2 AND enabled = 1 ORDER BY host ASC, source_id DESC, id ASC")
     List<HostListItem> getEnabledRedirectedHosts();
+
+    @Query("SELECT * FROM hosts_lists WHERE source_id = 1 AND enabled = 1 ORDER BY id ASC")
+    List<HostListItem> getEnabledUserRules();
 
     /**
      * Batch-insert redirected host entries, used by {@link #sync()}.
@@ -75,11 +75,6 @@ public interface HostEntryDao {
     default void sync() {
         clear();
         importBlocked();
-        for (String allowedHost : getEnabledAllowedHosts()) {
-            allowedHost = ANY_CHAR_PATTERN.matcher(allowedHost).replaceAll("%");
-            allowedHost = A_CHAR_PATTERN.matcher(allowedHost).replaceAll("_");
-            allowHost(allowedHost);
-        }
         List<HostListItem> redirectedHosts = getEnabledRedirectedHosts();
         List<HostEntry> redirections = new ArrayList<>(redirectedHosts.size());
         for (HostListItem redirectedHost : redirectedHosts) {
@@ -90,6 +85,23 @@ public interface HostEntryDao {
             redirections.add(entry);
         }
         redirectHosts(redirections);
+        // Shared contract: exception before ordinary replacement/block; user rules win last.
+        for (String allowedHost : getEnabledAllowedHosts()) allowHost(sqlPattern(allowedHost));
+        for (HostListItem userRule : getEnabledUserRules()) {
+            if (userRule.getType() == ListType.ALLOWED) {
+                allowHost(sqlPattern(userRule.getHost()));
+            } else {
+                HostEntry entry = new HostEntry();
+                entry.setHost(userRule.getHost()); entry.setType(userRule.getType());
+                entry.setRedirection(userRule.getRedirection());
+                redirectHosts(java.util.Collections.singletonList(entry));
+            }
+        }
+    }
+
+    static String sqlPattern(String host) {
+        return host.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                .replace("*", "%").replace("?", "_");
     }
 
     @Query("SELECT * FROM `host_entries` ORDER BY `host`")

@@ -143,51 +143,43 @@ public class WebServerUtils {
      */
     public static int exportBlockList(Context context) {
         java.io.File target = getResourcePath(context).resolve("blocklist.txt").toFile();
-        int count = 0;
-        try (android.database.Cursor cursor = org.adaway.db.AppDatabase.getInstance(context)
-                .hostEntryDao().getAllCursor();
-             java.io.BufferedWriter writer = new java.io.BufferedWriter(
-                     new java.io.OutputStreamWriter(new java.io.FileOutputStream(target), "UTF-8"), 1 << 16)) {
-            int hostIdx = cursor.getColumnIndexOrThrow("host");
-            int typeIdx = cursor.getColumnIndexOrThrow("type");
-            int redirectionIdx = cursor.getColumnIndexOrThrow("redirection");
-            while (cursor.moveToNext()) {
-                String host = cursor.getString(hostIdx);
-                if (host == null || host.isEmpty()) continue;
-                boolean redirected = cursor.getInt(typeIdx) ==
-                        org.adaway.db.entity.ListType.REDIRECTED.getValue();
-                if (redirected) {
-                    String redirection = cursor.getString(redirectionIdx);
-                    writer.write((redirection == null || redirection.isEmpty() ? "0.0.0.0" : redirection));
-                } else {
-                    writer.write("0.0.0.0");
+        int[] count = {0};
+        try {
+            org.adaway.model.source.AtomicRuleFile.write(target, writer -> {
+                try (android.database.Cursor cursor = org.adaway.db.AppDatabase.getInstance(context).hostEntryDao().getAllCursor()) {
+                    int hostIdx = cursor.getColumnIndexOrThrow("host");
+                    int typeIdx = cursor.getColumnIndexOrThrow("type");
+                    int redirectionIdx = cursor.getColumnIndexOrThrow("redirection");
+                    while (cursor.moveToNext()) {
+                        if (count[0] >= org.adaway.model.source.BoundedSourceImport.MAX_ENTRIES)
+                            throw new java.io.IOException("Block export exceeds entry limit");
+                        String host = cursor.getString(hostIdx);
+                        if (host == null || host.isEmpty()) continue;
+                        boolean redirected = cursor.getInt(typeIdx) == org.adaway.db.entity.ListType.REDIRECTED.getValue();
+                        String address = redirected ? cursor.getString(redirectionIdx) : "0.0.0.0";
+                        if (address == null || address.isEmpty()) throw new java.io.IOException("Invalid replacement in block export");
+                        writer.write(address); writer.write(' '); writer.write(host); writer.write('\n'); count[0]++;
+                    }
                 }
-                writer.write(' ');
-                writer.write(host);
-                writer.write('\n');
-                count++;
-            }
+            });
         } catch (Exception exception) {
-            Timber.w(exception, "Failed to export the block list");
+            Timber.w(exception, "Failed to export the block list; previous file preserved");
             return -1;
         }
-        Timber.i("Exported %d blocked hosts to %s", count, target);
+        Timber.i("Exported %d blocked hosts to %s", count[0], target);
         // Element hiding rules (AdGuard / adblock syntax) picked up while the
         // sources were parsed: the hijack proxy injects this stylesheet into
         // every filtered page - the cosmetic filtering AdGuard does.
         try {
             java.io.File css = getResourcePath(context).resolve("cosmetic.css").toFile();
             String content = org.adaway.model.source.CosmeticRules.toCss();
-            try (java.io.Writer writer = new java.io.OutputStreamWriter(
-                    new java.io.FileOutputStream(css), "UTF-8")) {
-                writer.write(content);
-            }
+            org.adaway.model.source.AtomicRuleFile.write(css, writer -> writer.write(content));
             Timber.i("Exported %d cosmetic rules (%d bytes)",
                     org.adaway.model.source.CosmeticRules.getSeenCount(), content.length());
         } catch (Exception exception) {
             Timber.w(exception, "Failed to export the cosmetic rules");
         }
-        return count;
+        return count[0];
     }
 
     /**
