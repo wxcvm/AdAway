@@ -4737,9 +4737,9 @@ int main(int argc, char *argv[]) {
     char http_url[128], https_url[128], http_url6[128], https_url6[128];
     const char *v4 = s.bind_all ? "0.0.0.0" : "127.0.0.1";
     const char *v6 = s.bind_all ? "[::]" : "[::1]";
-    snprintf(http_url, sizeof(http_url), "http://%s:%d", v4, s.http_port);
+    snprintf(http_url, sizeof(http_url), "http://%s:%d", v4, s.http_port);  // NOSONAR: URL 指向本服务自己的监听地址（仅回环端口），明文是本机通信的设计使然（Sonar c:S5332）
     snprintf(https_url, sizeof(https_url), "https://%s:%d", v4, s.https_port);
-    snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);
+    snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);  // NOSONAR: URL 指向本服务自己的监听地址（仅回环端口），明文是本机通信的设计使然（Sonar c:S5332）
     snprintf(https_url6, sizeof(https_url6), "https://%s:%d", v6, s.https_port);
 
     if (!mg_http_listen(&mgr, http_url, fn, &s)) {
