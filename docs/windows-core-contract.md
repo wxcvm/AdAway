@@ -129,6 +129,34 @@ webserver/jni/rule_norm_test.c 在 CI 中执行。
 - 所有 Action 固定到 commit SHA，文件行尾 LF；
 - 迁出后原仓库移除 Windows 目录与流水线，README 指向新仓库。
 
+### 6.1 核心已分叉：`webserver.c` 需要一次真正的合并（2026-10-15 核实）
+
+**结论：不能靠"改一行 pin"同步两端。** Windows 仓库的 `fetch-upstream.sh` 目前 pin 在
+`feat/win11-webserver-release` 的提交 `4470606…`，那份 `webserver/jni` 只有 8 个文件，而 master 有
+**19 个**；同名文件 `webserver.c` 两侧也不同：
+
+| | files in jni | webserver.c | `_WIN32` 出现 | 预处理条件 | `cosmetic` | 纯函数头引用 |
+|---|---|---|---|---|---|---|
+| `master`（Android） | 19 | 218,142 B | 8 | 10 | 76 | 65 |
+| `feat/win11-webserver-release`（Windows） | 8 | 250,980 B | 38 | 37 | 19 | 2 |
+
+逐行差分：**2435 行新增 / 1620 行删除**（相对 master）—— 两侧各自演进了很久：
+
+- **只有 Windows 侧有**：`win32_dirent.h`（opendir/readdir shim）、`winsock2.h`/`_stricmp` 等
+  `_WIN32` 分支、以及"没有 `/proc` 时 uid 视为 unknown"这类 Windows 适配；
+- **只有 master 有**：G1 抽出的纯函数头与宿主测试（`rule_norm.h`、`pin_window.h`、`f5_guard.h`、
+  `cosmetic_sanitize.h`、`cosmetic_scope.h` 及各自测试、`rule_vectors.txt`），以及 cosmetic 的两处修复
+  （`<style>` 上下文与域名作用域）。
+
+**因此目前的状态是"漂移"而不是"故障"**：Windows CI 仍然绿（它 pin 的旧提交里有那 8 个文件），
+但它**拿不到** Android 侧的新修复。
+
+**合并方案（未执行）**：以共同祖先为基准做三方比对，把差量分成「Windows 专属 / Android 新增 /
+双方都改」三类，冲突段逐个判定（依据写进提交信息），在**独立分支**上重建一份 = master 全部 +
+Windows 专属增量，让 Windows 仓库 pin 到**新提交**，并让它的 CI（编译 + 冒烟 + 打包 + 发布 +
+`--latest=false`）通过后才算完成。**在独立分支与 CI 通过之前，不要动 `webserver.c`。**
+
+
 ## 6. 迁出状态（F 项）
 
 **已完成**（2026-10-11）：
