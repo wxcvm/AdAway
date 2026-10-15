@@ -10,6 +10,7 @@
 #include "rule_norm.h"
 #include "pin_window.h"
 #include "f5_guard.h"
+#include "cosmetic_sanitize.h"
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -3295,15 +3296,20 @@ static bool host_is_local(const char *h) {
 }
 
 /* Element-hiding stylesheet injected into proxied HTML pages. */
-static const char kHideCss[] =
+/* 内置隐藏规则（不含收尾标签）。与 kHideCssTail 配合使用：
+   导入的 cosmetic 规则必须注入在 <style> **内部** —— 原实现把化妆品规则追加在 "</style>"
+   之后，浏览器不会把它当 CSS，等于这些规则从未生效（Java 侧 CosmeticRules.toCss() 写出的
+   是纯 CSS 规则，不带 <style> 包裹）。 */
+static const char kHideCssHead[] =
     "<style id=\"adblock-hide\">"
     ".adsbygoogle,ins.adsbygoogle,[id^=\"google_ads\"],[id^=\"div-gpt-ad\"],"
     "[class^=\"ad-\"],[class^=\"ads-\"],[class^=\"advert\"],[id^=\"ad-\"],[id^=\"ads-\"],"
     "[class*=\" ad-\"],[class*=\" ads-\"],[data-ad-slot],[data-ad-client],"
     "iframe[src*=\"doubleclick.net\"],iframe[src*=\"googlesyndication.com\"],"
     "iframe[src*=\"adsystem\"],[class$=\"-ad\"],[class$=\"-ads\"]"
-    "{display:none!important;visibility:hidden!important}"
-    "</style>";
+    "{display:none!important;visibility:hidden!important}";
+/* 收尾标签：必须放在导入规则**之后**，否则规则落在样式元素外面。 */
+static const char kHideCssTail[] = "</style>";
 
 /* Extract the host of an URL and test it against the block list. */
 static bool url_host_blocked(const char *u, size_t n) {
@@ -3362,9 +3368,18 @@ static void load_cosmetic_css(const char *resource_dir) {
     size_t got = fread(buffer, 1, (size_t) size, f);
     fclose(f);
     buffer[got] = '\0';
+    /* 注入 <style> 内部前先净化：含 '<' 的整条丢弃（可提前闭合样式元素）。
+       保留/丢弃的条数必须写进日志，不静默。 */
+    struct cosmetic_stats cstats;
+    size_t kept_len = cosmetic_sanitize(buffer, got, &cstats);
     s_cosmetic_css = buffer;
-    s_cosmetic_len = got;
-    LOG_INFO("cosmetic filter: %zu bytes loaded from %s", got, path);
+    s_cosmetic_len = kept_len;
+    LOG_INFO("cosmetic filter: %zu bytes from %s (%zu rules kept, %zu dropped, %zu bytes in)",
+             kept_len, path, cstats.kept, cstats.dropped, cstats.bytes_in);
+    if (cstats.dropped > 0) {
+        LOG_WARN("cosmetic filter: dropped %zu rule(s) containing '<' (would break out of <style>)",
+                 cstats.dropped);
+    }
 #else
     (void) resource_dir;
 #endif
@@ -3427,8 +3442,9 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
             }
             if (!injected && name_len == 4 && strncasecmp(in + name_at, "head", 4) == 0) {
                 for (size_t p = i; p < tag_end; p++) AB_PUT(in[p]);
-                for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+                for (size_t p = 0; p < sizeof(kHideCssHead) - 1; p++) AB_PUT(kHideCssHead[p]);
                 for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
+                for (size_t p = 0; p < sizeof(kHideCssTail) - 1; p++) AB_PUT(kHideCssTail[p]);
                 injected = true;
                 i = tag_end;
                 continue;
@@ -3438,8 +3454,9 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
         i = tag_end;
     }
     if (!injected) {
-        for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+        for (size_t p = 0; p < sizeof(kHideCssHead) - 1; p++) AB_PUT(kHideCssHead[p]);
         for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
+        for (size_t p = 0; p < sizeof(kHideCssTail) - 1; p++) AB_PUT(kHideCssTail[p]);
     }
 #undef AB_PUT
     return o;
@@ -3525,7 +3542,7 @@ static void proxy_finish_filtered(struct proxy_state *st) {
     if (!st->client || !st->buf || !st->headers_done) return;
     size_t body_off = st->head_len;
     size_t body_len = st->buf_len > body_off ? st->buf_len - body_off : 0;
-    size_t cap = body_len + 2048 + s_cosmetic_len;
+    size_t cap = body_len + 2048 + sizeof(kHideCssTail) + s_cosmetic_len;
     char *filtered = (char *) malloc(cap);
     if (!filtered) { proxy_send_raw(st, st->buf, st->buf_len); st->replied = true; return; }
     size_t flen = html_filter(st->buf + body_off, body_len, filtered, cap);
