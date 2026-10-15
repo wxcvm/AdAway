@@ -132,8 +132,6 @@
     <string name="compose_settings_chart_donut_hint">各类请求占比环形图</string>
     <string name="compose_settings_chart_trend">请求趋势</string>
     <string name="compose_settings_chart_trend_hint">每小时请求折线图</string>
-    <string name="compose_settings_chart_bars">流量柱状图</string>
-    <string name="compose_settings_chart_bars_hint">24小时/30天柱状图</string>
     <string name="compose_settings_chart_apps">活跃应用</string>
     <string name="compose_settings_chart_apps_hint">各应用连接列表</string>
     <string name="compose_settings_chart_certs">最近签发证书</string>

@@ -153,8 +153,6 @@
     <string name="compose_settings_chart_donut_hint">Ring chart of request categories</string>
     <string name="compose_settings_chart_trend">Request trend</string>
     <string name="compose_settings_chart_trend_hint">Line chart of hourly requests</string>
-    <string name="compose_settings_chart_bars">Traffic bars</string>
-    <string name="compose_settings_chart_bars_hint">24h / 30d bar chart</string>
     <string name="compose_settings_chart_apps">Active apps</string>
     <string name="compose_settings_chart_apps_hint">Per-app connection list</string>
     <string name="compose_settings_chart_certs">Recent certs</string>

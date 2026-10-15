@@ -243,7 +243,9 @@ internal fun userAllowedUids(context: Context): List<Int> {
 
 
 /** Whether a statistics card is enabled. Keys: chart_donut, chart_trend,
- *  chart_bars, chart_apps, chart_certs. All default true. */
+ *  chart_apps, chart_certs. All default true.
+ *  Bar/line/area is NOT a separate toggle any more: it is the chart_style value
+ *  (CHART_STYLE_LINE / AREA / BARS), so the old chart_bars key and its labels are gone. */
 internal fun isChartEnabled(context: Context, key: String): Boolean {
     return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
         .getBoolean(key, true)
