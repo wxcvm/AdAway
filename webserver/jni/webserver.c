@@ -2817,7 +2817,9 @@ static void qlog_save(const char *resource_dir) {
     char path[PATH_MAX];
     if (resource_dir == NULL || resource_dir[0] == '\0') return;
     snprintf(path, sizeof(path), "%s/query_log.dat", resource_dir);
-    FILE *fp = fopen(path, "wb");
+    /* 原子写：写 <path>.tmp，成功后 rename —— 读端永远不会看到写了一半的查询日志。 */
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
     if (fp == NULL) return;
     /*
      * The ring holds QLOG_MAX (10k, ~2 MB) so the app can page through the
@@ -2838,7 +2840,7 @@ static void qlog_save(const char *resource_dir) {
     fwrite(&zero, sizeof(zero), 1, fp);      /* pos: the file starts at slot 0 */
     fwrite(&persist, sizeof(persist), 1, fp);
     fwrite(s_qlog_persist, sizeof(s_qlog_persist[0]), persist, fp);
-    fclose(fp);
+    finish_atomic_write(fp, path, atomic_tmp);
 }
 
 static void qlog_load(const char *resource_dir) {
