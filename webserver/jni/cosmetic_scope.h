@@ -22,9 +22,14 @@
 
 static inline int cs_lower(int c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }
 
-/* 无大小写比较：a 的长度为 alen，b 以 NUL 结尾。 */
-static inline bool cs_eq_nocase(const char *a, size_t alen, const char *b) {
-    size_t blen = strlen(b);
+/*
+ * 无大小写比较，**两端都显式给长度**。
+ *
+ * 为什么不用 strlen(b)：主机末尾的点在调用处已经被剥掉，长度变了；如果这里再用
+ * strlen 重新量一次，就会拿"带点的长度"去比"剥点后的长度"，必然不相等 ——
+ * CI 实测就是这个错误（"example.com." 匹配 "example.com" 失败）。
+ */
+static inline bool cs_eq_nocase_n(const char *a, size_t alen, const char *b, size_t blen) {
     if (alen != blen) return false;
     for (size_t i = 0; i < alen; i++) {
         if (cs_lower((unsigned char) a[i]) != cs_lower((unsigned char) b[i])) return false;
@@ -44,10 +49,10 @@ static inline bool cosmetic_domain_match(const char *rule, size_t rlen, const ch
     /* 空域名或 '*' → 全局 */
     if (rlen == 0) return true;
     if (rlen == 1 && rule[0] == '*') return true;
-    if (cs_eq_nocase(rule, rlen, host) && hlen == rlen) return true;
-    /* 子域：host = <sub>.rule */
+    if (cs_eq_nocase_n(rule, rlen, host, hlen)) return true;
+    /* 子域：host = <sub>.rule（都用剥点后的 hlen） */
     if (hlen > rlen + 1 && host[hlen - rlen - 1] == '.') {
-        if (cs_eq_nocase(rule, rlen, host + (hlen - rlen))) return true;
+        if (cs_eq_nocase_n(rule, rlen, host + (hlen - rlen), rlen)) return true;
     }
     return false;
 }
