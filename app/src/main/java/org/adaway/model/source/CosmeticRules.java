@@ -80,8 +80,8 @@ public final class CosmeticRules {
             }
             for (String domain : domains.split(",")) {
                 String d = domain.trim();
-                if (d.isEmpty() || d.startsWith("~") || d.indexOf('/') >= 0 || d.length() > 190) {
-                    continue;   /* 排除语法/异常写法：不猜，跳过 */
+                if (!isPlausibleDomain(d)) {
+                    continue;   /* 排除语法/异常写法：不猜，跳过并计入 seen */
                 }
                 SELECTORS.add(d.toLowerCase(java.util.Locale.ROOT) + '\t' + selector);
             }
@@ -141,6 +141,33 @@ public final class CosmeticRules {
             }
         }
         return builder.toString();
+    }
+
+    /**
+     * Whether the text before {@code ##} can be used as a domain scope.
+     *
+     * <p>Accepts a plain hostname only ({@code a-z A-Z 0-9 . - _}, non-empty, at most 190 chars).
+     * Everything else is skipped: the {@code ~} exclusion syntax we do not implement, and — the
+     * case a unit test pins — a malformed rule such as {@code .ok{color:red}##.x} whose "domain"
+     * part is actually a CSS rule. Skipping keeps the rule out of both output files instead of
+     * letting a bogus domain silently scope it.</p>
+     *
+     * @param d The candidate domain text.
+     * @return {@code true} when it looks like a hostname.
+     */
+    private static boolean isPlausibleDomain(String d) {
+        if (d.isEmpty() || d.length() > 190 || d.startsWith("~")) {
+            return false;
+        }
+        for (int i = 0; i < d.length(); i++) {
+            char c = d.charAt(i);
+            boolean allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+            if (!allowed) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @return The selector part of a {@code domain<TAB>selector} entry. */
