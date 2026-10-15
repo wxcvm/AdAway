@@ -184,3 +184,23 @@ openssl s_client -connect <被拦域名>:443 -servername <被拦域名> 2>/dev/n
 （`POST /actions/runs/{id}/rerun-failed-jobs`），重跑后 **success**，`6.7.5.723` 正常出现在发布列表里。
 **经验**：`conclusion = failure` 不等于代码有问题，必须看清**失败在哪一步**；否则要么改坏好代码，
 要么漏掉"用户其实没收到更新"。
+
+## 7. 逐项亲验（不是"我做过所以应该对"）
+
+收口阶段对若干"早已完成"的项做了**重新打开源码核对**，结果与证据如下。
+
+**C1：`/internal-reset` 的界面二次确认与结果反馈 —— 完整** ✓
+`SettingsScreen.kt` 的清除按钮实现了两段式确认（`clearArmed`：第一次点击只进入确认态、按钮文案切到
+`compose_settings_clear_stats_confirm`；第二次才执行），确认后在后台线程调用
+`WebServerUtils.resetStatistics()`（走回环管理端口的 `/internal-reset?what=all`），再用主线程 `Toast`
+反馈结果：成功用 `compose_settings_clear_stats_ok`、失败用 `compose_settings_clear_stats_fail` ——
+**失败时如实提示失败**，不是"点了就假装成功"。注释也记录了被修掉的历史缺陷：
+此前只删了两个设置键，而计数/历史曲线/应用统计/查询日志都在原生进程内存里，
+「按钮点了等于没点、也没有任何反馈」。
+
+**G3：`LOG_LIMIT` / `LOG_RETENTION` 死键 —— 已删净** ✓
+全仓检索：**代码里零引用**，仅 `PrefsKeys.kt` 留一条注释说明"这里原本有这两个键（日志条数上限）"，
+以及本文件 §1 的一行记录。即"删除死键 + 留一句话解释历史"的正确收尾方式。
+
+**方法说明**：以上均为**只读核对**（读源码/读资源），未修改任何行为；核对它们的动机是前面几轮
+反复出现的教训 —— "声称已做"与"亲眼看过"是两件事（例如边界 ② 就曾只做了一半）。
