@@ -10,6 +10,7 @@ boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
         project.hasProperty('signingStorePassword') &&
         project.hasProperty('signingKeyAlias') &&
         project.hasProperty('signingKeyPassword')
+boolean progressPreview = project.findProperty('progressPreview')?.toString() == 'true'
 
 android {
     compileSdk 37
@@ -18,6 +19,14 @@ android {
 
     defaultConfig {
         applicationId 'com.wxcvm.Adaway'
+        if (progressPreview) applicationIdSuffix '.preview'
+        manifestPlaceholders = [
+                appLabel: progressPreview ? 'AdAway Preview' : '@string/app_name',
+                commandPermission: progressPreview ? 'org.adaway.preview.permission.SEND_COMMAND' : 'org.adaway.permission.SEND_COMMAND',
+                commandPermissionGroup: progressPreview ? 'org.adaway.preview.permission-group.API' : 'org.adaway.permission-group.API',
+                commandReceiverEnabled: progressPreview ? 'false' : 'true'
+        ]
+        buildConfigField 'boolean', 'PROGRESS_PREVIEW', progressPreview.toString()
         minSdk 30
         targetSdk 37
         ndk {
@@ -74,6 +83,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig true
         viewBinding true
         compose true
     }
