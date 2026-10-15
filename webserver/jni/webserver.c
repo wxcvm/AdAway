@@ -11,6 +11,7 @@
 #include "pin_window.h"
 #include "f5_guard.h"
 #include "cosmetic_sanitize.h"
+#include "cosmetic_scope.h"
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -3350,6 +3351,21 @@ static bool url_host_blocked(const char *u, size_t n) {
 static char  *s_cosmetic_css;
 static size_t s_cosmetic_len;
 
+/*
+ * 域名限定的 cosmetic 规则（可选文件 <resource>/cosmetic_rules.txt，格式 domain<TAB>selector）。
+ * 文件不存在时 count=0 —— 行为与引入本功能之前完全一致（默认不变）。
+ */
+#define COSMETIC_SCOPED_MAX 4096
+struct cosmetic_scoped_rule {
+    char   domain[192];
+    size_t off;
+    size_t len;
+};
+static char  *s_cosmetic_scoped_buf;
+static size_t s_cosmetic_scoped_len;
+static struct cosmetic_scoped_rule s_cosmetic_scoped[COSMETIC_SCOPED_MAX];
+static int    s_cosmetic_scoped_count;
+
 static void load_cosmetic_css(const char *resource_dir) {
     free(s_cosmetic_css);
     s_cosmetic_css = NULL;
@@ -3380,12 +3396,77 @@ static void load_cosmetic_css(const char *resource_dir) {
         LOG_WARN("cosmetic filter: dropped %zu rule(s) containing '<' (would break out of <style>)",
                  cstats.dropped);
     }
+}
+
+/*
+ * 载入域名限定的 cosmetic 规则（可选文件）。格式：domain<TAB>selector，每行一条；
+ * domain 为 '*' 或留空表示全局。文件不存在或解析不出任何规则时 count 保持 0，
+ * 注入行为与"没有这个功能"时完全一致。
+ */
+static void load_cosmetic_rules(const char *resource_dir) {
+    free(s_cosmetic_scoped_buf);
+    s_cosmetic_scoped_buf = NULL;
+    s_cosmetic_scoped_len = 0;
+    s_cosmetic_scoped_count = 0;
+#ifndef _WIN32
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/cosmetic_rules.txt", resource_dir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return;                      /* 可选文件：没有就保持默认行为 */
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > (long) (512 * 1024)) { fclose(f); return; }
+    char *buffer = (char *) malloc((size_t) size + 1);
+    if (!buffer) { fclose(f); return; }
+    size_t got = fread(buffer, 1, (size_t) size, f);
+    fclose(f);
+    buffer[got] = '\0';
+    /* 含 '<' 的整行丢弃（与 cosmetic.css 同样只挡 '<'） */
+    struct cosmetic_stats cstats;
+    size_t kept_len = cosmetic_sanitize(buffer, got, &cstats);
+    int dropped = 0;
+    size_t pos = 0;
+    while (pos < kept_len && s_cosmetic_scoped_count < COSMETIC_SCOPED_MAX) {
+        size_t line_start = pos;
+        while (pos < kept_len && buffer[pos] != '\n') pos++;
+        size_t line_len = pos - line_start;
+        if (line_len > 0) {
+            char *tab = (char *) memchr(buffer + line_start, '\t', line_len);
+            if (tab != NULL) {
+                size_t dlen = (size_t) (tab - (buffer + line_start));
+                size_t sel_off = (size_t) (tab - buffer) + 1;
+                size_t sel_len = line_len - dlen - 1;
+                while (sel_len > 0 && (buffer[sel_off] == ' ' || buffer[sel_off] == '\t')) { sel_off++; sel_len--; }
+                if (sel_len > 0) {
+                    if (dlen >= sizeof(s_cosmetic_scoped[0].domain)) dlen = sizeof(s_cosmetic_scoped[0].domain) - 1;
+                    memcpy(s_cosmetic_scoped[s_cosmetic_scoped_count].domain, buffer + line_start, dlen);
+                    s_cosmetic_scoped[s_cosmetic_scoped_count].domain[dlen] = '\0';
+                    s_cosmetic_scoped[s_cosmetic_scoped_count].off = sel_off;
+                    s_cosmetic_scoped[s_cosmetic_scoped_count].len = sel_len;
+                    s_cosmetic_scoped_count++;
+                } else {
+                    dropped++;
+                }
+            } else {
+                dropped++;   /* 没有制表符的行无法归属域名，丢弃并计数 */
+            }
+        }
+        pos++;
+    }
+    s_cosmetic_scoped_buf = buffer;
+    s_cosmetic_scoped_len = kept_len;
+    LOG_INFO("cosmetic scope: %d rule(s) loaded from %s (%d dropped, %zu bytes)",
+             s_cosmetic_scoped_count, path, dropped, kept_len);
+#else
+    (void) resource_dir;
+#endif
 #else
     (void) resource_dir;
 #endif
 }
 
-static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
+static size_t html_filter(const char *in, size_t n, char *out, size_t cap, const char *host) {
     size_t i = 0, o = 0;
     bool injected = false;
 #define AB_PUT(ch) do { if (o < cap) out[o] = (char) (ch); o++; } while (0)
@@ -3444,6 +3525,13 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
                 for (size_t p = i; p < tag_end; p++) AB_PUT(in[p]);
                 for (size_t p = 0; p < sizeof(kHideCssHead) - 1; p++) AB_PUT(kHideCssHead[p]);
                 for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
+                for (int r = 0; r < s_cosmetic_scoped_count; r++) {
+                    if (!cosmetic_domain_match(s_cosmetic_scoped[r].domain,
+                                               strlen(s_cosmetic_scoped[r].domain), host)) continue;
+                    for (size_t p = 0; p < s_cosmetic_scoped[r].len; p++)
+                        AB_PUT(s_cosmetic_scoped_buf[s_cosmetic_scoped[r].off + p]);
+                    AB_PUT('\n');
+                }
                 for (size_t p = 0; p < sizeof(kHideCssTail) - 1; p++) AB_PUT(kHideCssTail[p]);
                 injected = true;
                 i = tag_end;
@@ -3456,6 +3544,13 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
     if (!injected) {
         for (size_t p = 0; p < sizeof(kHideCssHead) - 1; p++) AB_PUT(kHideCssHead[p]);
         for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
+        for (int r = 0; r < s_cosmetic_scoped_count; r++) {
+            if (!cosmetic_domain_match(s_cosmetic_scoped[r].domain,
+                                       strlen(s_cosmetic_scoped[r].domain), host)) continue;
+            for (size_t p = 0; p < s_cosmetic_scoped[r].len; p++)
+                AB_PUT(s_cosmetic_scoped_buf[s_cosmetic_scoped[r].off + p]);
+            AB_PUT('\n');
+        }
         for (size_t p = 0; p < sizeof(kHideCssTail) - 1; p++) AB_PUT(kHideCssTail[p]);
     }
 #undef AB_PUT
@@ -3542,10 +3637,10 @@ static void proxy_finish_filtered(struct proxy_state *st) {
     if (!st->client || !st->buf || !st->headers_done) return;
     size_t body_off = st->head_len;
     size_t body_len = st->buf_len > body_off ? st->buf_len - body_off : 0;
-    size_t cap = body_len + 2048 + sizeof(kHideCssTail) + s_cosmetic_len;
+    size_t cap = body_len + 2048 + sizeof(kHideCssTail) + s_cosmetic_len + s_cosmetic_scoped_len + 64;
     char *filtered = (char *) malloc(cap);
     if (!filtered) { proxy_send_raw(st, st->buf, st->buf_len); st->replied = true; return; }
-    size_t flen = html_filter(st->buf + body_off, body_len, filtered, cap);
+    size_t flen = html_filter(st->buf + body_off, body_len, filtered, cap, st->host);
     /* status line first */
     size_t line_end = 0;
     while (line_end + 1 < body_off &&
@@ -4410,6 +4505,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             if (s->proxy_filter) {
                 block_set_load(s->resource_dir);
                 load_cosmetic_css(s->resource_dir);
+                load_cosmetic_rules(s->resource_dir);
             }
             char hdr[96];
             int hl = snprintf(hdr, sizeof(hdr), "Content-Type: text/plain%c%c", 0x0d, 0x0a);
@@ -4635,6 +4731,7 @@ int main(int argc, char *argv[]) {
     if (s.proxy_filter) {
         block_set_load(s.resource_dir);
         load_cosmetic_css(s.resource_dir);
+        load_cosmetic_rules(s.resource_dir);
     }
     /* Dedicated loopback management listener (statistics + control). */
     if (s.stats_port == 0) s.stats_port = 8686;
