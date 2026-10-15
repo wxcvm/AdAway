@@ -41,9 +41,10 @@ int main(void) {
     ok_num("b3 丢弃 1", (unsigned long) st.dropped, 1);
 
     /* 空行与纯空白行保留结构、不计为规则 */
+    /* 空行与纯空白行都会被规范成一个空行（header 里写明的行为）：对 CSS 无影响 */
     char b4[] = "\n   \n.a{}\n";
     cosmetic_sanitize(b4, strlen(b4), &st);
-    ok_str("空行保留、规则保留", b4, "\n   \n.a{}\n");
+    ok_str("空白行规范成空行、规则保留", b4, "\n\n.a{}\n");
     ok_num("只计 1 条规则", (unsigned long) st.kept, 1);
     ok_num("无丢弃", (unsigned long) st.dropped, 0);
 
