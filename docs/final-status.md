@@ -109,6 +109,37 @@
 > （把 `/internal-stats` 的计数器、函数名前缀、普通单词都算了进去）。收窄到 `jbool` 后为 16==16。
 > 该误报**没有**写进任何文档或提交。
 
+### 5.2 `/internal-reset` 的两条边界：**节流**与**原子写**（均已实现并 CI 验收）
+
+计划边界原文：「`/internal-reset` 与轮询并发时加节流与原子写」。两条分别核实如下。
+
+**节流（原本就成立）**：处理器先判节流、后动数据 —— 1 秒内重复调用返回 `429` 与
+`{"ok":false,"error":"throttled"}`，注释写明理由是"避免与每秒一次的 `/internal-stats` 轮询打架"。
+另外重置**只清内存**，磁盘快照由随后的轮询按既有节奏写出。重置的语义也做了正确取舍：
+计数整体清零但**保留 `start_time_ms`**（否则"已运行"会变成天文数字），历史曲线与 F5 各类计数一并清零。
+
+**原子写（本轮补齐）**：原先五份 `.dat` 中只有 SNI 缓存用了 `tmp + rename`，其余四份
+（`stats.dat`/`hist.dat`/`apps.dat`/`query_log.dat`）是 `fopen(path, "wb")` **直接截断** ——
+而 App 会并发读取这些文件，存在"读到写了一半"的窗口。现补成一对辅助：
+
+```c
+static FILE *open_atomic_write(const char *path, char *tmp, size_t tmp_cap);   /* 写 <path>.tmp */
+static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp); /* fclose 成功→rename，失败→remove(tmp) */
+```
+
+五处写入点（`stats.dat`/`hist.dat`/`apps.dat`/`query_log.dat`/`sni_cache.dat`）全部改为这一对，
+**写入内容与时机不变**；失败时临时文件被删除、**旧文件原样保留**。写 CA 私钥/证书的两处 PEM 调用未动。
+现状核对：全文件已无 `fopen(path, "wb")` 直接截断，`open_atomic_write` 调用 5 处、`finish_atomic_write` 5 处。
+
+**CI 证据**：Android CI **#721**（`548efa5`）**success** —— 六个宿主测试 248 项断言、契约键守卫、
+**NDK 编译** `webserver.c`、签名与发布全部通过；应用内发布 `6.7.5.721`。
+
+> 过程记录（我自己的两个失误，均已在上游修正或拦下）：① 插入辅助函数与原型时脚本跑了两次，
+> 造成**重复定义**（会编译不过）—— 提交前的计数断言抓出并去重；
+> ② 我此前有一条"整文件圆括号平衡"的断言本身是错的（注释与字符串里也有括号），已弃用，
+> 改为与上一提交对比的结构不变量与"只断言最终状态、可重复执行"的写法。
+
+
 
 | **MoveCertificate** | ⛔ 移出范围 | 用户指示"这个仓库就别管了" | 其 `main` 上有一个我推的未发版加固提交（不影响任何东西） |
 | **两端核心合一** | ⛔ 不在计划内 | 计划明写"不抽取共享 `webserver.c`" | 契约 §6.2 给了工作清单与红线（独立分支 + 两端 CI） |
