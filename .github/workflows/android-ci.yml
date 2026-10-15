@@ -41,6 +41,8 @@ jobs:
           "$RUNNER_TEMP/cosmetic_sanitize_test"
           cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/cosmetic_scope_test" webserver/jni/cosmetic_scope_test.c
           "$RUNNER_TEMP/cosmetic_scope_test"
+          cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/lt_map_test" webserver/jni/lt_map_test.c
+          "$RUNNER_TEMP/lt_map_test"
 
       - name: set up JDK 21
         uses: actions/setup-java@v5

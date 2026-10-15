@@ -12,6 +12,7 @@
 #include "f5_guard.h"
 #include "cosmetic_sanitize.h"
 #include "cosmetic_scope.h"
+#include "lt_map.h"
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -2317,11 +2318,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Images & video thumbnails: fall through to the user-configured
        placeholder images (they're meant to be seen). */
-    if (uri_ends_with_ci(u, ".jpg") || uri_ends_with_ci(u, ".jpeg") ||
-        uri_ends_with_ci(u, ".png") || uri_ends_with_ci(u, ".gif") ||
-        uri_ends_with_ci(u, ".webp") || uri_ends_with_ci(u, ".avif") ||
-        uri_ends_with_ci(u, ".svg") || uri_ends_with_ci(u, ".ico") ||
-        uri_ends_with_ci(u, ".bmp")) {
+    if (lt_is_image(u.buf, u.len)) {
         RB_TYPE(LT_IMAGES, cfg_images);
         if (!cfg_images) return deny_quick(&s_stats.blocked_images, c);
         return false;
@@ -2331,7 +2328,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        response never changes at runtime, so the client stops
        re-requesting it after the first time (saves battery/bandwidth
        on every page load). */
-    if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
+    if (lt_is_script(u.buf, u.len)) {
         RB_TYPE(LT_SCRIPTS, cfg_scripts);
         if (!cfg_scripts) return deny_quick(&s_stats.blocked_scripts, c);
         s_stats.blocked_scripts++;
@@ -2342,7 +2339,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     }
 
     /* Stylesheets: empty CSS, HTTP 200. Cached like JS above. */
-    if (uri_ends_with_ci(u, ".css")) {
+    if (lt_is_style(u.buf, u.len)) {
         RB_TYPE(LT_STYLES, cfg_styles);
         if (!cfg_styles) return deny_quick(&s_stats.blocked_styles, c);
         s_stats.blocked_styles++;
@@ -2353,9 +2350,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     }
 
     /* Fonts: HTTP 204 (no content needed). */
-    if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
-        uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
-        uri_ends_with_ci(u, ".eot")) {
+    if (lt_is_font(u.buf, u.len)) {
         RB_TYPE(LT_FONTS, cfg_fonts);
         if (!cfg_fonts) return deny_quick(&s_stats.blocked_fonts, c);
         s_stats.blocked_fonts++;
@@ -2370,14 +2365,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        ended / nothing to play" and keeps the player quiet. Covers
        MP4/WebM audio+video containers, HLS (.m3u8/.ts) and DASH
        (.mpd) manifests, and legacy formats. */
-    if (uri_ends_with_ci(u, ".mp4") || uri_ends_with_ci(u, ".webm") ||
-        uri_ends_with_ci(u, ".m4a") || uri_ends_with_ci(u, ".m4v") ||
-        uri_ends_with_ci(u, ".mp3") || uri_ends_with_ci(u, ".aac") ||
-        uri_ends_with_ci(u, ".ogg") || uri_ends_with_ci(u, ".oga") ||
-        uri_ends_with_ci(u, ".opus") || uri_ends_with_ci(u, ".flac") ||
-        uri_ends_with_ci(u, ".ts") || uri_ends_with_ci(u, ".m3u8") ||
-        uri_ends_with_ci(u, ".mpd") || uri_ends_with_ci(u, ".flv") ||
-        uri_ends_with_ci(u, ".mov") || uri_ends_with_ci(u, ".wav")) {
+    if (lt_is_media(u.buf, u.len)) {
         RB_TYPE(LT_MEDIA, cfg_media);
         if (!cfg_media) return deny_quick(&s_stats.blocked_media, c);
         s_stats.blocked_media++;
