@@ -32,6 +32,15 @@ public class SourceLoaderRoomTest {
         database.hostsSourceDao().insert(source);
     }
     @After public void closeDatabase() { database.close(); }
+    @Test public void atomicRuleEditingWorksOnTheSupportedAndroidRuntime() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        java.io.File file = java.io.File.createTempFile("adaway-rule-test-", ".txt", context.getCacheDir());
+        try {
+            AtomicRuleFile.update(file, previous -> "one.test\n");
+            AtomicRuleFile.update(file, previous -> previous + "two.test\n");
+            assertEquals("one.test\ntwo.test\n", new String(java.nio.file.Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8));
+        } finally { java.nio.file.Files.deleteIfExists(file.toPath()); }
+    }
     private void load(String text) throws IOException {
         new SourceLoader(source).parse(new BufferedReader(new StringReader(text)), database.hostsListItemDao(), database);
     }

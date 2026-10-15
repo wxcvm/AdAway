@@ -3,6 +3,8 @@ package org.adaway.model.source;
 import java.io.File;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,7 +36,10 @@ public final class AtomicRuleFile {
         Files.createDirectories(target.getParent());
         if (Files.exists(target) && Files.size(target) > BoundedSourceImport.MAX_CHARACTERS)
             throw new IOException("Rule file exceeds import limit");
-        String previous = Files.exists(target) ? Files.readString(target, StandardCharsets.UTF_8) : "";
+        // Files.readString is newer than our minimum Android runtime. Keep strict UTF-8 decoding on API 26+.
+        String previous = Files.exists(target) ? StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(Files.readAllBytes(target))).toString() : "";
         byte[] next = edit.apply(previous).getBytes(StandardCharsets.UTF_8);
         if (next.length > BoundedSourceImport.MAX_CHARACTERS) throw new IOException("Rule file exceeds import limit");
         write(file, writer -> writer.write(new String(next, StandardCharsets.UTF_8)));
