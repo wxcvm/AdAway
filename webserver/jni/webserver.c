@@ -13,6 +13,16 @@
 #include "cosmetic_sanitize.h"
 #include "cosmetic_scope.h"
 #include "lt_map.h"
+
+
+/*
+ * 统计类 .dat 文件的**原子写**：先写 <path>.tmp，落盘成功后 rename 覆盖。
+ * 这样读端（App 会并发读这四个文件）要么看到旧文件、要么看到新文件，
+ * 永远不会读到写了一半的内容 —— 计划边界要求"与轮询并发时加节流与原子写"。
+ * 失败时删掉临时文件，旧文件原样保留。
+ */
+static FILE *open_atomic_write(const char *path, char *tmp, size_t tmp_cap);
+static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp);
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -467,10 +477,11 @@ static void save_stats(const struct settings *s) {
     f.tls_handshakes    = s_stats.tls_handshakes;
     f.tls_failures      = s_stats.tls_failures;
     f.sni_cache_hits    = s_stats.sni_cache_hits;
-    FILE *fp = fopen(path, "wb");
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
     if (fp) {
         fwrite(&f, sizeof(f), 1, fp);
-        fclose(fp);
+        finish_atomic_write(fp, path, atomic_tmp);
     }
 }
 
@@ -772,8 +783,9 @@ static void save_hist(const struct settings *s) {
     f.daily_slot_start = (int64_t)s_daily_slot_start;
     memcpy(f.hist, s_hist, sizeof(s_hist));
     memcpy(f.daily, s_daily, sizeof(s_daily));
-    FILE *fp = fopen(path, "wb");
-    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); finish_atomic_write(fp, path, atomic_tmp); }
 }
 
 static void load_hist(const struct settings *s) {
@@ -897,8 +909,9 @@ static void apps_save(const char *resource_dir) {
     f.count = (uint32_t)s_app_count;
     for (int i = 0; i < s_app_count && i < APP_STATS_MAX; i++)
         f.entries[i] = s_apps[i];
-    FILE *fp = fopen(path, "wb");
-    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); finish_atomic_write(fp, path, atomic_tmp); }
 }
 static void apps_load(const char *resource_dir) {
     if (!resource_dir || !resource_dir[0]) return;
@@ -1742,8 +1755,9 @@ static void sni_cache_save(const char *resource_dir) {
         f.entries[i].issued_at = s_sni_cache[i].issued_at;
     }
     pthread_mutex_unlock(&s_sni_mutex);
-    FILE *fp = fopen(path, "wb");
-    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); finish_atomic_write(fp, path, atomic_tmp); }
 }
 
 static void sni_cache_load(const char *resource_dir) {
@@ -3564,6 +3578,23 @@ static void write_stats_json_file(struct settings *s) {
     fclose(fp);
     remove(path);
     rename(tmp, path);
+}
+
+/* open_atomic_write / finish_atomic_write：见文件顶部的原型处说明。 */
+static FILE *open_atomic_write(const char *path, char *tmp, size_t tmp_cap) {
+    size_t need = strlen(path) + 5;               /* ".tmp" + NUL */
+    if (path == NULL || tmp == NULL || tmp_cap < need) return NULL;
+    snprintf(tmp, tmp_cap, "%s.tmp", path);
+    return fopen(tmp, "wb");
+}
+
+static void finish_atomic_write(FILE *fp, const char *path, const char *tmp) {
+    if (fp == NULL) return;
+    if (fclose(fp) == 0) {
+        rename(tmp, path);
+    } else {
+        remove(tmp);                              /* 落盘失败：删掉临时文件，旧文件保持原样 */
+    }
 }
 
 /* ── proxy plumbing ── */
