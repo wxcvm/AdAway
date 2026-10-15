@@ -202,8 +202,8 @@ Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配�
 ## 规则支持清单（按实现核实，不是承诺）
 
 本节描述的是**当前实现真实支持**的语法，依据是 `webserver/jni/webserver.c` 里的
-`domain_rule_normalize()`（规则归一化，L531）、`domain_is_allowed()`（放行匹配，L563）与
-`block_set_contains()`（拦截匹配，L3271），以及 App 侧的 `app/src/main/java/org/adaway/model/source/SourceLoader.java`（订阅源解析，含 `HostListItemParser`）。两端（Android 原生服务端与 Windows 服务端）共用同一份
+`domain_rule_normalize()`（规则归一化）、`domain_is_allowed()`（放行匹配）与
+`block_set_contains()`（拦截匹配），以及 App 侧的 `app/src/main/java/org/adaway/model/source/SourceLoader.java`（订阅源解析，含 `HostListItemParser`）。两端（Android 原生服务端与 Windows 服务端）共用同一份
 C 代码，因此下面的语义在两端一致；跨端测试向量应钉住这些行为。
 
 ### 支持（会被正确归一化）
