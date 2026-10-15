@@ -164,3 +164,23 @@ openssl s_client -connect <被拦域名>:443 -servername <被拦域名> 2>/dev/n
 **A4-3 固定证书应用**：访问一个做证书固定的应用，`/internal-stats` 的 `tls_failures` 应上升，且界面必须表达为
 "（仅拒绝）"，**不得**显示成功。
 **G2**：拦截命中、`204`（放行）、查询日志记录、证书状态刷新 —— 四项各截一次日志/界面即可。
+
+## 6. 计划「边界」四条：逐条实现与证据（2026-10-16 核实）
+
+| 边界 | 实现 | 证据 |
+|---|---|---|
+| ① 无 Root 只承诺 DNS/hosts 层，且**在 UI 明示** | 空路由模式文案说明"不占用任何端口、无拦截页、无逐应用统计"，本机模式说明需占用 80/443 | `values` / `values-zh` 的 `compose_settings_block_mode_null_hint`、`compose_settings_block_mode_localhost_hint` |
+| ② 证书固定的应用用 `tls_failures` 与**（仅拒绝）**表达，**不谎报成功** | 计数器通道：服务端字段 → 汇总 → `/internal-stats` 的 `tls_failures` → App 读取；**用户可见措辞**：每个应用的 TLS 失败计数后追加"（仅拒绝：…不是拦截成功）"与英文 "(rejected only: … - not a successful block)" | `webserver.c` 的 `tls_failures`（声明/汇总/JSON 导出）、`StatsViewModel.kt` 的 `tlsFailures`、`AppDetailScreen.kt` / `StatisticsScreen.kt` 的展示位、`compose_stats_app_tls_fail`（中英各一份），提交 `4dfc493`，发布 `6.7.5.723` |
+| ③ `/internal-reset` 与轮询并发时加**节流**与**原子写** | 节流：1 秒内返回 429；原子写：五份 `.dat` 全部 tmp+rename（见 §5.2） | 处理器与辅助函数见 `webserver.c`；CI #721 编译与测试全绿 |
+| ④ 端口冲突**显示来源**、**不静默改动** | 文案点出"可能被 AdGuard 等占用"、说明"没有监听"这一事实、让用户自行改用 8080/8443（并注明劫持模式不依赖 80/443） | `compose_settings_block_mode_hijack_failed`（中英各一份） |
+
+**如实记录（这一条曾是半成品）**：边界 ② 起初**只做了一半** —— `tls_failures` 的计数器通道是完整的，
+但"（仅拒绝）"这句用户可见的表达在全仓**为 0 处**；也就是说用户看到失败数字时**仍可能以为通过了**，
+正是这条边界要防的"谎报成功"。该缺口是在本次收口核对时**查出来**并补上的（`4dfc493`），不是一开始就对。
+
+**如实记录（一次 CI 失败的处理）**：`4dfc493` 的首次 CI 结论是 **failure**，但失败点在
+`Publish to the in-app update feed` 这一步，而 `Run tests & build release` / 签名 / 上传**均已通过** ——
+即代码与资源都没有问题，是发布环节的偶发失败。处理方式是**用 API 重跑失败作业**
+（`POST /actions/runs/{id}/rerun-failed-jobs`），重跑后 **success**，`6.7.5.723` 正常出现在发布列表里。
+**经验**：`conclusion = failure` 不等于代码有问题，必须看清**失败在哪一步**；否则要么改坏好代码，
+要么漏掉"用户其实没收到更新"。
