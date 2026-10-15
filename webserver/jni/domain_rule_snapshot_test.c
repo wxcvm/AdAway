@@ -33,7 +33,7 @@ static void vectors(const char *path) {
         enum dr_parse_status got = dr_parse_line(cells[1], (flags & 1) != 0, (flags & 2) != 0, capture_entry, &capture);
         if (strcmp(status[got], cells[2]) != 0) fprintf(stderr, "vector: %s expected %s got %s\n", cells[1], cells[2], status[got]);
         CHECK(strcmp(status[got], cells[2]) == 0);
-        if (got != DR_INVALID) CHECK(strcmp(capture.text, cells[3]) == 0);
+        if (got != DR_INVALID) CHECK(strcmp(capture.text, strcmp(cells[3], "-") == 0 ? "" : cells[3]) == 0);
         count++;
     }
     CHECK(!ferror(file)); CHECK(fclose(file) == 0); CHECK(count >= 25);

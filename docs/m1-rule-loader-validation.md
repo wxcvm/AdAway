@@ -73,7 +73,7 @@ cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic -pthread \
 
 Local Windows checks use MSVC `/utf-8 /std:c11 /W4 /WX` and JBR javac
 `--release 17`, JUnit 4.13.2 and the app's pinned Guava 33.6.0-android.
-The 14 selected JVM tests pass. Shared loader vectors, invalid/stale rollback,
+The 20 selected JVM tests (including the migrated legacy importer tests) pass. 37 shared loader vectors, invalid/stale rollback,
 the production exemption reader, two four-reader/1,000-update/200,000-read
 tests and a 300,000-entry actual block source have passed locally. Final
 HEAD-specific CI evidence is recorded in the draft PR and workspace report.

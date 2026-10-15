@@ -26,7 +26,7 @@ public class DomainSourceParserTest {
                         .collect(Collectors.joining(";"));
             } catch (IllegalArgumentException e) { status = "INVALID"; }
             assertEquals(cells[1], cells[2], status);
-            if (!status.equals("INVALID")) assertEquals(cells[1], cells[3], entries);
+            if (!status.equals("INVALID")) assertEquals(cells[1], cells[3].equals("-") ? "" : cells[3], entries);
             count++;
         }
         assertTrue(count >= 25);
