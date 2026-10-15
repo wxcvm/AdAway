@@ -109,15 +109,24 @@ public final class CosmeticRules {
     }
 
     /**
-     * Build the stylesheet injected into proxied pages.
+     * Build the stylesheet injected into <b>every</b> filtered page.
      *
-     * @return The CSS text (empty when no cosmetic rule was collected).
+     * <p>Only <b>global</b> rules (those whose domain part is {@code *}) end up here. Domain-scoped
+     * rules go to {@link #toScopedRules()} instead, because the server picks them per request by
+     * the page being filtered. Emitting a domain-scoped selector here would hide elements on every
+     * site — which is the bug this split fixes: before, all selectors (scoped or not) were written
+     * to this file, so {@code example.com##.ad} also applied on unrelated sites.</p>
+     *
+     * @return The CSS text (empty when no global cosmetic rule was collected).
      */
     public static String toCss() {
         StringBuilder builder = new StringBuilder(64 * 1024);
         builder.append("/* ADBlock cosmetic rules (AdGuard/adblock syntax) */\n");
         synchronized (SELECTORS) {
             for (String entry : SELECTORS) {
+                if (!entry.startsWith("*\t")) {
+                    continue;   /* 域名限定的规则走 cosmetic_rules.txt，不在这里全局注入 */
+                }
                 builder.append(selectorOf(entry)).append("{display:none !important;}\n");
             }
         }

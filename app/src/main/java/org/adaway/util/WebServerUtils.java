@@ -182,8 +182,18 @@ public class WebServerUtils {
                     new java.io.FileOutputStream(css), "UTF-8")) {
                 writer.write(content);
             }
-            Timber.i("Exported %d cosmetic rules (%d bytes)",
-                    org.adaway.model.source.CosmeticRules.getSeenCount(), content.length());
+            /* Domain-scoped rules go to a separate file: the server reads it per request and
+               injects only the rules matching the page being filtered. Both files are written
+               here on purpose - one writer, so they can never disagree. */
+            java.io.File scoped = getResourcePath(context).resolve("cosmetic_rules.txt").toFile();
+            String scopedContent = org.adaway.model.source.CosmeticRules.toScopedRules();
+            try (java.io.Writer writer = new java.io.OutputStreamWriter(
+                    new java.io.FileOutputStream(scoped), "UTF-8")) {
+                writer.write(scopedContent);
+            }
+            Timber.i("Exported %d cosmetic rules (%d bytes global, %d bytes scoped)",
+                    org.adaway.model.source.CosmeticRules.getSeenCount(), content.length(),
+                    scopedContent.length());
         } catch (Exception exception) {
             Timber.w(exception, "Failed to export the cosmetic rules");
         }

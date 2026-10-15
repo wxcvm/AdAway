@@ -51,11 +51,25 @@ class CosmeticRulesScopeTest {
     }
 
     @Test
-    fun legacyCssOutputStaysSelectorOnly() {
+    fun cssOutputCarriesGlobalRulesOnly() {
         CosmeticRules.clear()
-        CosmeticRules.collect("example.com##.ad-banner")
+        CosmeticRules.collect("##.global-banner")
+        CosmeticRules.collect("example.com##.site-banner")
         val css = CosmeticRules.toCss()
-        assertTrue(css.contains(".ad-banner{display:none !important;}"))
-        assertFalse("旧文件不应包含域名列", css.contains("example.com\t"))
+        assertTrue("全局规则必须进 css", css.contains(".global-banner{display:none !important;}"))
+        assertFalse("域名限定规则不得进全局 css（否则会在所有站点隐藏元素）",
+                css.contains(".site-banner"))
+        assertFalse("css 里不应出现域名列", css.contains("example.com\t"))
+    }
+
+    @Test
+    fun scopedOutputCarriesEveryRule() {
+        CosmeticRules.clear()
+        CosmeticRules.collect("##.global-banner")
+        CosmeticRules.collect("example.com##.site-banner")
+        val rules = CosmeticRules.toScopedRules().lines().filter { it.isNotEmpty() }
+        assertEquals(2, rules.size)
+        assertTrue(rules.contains("*\t.global-banner"))
+        assertTrue(rules.contains("example.com\t.site-banner"))
     }
 }
