@@ -89,6 +89,27 @@
 `android:usesCleartextTraffic="true"` —— 那会在 API 28+ 上**真的放开对外明文**，是安全上的实质退步。
 现状（保持平台默认、只与本地回环服务通信）才是正确形态，该 MINOR 项保留并在此记录。
 
+### 5.1 `block_config.json` 键清单：契约与代码**逐一相同**（已做成 CI 守卫）
+
+**提取方法（可复现）**：代码侧 = `webserver/jni/webserver.c` 里 `jbool(...)` 的**第二个参数**
+（那才是服务端真正读取的键名）；契约侧 = `docs/windows-core-contract.md` 第 1 节表格里反引号包裹的键。
+两侧各自 `sort -u` 后 `diff`。
+
+**结果**：**16 个 == 16 个，逐项相同** —— 既无"代码在读、契约没记"，也无"契约记了、代码没读"。
+这 16 个是：`cache_reuse_enabled`、`circuit_breaker_enabled`、`dedup_enabled`、`reply_api`、
+`reply_config`、`reply_fonts`、`reply_images`、`reply_media`、`reply_scripts`、`reply_structures`、
+`reply_styles`、`reply_telemetry`、`reply_visible`、`reply_ws_sse`、`retry_guard_enabled`、
+`rule_override_enabled`。
+
+**已升级为常驻守卫**：Android CI 的步骤 `Config key contract guard` 每次推送都做同一比对，
+不一致就 `::error::` 并失败 —— 于是"加了键却不更新契约"或"契约写了代码没有"会**当场被挡住**。
+首次运行（CI #717 / `9e80c9d`）即 **success**（见 §3 与 CI 步骤清单）。
+
+> 过程记录：本项最初用一条**过宽的正则**抽取，得出"代码里有 38 个键未记录"——那是**误报**
+> （把 `/internal-stats` 的计数器、函数名前缀、普通单词都算了进去）。收窄到 `jbool` 后为 16==16。
+> 该误报**没有**写进任何文档或提交。
+
+
 | **MoveCertificate** | ⛔ 移出范围 | 用户指示"这个仓库就别管了" | 其 `main` 上有一个我推的未发版加固提交（不影响任何东西） |
 | **两端核心合一** | ⛔ 不在计划内 | 计划明写"不抽取共享 `webserver.c`" | 契约 §6.2 给了工作清单与红线（独立分支 + 两端 CI） |
 
