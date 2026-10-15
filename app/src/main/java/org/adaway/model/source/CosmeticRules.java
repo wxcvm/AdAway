@@ -21,7 +21,11 @@ public final class CosmeticRules {
      */
     private static final int MAX_RULES = 20000;
     /**
-     * The collected CSS selectors (insertion ordered, de-duplicated).
+     * The collected cosmetic rules as {@code domain<TAB>selector} (insertion ordered, de-duplicated).
+     *
+     * <p>{@code domain} is {@code *} for a global rule. Keeping the domain here is what makes
+     * domain scoping possible: a rule written as {@code example.com##.ad} must only apply on that
+     * domain (and its subdomains), otherwise it would hide elements on every filtered page.</p>
      */
     private static final LinkedHashSet<String> SELECTORS = new LinkedHashSet<>();
     /**
@@ -63,9 +67,23 @@ public final class CosmeticRules {
                 || selector.indexOf('{') >= 0 || selector.indexOf('}') >= 0) {
             return true;
         }
+        /* 域名部分：'##' 之前的内容，例如 "example.com"；空则是全局规则（*）。
+           多个域名用逗号分隔（AdGuard 语法）；'~' 前缀的排除语法我们不支持，整条跳过。 */
+        String domains = rule.substring(0, hide).trim();
         synchronized (SELECTORS) {
-            if (SELECTORS.size() < MAX_RULES) {
-                SELECTORS.add(selector);
+            if (SELECTORS.size() >= MAX_RULES) {
+                return true;
+            }
+            if (domains.isEmpty()) {
+                SELECTORS.add("*" + '\t' + selector);
+                return true;
+            }
+            for (String domain : domains.split(",")) {
+                String d = domain.trim();
+                if (d.isEmpty() || d.startsWith("~") || d.indexOf('/') >= 0 || d.length() > 190) {
+                    continue;   /* 排除语法/异常写法：不猜，跳过 */
+                }
+                SELECTORS.add(d.toLowerCase(java.util.Locale.ROOT) + '\t' + selector);
             }
         }
         return true;
@@ -99,10 +117,35 @@ public final class CosmeticRules {
         StringBuilder builder = new StringBuilder(64 * 1024);
         builder.append("/* ADBlock cosmetic rules (AdGuard/adblock syntax) */\n");
         synchronized (SELECTORS) {
-            for (String selector : SELECTORS) {
-                builder.append(selector).append("{display:none !important;}\n");
+            for (String entry : SELECTORS) {
+                builder.append(selectorOf(entry)).append("{display:none !important;}\n");
             }
         }
         return builder.toString();
+    }
+
+    /**
+     * Build the domain-scoped rule file ({@code <resource>/cosmetic_rules.txt}).
+     *
+     * <p>One rule per line as {@code domain<TAB>selector}; {@code *} means global. The server
+     * reads it per request and injects only the rules whose domain matches the page being
+     * filtered — when the file is absent the server behaves exactly as before (global only).</p>
+     *
+     * @return The rule text (empty when no cosmetic rule was collected).
+     */
+    public static String toScopedRules() {
+        StringBuilder builder = new StringBuilder(64 * 1024);
+        synchronized (SELECTORS) {
+            for (String entry : SELECTORS) {
+                builder.append(entry).append('\n');
+            }
+        }
+        return builder.toString();
+    }
+
+    /** @return The selector part of a {@code domain<TAB>selector} entry. */
+    private static String selectorOf(String entry) {
+        int tab = entry.indexOf('\t');
+        return tab < 0 ? entry : entry.substring(tab + 1);
     }
 }
