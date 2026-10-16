@@ -43,8 +43,8 @@ def officialOpenSsl = tasks.register('buildOfficialOpenSsl', Exec) {
     commandLine 'bash', file('scripts/build-official-openssl.sh').absolutePath
     inputs.property('opensslRelease', '3.5.9')
     outputs.files(
-        layout.buildDirectory.file('official-openssl/arm64-v8a/libssl.a'),
-        layout.buildDirectory.file('official-openssl/arm64-v8a/libcrypto.a'),
+        layout.buildDirectory.file('official-openssl/arm64-v8a/lib/libssl.a'),
+        layout.buildDirectory.file('official-openssl/arm64-v8a/lib/libcrypto.a'),
         layout.buildDirectory.file('official-openssl/arm64-v8a/BUILD-COMMIT')
     )
 }
