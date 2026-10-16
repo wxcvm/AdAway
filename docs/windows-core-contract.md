@@ -106,6 +106,7 @@ C 服务端读取的文件（名称取自源码的三种写法：宏定义、裸
 | `pin_policy.txt` | 固定证书（pin）策略：域名与模式 | 应用/用户 | PIN_POLICY_FILE 宏 |
 | `rule_overrides.txt` | 按域覆盖响应（自定义格式） | 应用按域覆盖页 | RULE_OVERRIDE_FILE 宏 |
 | `cosmetic.css` | 元素隐藏样式表（AdGuard/ABP 的 `##selector` 收集结果），注入被过滤页面的 `<style>` **内部**（此前被注入在 `</style>` 之后，等于从未生效，已修） | 应用 `CosmeticRules.toCss()`（经 `WebServerUtils` 落盘） | `webserver.c` 的 `load_cosmetic_css()`（`%s/cosmetic.css`） |
+| `cosmetic_rules.txt` | **域名限定**的元素隐藏规则（`domain<TAB>selector`，`*` = 全局）；服务端按当前页面主机筛选后注入 `<style>` 内部（精确主机或子域，大小写不敏感）。**文件不存在时行为与没有本功能时完全一致** | 应用 `CosmeticRules.toScopedRules()`（经 `WebServerUtils` 落盘） | `webserver.c` 的 `load_cosmetic_rules()`（`%s/cosmetic_rules.txt`） |
 | `domain_allowlist.txt` | 按域名豁免（ALLOWED 条目导出） | 应用 ExemptionRules | 内联路径 "%s/domain_allowlist.txt" |
 | `allowlist.txt` | 按 uid 放行（每行一个十进制 uid） | 应用 SettingsScreen | 内联路径 "%s/allowlist.txt" |
 | `blocklist.txt` | 拦截列表本体（服务端 block_set_contains 检索的主机集合） | 应用导出规则库 | 内联路径 "%s/blocklist.txt" |
