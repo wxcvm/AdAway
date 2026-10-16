@@ -64,18 +64,33 @@
 | **`a.jpg?v=1` 不匹配** | ⚠️ 已知缺口 | 比较对象是含查询串的完整 URI（**与抽取前一致**，修它会改变线上行为） | 记录在 `lt_map.h` 注释与本节；要改需单独决策 |
 | **按域熔断未迁移** | ⚠️ 有意保留 | 与 `f5_guard.h` 结构相同但**键不同**（只看域，不看 uid） | 迁移前需先有等价测试（已写进头文件） |
 | **`RB_TYPE` 宏表未重构** | ⚠️ 有意保留 | 它做的是**分发**，不是分类；分类已由 `lt_map.h` 覆盖 | 不动 |
-| **CRLF（7 个文本文件）** | ⚠️ 已知无害 | 其中 **仅 2 个与本次工作有关**（API 推送脚本读工作区字节造成）：`OverviewScreen.kt` 与 `util/WebServerStats.java`；另外 5 个是**上游 libpcap 的 `msdos/` DOS 移植文件**，预先存在、本应与本次工作无关 | 详见 §2 的「CRLF 全量复核」小节 |
+| **CRLF：3 个普通文件 + 10 个上游文件** | ⚠️ 已处理 | **我的 2 个已修为 LF**（`OverviewScreen.kt` / `util/WebServerStats.java`，提交 `8549b1184`）；**`gradlew.bat` 保持 CRLF 是应当的**（Windows 批处理）；另有 **10 个**上游 libpcap `msdos/` 文件为 CRLF，刻意不动 | 见「CRLF 全量复核」小节 |
 | **`sonar-project.properties` 惰性** | ⚠️ 已定性 | 项目用的是 SonarCloud **Automatic Analysis**，该文件**不被读取**（文件第 3 行自己写着这一点）→ 其中的排除项/测试标记**都没生效** | 两条路：改成 **CI 内分析**（配置才生效，也仍满足"每次推送都触发"）或把文件改成纯说明；本次未擅自选，留给决策 |
 
-### CRLF 全量复核（2026-10-16，zipball 一次下载后本地扫描 1951 个文本类文件）
+### CRLF 全量复核（2026-10-16；我自己初查 + 子智能体独立审计）
 
-- 远端 master 上含 CRLF 的**文本类文件共 7 个**；其中**只有 2 个与本次工作有关**（由 API 推送脚本读取工作区字节造成）：
-  `app/src/main/java/org/adaway/ui/compose/OverviewScreen.kt` 与 `app/src/main/java/org/adaway/util/WebServerStats.java`。
-- **更正**：此前本节把后者的目录写成 `ui/compose/`，**那是错的** —— 它在 `util/` 下。
-- 另外 5 个是**上游 libpcap 自带的 DOS 移植文件**（`tcpdump/jni/libpcap/msdos/` 下的 `bin2c.c`、`ndis2.c`、`ndis2.h`、`pktdrvr.c`、`pktdrvr.h`）：**预先存在、本应使用 CRLF、与本次工作无关**。
-- 修复方式（如需）：让推送脚本读取 **git 对象**而不是工作区字节，或做一次有意识的重规范化；
-  **不要**用 `core.autocrlf` 做全局重规范化（会弄脏约 1000 个文件）。
+**准确清单（经独立审计更正）**：
 
+| 类别 | 数量 | 处理 |
+|---|---|---|
+| 因服务端 API 造提交而意外 CRLF 的普通文件 | **2** | **已转为 LF**（提交 `8549b1184`）；已逐字节证明只改行尾 |
+| `gradlew.bat` | **1** | **保持 CRLF**（Windows 批处理，本就应当 CRLF；未被 `.gitattributes` 匹配） |
+| 上游 libpcap `tcpdump/jni/libpcap/msdos/` | **10** | **刻意不动**（上游 DOS 移植目录；`.gitattributes` 刻意不含 `*.c`/`*.h`）|
+
+**更正说明**：此前本节写「共 7 个（我的 2 个 + 上游 5 个）」，两处都不准 —— 根因是我早前那次 zipball 扫描的**扩展名清单没有包含 `.bat`**，且 msdos 目录我只数了 5 个 `.c/.h`。经独立审计更正为 **3 个普通文件（2 个已修 + `gradlew.bat` 应当保留）+ 10 个上游文件**。
+
+**持久性（子智能体做了隔离实验，不是推断）**：
+
+- 根目录新增最小 `.gitattributes`（12 条 `text eol=lf`，**不含 `*.c`/`*.h`**）；
+- 在 `core.autocrlf=true` / `false` / `input` 三种配置下，带该属性的文件 `git add` 后索引内**都是 LF**（即属性优先于本地配置）；
+- 在隔离仓库里**全新 clone** 后工作区仍是 LF 且 `git status` 干净（即不会复发）。
+
+> ⚠️ **危险操作，勿在本仓库执行**：`git add --renormalize .` —— 隔离实验证明它会把 `gradlew.bat` 与 10 个 msdos blobs**一起翻成 LF**。要修就只 `git add <具体路径>`。
+
+**独立验证（另一子智能体，只读、对抗性）**：对提交 `8549b1184` 的 7 条断言逐条尝试反驳 → **7/7 确认、0 反驳**。两条最省的复核命令：
+
+- `git diff --ignore-cr-at-eol --stat 8549b1184^ 8549b1184` → 只剩 `.gitattributes | 15 +`（两个源文件的差异全是行尾）；
+- 把旧 blob 去掉全部 `\r` 后 `git hash-object --stdin` → **正好等于**新 blob 的 id。
 
 ## 3. 可核对的证据（截至本次更新）
 
