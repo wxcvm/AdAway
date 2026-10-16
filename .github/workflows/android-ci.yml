@@ -169,6 +169,15 @@ jobs:
           PYEOF
 
 
+      - name: Cache official arm64 OpenSSL 3.5.9 archives
+        uses: actions/cache@v4
+        with:
+          # Only cached build inputs; never cache CA keys or application state.
+          # BUILD-COMMIT and ELF/OpenSSL signatures are still verified by the
+          # source build script and OpenSSL verification workflow.
+          path: webserver/build/official-openssl/arm64-v8a
+          key: official-openssl-3.5.9-android-ndk28.1.13356709-${{ runner.os }}-${{ hashFiles('webserver/scripts/build-official-openssl.sh') }}
+
       - name: Run tests & build release
         run: |
           # Monotonic versionCode: use run_number (per-workflow counter) instead
