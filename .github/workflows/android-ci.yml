@@ -81,6 +81,11 @@ jobs:
           fi
           echo "/internal-stats 字段与契约完全一致 ✓"
 
+      # 契约守卫 3（文档卫生）：文档里每个 §N / §N.M 引用都必须解析到同编号标题。
+      # 起因：手写引用曾多次指错（写成不存在的 §4.1、把确实存在的 §5.2 误判为悬空）。
+      - name: Doc cross-reference guard
+        run: python3 tools/check_doc_refs.py
+
       - name: set up JDK 21
         uses: actions/setup-java@v5
         with:
