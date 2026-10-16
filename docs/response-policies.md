@@ -53,7 +53,7 @@
 | `compatibility_200` | 200 + 空正文（兼容某些客户端） | ✅ 保留，**但放行路径不再使用它** |
 | `image_placeholder` | 返回占位图 | ✅（既有：按类型回内置占位图） |
 | `compatibility` | 按类型自适应（默认） | ✅ 默认档 |
-| **`visible_image_placeholder`** | 对"可见内容"请求也回占位图（而不是让页面塌陷） | ✅ 已实现（`reply_visible`，**默认关**；见 §4.1） |
+| **`visible_image_placeholder`** | 对"可见内容"请求也回占位图（而不是让页面塌陷） | ✅ 已实现（`reply_visible`，**默认关**；见 §3.1） |
 | **`rules` / `rule_override`** | 用户按域/类型覆盖策略 | 🟡 服务端已实现（`rule_override_enabled` + `rule_overrides.txt`，默认关）；**App 内编辑界面未做** |
 | **`request_dedup`** | 短窗口内相同请求只处理一次 | ✅ 已实现（`dedup_enabled`，默认关；1s 窗口） |
 | **`retry_guard`** | 同上请求高频重试时降级应答 | ✅ 已实现（`retry_guard_enabled`，默认关；10s/40 次 → 冷却 30s） |

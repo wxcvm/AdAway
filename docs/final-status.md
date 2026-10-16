@@ -181,7 +181,7 @@ static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp); /
 |---|---|---|
 | ① 无 Root 只承诺 DNS/hosts 层，且**在 UI 明示** | 空路由模式文案说明"不占用任何端口、无拦截页、无逐应用统计"，本机模式说明需占用 80/443 | `values` / `values-zh` 的 `compose_settings_block_mode_null_hint`、`compose_settings_block_mode_localhost_hint` |
 | ② 证书固定的应用用 `tls_failures` 与**（仅拒绝）**表达，**不谎报成功** | 计数器通道：服务端字段 → 汇总 → `/internal-stats` 的 `tls_failures` → App 读取；**用户可见措辞**：每个应用的 TLS 失败计数后追加"（仅拒绝：…不是拦截成功）"与英文 "(rejected only: … - not a successful block)" | `webserver.c` 的 `tls_failures`（声明/汇总/JSON 导出）、`StatsViewModel.kt` 的 `tlsFailures`、`AppDetailScreen.kt` / `StatisticsScreen.kt` 的展示位、`compose_stats_app_tls_fail`（中英各一份），提交 `4dfc493`，发布 `6.7.5.723` |
-| ③ `/internal-reset` 与轮询并发时加**节流**与**原子写** | 节流：1 秒内返回 429；原子写：五份 `.dat` 全部 tmp+rename（见 §6 边界四条的表） | 处理器与辅助函数见 `webserver.c`；CI #721 编译与测试全绿 |
+| ③ `/internal-reset` 与轮询并发时加**节流**与**原子写** | 节流：1 秒内返回 429；原子写：五份 `.dat` 全部 tmp+rename（见 §5.2） | 处理器与辅助函数见 `webserver.c`；CI #721 编译与测试全绿 |
 | ④ 端口冲突**显示来源**、**不静默改动** | 文案点出"可能被 AdGuard 等占用"、说明"没有监听"这一事实、让用户自行改用 8080/8443（并注明劫持模式不依赖 80/443） | `compose_settings_block_mode_hijack_failed`（中英各一份） |
 
 **如实记录（这一条曾是半成品）**：边界 ② 起初**只做了一半** —— `tls_failures` 的计数器通道是完整的，
