@@ -30,7 +30,7 @@ if [[ "$GOT" != "$COMMIT" ]]; then
   echo "ERROR: OpenSSL source commit mismatch ($GOT != $COMMIT)" >&2
   exit 1
 fi
-if [[ -f "$OUT/libssl.a" && -f "$OUT/libcrypto.a" && -f "$OUT/include/openssl/ssl.h" && -f "$OUT/BUILD-COMMIT" ]] &&
+if [[ -s "$OUT/lib/libssl.a" && -s "$OUT/lib/libcrypto.a" && -f "$OUT/include/openssl/ssl.h" && -f "$OUT/BUILD-COMMIT" ]] &&
    [[ "$(cat "$OUT/BUILD-COMMIT")" == "$COMMIT" ]]; then
   echo "Pinned OpenSSL $VERSION already built."
   exit 0
@@ -48,12 +48,12 @@ pushd "$WORK" >/dev/null
 ./Configure android-arm64 -D__ANDROID_API__=30 \
   no-shared no-tests no-apps no-docs no-module \
   -Wl,-z,max-page-size=16384 \
-  --prefix="$OUT" --openssldir="$OUT/ssl"
+  --prefix="$OUT" --libdir=lib --openssldir="$OUT/ssl"
 make -j "${OPENSSL_JOBS:-4}" build_libs
 make install_dev
 popd >/dev/null
 
-[[ -s "$OUT/libssl.a" && -s "$OUT/libcrypto.a" ]] || {
+[[ -s "$OUT/lib/libssl.a" && -s "$OUT/lib/libcrypto.a" ]] || {
   echo "ERROR: OpenSSL libraries were not generated" >&2; exit 1;
 }
 [[ -f "$OUT/include/openssl/opensslv.h" ]] || {
