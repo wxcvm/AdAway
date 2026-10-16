@@ -1,3 +1,62 @@
+# Consolidation pass (in-app releases 6.7.5.696 - 6.7.5.739, 2026-10-16)
+
+> Only **user-visible** changes are listed. Each line names what a user would notice.
+> (The in-app update feed numbers releases 6.7.5.<run>; product versioning is unchanged.)
+
+## Cosmetic filtering (element hiding) -- was silently broken
+
+- **Imported hiding rules never applied.** The collected `##selector` rules were injected *after* `</style>`,
+  so browsers never treated them as CSS. They are now injected **inside** the stylesheet element, so they
+  actually hide elements.
+- **Domain-scoped rules no longer leak to every site.** A rule written as `example.com##.ad` used to be
+  written into the global stylesheet and therefore hid `.ad` on **all** filtered pages. Global rules
+  (`##.ad`) stay global; domain-scoped rules now go to a separate `cosmetic_rules.txt` and are injected
+  only for the page whose host matches (exact host or subdomain; case-insensitive). If that file is
+  absent, behaviour is exactly as before.
+- **Rules containing `<` are dropped** (counted and logged) instead of being able to break out of the
+  stylesheet element.
+
+## Certificate / TLS reporting -- no longer overstates success
+
+- **Per-app TLS failure counts now say "(rejected only)".** A certificate-pinning app fails even when the
+  certificate is installed system-wide; the count now states that the app refused the connection itself
+  and that this is **not** a successful block.
+- **Certificate state remains four-state** (not installed / user store / system-wide / changed) and is
+  recomputed after install, after removal and on every app start; the user-store wording states that most
+  apps do not trust it by default and that system-wide requires `/system` or APEX/apexdata.
+
+## Statistics and counters
+
+- **The "clear all statistics" button now really clears.** It previously deleted two settings keys only,
+  while counters, history curves, per-app stats and the query log live in the native process. It now calls
+  the server's `/internal-reset` (loopback only, 1-second throttle) after a **second-tap confirmation**,
+  and reports success **or failure** honestly.
+- **Statistics files are written atomically.** `stats.dat`, `hist.dat`, `apps.dat`, `query_log.dat` and the
+  SNI cache are now written to a temporary file and renamed, so a concurrent reader can never observe a
+  half-written file; on failure the previous file is left intact.
+- **Retry-storm guard counters are counted by category** instead of being lumped into one "other" bucket.
+
+## Settings
+
+- **Removed a dead toggle.** Bar/line/area is chosen by the chart style; the old separate "traffic bars"
+  switch and its labels were removed (nothing changes for users who never touched it).
+- **TLS failure text, warning texts and certificate hints are complete in both Chinese and English.**
+
+## AdGuard coexistence
+
+- **Guides state the three gotchas explicitly**, and one of them is now enforced in code rather than only
+  documented: pointing DNS at this service does **not** mean HTTPS is filtered. If DNS answers and the
+  connection succeeds but the certificate issuer is still a public CA, the Home wizard judges the setup
+  as *not filtered* and **rolls back** instead of reporting success.
+- **Nothing is ever written to an AdGuard Home configuration file that we do not fully recognise**, a
+  backup is taken first, and any failure rolls back.
+
+## Windows companion repository
+
+- The Windows web-server build lives in a separate repository with its own CI, versioning and releases; it
+  pins upstream `webserver/jni` at a fixed commit. Note: the two ends are a **feature fork** -- they share
+  the rule semantics, configuration keys and `/internal-stats` fields, but not every feature.
+
 # Release 6.4.2
 
 ## Web server
