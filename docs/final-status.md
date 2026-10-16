@@ -287,6 +287,7 @@ static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp); /
 |---|---|---|---|
 | `block_config.json` 的键 | **16** | `Config key contract guard` | CI #717（提交 9e80c9d） |
 | `/internal-stats` 的字段 | **63** | `Stats field contract guard` | CI #744（提交 4f45b05） |
+| **文档交叉引用**（`§N` / `§N.M`） | **25** | `Doc cross-reference guard`（`tools/check_doc_refs.py`） | CI #753（提交 5ea23a7） |
 
 两条守卫做同一件事：把**代码里真实出现的东西**与**契约里记录的东西**各自排序后 `diff`，
 不一致就 `::error::` 并让这一步失败。因此：
@@ -298,6 +299,14 @@ static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp); /
 第一版提取只认 `"key":`，于是报出「契约记了 60 个、代码一个都没有」——那是**提取器的错**，不是文档的错。
 **规则**：当"文档 vs 代码"的比对出现**大面积差异**时，先怀疑提取器；真缺口通常是 1–3 项
 （例如契约的文件清单从六个补到七个）。
+
+### 11.0 三条守卫的共同点：都做过**反向验证**
+
+只证明"能通过"不算守卫 —— 每条都额外验证过"**该失败时会失败**"：
+
+- 键守卫：改动代码里的键名 → 步骤红（此前已验证）；
+- 字段守卫：本地故意让提取结果与契约不一致 → `::error::` + 非零退出；
+- 引用守卫：本地插入一个 一个不存在的编号（形如 § 加 99.9） → **退出码 1** ✓，报错含 `::error file=…,line=…` 与编号 ✓，移除后恢复通过 ✓。
 
 ### 11.1 顺带修掉的三处真实陈旧文档（同一轮排查的产物）
 
