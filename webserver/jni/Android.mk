@@ -7,13 +7,13 @@ OPENSSL_BUILT_DIR := $(LOCAL_PATH)/../build/official-openssl/arm64-v8a
 # checkout by webserver/scripts/build-official-openssl.sh.
 include $(CLEAR_VARS)
 LOCAL_MODULE := official_openssl_crypto
-LOCAL_SRC_FILES := $(OPENSSL_BUILT_DIR)/libcrypto.a
+LOCAL_SRC_FILES := $(OPENSSL_BUILT_DIR)/lib/libcrypto.a
 LOCAL_EXPORT_C_INCLUDES := $(OPENSSL_BUILT_DIR)/include
 include $(PREBUILT_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := official_openssl_ssl
-LOCAL_SRC_FILES := $(OPENSSL_BUILT_DIR)/libssl.a
+LOCAL_SRC_FILES := $(OPENSSL_BUILT_DIR)/lib/libssl.a
 LOCAL_EXPORT_C_INCLUDES := $(OPENSSL_BUILT_DIR)/include
 include $(PREBUILT_STATIC_LIBRARY)
 
