@@ -77,6 +77,27 @@
   **不要**用 `core.autocrlf` 做全局重规范化（会弄脏约 1000 个文件）。
 
 
+## 3. 可核对的证据（截至本次更新）
+
+- master：`e24f065`
+- Android CI 绿运行（已完成的最近几次）：#705(b9a84db)、#703(7340369)、#700(8b41ec9)、#696(22de337)
+- 应用内更新发布：6.7.5.705(2026-10-15T14:43)、6.7.5.703(2026-10-15T14:31)、6.7.5.700(2026-10-15T14:18)、6.7.5.696(2026-10-15T14:05)
+- Windows 仓库发布：progress-win-20261015.1(2026-10-15T11:42) ← adblock-preview-machine-x64.exe,adblock-preview-user-x64；win11-webserver-v1.74(2026-10-11T14:24) ← adblock-webserver-setup.exe,adblock-webserver-win64.zip
+- 说明：Run #704 是 `cancelled`（被后一笔推送按 `concurrency: cancel-in-progress` 取消）—— 该提交的**内容**由
+  #705 验证（#705 的提交包含它），但**那一次运行本身**不构成验收。
+
+## 4. 需要你执行的部分（我只给命令与预期，不写设备脚本）
+
+**A4-1 证书四态**：设置页应显示证书状态（未安装/用户级/系统级/已变化），点"重新计算"后仍然正确。
+**A4-2 issuer**：
+```
+openssl s_client -connect <被拦域名>:443 -servername <被拦域名> 2>/dev/null | openssl x509 -noout -issuer -subject
+```
+预期：issuer 是本地 CA 的 subject（若仍是公网 CA，说明该应用的流量没走到本服务）。
+**A4-3 固定证书应用**：访问一个做证书固定的应用，`/internal-stats` 的 `tls_failures` 应上升，且界面必须表达为
+"（仅拒绝）"，**不得**显示成功。
+**G2**：拦截命中、`204`（放行）、查询日志记录、证书状态刷新 —— 四项各截一次日志/界面即可。
+
 ## 5. G3 收口结果（2026-10-15，全部来自 SonarCloud 只读 API）
 
 **"每次推送都触发分析"——已核实**：`wxcvm_AdAway` 的分析记录与我的提交逐一对应
@@ -153,27 +174,6 @@ static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp); /
 
 | **MoveCertificate** | ⛔ 移出范围 | 用户指示"这个仓库就别管了" | 其 `main` 上有一个我推的未发版加固提交（不影响任何东西） |
 | **两端核心合一** | ⛔ 不在计划内 | 计划明写"不抽取共享 `webserver.c`" | 契约 §6.2 给了工作清单与红线（独立分支 + 两端 CI） |
-
-## 3. 可核对的证据（截至本次更新）
-
-- master：`e24f065`
-- Android CI 绿运行（已完成的最近几次）：#705(b9a84db)、#703(7340369)、#700(8b41ec9)、#696(22de337)
-- 应用内更新发布：6.7.5.705(2026-10-15T14:43)、6.7.5.703(2026-10-15T14:31)、6.7.5.700(2026-10-15T14:18)、6.7.5.696(2026-10-15T14:05)
-- Windows 仓库发布：progress-win-20261015.1(2026-10-15T11:42) ← adblock-preview-machine-x64.exe,adblock-preview-user-x64；win11-webserver-v1.74(2026-10-11T14:24) ← adblock-webserver-setup.exe,adblock-webserver-win64.zip
-- 说明：Run #704 是 `cancelled`（被后一笔推送按 `concurrency: cancel-in-progress` 取消）—— 该提交的**内容**由
-  #705 验证（#705 的提交包含它），但**那一次运行本身**不构成验收。
-
-## 4. 需要你执行的部分（我只给命令与预期，不写设备脚本）
-
-**A4-1 证书四态**：设置页应显示证书状态（未安装/用户级/系统级/已变化），点"重新计算"后仍然正确。
-**A4-2 issuer**：
-```
-openssl s_client -connect <被拦域名>:443 -servername <被拦域名> 2>/dev/null | openssl x509 -noout -issuer -subject
-```
-预期：issuer 是本地 CA 的 subject（若仍是公网 CA，说明该应用的流量没走到本服务）。
-**A4-3 固定证书应用**：访问一个做证书固定的应用，`/internal-stats` 的 `tls_failures` 应上升，且界面必须表达为
-"（仅拒绝）"，**不得**显示成功。
-**G2**：拦截命中、`204`（放行）、查询日志记录、证书状态刷新 —— 四项各截一次日志/界面即可。
 
 ## 6. 计划「边界」四条：逐条实现与证据（2026-10-16 核实）
 
