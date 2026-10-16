@@ -8,6 +8,12 @@ android {
     defaultConfig {
         minSdk 30
         targetSdk 35
+        // Matches app/build.gradle and jni/Application.mk. Without an ABI
+        // filter AGP invokes ndk-build for armeabi-v7a and tries to link
+        // the arm64 OpenSSL archive into a 32-bit binary.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
     }
 
     externalNativeBuild {
