@@ -64,7 +64,13 @@
 | **`a.jpg?v=1` 不匹配** | ⚠️ 已知缺口 | 比较对象是含查询串的完整 URI（**与抽取前一致**，修它会改变线上行为） | 记录在 `lt_map.h` 注释与本节；要改需单独决策 |
 | **按域熔断未迁移** | ⚠️ 有意保留 | 与 `f5_guard.h` 结构相同但**键不同**（只看域，不看 uid） | 迁移前需先有等价测试（已写进头文件） |
 | **`RB_TYPE` 宏表未重构** | ⚠️ 有意保留 | 它做的是**分发**，不是分类；分类已由 `lt_map.h` 覆盖 | 不动 |
-| **CRLF（2 个文件）** | ⚠️ 已知无害 | 我的 API 推送读的是**工作区字节**（Windows 上 `core.autocrlf=true` 会转成 CRLF），而提交里是 LF；于是 `OverviewScreen.kt`(595) 与 `WebServerStats.java`(95) 在远端带上了 CRLF | **不影响功能与编译**；正确修法是改推送脚本去读 git 对象，或单独做一次全仓 renormalize（`git add --renormalize` 会一次触碰上千文件，风险大于收益，故未做） |
+- **CRLF 的真实情况（2026-10-16 用 zipball 全量复核后更正）**：远端 master 上含 CRLF 的文本类文件共 **7 个**，
+  其中 **只有 2 个与本次工作有关**（由 API 推送脚本读取工作区字节造成）：
+  `app/src/main/java/org/adaway/ui/compose/OverviewScreen.kt` 与 `app/src/main/java/org/adaway/util/WebServerStats.java`；
+  **此前账里把后者的目录写成了 `ui/compose/`，是错的**（它在 `util/` 下）。
+  另外 **5 个是上游 libpcap 自带的 DOS 移植文件**（`tcpdump/jni/libpcap/msdos/` 下的 `bin2c.c`、`ndis2.c`、`ndis2.h`、`pktdrvr.c`、`pktdrvr.h`），
+  **预先存在、本应使用 CRLF、与本次工作无关**。修复方式（如需）：让推送脚本读取 git 对象而不是工作区字节，
+  或做一次有意识的重规范化；**不要**用 `core.autocrlf` 全局重规范化（会弄脏约 1000 个文件）。
 | **`sonar-project.properties` 惰性** | ⚠️ 已定性 | 项目用的是 SonarCloud **Automatic Analysis**，该文件**不被读取**（文件第 3 行自己写着这一点）→ 其中的排除项/测试标记**都没生效** | 两条路：改成 **CI 内分析**（配置才生效，也仍满足"每次推送都触发"）或把文件改成纯说明；本次未擅自选，留给决策 |
 
 ## 5. G3 收口结果（2026-10-15，全部来自 SonarCloud 只读 API）
