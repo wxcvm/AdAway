@@ -63,6 +63,24 @@ jobs:
           fi
           echo "契约与代码的键清单完全一致 ✓"
 
+      # 契约守卫 2（G4）：/internal-stats 的字段清单也必须与代码**逐一相同**。
+      # 左边 = 服务端实际输出的 JSON 键（webserver.c 里的 "key": 与转义的 \"key\": 两种写法）；
+      # 右边 = docs/windows-core-contract.md 第 2 节表格里记录的字段。
+      - name: Stats field contract guard
+        run: |
+          set -euo pipefail
+          code_keys=$( { grep -oE '\\"[a-z][a-z0-9_]{2,40}\\"[[:space:]]*:' webserver/jni/webserver.c | sed -E 's/.*\\"([a-z0-9_]+)\\".*/\1/'
+                         grep -oE '(^|[^\\])"[a-z][a-z0-9_]{2,40}"[[:space:]]*:' webserver/jni/webserver.c | sed -E 's/.*"([a-z0-9_]+)".*/\1/' ; } | sort -u)
+          doc_keys=$(sed -n '/^## 2\./,/^## 3\./p' docs/windows-core-contract.md \
+                      | grep -oE '`[a-z][a-z0-9_]{2,40}`' | tr -d '`' | sort -u)
+          echo "代码输出的字段（$(echo "$code_keys" | wc -l) 个）"; echo "$code_keys"
+          echo "契约记录的字段（$(echo "$doc_keys" | wc -l) 个）"; echo "$doc_keys"
+          if ! diff -u <(echo "$doc_keys") <(echo "$code_keys"); then
+            echo "::error::/internal-stats 字段清单与契约不一致：左边是契约、右边是代码（见上）"
+            exit 1
+          fi
+          echo "/internal-stats 字段与契约完全一致 ✓"
+
       - name: set up JDK 21
         uses: actions/setup-java@v5
         with:
