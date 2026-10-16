@@ -181,7 +181,7 @@ static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp); /
 |---|---|---|
 | ① 无 Root 只承诺 DNS/hosts 层，且**在 UI 明示** | 空路由模式文案说明"不占用任何端口、无拦截页、无逐应用统计"，本机模式说明需占用 80/443 | `values` / `values-zh` 的 `compose_settings_block_mode_null_hint`、`compose_settings_block_mode_localhost_hint` |
 | ② 证书固定的应用用 `tls_failures` 与**（仅拒绝）**表达，**不谎报成功** | 计数器通道：服务端字段 → 汇总 → `/internal-stats` 的 `tls_failures` → App 读取；**用户可见措辞**：每个应用的 TLS 失败计数后追加"（仅拒绝：…不是拦截成功）"与英文 "(rejected only: … - not a successful block)" | `webserver.c` 的 `tls_failures`（声明/汇总/JSON 导出）、`StatsViewModel.kt` 的 `tlsFailures`、`AppDetailScreen.kt` / `StatisticsScreen.kt` 的展示位、`compose_stats_app_tls_fail`（中英各一份），提交 `4dfc493`，发布 `6.7.5.723` |
-| ③ `/internal-reset` 与轮询并发时加**节流**与**原子写** | 节流：1 秒内返回 429；原子写：五份 `.dat` 全部 tmp+rename（见 §5.2） | 处理器与辅助函数见 `webserver.c`；CI #721 编译与测试全绿 |
+| ③ `/internal-reset` 与轮询并发时加**节流**与**原子写** | 节流：1 秒内返回 429；原子写：五份 `.dat` 全部 tmp+rename（见 §6 边界四条的表） | 处理器与辅助函数见 `webserver.c`；CI #721 编译与测试全绿 |
 | ④ 端口冲突**显示来源**、**不静默改动** | 文案点出"可能被 AdGuard 等占用"、说明"没有监听"这一事实、让用户自行改用 8080/8443（并注明劫持模式不依赖 80/443） | `compose_settings_block_mode_hijack_failed`（中英各一份） |
 
 **如实记录（这一条曾是半成品）**：边界 ② 起初**只做了一半** —— `tls_failures` 的计数器通道是完整的，
@@ -278,7 +278,7 @@ static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp); /
   在这种前提下写出**从未运行过**的测试代码，属于"看起来有测试、实际没验证"，与本项目一直坚持的标准相反。
 - **若你要走仪器测试路线**：需要你在接好设备后运行一次并贴回结果；我可以据其失败信息修——但**不会**先交付未运行的测试。
 
-同类如实说明还有两条（此前已记）：远端有 7 个文本文件是 CRLF，其中 2 个与本次工作有关（功能等价，详见 §4 末）；SonarCloud 余 1 条 MINOR 的 `xml:S5332`
+同类如实说明还有两条（此前已记）：远端有 7 个文本文件是 CRLF，其中 2 个与本次工作有关（功能等价，详见 §2 的「CRLF 全量复核」小节）；SonarCloud 余 1 条 MINOR 的 `xml:S5332`
 （已在 XML 中按正确方式抑制但该规则不支持，**拒绝**为让数字好看而真的声明 `usesCleartextTraffic`）。
 
 ## 11. 契约的两个接口面：均已由 CI 常驻守卫（不再是"我记得更新过"）
