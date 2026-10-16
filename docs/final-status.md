@@ -232,3 +232,28 @@ openssl s_client -connect <被拦域名>:443 -servername <被拦域名> 2>/dev/n
 | 解除过滤的真实效果 | 本服务器不再拦截该域名（回 204 No Content）；在 AdGuard 指向本服务器的部署里服务器拿不到真实内容 | 主动说明真实效果，属「不谎报」的正确示范 |
 
 这些文案**主动写明默认关闭、写完真实效果与不变项**（正常请求不受影响 / 请求仍然算被拦 / 拦截效果不变），与实现一致；也是本项目「不谎报」要求在 UI 上的体现。
+## 9. 收口期新增的三块（E 的两层 + 验收单 + 三坑亲验）
+
+### 9.1 E（AdGuard Home custom_ip 向导）补上两层，均已 CI 验证
+
+| 层 | 做什么 | 证据 |
+|---|---|---|
+| 改动计划核心 `AdGuardHomeCustomIp` | 只认已知格式（找不到 `dns:` 或 `blocking_mode:` 就拒绝）；保存每一处原文以支持字节级回滚；绝不部分写入；**本类不写文件** | 5 个单测 |
+| 文件层 `AdGuardHomeConfigFile` | **先备份**（备份失败即放弃应用）→ 写 `.tmp` 后 `rename`（原子写）→ 写后**读回校验**→ 任何一步失败**用备份回滚**并如实回报 `rolledBack`；格式不认则**一字不动** | 3 个单测；Android CI **#736** success |
+| 实测判定 `AdGuardHomeVerification` | DNS / 连接 / issuer 三步判定；**DNS 已指向但 issuer 仍是公网 CA ⇒ 判 DNS_ONLY_NOT_FILTERED 并必须回滚**；`shouldRollback(v) = v != OK` | 4 个单测；Android CI **#737** success |
+
+**尚未接线**：界面（展示/复制/一键应用与回滚）需要看到真实界面再动手，属于待你提供截图后的工作。
+
+### 9.2 真机验收单（把 A4 与 G2 合成一次运行）
+
+`docs/device-acceptance.md`：cmd 可直接粘贴的四库命令与 issuer 两条等价命令；**判定规则在运行之前写死**
+（四态判定与 `certificateTrustLevel()` 实现逐条对齐；无 root 则判定降级、不得断言没有系统级；
+公网 issuer 属「该应用流量没走到本服务」，如实记录、不算失败）；并写明设置页状态与 `ls` 结果不一致即为我方 bug。
+
+### 9.3 「三坑」逐坑亲验（均已在代码中存在）
+
+- 坑①（DNS 不带端口需 80/443）：HijackModel 的 nat 链说明与 ServerWatchdogWorker 的黑洞风险说明；
+- 坑②（127.0.0.1 指客户端自身）：HijackModel 明确「Leave loopback, LAN and carrier-grade NAT destinations alone」；
+- 坑③（DNS 已指向 ≠ HTTPS 已过滤）：**三重独立保障** —— `AdGuardCoexistence` 的阻塞判定；
+  `AdGuardClientGuide` 中由单测固定的规则（任何版本都不允许出现「DNS 已指向即完成」的说法）；
+  以及 `AdGuardHomeVerification` 的机器判定 + 自动回滚。
