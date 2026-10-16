@@ -204,3 +204,18 @@ openssl s_client -connect <被拦域名>:443 -servername <被拦域名> 2>/dev/n
 
 **方法说明**：以上均为**只读核对**（读源码/读资源），未修改任何行为；核对它们的动机是前面几轮
 反复出现的教训 —— "声称已做"与"亲眼看过"是两件事（例如边界 ② 就曾只做了一半）。
+
+### 7.1 C5 的再次亲验（规则/覆盖的保存反馈）
+
+**`addUserRule` 会把结果反馈给调用方** —— 实现形态是**回调**而不是 `Result` 类型：
+`StatsViewModel.addUserRule(host, type, redirection, onDone: (Boolean) -> Unit)`，
+调用处（`RulesScreen`）接收该布尔值并据此给出界面反馈。**意图（让调用方知道成功/失败）满足**；
+但如实说明：它**不是**计划措辞里的 sealed `Result`。此处按实情记录，不写成"返回 Result"。
+
+**`addOverride` 有返回值，界面按结果决定后续动作**：`ExemptionRules.addOverride(context, host, policy): String`；
+`RuleOverridesScreen` 用 `val saved = …` 接收，注释写明"保存要按结果决定后续动作：
+`addOverride()` 在**域名无效或写文件失败**时…"。即"非空才清空/失败要如实反馈"的要害成立。
+
+**`rule_override_enabled` 的依赖被明确提示**：该键确实由服务端写入配置
+（`WebServerUtils` 的 `appendBlockReplyField(sb, "rule_override_enabled", …)`；
+`RuleOverridesScreen` 的注释写明"所以**提示里必须把这条依赖说清楚**"）。
