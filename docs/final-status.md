@@ -295,3 +295,28 @@ openssl s_client -connect <被拦域名>:443 -servername <被拦域名> 2>/dev/n
 2. `docs/response-policies.md` 指向**已迁出**的 `webserver/win32/` —— 已改为指向独立仓库与契约 §6.1/§6.2；
 3. `docs/windows-core-contract.md` §3 的文件清单**少一个**：C 端实际还会读 `cosmetic_rules.txt`（域名作用域），
    现已列为第七个文件，并写明"文件不存在时行为与没有本功能时完全一致"。
+## 12. Windows 端巡检（2026-10-16）：pin 有效、两次失败已澄清、一条将来维护项
+
+### 12.1 pin 仍然有效（未前移）
+
+- `fetch-upstream.sh`：`PIN=4470606366e614abdb308fdfe94734d28167439c`，`BRANCH=feat/win11-webserver-release`；
+- 该分支**现在的尖端正好就是这个提交**（2026-10-11 14:26）→ 所以脚本里那条
+  「取到的提交 != PIN 就 `::error::` 大声失败」的断言**现在是安静的** ✓；
+- 被 pin 的树内容与契约一致：`webserver/jni` **8 个文件**（Android.mk、Application.mk、mongoose 四件、stub.c、webserver.c），
+  `webserver/win32` **0 个**（已彻底迁出）。
+
+### 12.2 最近 5 次 CI 里有 2 次失败 —— 已查清为历史中间态，不是隐患
+
+| 运行 | 提交信息 | 失败步骤 | 判定 |
+|---|---|---|---|
+| #52（10-14） | `fix(win): atomic bounded subscription import and frozen-core loader in …` | Build webserver.exe (mingw64 + OpenSSL) | 该轮正在修这件事 |
+| #50（10-12） | `ci: install Python for pinned source validation in MSYS2` | **同一步骤** | 同上 |
+
+两次之后 **#51 / #53 / #54 同一构建步骤全部通过** → 结论：**历史中间态、已被后续修复覆盖**，
+不是"每隔几次就坏一次"的规律。
+
+### 12.3 一条将来维护项（现在不是问题）
+
+MSYS2 会输出**非致命警告**：`[msystem-mingw64] MINGW64 is deprecated. Migrate to UCRT64 or CLANG64.`
+→ 与那两次失败**无关**（失败在编译步骤）。但将来 MSYS2 若移除 MINGW64 环境，Windows 构建会突然断；
+迁到 UCRT64/CLANG64 是一次**独立的小改动**（需在独立仓库改 CI 与可能的路径假设），**现在不做**。
