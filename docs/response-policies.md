@@ -4,7 +4,8 @@
 > 每个结论都对应仓库里的提交；不确定的地方宁可写"未实现"，不要写成"已支持"。
 >
 > 适用范围：`webserver/jni/webserver.c`（Android，master）与
-> `webserver/win32/gui_win32.c`（Windows，feat/win11-webserver-release）。
+> Windows 端（`gui_win32.c` 等）**已迁出到独立仓库** `wxcvm/AdAway-Windows`；本仓库不再包含 `webserver/win32/`。两端的差距与"特性分家"的定性见
+> `docs/windows-core-contract.md` §6.1/§6.2。
 
 ## 1. 请求判定流水线（顺序即优先级）
 
