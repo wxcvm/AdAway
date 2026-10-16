@@ -340,3 +340,57 @@ static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp); /
 MSYS2 会输出**非致命警告**：`[msystem-mingw64] MINGW64 is deprecated. Migrate to UCRT64 or CLANG64.`
 → 与那两次失败**无关**（失败在编译步骤）。但将来 MSYS2 若移除 MINGW64 环境，Windows 构建会突然断；
 迁到 UCRT64/CLANG64 是一次**独立的小改动**（需在独立仓库改 CI 与可能的路径假设），**现在不做**。
+## 13. A4 真机实测（2026-10-16，Android 17 / SDK 37 / arm64-v8a / KernelSU）
+
+设备：`5LEA596P8DW4YXBQ`（PGKM10）· 应用 `com.wxcvm.Adaway` · 全部取证**只读**（不装不卸、不改设置、不写设备文件）。
+
+### 13.1 A4① 证书落在哪儿：**确证为系统级**
+
+两条**独立**证据（互为校验）：
+
+| 证据 | 方法 | 结果 |
+|---|---|---|
+| 一 | DER 指纹直接比对（同一张证书 ⇔ DER 完全相同） | 应用 CA `localhost-2410.crt` 的 `sha256(DER)` = `d1a2b1448fa03b0d…` **与 APEX 里 `0a405a57.0` 完全相同**；与 `0f4ed297.0` 不同 |
+| 二 | subject hash（**先自检解析器**，再用它） | `0a405a57.0` 算出的 md5 = `0a405a57` **等于它自己的文件名**（自检通过）；应用 CA 算出的 md5 **同为 `0a405a57`** |
+
+⇒ 结论：**`/apex/com.android.conscrypt/cacerts/0a405a57.0` 就是 AdAway 的本机 CA ⇒ 判定 TRUST_SYSTEM（系统级）**，
+即 `certificateTrustLevel()` 四条系统级路径中的第 2 条命中。
+
+**顺带由真机反向确证了一个代码事实**：命中的是 **md5 规则** ⇒ `computeSubjectHashOld()` 用的确实是
+旧式（MD5）subject hash —— 此前只是"方法名里带 Old"，现在由设备上的证书文件名证明。
+
+### 13.2 四条探测路径在本机的逐条实测
+
+| 路径 | 本机实测 | 是否命中 |
+|---|---|---|
+| `/system/etc/security/cacerts/<hash>.0` | 145 个，时间 2026-09-13（系统构建） | 未命中（无本机 CA） |
+| `/apex/com.android.conscrypt/cacerts/<hash>.0` | 147 个；`0a405a57.0` 时间戳为**当天 16:11** | **命中 ⇒ 系统级** |
+| `/data/misc/apexdata/com.android.conscrypt/cacerts/<hash>.0` | **目录不存在** | 未命中（该分支在本机永不成立） |
+| `/apex/com.android.conscrypt@*/cacerts/<hash>.0` | **glob 不存在** | 未命中（同上） |
+| 用户库 `/data/misc/user/0/cacerts-added` | **连 root 都 Permission denied**（SELinux） | 读不到 ⇒ 见 §13.4 |
+
+### 13.3 其他已确证事实（只读取得）
+
+- 服务在跑：`127.0.0.1` 与 `[::1]` 上 **80 / 443 / 8686** 均在 LISTEN；
+- 资源目录 = `/data/data/com.wxcvm.Adaway/files/webserver/`，含 CA（`localhost-2410.crt`，1151 字节）与
+  `block_config.json`、`blocklist.txt`、`allowlist.txt`、`pin_policy.txt`、`cosmetic.css` 等；
+- **实测印证了 §5.2 的行为**：`stats.json` 时间戳为 19:22（实时刷新），而五份 `.dat` 快照为 16:10
+  ⇒ 正是"重置只清内存、磁盘快照由随后轮询按既有节奏写出"。
+
+### 13.4 取证经验（写下来免得后人重踩）
+
+1. **二进制/证书一律走 `base64`**：`adb exec-out "su -c cat …"` 会被 LF→CRLF 转换污染
+   （实测：1151 字节的证书被读成 2342 字节）；改用 `base64` 文本传输后字节数与设备完全一致；
+2. **APEX 里的 `<hash>.0` 是 PEM，不是 DER**（首行 base64 解出 `-----BEGIN CERTIFICATE-----`）——
+   两者混用会让解析器报"首字节不是 SEQUENCE"；
+3. **`cacerts-added` 在本机连 root 都读不到**（SELinux），所以"用 adb 看用户库"这条路不通，
+   四库判定的可信来源是 APEX 两条 + 应用自身状态；
+4. 设备上没有 `openssl` / `curl` / `wget`，只有 `toybox`。
+
+### 13.5 仍未完成（如实）
+
+- **A4② issuer**：未做（需要选定一个被拦域名后跑 `openssl s_client` 或本机已自测的 `tls_issuer.ps1`）；
+- **A4③ `tls_failures` 是否随 pinning 上升**：未做（数据源已定位：`files/webserver/stats.json` 与回环 8686）；
+- **G2 四项**（拦截命中 / 204 放行 / 查询日志 / 证书状态）：未做；
+- **C9 的 7 组视觉改造与 E 向导界面接线**：需要一张设置页截图（含证书状态段），与该截图可对 §13.1 的
+  「系统级」结论做交叉印证。
