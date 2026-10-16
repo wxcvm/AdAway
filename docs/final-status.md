@@ -64,14 +64,18 @@
 | **`a.jpg?v=1` 不匹配** | ⚠️ 已知缺口 | 比较对象是含查询串的完整 URI（**与抽取前一致**，修它会改变线上行为） | 记录在 `lt_map.h` 注释与本节；要改需单独决策 |
 | **按域熔断未迁移** | ⚠️ 有意保留 | 与 `f5_guard.h` 结构相同但**键不同**（只看域，不看 uid） | 迁移前需先有等价测试（已写进头文件） |
 | **`RB_TYPE` 宏表未重构** | ⚠️ 有意保留 | 它做的是**分发**，不是分类；分类已由 `lt_map.h` 覆盖 | 不动 |
-- **CRLF 的真实情况（2026-10-16 用 zipball 全量复核后更正）**：远端 master 上含 CRLF 的文本类文件共 **7 个**，
-  其中 **只有 2 个与本次工作有关**（由 API 推送脚本读取工作区字节造成）：
-  `app/src/main/java/org/adaway/ui/compose/OverviewScreen.kt` 与 `app/src/main/java/org/adaway/util/WebServerStats.java`；
-  **此前账里把后者的目录写成了 `ui/compose/`，是错的**（它在 `util/` 下）。
-  另外 **5 个是上游 libpcap 自带的 DOS 移植文件**（`tcpdump/jni/libpcap/msdos/` 下的 `bin2c.c`、`ndis2.c`、`ndis2.h`、`pktdrvr.c`、`pktdrvr.h`），
-  **预先存在、本应使用 CRLF、与本次工作无关**。修复方式（如需）：让推送脚本读取 git 对象而不是工作区字节，
-  或做一次有意识的重规范化；**不要**用 `core.autocrlf` 全局重规范化（会弄脏约 1000 个文件）。
+| **CRLF（7 个文本文件）** | ⚠️ 已知无害 | 其中 **仅 2 个与本次工作有关**（API 推送脚本读工作区字节造成）：`OverviewScreen.kt` 与 `util/WebServerStats.java`；另外 5 个是**上游 libpcap 的 `msdos/` DOS 移植文件**，预先存在、本应与本次工作无关 | 详见 §4 末的「CRLF 全量复核」段落 |
 | **`sonar-project.properties` 惰性** | ⚠️ 已定性 | 项目用的是 SonarCloud **Automatic Analysis**，该文件**不被读取**（文件第 3 行自己写着这一点）→ 其中的排除项/测试标记**都没生效** | 两条路：改成 **CI 内分析**（配置才生效，也仍满足"每次推送都触发"）或把文件改成纯说明；本次未擅自选，留给决策 |
+
+### CRLF 全量复核（2026-10-16，zipball 一次下载后本地扫描 1951 个文本类文件）
+
+- 远端 master 上含 CRLF 的**文本类文件共 7 个**；其中**只有 2 个与本次工作有关**（由 API 推送脚本读取工作区字节造成）：
+  `app/src/main/java/org/adaway/ui/compose/OverviewScreen.kt` 与 `app/src/main/java/org/adaway/util/WebServerStats.java`。
+- **更正**：此前本节把后者的目录写成 `ui/compose/`，**那是错的** —— 它在 `util/` 下。
+- 另外 5 个是**上游 libpcap 自带的 DOS 移植文件**（`tcpdump/jni/libpcap/msdos/` 下的 `bin2c.c`、`ndis2.c`、`ndis2.h`、`pktdrvr.c`、`pktdrvr.h`）：**预先存在、本应使用 CRLF、与本次工作无关**。
+- 修复方式（如需）：让推送脚本读取 **git 对象**而不是工作区字节，或做一次有意识的重规范化；
+  **不要**用 `core.autocrlf` 做全局重规范化（会弄脏约 1000 个文件）。
+
 
 ## 5. G3 收口结果（2026-10-15，全部来自 SonarCloud 只读 API）
 
@@ -274,8 +278,9 @@ openssl s_client -connect <被拦域名>:443 -servername <被拦域名> 2>/dev/n
   在这种前提下写出**从未运行过**的测试代码，属于"看起来有测试、实际没验证"，与本项目一直坚持的标准相反。
 - **若你要走仪器测试路线**：需要你在接好设备后运行一次并贴回结果；我可以据其失败信息修——但**不会**先交付未运行的测试。
 
-同类如实说明还有两条（此前已记）：远端两个文件为 CRLF（功能等价）；SonarCloud 余 1 条 MINOR 的 `xml:S5332`
+同类如实说明还有两条（此前已记）：远端有 7 个文本文件是 CRLF，其中 2 个与本次工作有关（功能等价，详见 §4 末）；SonarCloud 余 1 条 MINOR 的 `xml:S5332`
 （已在 XML 中按正确方式抑制但该规则不支持，**拒绝**为让数字好看而真的声明 `usesCleartextTraffic`）。
+
 ## 11. 契约的两个接口面：均已由 CI 常驻守卫（不再是"我记得更新过"）
 
 | 接口面 | 数量 | 守卫步骤 | 首次通过 |
