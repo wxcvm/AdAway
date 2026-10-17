@@ -106,7 +106,14 @@ jobs:
           # than the legacy outputs/apk directory. Select only release APKs,
           # never a debug/androidTest APK, and refuse ambiguous candidates.
           mapfile -t release_apks < <(find app/build -type f -name '*.apk' \
-            | grep -E '/apk/release/[^/]+\.apk
+            | grep -E '/apk/release/[^/]+\.apk$' | sort)
+          if [[ "${#release_apks[@]}" -ne 1 || ! -s "${release_apks[0]:-}" ]]; then
+            echo "::error::Expected exactly one packaged release APK, found ${#release_apks[@]}"
+            find app/build -type f -name '*.apk' -print || true
+            exit 1
+          fi
+          unsigned="${release_apks[0]}"
+          echo "Using release APK from: $unsigned"
           export SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD
           "$bt/apksigner" sign --ks "$keystore" \
             --ks-pass env:SIGNING_STORE_PASSWORD \
