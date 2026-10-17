@@ -44,7 +44,12 @@ jobs:
                   key = f"compose_settings_section_{i}_{suffix}"
                   assert all(key in group for group in groups), key
           page = Path("app/src/main/java/org/adaway/ui/compose/SettingsScreen.kt").read_text()
-          assert "rememberSaveable" in page and "SettingsCategoryNavigation" in page
+          assert "rememberSaveable" in page and "SettingsCategoryHome" in page
+          assert "BackHandler(enabled = selectedSection >= 0)" in page
+          assert "if (selectedSection < 0)" in page
+          assert "sectionSearchHints" in page
+          nav = Path("app/src/main/java/org/adaway/ui/compose/SettingsCategoryNavigation.kt").read_text()
+          assert "OutlinedTextField" in nav and "SettingsCategoryHome" in nav
           for i in range(7):
               assert f"{i} ->" in page, f"Missing settings page section {i}"
           print("All seven categorized settings sections present and localized")
