@@ -568,11 +568,13 @@ public class UpdateModel {
                 .edit().putLong(PENDING_DOWNLOAD_ID, downloadId).apply();
         // Register new broadcast receiver
         this.receiver = new ApkDownloadReceiver(downloadId);
-        // RECEIVER_NOT_EXPORTED: ACTION_DOWNLOAD_COMPLETE is sent by the system
-        // DownloadManager, so no other app needs (or gets) access to this
-        // receiver. EXPORTED also let any app wake the process at will.
+        // DownloadManager's completion may be broadcast by the privileged
+        // DownloadsProvider UID rather than system UID. Android's receiver
+        // guidance requires EXPORTED for such system-owned senders. The
+        // receiver checks the exact id and DownloadManager terminal state,
+        // then cryptographically verifies the APK before any install intent.
         ContextCompat.registerReceiver(this.context, this.receiver,
-                new IntentFilter(ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_NOT_EXPORTED);
+                new IntentFilter(ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED);
         // Return download identifier
         return downloadId;
     }
