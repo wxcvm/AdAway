@@ -12,6 +12,11 @@ on:
   push:
     branches: ['ui/settings-seven-sections-*']
 
+# Discard outdated branch builds when UI is edited repeatedly.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
