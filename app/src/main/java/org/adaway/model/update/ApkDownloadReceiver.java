@@ -47,7 +47,28 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
         //Fetching the download id received with the broadcast
         long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
         //Checking if the received broadcast is for our enqueued download by matching download id
-        if (this.downloadId != id) {
+        if (this.downloadId != id ||
+                !DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction())) {
+            return;
+        }
+        // An exported receiver cannot trust the broadcast alone: even if a
+        // third party knows the id, it cannot fake DownloadManager state.
+        DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
+        if (downloadManager == null) return;
+        int status;
+        try (android.database.Cursor cursor = downloadManager.query(
+                new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) return;
+            int column = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (column < 0) return;
+            status = cursor.getInt(column);
+        } catch (Exception exception) {
+            Timber.w(exception, "Cannot verify DownloadManager completion broadcast");
+            return;
+        }
+        if (status != DownloadManager.STATUS_SUCCESSFUL
+                && status != DownloadManager.STATUS_FAILED) {
+            // Do not unregister on an early/spoofed completion intent.
             return;
         }
         // One-shot receiver: unregister before the slow verification below so
@@ -57,6 +78,12 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
             context.unregisterReceiver(this);
         } catch (IllegalArgumentException ignored) {
             // already unregistered
+        }
+        if (status == DownloadManager.STATUS_FAILED) {
+            Toast.makeText(context,
+                    context.getString(R.string.compose_update_download_failed),
+                    Toast.LENGTH_LONG).show();
+            return;
         }
         Context appContext = context.getApplicationContext();
         // onReceive runs on the main thread and has ~10 s before the system
