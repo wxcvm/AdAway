@@ -491,4 +491,20 @@
     <string name="compose_settings_section_5_keywords">统计 图表 趋势 实时 websocket 曲线</string>
     <string name="compose_settings_section_6_keywords">应用 监控 开机 自启动 后台 主题 外观 浅色 深色</string>
     <string name="compose_settings_section_7_keywords">备份 恢复 导入 导出 重置 调试 日志 更新 关于 版本</string>
+
+    <string name="compose_nav_more">更多</string>
+    <string name="compose_more_hint">这里集中提供现有工具与诊断入口，点击即可打开对应功能。</string>
+    <string name="compose_more_logs">查询日志</string>
+    <string name="compose_more_logs_desc">查看已送达服务的请求、处理结果与导出</string>
+    <string name="compose_more_exempt">域名放行</string>
+    <string name="compose_more_exempt_desc">在支持放行的拦截模式下管理域名豁免</string>
+    <string name="compose_more_overrides">按域响应覆盖</string>
+    <string name="compose_more_overrides_desc">为不同域名设置拦截后的自定义响应方式</string>
+    <string name="compose_more_network">网络中心</string>
+    <string name="compose_more_network_desc">查看全流量接管、AdGuard 协同、DNS 与回滚的规划状态</string>
+    <string name="compose_more_settings">全部设置</string>
+    <string name="compose_more_settings_desc">拦截选项、Web 服务、证书、备份及外观设置</string>
+    <string name="compose_more_planned">后续计划 · 尚未启用</string>
+    <string name="compose_more_planned_desc">VPN/TUN 全流量接管、AdGuard 冲突自动处理、网络路由回滚尚未实装。可以打开网络中心了解具体范围。</string>
+
 </resources>
