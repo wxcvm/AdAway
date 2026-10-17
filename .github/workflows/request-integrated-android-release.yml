@@ -1,0 +1,28 @@
+name: Publish integrated Android stable UI and updater
+on:
+  push:
+    branches: ['release-request/official-full-ui-20261017']
+    paths: ['.github/workflows/request-integrated-android-release.yml']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  dispatch:
+    if: github.repository == 'wxcvm/AdAway'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate tested current master and dispatch original signed release
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=f29a1feafed39c51079a18b3d9b95bf51cbcb4f5
+          gh run watch 39013604487 --repo "$GITHUB_REPOSITORY" --exit-status
+          actual=$(gh api "repos/$GITHUB_REPOSITORY/branches/master" --jq '.commit.sha')
+          test "$actual" = "$expected" || {
+            echo "::error::Android master changed since release was approved"; exit 1;
+          }
+          gh workflow run android-ci.yml --repo "$GITHUB_REPOSITORY" --ref master
+          echo "Triggered original production-signed Android workflow for $expected"
