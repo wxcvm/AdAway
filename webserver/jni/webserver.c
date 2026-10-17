@@ -10,6 +10,19 @@
 #include "rule_norm.h"
 #include "pin_window.h"
 #include "f5_guard.h"
+#include "cosmetic_sanitize.h"
+#include "cosmetic_scope.h"
+#include "lt_map.h"
+
+
+/*
+ * 统计类 .dat 文件的**原子写**：先写 <path>.tmp，落盘成功后 rename 覆盖。
+ * 这样读端（App 会并发读这四个文件）要么看到旧文件、要么看到新文件，
+ * 永远不会读到写了一半的内容 —— 计划边界要求"与轮询并发时加节流与原子写"。
+ * 失败时删掉临时文件，旧文件原样保留。
+ */
+static FILE *open_atomic_write(const char *path, char *tmp, size_t tmp_cap);
+static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp);
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -464,10 +477,11 @@ static void save_stats(const struct settings *s) {
     f.tls_handshakes    = s_stats.tls_handshakes;
     f.tls_failures      = s_stats.tls_failures;
     f.sni_cache_hits    = s_stats.sni_cache_hits;
-    FILE *fp = fopen(path, "wb");
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
     if (fp) {
         fwrite(&f, sizeof(f), 1, fp);
-        fclose(fp);
+        finish_atomic_write(fp, path, atomic_tmp);
     }
 }
 
@@ -769,8 +783,9 @@ static void save_hist(const struct settings *s) {
     f.daily_slot_start = (int64_t)s_daily_slot_start;
     memcpy(f.hist, s_hist, sizeof(s_hist));
     memcpy(f.daily, s_daily, sizeof(s_daily));
-    FILE *fp = fopen(path, "wb");
-    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); finish_atomic_write(fp, path, atomic_tmp); }
 }
 
 static void load_hist(const struct settings *s) {
@@ -894,8 +909,9 @@ static void apps_save(const char *resource_dir) {
     f.count = (uint32_t)s_app_count;
     for (int i = 0; i < s_app_count && i < APP_STATS_MAX; i++)
         f.entries[i] = s_apps[i];
-    FILE *fp = fopen(path, "wb");
-    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); finish_atomic_write(fp, path, atomic_tmp); }
 }
 static void apps_load(const char *resource_dir) {
     if (!resource_dir || !resource_dir[0]) return;
@@ -1739,8 +1755,9 @@ static void sni_cache_save(const char *resource_dir) {
         f.entries[i].issued_at = s_sni_cache[i].issued_at;
     }
     pthread_mutex_unlock(&s_sni_mutex);
-    FILE *fp = fopen(path, "wb");
-    if (fp) { fwrite(&f, sizeof(f), 1, fp); fclose(fp); }
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
+    if (fp) { fwrite(&f, sizeof(f), 1, fp); finish_atomic_write(fp, path, atomic_tmp); }
 }
 
 static void sni_cache_load(const char *resource_dir) {
@@ -2315,11 +2332,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Images & video thumbnails: fall through to the user-configured
        placeholder images (they're meant to be seen). */
-    if (uri_ends_with_ci(u, ".jpg") || uri_ends_with_ci(u, ".jpeg") ||
-        uri_ends_with_ci(u, ".png") || uri_ends_with_ci(u, ".gif") ||
-        uri_ends_with_ci(u, ".webp") || uri_ends_with_ci(u, ".avif") ||
-        uri_ends_with_ci(u, ".svg") || uri_ends_with_ci(u, ".ico") ||
-        uri_ends_with_ci(u, ".bmp")) {
+    if (lt_is_image(u.buf, u.len)) {
         RB_TYPE(LT_IMAGES, cfg_images);
         if (!cfg_images) return deny_quick(&s_stats.blocked_images, c);
         return false;
@@ -2329,7 +2342,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        response never changes at runtime, so the client stops
        re-requesting it after the first time (saves battery/bandwidth
        on every page load). */
-    if (uri_ends_with_ci(u, ".js") || uri_ends_with_ci(u, ".mjs")) {
+    if (lt_is_script(u.buf, u.len)) {
         RB_TYPE(LT_SCRIPTS, cfg_scripts);
         if (!cfg_scripts) return deny_quick(&s_stats.blocked_scripts, c);
         s_stats.blocked_scripts++;
@@ -2340,7 +2353,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     }
 
     /* Stylesheets: empty CSS, HTTP 200. Cached like JS above. */
-    if (uri_ends_with_ci(u, ".css")) {
+    if (lt_is_style(u.buf, u.len)) {
         RB_TYPE(LT_STYLES, cfg_styles);
         if (!cfg_styles) return deny_quick(&s_stats.blocked_styles, c);
         s_stats.blocked_styles++;
@@ -2351,9 +2364,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     }
 
     /* Fonts: HTTP 204 (no content needed). */
-    if (uri_ends_with_ci(u, ".woff") || uri_ends_with_ci(u, ".woff2") ||
-        uri_ends_with_ci(u, ".ttf") || uri_ends_with_ci(u, ".otf") ||
-        uri_ends_with_ci(u, ".eot")) {
+    if (lt_is_font(u.buf, u.len)) {
         RB_TYPE(LT_FONTS, cfg_fonts);
         if (!cfg_fonts) return deny_quick(&s_stats.blocked_fonts, c);
         s_stats.blocked_fonts++;
@@ -2368,14 +2379,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        ended / nothing to play" and keeps the player quiet. Covers
        MP4/WebM audio+video containers, HLS (.m3u8/.ts) and DASH
        (.mpd) manifests, and legacy formats. */
-    if (uri_ends_with_ci(u, ".mp4") || uri_ends_with_ci(u, ".webm") ||
-        uri_ends_with_ci(u, ".m4a") || uri_ends_with_ci(u, ".m4v") ||
-        uri_ends_with_ci(u, ".mp3") || uri_ends_with_ci(u, ".aac") ||
-        uri_ends_with_ci(u, ".ogg") || uri_ends_with_ci(u, ".oga") ||
-        uri_ends_with_ci(u, ".opus") || uri_ends_with_ci(u, ".flac") ||
-        uri_ends_with_ci(u, ".ts") || uri_ends_with_ci(u, ".m3u8") ||
-        uri_ends_with_ci(u, ".mpd") || uri_ends_with_ci(u, ".flv") ||
-        uri_ends_with_ci(u, ".mov") || uri_ends_with_ci(u, ".wav")) {
+    if (lt_is_media(u.buf, u.len)) {
         RB_TYPE(LT_MEDIA, cfg_media);
         if (!cfg_media) return deny_quick(&s_stats.blocked_media, c);
         s_stats.blocked_media++;
@@ -2813,7 +2817,9 @@ static void qlog_save(const char *resource_dir) {
     char path[PATH_MAX];
     if (resource_dir == NULL || resource_dir[0] == '\0') return;
     snprintf(path, sizeof(path), "%s/query_log.dat", resource_dir);
-    FILE *fp = fopen(path, "wb");
+    /* 原子写：写 <path>.tmp，成功后 rename —— 读端永远不会看到写了一半的查询日志。 */
+    char atomic_tmp[PATH_MAX];
+    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
     if (fp == NULL) return;
     /*
      * The ring holds QLOG_MAX (10k, ~2 MB) so the app can page through the
@@ -2834,7 +2840,7 @@ static void qlog_save(const char *resource_dir) {
     fwrite(&zero, sizeof(zero), 1, fp);      /* pos: the file starts at slot 0 */
     fwrite(&persist, sizeof(persist), 1, fp);
     fwrite(s_qlog_persist, sizeof(s_qlog_persist[0]), persist, fp);
-    fclose(fp);
+    finish_atomic_write(fp, path, atomic_tmp);
 }
 
 static void qlog_load(const char *resource_dir) {
@@ -3295,15 +3301,20 @@ static bool host_is_local(const char *h) {
 }
 
 /* Element-hiding stylesheet injected into proxied HTML pages. */
-static const char kHideCss[] =
+/* 内置隐藏规则（不含收尾标签）。与 kHideCssTail 配合使用：
+   导入的 cosmetic 规则必须注入在 <style> **内部** —— 原实现把化妆品规则追加在 "</style>"
+   之后，浏览器不会把它当 CSS，等于这些规则从未生效（Java 侧 CosmeticRules.toCss() 写出的
+   是纯 CSS 规则，不带 <style> 包裹）。 */
+static const char kHideCssHead[] =
     "<style id=\"adblock-hide\">"
     ".adsbygoogle,ins.adsbygoogle,[id^=\"google_ads\"],[id^=\"div-gpt-ad\"],"
     "[class^=\"ad-\"],[class^=\"ads-\"],[class^=\"advert\"],[id^=\"ad-\"],[id^=\"ads-\"],"
     "[class*=\" ad-\"],[class*=\" ads-\"],[data-ad-slot],[data-ad-client],"
     "iframe[src*=\"doubleclick.net\"],iframe[src*=\"googlesyndication.com\"],"
     "iframe[src*=\"adsystem\"],[class$=\"-ad\"],[class$=\"-ads\"]"
-    "{display:none!important;visibility:hidden!important}"
-    "</style>";
+    "{display:none!important;visibility:hidden!important}";
+/* 收尾标签：必须放在导入规则**之后**，否则规则落在样式元素外面。 */
+static const char kHideCssTail[] = "</style>";
 
 /* Extract the host of an URL and test it against the block list. */
 static bool url_host_blocked(const char *u, size_t n) {
@@ -3344,6 +3355,21 @@ static bool url_host_blocked(const char *u, size_t n) {
 static char  *s_cosmetic_css;
 static size_t s_cosmetic_len;
 
+/*
+ * 域名限定的 cosmetic 规则（可选文件 <resource>/cosmetic_rules.txt，格式 domain<TAB>selector）。
+ * 文件不存在时 count=0 —— 行为与引入本功能之前完全一致（默认不变）。
+ */
+#define COSMETIC_SCOPED_MAX 4096
+struct cosmetic_scoped_rule {
+    char   domain[192];
+    size_t off;
+    size_t len;
+};
+static char  *s_cosmetic_scoped_buf;
+static size_t s_cosmetic_scoped_len;
+static struct cosmetic_scoped_rule s_cosmetic_scoped[COSMETIC_SCOPED_MAX];
+static int    s_cosmetic_scoped_count;
+
 static void load_cosmetic_css(const char *resource_dir) {
     free(s_cosmetic_css);
     s_cosmetic_css = NULL;
@@ -3362,15 +3388,89 @@ static void load_cosmetic_css(const char *resource_dir) {
     size_t got = fread(buffer, 1, (size_t) size, f);
     fclose(f);
     buffer[got] = '\0';
+    /* 注入 <style> 内部前先净化：含 '<' 的整条丢弃（可提前闭合样式元素）。
+       保留/丢弃的条数必须写进日志，不静默。 */
+    struct cosmetic_stats cstats;
+    size_t kept_len = cosmetic_sanitize(buffer, got, &cstats);
     s_cosmetic_css = buffer;
-    s_cosmetic_len = got;
-    LOG_INFO("cosmetic filter: %zu bytes loaded from %s", got, path);
+    s_cosmetic_len = kept_len;
+    LOG_INFO("cosmetic filter: %zu bytes from %s (%zu rules kept, %zu dropped, %zu bytes in)",
+             kept_len, path, cstats.kept, cstats.dropped, cstats.bytes_in);
+    if (cstats.dropped > 0) {
+        LOG_WARN("cosmetic filter: dropped %zu rule(s) containing '<' (would break out of <style>)",
+                 cstats.dropped);
+    }
+}
+
+/*
+ * 载入域名限定的 cosmetic 规则（可选文件）。格式：domain<TAB>selector，每行一条；
+ * domain 为 '*' 或留空表示全局。文件不存在或解析不出任何规则时 count 保持 0，
+ * 注入行为与"没有这个功能"时完全一致。
+ */
+static void load_cosmetic_rules(const char *resource_dir) {
+    free(s_cosmetic_scoped_buf);
+    s_cosmetic_scoped_buf = NULL;
+    s_cosmetic_scoped_len = 0;
+    s_cosmetic_scoped_count = 0;
+#ifndef _WIN32
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/cosmetic_rules.txt", resource_dir);
+    FILE *f = fopen(path, "rb");
+    if (!f) return;                      /* 可选文件：没有就保持默认行为 */
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > (long) (512 * 1024)) { fclose(f); return; }
+    char *buffer = (char *) malloc((size_t) size + 1);
+    if (!buffer) { fclose(f); return; }
+    size_t got = fread(buffer, 1, (size_t) size, f);
+    fclose(f);
+    buffer[got] = '\0';
+    /* 含 '<' 的整行丢弃（与 cosmetic.css 同样只挡 '<'） */
+    struct cosmetic_stats cstats;
+    size_t kept_len = cosmetic_sanitize(buffer, got, &cstats);
+    int dropped = 0;
+    size_t pos = 0;
+    while (pos < kept_len && s_cosmetic_scoped_count < COSMETIC_SCOPED_MAX) {
+        size_t line_start = pos;
+        while (pos < kept_len && buffer[pos] != '\n') pos++;
+        size_t line_len = pos - line_start;
+        if (line_len > 0) {
+            char *tab = (char *) memchr(buffer + line_start, '\t', line_len);
+            if (tab != NULL) {
+                size_t dlen = (size_t) (tab - (buffer + line_start));
+                size_t sel_off = (size_t) (tab - buffer) + 1;
+                size_t sel_len = line_len - dlen - 1;
+                while (sel_len > 0 && (buffer[sel_off] == ' ' || buffer[sel_off] == '\t')) { sel_off++; sel_len--; }
+                if (sel_len > 0) {
+                    if (dlen >= sizeof(s_cosmetic_scoped[0].domain)) dlen = sizeof(s_cosmetic_scoped[0].domain) - 1;
+                    memcpy(s_cosmetic_scoped[s_cosmetic_scoped_count].domain, buffer + line_start, dlen);
+                    s_cosmetic_scoped[s_cosmetic_scoped_count].domain[dlen] = '\0';
+                    s_cosmetic_scoped[s_cosmetic_scoped_count].off = sel_off;
+                    s_cosmetic_scoped[s_cosmetic_scoped_count].len = sel_len;
+                    s_cosmetic_scoped_count++;
+                } else {
+                    dropped++;
+                }
+            } else {
+                dropped++;   /* 没有制表符的行无法归属域名，丢弃并计数 */
+            }
+        }
+        pos++;
+    }
+    s_cosmetic_scoped_buf = buffer;
+    s_cosmetic_scoped_len = kept_len;
+    LOG_INFO("cosmetic scope: %d rule(s) loaded from %s (%d dropped, %zu bytes)",
+             s_cosmetic_scoped_count, path, dropped, kept_len);
+#else
+    (void) resource_dir;
+#endif
 #else
     (void) resource_dir;
 #endif
 }
 
-static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
+static size_t html_filter(const char *in, size_t n, char *out, size_t cap, const char *host) {
     size_t i = 0, o = 0;
     bool injected = false;
 #define AB_PUT(ch) do { if (o < cap) out[o] = (char) (ch); o++; } while (0)
@@ -3427,8 +3527,16 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
             }
             if (!injected && name_len == 4 && strncasecmp(in + name_at, "head", 4) == 0) {
                 for (size_t p = i; p < tag_end; p++) AB_PUT(in[p]);
-                for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+                for (size_t p = 0; p < sizeof(kHideCssHead) - 1; p++) AB_PUT(kHideCssHead[p]);
                 for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
+                for (int r = 0; r < s_cosmetic_scoped_count; r++) {
+                    if (!cosmetic_domain_match(s_cosmetic_scoped[r].domain,
+                                               strlen(s_cosmetic_scoped[r].domain), host)) continue;
+                    for (size_t p = 0; p < s_cosmetic_scoped[r].len; p++)
+                        AB_PUT(s_cosmetic_scoped_buf[s_cosmetic_scoped[r].off + p]);
+                    AB_PUT('\n');
+                }
+                for (size_t p = 0; p < sizeof(kHideCssTail) - 1; p++) AB_PUT(kHideCssTail[p]);
                 injected = true;
                 i = tag_end;
                 continue;
@@ -3438,8 +3546,16 @@ static size_t html_filter(const char *in, size_t n, char *out, size_t cap) {
         i = tag_end;
     }
     if (!injected) {
-        for (size_t p = 0; p < sizeof(kHideCss) - 1; p++) AB_PUT(kHideCss[p]);
+        for (size_t p = 0; p < sizeof(kHideCssHead) - 1; p++) AB_PUT(kHideCssHead[p]);
         for (size_t p = 0; p < s_cosmetic_len; p++) AB_PUT(s_cosmetic_css[p]);
+        for (int r = 0; r < s_cosmetic_scoped_count; r++) {
+            if (!cosmetic_domain_match(s_cosmetic_scoped[r].domain,
+                                       strlen(s_cosmetic_scoped[r].domain), host)) continue;
+            for (size_t p = 0; p < s_cosmetic_scoped[r].len; p++)
+                AB_PUT(s_cosmetic_scoped_buf[s_cosmetic_scoped[r].off + p]);
+            AB_PUT('\n');
+        }
+        for (size_t p = 0; p < sizeof(kHideCssTail) - 1; p++) AB_PUT(kHideCssTail[p]);
     }
 #undef AB_PUT
     return o;
@@ -3464,6 +3580,23 @@ static void write_stats_json_file(struct settings *s) {
     fclose(fp);
     remove(path);
     rename(tmp, path);
+}
+
+/* open_atomic_write / finish_atomic_write：见文件顶部的原型处说明。 */
+static FILE *open_atomic_write(const char *path, char *tmp, size_t tmp_cap) {
+    size_t need = strlen(path) + 5;               /* ".tmp" + NUL */
+    if (path == NULL || tmp == NULL || tmp_cap < need) return NULL;
+    snprintf(tmp, tmp_cap, "%s.tmp", path);
+    return fopen(tmp, "wb");
+}
+
+static void finish_atomic_write(FILE *fp, const char *path, const char *tmp) {
+    if (fp == NULL) return;
+    if (fclose(fp) == 0) {
+        rename(tmp, path);
+    } else {
+        remove(tmp);                              /* 落盘失败：删掉临时文件，旧文件保持原样 */
+    }
 }
 
 /* ── proxy plumbing ── */
@@ -3525,10 +3658,10 @@ static void proxy_finish_filtered(struct proxy_state *st) {
     if (!st->client || !st->buf || !st->headers_done) return;
     size_t body_off = st->head_len;
     size_t body_len = st->buf_len > body_off ? st->buf_len - body_off : 0;
-    size_t cap = body_len + 2048 + s_cosmetic_len;
+    size_t cap = body_len + 2048 + sizeof(kHideCssTail) + s_cosmetic_len + s_cosmetic_scoped_len + 64;
     char *filtered = (char *) malloc(cap);
     if (!filtered) { proxy_send_raw(st, st->buf, st->buf_len); st->replied = true; return; }
-    size_t flen = html_filter(st->buf + body_off, body_len, filtered, cap);
+    size_t flen = html_filter(st->buf + body_off, body_len, filtered, cap, st->host);
     /* status line first */
     size_t line_end = 0;
     while (line_end + 1 < body_off &&
@@ -4393,6 +4526,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             if (s->proxy_filter) {
                 block_set_load(s->resource_dir);
                 load_cosmetic_css(s->resource_dir);
+                load_cosmetic_rules(s->resource_dir);
             }
             char hdr[96];
             int hl = snprintf(hdr, sizeof(hdr), "Content-Type: text/plain%c%c", 0x0d, 0x0a);
@@ -4618,6 +4752,7 @@ int main(int argc, char *argv[]) {
     if (s.proxy_filter) {
         block_set_load(s.resource_dir);
         load_cosmetic_css(s.resource_dir);
+        load_cosmetic_rules(s.resource_dir);
     }
     /* Dedicated loopback management listener (statistics + control). */
     if (s.stats_port == 0) s.stats_port = 8686;
@@ -4635,9 +4770,9 @@ int main(int argc, char *argv[]) {
     char http_url[128], https_url[128], http_url6[128], https_url6[128];
     const char *v4 = s.bind_all ? "0.0.0.0" : "127.0.0.1";
     const char *v6 = s.bind_all ? "[::]" : "[::1]";
-    snprintf(http_url, sizeof(http_url), "http://%s:%d", v4, s.http_port);
+    snprintf(http_url, sizeof(http_url), "http://%s:%d", v4, s.http_port);  // NOSONAR: URL 指向本服务自己的监听地址（仅回环端口），明文是本机通信的设计使然（Sonar c:S5332）
     snprintf(https_url, sizeof(https_url), "https://%s:%d", v4, s.https_port);
-    snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);
+    snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);  // NOSONAR: URL 指向本服务自己的监听地址（仅回环端口），明文是本机通信的设计使然（Sonar c:S5332）
     snprintf(https_url6, sizeof(https_url6), "https://%s:%d", v6, s.https_port);
 
     if (!mg_http_listen(&mgr, http_url, fn, &s)) {

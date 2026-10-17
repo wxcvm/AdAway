@@ -44,8 +44,10 @@ int main(void) {
     ok_u64("冷却设为 now+cooldown", g[0].until_ms, 1200u + 30000u);
 
     /* 冷却中：直接快速失败，且不再改动条目 */
-    ok_bool("冷却中快速失败", f5_guard_step(g, 2, 1001u, 77u, 1300u, &cfg, NULL), false == false);
-    ok_bool("冷却中（第 2 次核对）", f5_guard_step(g, 2, 1001u, 77u, 31000u, &cfg, NULL), false == false);
+    /* 冷却期内必须快速失败（这正是冷却的目的）。这里原来是 false == false ——
+       一个恒为真的常量断言，等于没有测试；Sonar 的 c:S1764 把它抓出来了。 */
+    ok_bool("冷却中快速失败", f5_guard_step(g, 2, 1001u, 77u, 1300u, &cfg, NULL), true);
+    ok_bool("冷却中（第 2 次核对）", f5_guard_step(g, 2, 1001u, 77u, 31000u, &cfg, NULL), true);
     ok_u32("冷却中不改计数", g[0].count, 3u);
     ok_bool("冷却到期后不再快速失败", f5_guard_step(g, 2, 1001u, 77u, 31301u, &cfg, NULL), false);
 

@@ -21,7 +21,11 @@ public final class CosmeticRules {
      */
     private static final int MAX_RULES = 20000;
     /**
-     * The collected CSS selectors (insertion ordered, de-duplicated).
+     * The collected cosmetic rules as {@code domain<TAB>selector} (insertion ordered, de-duplicated).
+     *
+     * <p>{@code domain} is {@code *} for a global rule. Keeping the domain here is what makes
+     * domain scoping possible: a rule written as {@code example.com##.ad} must only apply on that
+     * domain (and its subdomains), otherwise it would hide elements on every filtered page.</p>
      */
     private static final LinkedHashSet<String> SELECTORS = new LinkedHashSet<>();
     /**
@@ -63,9 +67,23 @@ public final class CosmeticRules {
                 || selector.indexOf('{') >= 0 || selector.indexOf('}') >= 0) {
             return true;
         }
+        /* 域名部分：'##' 之前的内容，例如 "example.com"；空则是全局规则（*）。
+           多个域名用逗号分隔（AdGuard 语法）；'~' 前缀的排除语法我们不支持，整条跳过。 */
+        String domains = rule.substring(0, hide).trim();
         synchronized (SELECTORS) {
-            if (SELECTORS.size() < MAX_RULES) {
-                SELECTORS.add(selector);
+            if (SELECTORS.size() >= MAX_RULES) {
+                return true;
+            }
+            if (domains.isEmpty()) {
+                SELECTORS.add("*" + '\t' + selector);
+                return true;
+            }
+            for (String domain : domains.split(",")) {
+                String d = domain.trim();
+                if (!isPlausibleDomain(d)) {
+                    continue;   /* 排除语法/异常写法：不猜，跳过并计入 seen */
+                }
+                SELECTORS.add(d.toLowerCase(java.util.Locale.ROOT) + '\t' + selector);
             }
         }
         return true;
@@ -91,18 +109,79 @@ public final class CosmeticRules {
     }
 
     /**
-     * Build the stylesheet injected into proxied pages.
+     * Build the stylesheet injected into <b>every</b> filtered page.
      *
-     * @return The CSS text (empty when no cosmetic rule was collected).
+     * <p>Only <b>global</b> rules (those whose domain part is {@code *}) end up here. Domain-scoped
+     * rules go to {@link #toScopedRules()} instead, because the server picks them per request by
+     * the page being filtered. Emitting a domain-scoped selector here would hide elements on every
+     * site — which is the bug this split fixes: before, all selectors (scoped or not) were written
+     * to this file, so {@code example.com##.ad} also applied on unrelated sites.</p>
+     *
+     * @return The CSS text (empty when no global cosmetic rule was collected).
      */
     public static String toCss() {
         StringBuilder builder = new StringBuilder(64 * 1024);
         builder.append("/* ADBlock cosmetic rules (AdGuard/adblock syntax) */\n");
         synchronized (SELECTORS) {
-            for (String selector : SELECTORS) {
-                builder.append(selector).append("{display:none !important;}\n");
+            for (String entry : SELECTORS) {
+                if (!entry.startsWith("*\t")) {
+                    continue;   /* 域名限定的规则走 cosmetic_rules.txt，不在这里全局注入 */
+                }
+                builder.append(selectorOf(entry)).append("{display:none !important;}\n");
             }
         }
         return builder.toString();
+    }
+
+    /**
+     * Build the domain-scoped rule file ({@code <resource>/cosmetic_rules.txt}).
+     *
+     * <p>One rule per line as {@code domain<TAB>selector}; {@code *} means global. The server
+     * reads it per request and injects only the rules whose domain matches the page being
+     * filtered — when the file is absent the server behaves exactly as before (global only).</p>
+     *
+     * @return The rule text (empty when no cosmetic rule was collected).
+     */
+    public static String toScopedRules() {
+        StringBuilder builder = new StringBuilder(64 * 1024);
+        synchronized (SELECTORS) {
+            for (String entry : SELECTORS) {
+                builder.append(entry).append('\n');
+            }
+        }
+        return builder.toString();
+    }
+
+    /**
+     * Whether the text before {@code ##} can be used as a domain scope.
+     *
+     * <p>Accepts a plain hostname only ({@code a-z A-Z 0-9 . - _}, non-empty, at most 190 chars).
+     * Everything else is skipped: the {@code ~} exclusion syntax we do not implement, and — the
+     * case a unit test pins — a malformed rule such as {@code .ok{color:red}##.x} whose "domain"
+     * part is actually a CSS rule. Skipping keeps the rule out of both output files instead of
+     * letting a bogus domain silently scope it.</p>
+     *
+     * @param d The candidate domain text.
+     * @return {@code true} when it looks like a hostname.
+     */
+    private static boolean isPlausibleDomain(String d) {
+        if (d.isEmpty() || d.length() > 190 || d.startsWith("~")) {
+            return false;
+        }
+        for (int i = 0; i < d.length(); i++) {
+            char c = d.charAt(i);
+            boolean allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+            if (!allowed) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** @return The selector part of a {@code domain<TAB>selector} entry. */
+    private static String selectorOf(String entry) {
+        int tab = entry.indexOf('\t');
+        return tab < 0 ? entry : entry.substring(tab + 1);
     }
 }
