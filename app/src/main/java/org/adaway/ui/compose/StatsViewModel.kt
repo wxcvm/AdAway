@@ -705,11 +705,11 @@ fun refreshServerStats() {
                 "domain_allowlist.txt",
             )
             file.parentFile?.mkdirs()
-            file.bufferedWriter().use { writer ->
+            org.adaway.model.source.AtomicRuleFile.write(file) { writer ->
                 writer.write("# 由 ADBlock 生成：按域名解除过滤（原生服务器每次请求都会重读）\n")
                 for (item in allowed) {
-                    val host = item.host?.trim().orEmpty()
-                    if (host.isNotEmpty() && !host.startsWith("#")) {
+                    val host = org.adaway.model.rules.ExemptionRules.normalize(item.host.orEmpty()) ?: continue
+                    if (item.isEnabled && host.isNotEmpty() && !host.startsWith("#")) {
                         writer.write(host)
                         writer.write("\n")
                     }

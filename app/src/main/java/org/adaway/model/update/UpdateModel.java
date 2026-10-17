@@ -198,6 +198,10 @@ public class UpdateModel {
      * @return The manifest, or {@code null} if the check failed.
      */
     public Manifest checkForUpdate(boolean force) {
+        if (org.adaway.BuildConfig.PROGRESS_PREVIEW) {
+            this.lastError = "Preview builds are updated manually from their progress Release.";
+            return null;
+        }
         if (!force
                 && this.cachedManifest != null
                 && System.currentTimeMillis() - this.lastCheckAt < CHECK_CACHE_DELAY) {
@@ -298,7 +302,7 @@ public class UpdateModel {
         String bestDate = null;
         for (int i = 0; i < releases.length(); i++) {
             JSONObject release = releases.optJSONObject(i);
-            if (release == null || release.optBoolean("draft", false)) {
+            if (release == null || release.optBoolean("draft", false) || release.optBoolean("prerelease", false)) {
                 continue;
             }
             if (findApkAsset(release) == null) {
@@ -486,6 +490,7 @@ public class UpdateModel {
      * @return The download identifier ({@code -1} if download was not started).
      */
     public long update() {
+        if (org.adaway.BuildConfig.PROGRESS_PREVIEW) return -1;
         // Check manifest
         Manifest manifest = this.manifest.getValue();
         if (manifest == null) {

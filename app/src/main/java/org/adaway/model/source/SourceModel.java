@@ -34,6 +34,8 @@ import org.adaway.db.entity.HostListItem;
 import org.adaway.db.entity.HostsSource;
 import org.adaway.model.error.HostErrorException;
 import org.adaway.model.git.GitHostsSource;
+import org.adaway.model.traffic.RuleSnapshotRepository;
+import org.adaway.model.traffic.TrafficCoreContract;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -46,6 +48,8 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 import okhttp3.Cache;
 import okhttp3.OkHttpClient;
@@ -120,6 +124,11 @@ public class SourceModel {
      * point triggered them.
      */
     private final Object updateLock = new Object();
+    private final RuleSnapshotRepository ruleSnapshots = new RuleSnapshotRepository();
+
+    public RuleSnapshotRepository.Snapshot getRuleSnapshot() {
+        return this.ruleSnapshots.read();
+    }
     /**
      * The database, used to wrap each source's parse-and-insert pass in a
      * single transaction - see {@link SourceLoader#parse}.
@@ -413,7 +422,29 @@ public class SourceModel {
     public void syncHostEntries() {
         synchronized (this.updateLock) {
             setState(R.string.status_sync_database);
-            this.hostEntryDao.sync();
+            Map<String, TrafficCoreContract.Action> rules = new HashMap<>();
+            Map<String, String> replacements = new HashMap<>();
+            RuleSnapshotRepository.Snapshot[] prepared = new RuleSnapshotRepository.Snapshot[1];
+            // Validate inside the transaction; errors roll back the effective table too.
+            this.database.runInTransaction(() -> {
+                this.hostEntryDao.sync();
+                try (Cursor cursor = this.hostEntryDao.getAllCursor()) {
+                    while (cursor.moveToNext()) {
+                        if (rules.size() >= RuleSnapshotRepository.MAX_RULES)
+                            throw new IllegalStateException("Effective rules exceed snapshot limit");
+                        String host = cursor.getString(0);
+                        boolean replace = cursor.getInt(1) == 2;
+                        rules.put(host, replace ? TrafficCoreContract.Action.REPLACE : TrafficCoreContract.Action.NXDOMAIN);
+                        if (replace) replacements.put(host, cursor.getString(2));
+                    }
+                }
+                prepared[0] = RuleSnapshotRepository.prepareEffective(
+                        this.ruleSnapshots.read().generation + 1, rules, replacements);
+                if (prepared[0] == null)
+                    throw new IllegalStateException("Invalid effective domain rules");
+            });
+            if (!this.ruleSnapshots.publishPrepared(prepared[0]))
+                throw new IllegalStateException("Rule snapshot publication failed");
         }
     }
 

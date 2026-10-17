@@ -77,8 +77,8 @@ static void run_vectors(const char *path) {
     }
 }
 
-int main(void) {
-    run_vectors("webserver/jni/rule_vectors.txt");
+int main(int argc, char **argv) {
+    run_vectors(argc > 1 ? argv[1] : "webserver/jni/rule_vectors.txt");
 
     /* hosts 格式：取空白之后的那个字段 */
     expect_norm("0.0.0.0 ads.example.com", "ads.example.com");

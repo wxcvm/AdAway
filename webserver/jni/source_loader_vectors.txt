@@ -1,0 +1,38 @@
+# flags (allow=1, redirect=2), raw rule, status, serialized kind:domain:address
+0	0.0.0.0 ADS.TEST.	OK	BLOCK:ads.test:
+0	127.0.0.1 first.test second.test # comment	OK	BLOCK:first.test:;BLOCK:second.test:
+0	:: ads.test	OK	BLOCK:ads.test:
+0	::1 ads.test	OK	BLOCK:ads.test:
+2	192.0.2.8 redirect.test	OK	REPLACE:redirect.test:192.0.2.8
+2	2001:db8::8 redirect.test	OK	REPLACE:redirect.test:2001:db8::8
+0	192.0.2.8 redirect.test	OK	-
+0	||ads.test^	OK	BLOCK:ads.test:
+0	@@||ads.test^	OK	ALLOW:ads.test:
+1	||ads.test^	OK	ALLOW:ads.test:
+0	||ads.test^/image.png	UNSUPPORTED	-
+0	@@||ads.test^/image.png	UNSUPPORTED	-
+0	||ads.test^$script	UNSUPPORTED	-
+1	@@||ads.test^$script	UNSUPPORTED	-
+0	||ads.test/path	UNSUPPORTED	-
+0	||ads.test^|https	UNSUPPORTED	-
+0	||ads.test*^	UNSUPPORTED	-
+0	@@https://ads.test/path	UNSUPPORTED	-
+0	||bad..test^	INVALID	-
+0	999.1.1.1 bad.test	INVALID	-
+0	0.0.0.0 bad..test	INVALID	-
+0	0.0.0.0 localhost	OK	-
+1	*.ADS.TEST.	OK	ALLOW:*.ads.test:
+1	0.0.0.0 ads.test	OK	ALLOW:ads.test:
+0	! comment	OK	-
+0	[Adblock Plus 2.0]	OK	-
+0	ads.test##.advert	COSMETIC	-
+0	ads.test#@#.advert	COSMETIC	-
+0	0.0.0.0 bad.test/path	INVALID	-
+2	192.0.2.8 *.REDIRECT.TEST.	OK	REPLACE:*.redirect.test:192.0.2.8
+0	ADS.TEST.	OK	BLOCK:ads.test:
+0	127.0.0.1 comment.test ## inline comment	OK	BLOCK:comment.test:
+0	0.0.0.0 foo-.test	INVALID	-
+0	0.0.0.0 _bar.test	INVALID	-
+0	0.0.0.0 abc.12c	INVALID	-
+1	foo*-.test	INVALID	-
+1	abc.12*	INVALID	-
