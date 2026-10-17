@@ -76,6 +76,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -2612,6 +2613,22 @@ private fun UpdateCheckRow(viewModel: StatsViewModel, currentVersion: String) {
     var checking by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var available by remember { mutableStateOf<org.adaway.model.update.Manifest?>(null) }
+    val updateModel = remember(context) {
+        (context.applicationContext as org.adaway.AdAwayApplication).updateModel
+    }
+    var pendingState by remember {
+        mutableStateOf(updateModel.pendingDownloadState)
+    }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, updateModel) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                pendingState = updateModel.pendingDownloadState
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2676,8 +2693,13 @@ private fun UpdateCheckRow(viewModel: StatsViewModel, currentVersion: String) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = {
-                        viewModel.downloadUpdate()
-                        message = context.getString(R.string.compose_settings_update_downloading)
+                        val downloadId = viewModel.downloadUpdate()
+                        pendingState = updateModel.pendingDownloadState
+                        message = if (downloadId >= 0) {
+                            context.getString(R.string.compose_settings_update_downloading)
+                        } else {
+                            context.getString(R.string.compose_update_download_failed)
+                        }
                     },
                 ) { Text(stringResource(R.string.update_feed_download)) }
                 Spacer(Modifier.width(8.dp))
@@ -2699,6 +2721,38 @@ private fun UpdateCheckRow(viewModel: StatsViewModel, currentVersion: String) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 8,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (pendingState != org.adaway.model.update.UpdateModel.DownloadState.NONE) {
+            Spacer(Modifier.height(6.dp))
+            TextButton(
+                onClick = {
+                    pendingState = updateModel.pendingDownloadState
+                    message = when (pendingState) {
+                        org.adaway.model.update.UpdateModel.DownloadState.READY_TO_INSTALL -> {
+                            if (updateModel.retryInstallDownloadedUpdate()) {
+                                context.getString(R.string.compose_update_install_reopen)
+                            } else {
+                                context.getString(R.string.compose_update_download_failed)
+                            }
+                        }
+                        org.adaway.model.update.UpdateModel.DownloadState.DOWNLOADING ->
+                            context.getString(R.string.compose_update_download_pending)
+                        org.adaway.model.update.UpdateModel.DownloadState.FAILED ->
+                            context.getString(R.string.compose_update_download_failed)
+                        org.adaway.model.update.UpdateModel.DownloadState.NONE ->
+                            context.getString(R.string.compose_update_no_download)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    if (pendingState == org.adaway.model.update.UpdateModel.DownloadState.READY_TO_INSTALL) {
+                        stringResource(R.string.compose_update_install_retry)
+                    } else {
+                        stringResource(R.string.compose_update_check_download)
+                    },
                 )
             }
         }
