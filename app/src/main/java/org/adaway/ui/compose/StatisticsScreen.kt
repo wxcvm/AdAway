@@ -174,31 +174,6 @@ fun StatisticsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Hosts list totals
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        stringResource(R.string.compose_stats_hosts_list),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        CountLabel(stringResource(R.string.compose_hosts_blocked), blockedCount)
-                        CountLabel(stringResource(R.string.compose_hosts_allowed), allowedCount)
-                        CountLabel(stringResource(R.string.compose_hosts_redirected), redirectCount)
-                    }
-                }
-            }
-
             // 统计状态横幅：更新时间 + 状态（hosts 统计不依赖 webserver）
             val updatedAt by viewModel.statsUpdatedAt.collectAsStateWithLifecycle()
             val statsErr by viewModel.statsError.collectAsStateWithLifecycle()
@@ -246,7 +221,7 @@ fun StatisticsScreen(
                 }
             }
 
-            // ── KPI 卡片行（参考 AdGuard Home：数值 + 迷你趋势线）──
+            // ── 优先呈现实时服务指标，然后显示本地 hosts 规则数 ──（参考 AdGuard Home：数值 + 迷你趋势线）──
             if (serverStats != null) {
                 KpiCardRow(stats = serverStats!!)
             } else {
@@ -272,24 +247,32 @@ fun StatisticsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Text(
-                                stringResource(R.string.compose_hosts_blocked) + ": " + localCounts.first,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_hosts_allowed) + ": " + localCounts.second,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_hosts_redirected) + ": " + localCounts.third,
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                        }
+                        AdaptiveHostSummary(
+                            localCounts.first, localCounts.second, localCounts.third,
+                        )
                     }
                 }
             }
+
+            // A compact local-rules summary stays visible without a running
+            // server; avoid the previous full card above the primary KPIs.
+            if (serverStats != null) {
+                AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
+            }
+
+            // Show recent traffic directly after the live KPIs, before the
+            // category breakdown and lifetime diagnostics.
+            // Trend + traffic chart (AdGuard Home style)
+            if (showTrend && serverStats != null &&
+                (serverStats!!.history.isNotEmpty() || serverStats!!.daily.isNotEmpty())
+            ) {
+                TrafficTrendCard(
+                    hourly = serverStats!!.history,
+                    daily = serverStats!!.daily,
+                    showConnections = showConn,
+                )
+            }
+
 
             // Blocked-request chart
             if (showDonut) {
@@ -333,17 +316,6 @@ fun StatisticsScreen(
             // Block rate ring
             if (showRate && serverStats != null && serverStats!!.totalRequests > 0) {
                 BlockRateCard(serverStats!!)
-            }
-
-            // Trend + traffic chart (AdGuard Home style)
-            if (showTrend && serverStats != null &&
-                (serverStats!!.history.isNotEmpty() || serverStats!!.daily.isNotEmpty())
-            ) {
-                TrafficTrendCard(
-                    hourly = serverStats!!.history,
-                    daily = serverStats!!.daily,
-                    showConnections = showConn,
-                )
             }
 
             // Per-app activity
@@ -454,7 +426,6 @@ private fun KpiCardRow(stats: ServerStats) {
                             fontWeight = FontWeight.Bold,
                         ),
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
                     )
                     Text(
                         stringResource(R.string.compose_stats_kpi_rate),
@@ -474,6 +445,7 @@ private fun KpiCardRow(stats: ServerStats) {
                         stringResource(R.string.compose_stats_kpi_requests),
                         ChartUtils.compactNumber(stats.totalRequests),
                         MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
                     )
                     HeroMini(
                         stringResource(R.string.compose_stats_kpi_blocked),
