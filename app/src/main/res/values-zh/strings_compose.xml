@@ -434,4 +434,25 @@
     <string name="compose_settings_boot_test_script">测试开机脚本</string>
     <string name="compose_settings_boot_test_running">正在测试开机脚本…</string>
     <string name="compose_settings_boot_test_result_title">测试结果</string>
+
+    <!-- 网络中心：尚未接入的功能仅做结构预留 -->
+    <string name="compose_nav_network">网络</string>
+    <string name="compose_network_title">网络中心</string>
+    <string name="compose_network_status_title">流量接管范围</string>
+    <string name="compose_network_status_body">规划中的 VPN/TUN 全局接管尚未接入此页面。现有 Root 与 hosts 过滤仍由原有入口控制。本地服务器正常运行，并不代表设备全部流量都已过滤。</string>
+    <string name="compose_network_not_active">此处尚未启用全局接管</string>
+    <string name="compose_network_roadmap_heading">计划中的能力</string>
+    <string name="compose_network_planned">规划中 · 暂不可配置</string>
+    <string name="compose_network_capture_title">全流量接管</string>
+    <string name="compose_network_capture_description">通过 VPNService 或 Root 实现 IPv4/IPv6、TCP/UDP 与应用级覆盖，清晰显示实际模式和恢复状态。</string>
+    <string name="compose_network_adguard_title">AdGuard 协同</string>
+    <string name="compose_network_adguard_description">冲突证据、仅监听模式，以及可验证的 AdGuard Home 拦截 IP 配置向导。</string>
+    <string name="compose_network_dns_title">DNS 与规则引擎</string>
+    <string name="compose_network_dns_description">上游 DNS 健康、加密 DNS 和跨平台一致的规则匹配诊断。</string>
+    <string name="compose_network_https_title">HTTPS 与 QUIC 诊断</string>
+    <string name="compose_network_https_description">证书信任、TLS 握手和 UDP/443 覆盖检查，不承诺能解密所有 HTTPS 请求。</string>
+    <string name="compose_network_recovery_title">网络安全恢复</string>
+    <string name="compose_network_recovery_description">显示路由配置归属，接管失败时仅还原本应用修改的网络设置。</string>
+    <string name="compose_network_available_heading">现有功能</string>
+    <string name="compose_network_available_body">已有的拦截模式、服务器设置、规则和统计仍从当前页面入口使用。</string>
 </resources>
