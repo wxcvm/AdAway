@@ -17,7 +17,6 @@ timber = "5.0.1"
 zxing = "3.5.2"
 # Root
 libsu = "6.0.0"
-openssl = "1.1.1q-beta-1"
 # VPN
 # Test
 junit = "4.13.2"
@@ -52,7 +51,6 @@ timber = { module = "com.jakewharton.timber:timber", version.ref = "timber" }
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 # Root
 libsu = { module = "com.github.topjohnwu.libsu:core", version.ref = "libsu" }
-openssl = { module = "com.android.ndk.thirdparty:openssl", version.ref = "openssl" }
 # VPN
 # Test
 junit = { module = "junit:junit", version.ref = "junit" }

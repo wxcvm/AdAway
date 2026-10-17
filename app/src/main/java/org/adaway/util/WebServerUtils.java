@@ -146,38 +146,49 @@ public class WebServerUtils {
         int[] count = {0};
         try {
             org.adaway.model.source.AtomicRuleFile.write(target, writer -> {
-                try (android.database.Cursor cursor = org.adaway.db.AppDatabase.getInstance(context).hostEntryDao().getAllCursor()) {
+                try (android.database.Cursor cursor =
+                             org.adaway.db.AppDatabase.getInstance(context).hostEntryDao().getAllCursor()) {
                     int hostIdx = cursor.getColumnIndexOrThrow("host");
                     int typeIdx = cursor.getColumnIndexOrThrow("type");
                     int redirectionIdx = cursor.getColumnIndexOrThrow("redirection");
                     while (cursor.moveToNext()) {
-                        if (count[0] >= org.adaway.model.source.BoundedSourceImport.MAX_ENTRIES)
-                            throw new java.io.IOException("Block export exceeds entry limit");
                         String host = cursor.getString(hostIdx);
                         if (host == null || host.isEmpty()) continue;
-                        boolean redirected = cursor.getInt(typeIdx) == org.adaway.db.entity.ListType.REDIRECTED.getValue();
+                        if (count[0] >= org.adaway.model.source.BoundedSourceImport.MAX_ENTRIES)
+                            throw new java.io.IOException("Block export exceeds entry limit");
+                        boolean redirected = cursor.getInt(typeIdx) ==
+                                org.adaway.db.entity.ListType.REDIRECTED.getValue();
                         String address = redirected ? cursor.getString(redirectionIdx) : "0.0.0.0";
-                        if (address == null || address.isEmpty()) throw new java.io.IOException("Invalid replacement in block export");
-                        writer.write(address); writer.write(' '); writer.write(host); writer.write('\n'); count[0]++;
+                        if (address == null || address.isEmpty())
+                            throw new java.io.IOException("Invalid replacement in block export");
+                        writer.write(address);
+                        writer.write(' ');
+                        writer.write(host);
+                        writer.write('\n');
+                        count[0]++;
                     }
                 }
             });
         } catch (Exception exception) {
-            Timber.w(exception, "Failed to export the block list; previous file preserved");
+            Timber.w(exception, "Failed to atomically export the block list; previous file preserved");
             return -1;
         }
         Timber.i("Exported %d blocked hosts to %s", count[0], target);
-        // Element hiding rules (AdGuard / adblock syntax) picked up while the
-        // sources were parsed: the hijack proxy injects this stylesheet into
-        // every filtered page - the cosmetic filtering AdGuard does.
+        // Keep both global and domain-scoped cosmetic output; newer Android
+        // webserver.c uses cosmetic_rules.txt for per-domain element hiding.
         try {
             java.io.File css = getResourcePath(context).resolve("cosmetic.css").toFile();
             String content = org.adaway.model.source.CosmeticRules.toCss();
             org.adaway.model.source.AtomicRuleFile.write(css, writer -> writer.write(content));
-            Timber.i("Exported %d cosmetic rules (%d bytes)",
-                    org.adaway.model.source.CosmeticRules.getSeenCount(), content.length());
+            java.io.File scoped = getResourcePath(context).resolve("cosmetic_rules.txt").toFile();
+            String scopedContent = org.adaway.model.source.CosmeticRules.toScopedRules();
+            org.adaway.model.source.AtomicRuleFile.write(scoped,
+                    writer -> writer.write(scopedContent));
+            Timber.i("Exported %d cosmetic rules (%d bytes global, %d bytes scoped)",
+                    org.adaway.model.source.CosmeticRules.getSeenCount(),
+                    content.length(), scopedContent.length());
         } catch (Exception exception) {
-            Timber.w(exception, "Failed to export the cosmetic rules");
+            Timber.w(exception, "Failed to atomically export cosmetic rules");
         }
         return count[0];
     }

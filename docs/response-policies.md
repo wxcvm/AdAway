@@ -4,7 +4,8 @@
 > 每个结论都对应仓库里的提交；不确定的地方宁可写"未实现"，不要写成"已支持"。
 >
 > 适用范围：`webserver/jni/webserver.c`（Android，master）与
-> `webserver/win32/gui_win32.c`（Windows，feat/win11-webserver-release）。
+> Windows 端（`gui_win32.c` 等）**已迁出到独立仓库** `wxcvm/AdAway-Windows`；本仓库不再包含 `webserver/win32/`。两端的差距与"特性分家"的定性见
+> `docs/windows-core-contract.md` §6.1/§6.2。
 
 ## 1. 请求判定流水线（顺序即优先级）
 
@@ -52,7 +53,7 @@
 | `compatibility_200` | 200 + 空正文（兼容某些客户端） | ✅ 保留，**但放行路径不再使用它** |
 | `image_placeholder` | 返回占位图 | ✅（既有：按类型回内置占位图） |
 | `compatibility` | 按类型自适应（默认） | ✅ 默认档 |
-| **`visible_image_placeholder`** | 对"可见内容"请求也回占位图（而不是让页面塌陷） | ✅ 已实现（`reply_visible`，**默认关**；见 §4.1） |
+| **`visible_image_placeholder`** | 对"可见内容"请求也回占位图（而不是让页面塌陷） | ✅ 已实现（`reply_visible`，**默认关**；见 §3.1） |
 | **`rules` / `rule_override`** | 用户按域/类型覆盖策略 | 🟡 服务端已实现（`rule_override_enabled` + `rule_overrides.txt`，默认关）；**App 内编辑界面未做** |
 | **`request_dedup`** | 短窗口内相同请求只处理一次 | ✅ 已实现（`dedup_enabled`，默认关；1s 窗口） |
 | **`retry_guard`** | 同上请求高频重试时降级应答 | ✅ 已实现（`retry_guard_enabled`，默认关；10s/40 次 → 冷却 30s） |
@@ -202,8 +203,8 @@ Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配�
 ## 规则支持清单（按实现核实，不是承诺）
 
 本节描述的是**当前实现真实支持**的语法，依据是 `webserver/jni/webserver.c` 里的
-`domain_rule_normalize()`（规则归一化，L531）、`domain_is_allowed()`（放行匹配，L563）与
-`block_set_contains()`（拦截匹配，L3271），以及 App 侧的 `app/src/main/java/org/adaway/model/source/SourceLoader.java`（订阅源解析，含 `HostListItemParser`）。两端（Android 原生服务端与 Windows 服务端）共用同一份
+`domain_rule_normalize()`（规则归一化）、`domain_is_allowed()`（放行匹配）与
+`block_set_contains()`（拦截匹配），以及 App 侧的 `app/src/main/java/org/adaway/model/source/SourceLoader.java`（订阅源解析，含 `HostListItemParser`）。两端（Android 原生服务端与 Windows 服务端）共用同一份
 C 代码，因此下面的语义在两端一致；跨端测试向量应钉住这些行为。
 
 ### 支持（会被正确归一化）
