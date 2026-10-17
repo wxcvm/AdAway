@@ -47,7 +47,28 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
         //Fetching the download id received with the broadcast
         long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
         //Checking if the received broadcast is for our enqueued download by matching download id
-        if (this.downloadId != id) {
+        if (this.downloadId != id ||
+                !DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction())) {
+            return;
+        }
+        // An exported receiver cannot trust the broadcast alone: even if a
+        // third party knows the id, it cannot fake DownloadManager state.
+        DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
+        if (downloadManager == null) return;
+        int status;
+        try (android.database.Cursor cursor = downloadManager.query(
+                new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) return;
+            int column = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (column < 0) return;
+            status = cursor.getInt(column);
+        } catch (Exception exception) {
+            Timber.w(exception, "Cannot verify DownloadManager completion broadcast");
+            return;
+        }
+        if (status != DownloadManager.STATUS_SUCCESSFUL
+                && status != DownloadManager.STATUS_FAILED) {
+            // Do not unregister on an early/spoofed completion intent.
             return;
         }
         // One-shot receiver: unregister before the slow verification below so
@@ -57,6 +78,12 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
             context.unregisterReceiver(this);
         } catch (IllegalArgumentException ignored) {
             // already unregistered
+        }
+        if (status == DownloadManager.STATUS_FAILED) {
+            Toast.makeText(context,
+                    context.getString(R.string.compose_update_download_failed),
+                    Toast.LENGTH_LONG).show();
+            return;
         }
         Context appContext = context.getApplicationContext();
         // onReceive runs on the main thread and has ~10 s before the system
@@ -68,8 +95,35 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
         worker.start();
     }
 
+    /** User-triggered fallback, not a silent or privileged install. */
+    public static void resumeInstall(Context context, long id) {
+        if (id < 0) return;
+        Context app = context.getApplicationContext();
+        new Thread(() -> new ApkDownloadReceiver(id).verifyAndInstall(app, id),
+                "apk-update-foreground-retry").start();
+    }
+
     private void verifyAndInstall(Context context, long id) {
         DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
+        if (downloadManager == null) {
+            Timber.w("DownloadManager missing while verifying APK update");
+            return;
+        }
+        try (android.database.Cursor cursor = downloadManager.query(
+                new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                Timber.w("APK download %s not found", id);
+                return;
+            }
+            int index = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (index < 0 || cursor.getInt(index) != DownloadManager.STATUS_SUCCESSFUL) {
+                Timber.w("APK download %s is not complete", id);
+                return;
+            }
+        } catch (Exception exception) {
+            Timber.w(exception, "Unable to inspect downloaded update");
+            return;
+        }
         Uri apkUri = downloadManager.getUriForDownloadedFile(id);
         if (apkUri == null) {
             Timber.w("Failed to download id: %s.", id);
@@ -92,8 +146,14 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
         Intent install = new Intent(ACTION_INSTALL_PACKAGE);
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         install.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        install.setData(apkUri);
-        context.startActivity(install);
+        install.setDataAndType(apkUri, "application/vnd.android.package-archive");
+        try {
+            context.startActivity(install);
+        } catch (android.content.ActivityNotFoundException | SecurityException exception) {
+            Timber.w(exception, "No permitted installer can open the downloaded APK");
+            Toast.makeText(context,
+                    context.getString(R.string.update_verify_unreadable), Toast.LENGTH_LONG).show();
+        }
     }
 
     /**
@@ -128,7 +188,18 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
                 return R.string.update_verify_package;
             }
             PackageInfo current = packageManager.getPackageInfo(context.getPackageName(), GET_SIGNING_CERTIFICATES);
-            if (archive.getLongVersionCode() < current.getLongVersionCode()) {
+            // Installing an equal-version APK is not an update: this used to
+            // silently reinstall 758 when a cached fixed-tag asset was stale
+            // while the update manifest already advertised 773.
+            if (archive.getLongVersionCode() <= current.getLongVersionCode()) {
+                Timber.w("Downloaded APK is not newer: current=%s archive=%s",
+                        current.getLongVersionCode(), archive.getLongVersionCode());
+                return R.string.update_verify_version;
+            }
+            long expected = UpdateModel.expectedDownloadedVersionCode(context);
+            if (expected > 0 && archive.getLongVersionCode() != expected) {
+                Timber.w("Downloaded APK version does not match feed: expected=%s archive=%s",
+                        expected, archive.getLongVersionCode());
                 return R.string.update_verify_version;
             }
             String archiveSigner = signerDigest(archive);

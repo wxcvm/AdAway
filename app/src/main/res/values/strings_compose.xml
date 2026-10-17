@@ -344,7 +344,7 @@
     <string name="compose_settings_block_mode_custom_hint">Custom redirect address (edit the IPv4/IPv6 targets in the advanced settings).</string>
     <string name="compose_settings_update_check">Check for updates</string>
     <string name="compose_settings_update_check_hint">Installed %1$s · source: GitHub Releases</string>
-    <string name="compose_settings_update_downloading">Download started — the installer will pop up when it finishes</string>
+    <string name="compose_settings_update_downloading">Download queued. Confirm the system installer when prompted, or tap Resume installation if it does not appear.</string>
     <!-- Rules source: local file -->
     <string name="compose_rules_source_type_url">Subscription URL</string>
     <string name="compose_rules_source_type_file">Local file</string>
@@ -491,4 +491,11 @@
     <string name="compose_settings_section_5_keywords">charts statistics graph trend websocket live</string>
     <string name="compose_settings_section_6_keywords">app monitor startup boot background theme light dark</string>
     <string name="compose_settings_section_7_keywords">backup export import reset debug log update about version</string>
+
+    <string name="compose_update_install_retry">Resume installation of downloaded update</string>
+    <string name="compose_update_check_download">Check downloaded update status</string>
+    <string name="compose_update_install_reopen">Checking APK package, version and signature. Confirm the system installer to finish updating.</string>
+    <string name="compose_update_download_pending">Download is not complete yet. Check again shortly or use the manual release link.</string>
+    <string name="compose_update_download_failed">Update download or installation could not be started. Use the official APK download link and check the system installer error.</string>
+    <string name="compose_update_no_download">No pending downloaded update.</string>
 </resources>

@@ -5,6 +5,7 @@ import static org.adaway.model.update.UpdateStore.getApkStore;
 
 import android.app.DownloadManager;
 import android.content.Context;
+import android.database.Cursor;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -87,17 +88,70 @@ public class UpdateModel {
      */
     private static final String LATEST_MANIFEST_URL =
             "https://github.com/wxcvm/AdAway/releases/download/" + LATEST_TAG + "/manifest.json";
-    /**
-     * URL of the fixed-tag APK (same asset name in every build).
-     */
-    private static final String LATEST_APK_URL =
-            "https://github.com/wxcvm/AdAway/releases/download/" + LATEST_TAG + "/ADBlock-latest.apk";
+    // The fixed tag is used only for discovering the latest version.
+    // Downloads instead use an immutable versioned release URL below.
     /**
      * How long a successful check is reused before hitting the API again.
      * The unauthenticated GitHub API is limited to 60 requests per hour per
      * IP, and the check runs on every app start, so results are cached.
      */
     private static final long CHECK_CACHE_DELAY = 30L * 60L * 1000L;
+
+    // Persist the DownloadManager id across app restarts. A dynamically
+    // registered receiver cannot be trusted to survive process termination.
+    private static final String UPDATE_DOWNLOAD_PREFS = "update_download_state";
+    private static final String PENDING_DOWNLOAD_ID = "pending_download_id";
+    private static final String EXPECTED_APK_VERSION_CODE = "expected_apk_version_code";
+
+    static long expectedDownloadedVersionCode(Context context) {
+        return context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .getLong(EXPECTED_APK_VERSION_CODE, -1);
+    }
+
+    public enum DownloadState { NONE, DOWNLOADING, READY_TO_INSTALL, FAILED }
+
+    public DownloadState getPendingDownloadState() {
+        long id = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .getLong(PENDING_DOWNLOAD_ID, -1);
+        if (id < 0) return DownloadState.NONE;
+        DownloadManager dm = this.context.getSystemService(DownloadManager.class);
+        if (dm == null) return DownloadState.FAILED;
+        try (Cursor cursor = dm.query(new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) return DownloadState.FAILED;
+            int col = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (col < 0) return DownloadState.FAILED;
+            switch (cursor.getInt(col)) {
+                case DownloadManager.STATUS_SUCCESSFUL:
+                    return DownloadState.READY_TO_INSTALL;
+                case DownloadManager.STATUS_FAILED:
+                    return DownloadState.FAILED;
+                default:
+                    return DownloadState.DOWNLOADING;
+            }
+        } catch (Exception exception) {
+            Timber.w(exception, "Unable to inspect pending APK download");
+            return DownloadState.FAILED;
+        }
+    }
+
+    /**
+     * Explicit foreground recovery path if the original download-complete
+     * broadcast was missed or Android blocked a background installer launch.
+     * The same signing/package/version checks are performed again.
+     */
+    public boolean retryInstallDownloadedUpdate() {
+        if (getPendingDownloadState() != DownloadState.READY_TO_INSTALL) return false;
+        long id = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .getLong(PENDING_DOWNLOAD_ID, -1);
+        ApkDownloadReceiver.resumeInstall(this.context, id);
+        return true;
+    }
+
+    public static void clearPendingDownload(Context context) {
+        context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .edit().remove(PENDING_DOWNLOAD_ID)
+                .remove(EXPECTED_APK_VERSION_CODE).apply();
+    }
 
     private final Context context;
     private final VersionInfo versionInfo;
@@ -285,7 +339,13 @@ public class UpdateModel {
                 return null;
             }
             boolean updateAvailable = versionCode > this.versionInfo.code;
-            return new Manifest(version, versionCode, changelog, LATEST_APK_URL,
+            // Version-specific Release assets have unique immutable URLs.
+            // The fixed android-latest APK URL is re-uploaded on every CI run
+            // and can be stale in intermediary caches even when its JSON
+            // manifest already advertises the newer version.
+            String versionedApkUrl = "https://github.com/" + RELEASES_REPO
+                    + "/releases/download/" + Uri.encode(version) + "/ADBlock-latest.apk";
+            return new Manifest(version, versionCode, changelog, versionedApkUrl,
                     updateAvailable);
         } catch (IOException | JSONException exception) {
             Timber.w(exception, "Unable to read the fixed-tag manifest.");
@@ -512,13 +572,22 @@ public class UpdateModel {
         }
         // Queue download
         long downloadId = download(manifest);
+        // Save the id before waiting for a process-scoped callback: users must
+        // be able to open the installer after a download outlives this process.
+        this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putLong(PENDING_DOWNLOAD_ID, downloadId)
+                .putLong(EXPECTED_APK_VERSION_CODE, manifest.versionCode)
+                .apply();
         // Register new broadcast receiver
         this.receiver = new ApkDownloadReceiver(downloadId);
-        // RECEIVER_NOT_EXPORTED: ACTION_DOWNLOAD_COMPLETE is sent by the system
-        // DownloadManager, so no other app needs (or gets) access to this
-        // receiver. EXPORTED also let any app wake the process at will.
+        // DownloadManager's completion may be broadcast by the privileged
+        // DownloadsProvider UID rather than system UID. Android's receiver
+        // guidance requires EXPORTED for such system-owned senders. The
+        // receiver checks the exact id and DownloadManager terminal state,
+        // then cryptographically verifies the APK before any install intent.
         ContextCompat.registerReceiver(this.context, this.receiver,
-                new IntentFilter(ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_NOT_EXPORTED);
+                new IntentFilter(ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED);
         // Return download identifier
         return downloadId;
     }

@@ -345,7 +345,7 @@
     <string name="compose_settings_block_mode_custom_hint">自定义重定向地址（可在高级设置中修改 IPv4/IPv6 目标）。</string>
     <string name="compose_settings_update_check">检查更新</string>
     <string name="compose_settings_update_check_hint">当前版本 %1$s · 更新源：GitHub Releases</string>
-    <string name="compose_settings_update_downloading">已开始下载，完成后系统会提示安装</string>
+    <string name="compose_settings_update_downloading">已提交下载。下载完成后请确认系统安装提示；如果没有弹窗，可点击“继续安装已下载更新”。</string>
     <!-- 规则源：本地文件 -->
     <string name="compose_rules_source_type_url">订阅链接</string>
     <string name="compose_rules_source_type_file">本地文件</string>
@@ -491,4 +491,11 @@
     <string name="compose_settings_section_5_keywords">统计 图表 趋势 实时 websocket 曲线</string>
     <string name="compose_settings_section_6_keywords">应用 监控 开机 自启动 后台 主题 外观 浅色 深色</string>
     <string name="compose_settings_section_7_keywords">备份 恢复 导入 导出 重置 调试 日志 更新 关于 版本</string>
+
+    <string name="compose_update_install_retry">继续安装已下载更新</string>
+    <string name="compose_update_check_download">检查更新下载状态</string>
+    <string name="compose_update_install_reopen">正在核验安装包、版本号和签名。请在系统安装程序中确认“更新”，安装完成后重新打开应用。</string>
+    <string name="compose_update_download_pending">下载尚未完成，请稍后检查；也可以通过正式版页面手动下载安装。</string>
+    <string name="compose_update_download_failed">无法开始下载或安装，请从官方 Release 下载 APK，并查看 Android 安装器显示的具体错误。</string>
+    <string name="compose_update_no_download">没有尚待安装的更新包。</string>
 </resources>
