@@ -3,6 +3,8 @@ package org.adaway.ui.compose
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -99,7 +102,7 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                     IconButton(
                         /* 导出当前筛选下的两段：最新一页 + 用户已经加载出来的历史 */
                         onClick = { shareQueryLogCsv(context, shown + shownOlder) },
-                        enabled = shown.isNotEmpty(),
+                        enabled = shown.isNotEmpty() || shownOlder.isNotEmpty(),
                     ) {
                         Icon(
                             Icons.Outlined.Share,
@@ -124,9 +127,12 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            /* Scroll the filters on narrow screens and with large system fonts.
+             * Keeping every chip in a fixed Row clipped the last choices. */
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -151,6 +157,15 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                     label = { Text(stringResource(R.string.compose_stats_recent_action_proxied)) },
                 )
             }
+            /* Always show the loaded record count; do not suggest that a filter
+             * includes records which haven't been downloaded yet. */
+            Text(
+                text = "${shown.size + shownOlder.size} / ${if (olderTotal > 0) olderTotal else entries.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             /* 空状态要看两段：只判断 shown 会在最新一页没有命中筛选时把已加载的历史整段藏起来 */
             if (shown.isEmpty() && shownOlder.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -232,7 +247,16 @@ private fun QueryLogRow(entry: QueryLogEntry) {
             .fillMaxWidth()
             .padding(vertical = 6.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            entry.host.ifEmpty { "-" },
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(
+            modifier = Modifier.padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 time,
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
@@ -253,11 +277,9 @@ private fun QueryLogRow(entry: QueryLogEntry) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(
-            entry.host.ifEmpty { "-" },
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        HorizontalDivider(
+            modifier = Modifier.padding(top = 10.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
         )
     }
 }
