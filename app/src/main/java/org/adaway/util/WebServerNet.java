@@ -92,6 +92,12 @@ public final class WebServerNet {
             Thread.currentThread().interrupt(); }
             return body.toString("UTF-8");
         } catch (Exception e) {
+            /* 外层 catch 也会接到 InterruptedException（in.read / process.waitFor 都可能抛），
+               吞掉它会让上层的取消/退出逻辑失效（Sonar java:S2142）。这里只恢复中断标志，
+               其余行为不变：仍然记日志并返回 null。 */
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             Timber.w(e, "Failed to fetch via nc (host=%s port=%d)", host, port);
             return null;
         }

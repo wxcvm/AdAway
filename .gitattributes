@@ -1,0 +1,15 @@
+# 统一行尾：索引与工作区都保持 LF。
+# 起因：本仓库在 Windows 上 core.autocrlf=true，而历史上有两个文件曾被以 CRLF 写进索引（由服务端 API 造提交所致）。
+# 注意：**刻意不包含 *.c / *.h** —— tcpdump/jni/libpcap/msdos/ 下的上游 DOS 移植文件本就使用 CRLF，不应改动。
+*.kt     text eol=lf
+*.kts    text eol=lf
+*.java   text eol=lf
+*.md     text eol=lf
+*.py     text eol=lf
+*.yml    text eol=lf
+*.yaml   text eol=lf
+*.json   text eol=lf
+*.xml    text eol=lf
+*.txt    text eol=lf
+*.pro    text eol=lf
+*.gradle text eol=lf

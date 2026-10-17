@@ -72,6 +72,7 @@
       刻意不声明 android:usesCleartextTraffic="true"：那会在 API 28+ 上真的放开对外明文，
       而本应用对外的下载走 HTTPS；这里保持平台默认，仅说明用途。
     -->
+    <!-- NOSONAR(xml:S5332): 仅用于本地明文通信；刻意不声明 usesCleartextTraffic，保持平台默认（理由见上）-->
     <application
         android:name=".AdAwayApplication"
         android:allowBackup="true"

@@ -37,6 +37,54 @@ jobs:
           "$RUNNER_TEMP/pin_window_test"
           cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/f5_guard_test" webserver/jni/f5_guard_test.c
           "$RUNNER_TEMP/f5_guard_test"
+          cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/cosmetic_sanitize_test" webserver/jni/cosmetic_sanitize_test.c
+          "$RUNNER_TEMP/cosmetic_sanitize_test"
+          cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/cosmetic_scope_test" webserver/jni/cosmetic_scope_test.c
+          "$RUNNER_TEMP/cosmetic_scope_test"
+          cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/lt_map_test" webserver/jni/lt_map_test.c
+          "$RUNNER_TEMP/lt_map_test"
+
+      # 契约守卫（G4）：block_config.json 的键清单必须与实际读取的键**逐一相同**。
+      # 左边 = 服务端真正读取的键（webserver.c 里 jbool(...) 的第二个参数）；
+      # 右边 = docs/windows-core-contract.md 第 1 节表格里记录的键。
+      # 任何一边多出或缺少键，这里就失败 —— 避免"加了键却没更新契约"或"契约写了代码没有"。
+      - name: Config key contract guard
+        run: |
+          set -euo pipefail
+          code_keys=$(grep -oE 'jbool\([^,]+, *"[a-z0-9_]+"' webserver/jni/webserver.c \
+                      | grep -oE '"[a-z0-9_]+"' | tr -d '"' | sort -u)
+          doc_keys=$(sed -n '/^## 1\./,/^## 2\./p' docs/windows-core-contract.md \
+                      | grep -oE '`[a-z][a-z0-9_]*_[a-z0-9_]+`' | tr -d '`' | sort -u)
+          echo "代码读取的键（$(echo "$code_keys" | wc -l) 个）："; echo "$code_keys"
+          echo "契约记录的键（$(echo "$doc_keys" | wc -l) 个）："; echo "$doc_keys"
+          if ! diff -u <(echo "$doc_keys") <(echo "$code_keys"); then
+            echo "::error::block_config.json 键清单与契约不一致：左边是契约、右边是代码（见上）"
+            exit 1
+          fi
+          echo "契约与代码的键清单完全一致 ✓"
+
+      # 契约守卫 2（G4）：/internal-stats 的字段清单也必须与代码**逐一相同**。
+      # 左边 = 服务端实际输出的 JSON 键（webserver.c 里的 "key": 与转义的 \"key\": 两种写法）；
+      # 右边 = docs/windows-core-contract.md 第 2 节表格里记录的字段。
+      - name: Stats field contract guard
+        run: |
+          set -euo pipefail
+          code_keys=$( { grep -oE '\\"[a-z][a-z0-9_]{2,40}\\"[[:space:]]*:' webserver/jni/webserver.c | sed -E 's/.*\\"([a-z0-9_]+)\\".*/\1/'
+                         grep -oE '(^|[^\\])"[a-z][a-z0-9_]{2,40}"[[:space:]]*:' webserver/jni/webserver.c | sed -E 's/.*"([a-z0-9_]+)".*/\1/' ; } | sort -u)
+          doc_keys=$(sed -n '/^## 2\./,/^## 3\./p' docs/windows-core-contract.md \
+                      | grep -oE '`[a-z][a-z0-9_]{2,40}`' | tr -d '`' | sort -u)
+          echo "代码输出的字段（$(echo "$code_keys" | wc -l) 个）"; echo "$code_keys"
+          echo "契约记录的字段（$(echo "$doc_keys" | wc -l) 个）"; echo "$doc_keys"
+          if ! diff -u <(echo "$doc_keys") <(echo "$code_keys"); then
+            echo "::error::/internal-stats 字段清单与契约不一致：左边是契约、右边是代码（见上）"
+            exit 1
+          fi
+          echo "/internal-stats 字段与契约完全一致 ✓"
+
+      # 契约守卫 3（文档卫生）：文档里每个 §N / §N.M 引用都必须解析到同编号标题。
+      # 起因：手写引用曾多次指错（写成不存在的 §4.1、把确实存在的 §5.2 误判为悬空）。
+      - name: Doc cross-reference guard
+        run: python3 tools/check_doc_refs.py
 
       - name: set up JDK 21
         uses: actions/setup-java@v5
@@ -221,6 +269,10 @@ jobs:
       # wxcvm/Doh-ECH is still mirrored when the PAT happens to be configured,
       # because builds installed before this change look only there.
       - name: Publish to the in-app update feed
+        # A successful merge should only run CI; never push a prerelease
+        # APK to installed users. Tags v* or explicit manual dispatch on
+        # master are intentional publishing events.
+        if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') || startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LEGACY_FEED_TOKEN: ${{ secrets.DOH_ECH_TOKEN }}
