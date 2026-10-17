@@ -345,7 +345,7 @@
     <string name="compose_settings_block_mode_custom_hint">自定义重定向地址（可在高级设置中修改 IPv4/IPv6 目标）。</string>
     <string name="compose_settings_update_check">检查更新</string>
     <string name="compose_settings_update_check_hint">当前版本 %1$s · 更新源：GitHub Releases</string>
-    <string name="compose_settings_update_downloading">已开始下载，完成后系统会提示安装</string>
+    <string name="compose_settings_update_downloading">已提交下载。下载完成后请确认系统安装提示；如果没有弹窗，可点击“继续安装已下载更新”。</string>
     <!-- 规则源：本地文件 -->
     <string name="compose_rules_source_type_url">订阅链接</string>
     <string name="compose_rules_source_type_file">本地文件</string>
