@@ -5,6 +5,7 @@ import static org.adaway.model.update.UpdateStore.getApkStore;
 
 import android.app.DownloadManager;
 import android.content.Context;
+import android.database.Cursor;
 import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -98,6 +99,55 @@ public class UpdateModel {
      * IP, and the check runs on every app start, so results are cached.
      */
     private static final long CHECK_CACHE_DELAY = 30L * 60L * 1000L;
+
+    // Persist the DownloadManager id across app restarts. A dynamically
+    // registered receiver cannot be trusted to survive process termination.
+    private static final String UPDATE_DOWNLOAD_PREFS = "update_download_state";
+    private static final String PENDING_DOWNLOAD_ID = "pending_download_id";
+
+    public enum DownloadState { NONE, DOWNLOADING, READY_TO_INSTALL, FAILED }
+
+    public DownloadState getPendingDownloadState() {
+        long id = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .getLong(PENDING_DOWNLOAD_ID, -1);
+        if (id < 0) return DownloadState.NONE;
+        DownloadManager dm = this.context.getSystemService(DownloadManager.class);
+        if (dm == null) return DownloadState.FAILED;
+        try (Cursor cursor = dm.query(new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) return DownloadState.FAILED;
+            int col = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (col < 0) return DownloadState.FAILED;
+            switch (cursor.getInt(col)) {
+                case DownloadManager.STATUS_SUCCESSFUL:
+                    return DownloadState.READY_TO_INSTALL;
+                case DownloadManager.STATUS_FAILED:
+                    return DownloadState.FAILED;
+                default:
+                    return DownloadState.DOWNLOADING;
+            }
+        } catch (Exception exception) {
+            Timber.w(exception, "Unable to inspect pending APK download");
+            return DownloadState.FAILED;
+        }
+    }
+
+    /**
+     * Explicit foreground recovery path if the original download-complete
+     * broadcast was missed or Android blocked a background installer launch.
+     * The same signing/package/version checks are performed again.
+     */
+    public boolean retryInstallDownloadedUpdate() {
+        if (getPendingDownloadState() != DownloadState.READY_TO_INSTALL) return false;
+        long id = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .getLong(PENDING_DOWNLOAD_ID, -1);
+        ApkDownloadReceiver.resumeInstall(this.context, id);
+        return true;
+    }
+
+    public static void clearPendingDownload(Context context) {
+        context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .edit().remove(PENDING_DOWNLOAD_ID).apply();
+    }
 
     private final Context context;
     private final VersionInfo versionInfo;
@@ -512,6 +562,10 @@ public class UpdateModel {
         }
         // Queue download
         long downloadId = download(manifest);
+        // Save the id before waiting for a process-scoped callback: users must
+        // be able to open the installer after a download outlives this process.
+        this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .edit().putLong(PENDING_DOWNLOAD_ID, downloadId).apply();
         // Register new broadcast receiver
         this.receiver = new ApkDownloadReceiver(downloadId);
         // RECEIVER_NOT_EXPORTED: ACTION_DOWNLOAD_COMPLETE is sent by the system
