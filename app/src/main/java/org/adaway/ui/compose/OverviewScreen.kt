@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -143,15 +144,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 hostsCount = blockedCount,
             )
 
-            // Hosts statistics summary row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                StatTile(stringResource(R.string.compose_hosts_blocked), blockedCount, Modifier.weight(1f))
-                StatTile(stringResource(R.string.compose_hosts_allowed), allowedCount, Modifier.weight(1f))
-                StatTile(stringResource(R.string.compose_hosts_redirected), redirectCount, Modifier.weight(1f))
-            }
+            AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
 
             // Web server quick stats row（利用空位：证书/请求/拦截率）
             if (serverStats != null) {
@@ -465,6 +458,32 @@ private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
                     fontFamily = FontFamily.Monospace,
                 ),
             )
+        }
+    }
+}
+
+@Composable
+internal fun AdaptiveHostSummary(blocked: Int, allowed: Int, redirected: Int) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        if (maxWidth < 480.dp) {
+            // Give numbers and localized labels enough room at large font scales.
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatTile(stringResource(R.string.compose_hosts_blocked), blocked, Modifier.weight(1f))
+                    StatTile(stringResource(R.string.compose_hosts_allowed), allowed, Modifier.weight(1f))
+                }
+                StatTile(
+                    stringResource(R.string.compose_hosts_redirected),
+                    redirected,
+                    Modifier.fillMaxWidth(),
+                )
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatTile(stringResource(R.string.compose_hosts_blocked), blocked, Modifier.weight(1f))
+                StatTile(stringResource(R.string.compose_hosts_allowed), allowed, Modifier.weight(1f))
+                StatTile(stringResource(R.string.compose_hosts_redirected), redirected, Modifier.weight(1f))
+            }
         }
     }
 }
