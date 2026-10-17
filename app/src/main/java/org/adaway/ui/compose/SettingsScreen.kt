@@ -22,6 +22,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -42,6 +43,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Info
@@ -358,7 +360,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
 
     // Keep the chosen section across activity recreation, but never persist
     // transient UI state or change the underlying settings.
-    var selectedSection by rememberSaveable { mutableIntStateOf(0) }
+    var selectedSection by rememberSaveable { mutableIntStateOf(-1) }
+    BackHandler(enabled = selectedSection >= 0) { selectedSection = -1 }
     val settingsScroll = rememberScrollState()
     LaunchedEffect(selectedSection) { settingsScroll.scrollTo(0) }
     val sectionTitles = listOf(
@@ -380,10 +383,51 @@ fun SettingsScreen(viewModel: StatsViewModel) {
         stringResource(R.string.compose_settings_section_7_description),
     )
 
+    // Search uses existing localized option names. A hit opens its category,
+    // never changes a preference and never silently activates network mode.
+    val sectionSearchHints = listOf(
+        listOf(
+            stringResource(R.string.compose_settings_block_mode_title),
+            stringResource(R.string.compose_settings_allowlist_title),
+            stringResource(R.string.compose_tun_diagnostic_title),
+            "AdGuard",
+        ),
+        listOf(stringResource(R.string.compose_settings_light_mode), "HTTP", "HTTPS"),
+        listOf(
+            stringResource(R.string.compose_settings_cert_title),
+            stringResource(R.string.compose_settings_pin_policy),
+        ),
+        listOf(stringResource(R.string.compose_settings_cache_reuse)),
+        listOf(
+            stringResource(R.string.compose_settings_charts_title),
+            stringResource(R.string.compose_settings_realtime),
+        ),
+        listOf(
+            stringResource(R.string.compose_settings_autostart),
+            stringResource(R.string.compose_settings_theme_title),
+        ),
+        listOf(
+            stringResource(R.string.compose_settings_backup),
+            stringResource(R.string.compose_settings_debug_title),
+            stringResource(R.string.compose_settings_ipv6),
+            stringResource(R.string.compose_settings_about_title),
+        ),
+    )
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.compose_settings_title)) },
+                navigationIcon = {
+                    if (selectedSection >= 0) {
+                        IconButton(onClick = { selectedSection = -1 }) {
+                            Icon(
+                                Icons.Outlined.ArrowBack,
+                                contentDescription = stringResource(R.string.compose_settings_home_back),
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
@@ -393,11 +437,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
         Column(
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-            SettingsCategoryNavigation(
-                selectedIndex = selectedSection,
-                titles = sectionTitles,
-                onSelect = { selectedSection = it },
-            )
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -405,12 +444,20 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                SettingsCategoryIntroduction(
-                    index = selectedSection + 1,
-                    title = sectionTitles[selectedSection],
-                    description = sectionDescriptions[selectedSection],
-                )
-                when (selectedSection) {
+                if (selectedSection < 0) {
+                    SettingsCategoryHome(
+                        titles = sectionTitles,
+                        descriptions = sectionDescriptions,
+                        searchHints = sectionSearchHints,
+                        onSelect = { selectedSection = it },
+                    )
+                } else {
+                    SettingsCategoryIntroduction(
+                        index = selectedSection + 1,
+                        title = sectionTitles[selectedSection],
+                        description = sectionDescriptions[selectedSection],
+                    )
+                    when (selectedSection) {
                     0 -> {
 // ===== [E-WIZARD-SLOT] AdGuard Home custom_ip 写配置向导的界面入口 =====
 // 逻辑三层已完成并 CI 验证：AdGuardCoexistence / AdGuardHomeConfigFile / AdGuardHomeVerification；
@@ -2525,6 +2572,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
             }
                     }
                     else -> Unit
+                    }
                 }
             }
         }
