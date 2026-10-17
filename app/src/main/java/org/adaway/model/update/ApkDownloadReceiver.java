@@ -68,8 +68,35 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
         worker.start();
     }
 
+    /** User-triggered fallback, not a silent or privileged install. */
+    public static void resumeInstall(Context context, long id) {
+        if (id < 0) return;
+        Context app = context.getApplicationContext();
+        new Thread(() -> new ApkDownloadReceiver(id).verifyAndInstall(app, id),
+                "apk-update-foreground-retry").start();
+    }
+
     private void verifyAndInstall(Context context, long id) {
         DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
+        if (downloadManager == null) {
+            Timber.w("DownloadManager missing while verifying APK update");
+            return;
+        }
+        try (android.database.Cursor cursor = downloadManager.query(
+                new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                Timber.w("APK download %s not found", id);
+                return;
+            }
+            int index = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (index < 0 || cursor.getInt(index) != DownloadManager.STATUS_SUCCESSFUL) {
+                Timber.w("APK download %s is not complete", id);
+                return;
+            }
+        } catch (Exception exception) {
+            Timber.w(exception, "Unable to inspect downloaded update");
+            return;
+        }
         Uri apkUri = downloadManager.getUriForDownloadedFile(id);
         if (apkUri == null) {
             Timber.w("Failed to download id: %s.", id);
@@ -92,8 +119,14 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
         Intent install = new Intent(ACTION_INSTALL_PACKAGE);
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         install.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        install.setData(apkUri);
-        context.startActivity(install);
+        install.setDataAndType(apkUri, "application/vnd.android.package-archive");
+        try {
+            context.startActivity(install);
+        } catch (android.content.ActivityNotFoundException | SecurityException exception) {
+            Timber.w(exception, "No permitted installer can open the downloaded APK");
+            Toast.makeText(context,
+                    context.getString(R.string.update_verify_unreadable), Toast.LENGTH_LONG).show();
+        }
     }
 
     /**
