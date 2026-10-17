@@ -98,7 +98,7 @@ jobs:
           done < <(find "$sdk_root/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -Vr)
           if [[ -z "$bt" ]]; then
             echo "::error::No installed Android build-tools version offers both apksigner and aapt"
-            find "$sdk_root/build-tools" -maxdepth 2 \\( -name apksigner -o -name aapt \\) -print
+            find "$sdk_root/build-tools" -maxdepth 2 -type f | grep -E "/(aapt|apksigner)$" || true
             exit 1
           fi
           echo "Using Android build tools: ${bt##*/}"
