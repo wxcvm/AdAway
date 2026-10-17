@@ -167,8 +167,15 @@ def renameJniLibAsExecutable = tasks.register('renameJniLibAsExecutable', Copy) 
  * class path. Match by name against every task in the project rather
  * than filtering by (possibly wrong/renamed) type.
  */
+// The disposable x86_64 Room instrumentation job exercises Java/SQLite
+// only. It must not force the arm64 executable-renaming task: with an x86-only
+// ABI injection AGP does not expose externalNativeBuildDebug, and the native
+// server is deliberately absent from this test APK. All production ARM64
+// builds still MUST package and verify the real executable above.
+def roomOnlyX86Test = project.findProperty('ruleLoaderTestAbi')?.toString() == 'x86_64'
 tasks.configureEach { t ->
-    if (t.name.matches(/(?i).*merge.*(JniLibFolders|NativeLibs).*/)) {
+    if (!roomOnlyX86Test &&
+            t.name.matches(/(?i).*merge.*(JniLibFolders|NativeLibs).*/)) {
         t.dependsOn(renameJniLibAsExecutable)
     }
 }
