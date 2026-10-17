@@ -1,0 +1,35 @@
+name: Isolated userspace transport evaluation
+on:
+  pull_request:
+    branches: [feat/core-contract-v1]
+    paths: ['tools/transport-poc/**', '.github/workflows/isolated-transport-poc.yml', 'docs/isolated-transport-evaluation.md']
+permissions:
+  contents: read
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Fetch only the pinned candidate and its pinned dependencies
+        run: bash tools/transport-poc/fetch_candidate.sh "$RUNNER_TEMP/hev-evaluation"
+      - name: Build Linux shared library
+        working-directory: ${{ runner.temp }}/hev-evaluation
+        run: make -j2 shared CFLAGS='-O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2'
+      - name: Verify payloads through a mock TUN and loopback-only test services
+        working-directory: ${{ runner.temp }}/hev-evaluation
+        env:
+          LD_LIBRARY_PATH: third-part/yaml/bin:third-part/lwip/bin:third-part/hev-task-system/bin
+        run: python3 "$GITHUB_WORKSPACE/tools/transport-poc/loopback_probe.py" bin/libhev-socks5-tunnel.so > "$RUNNER_TEMP/transport-results.json"
+      - name: Cross-build two Android ABIs without app integration
+        working-directory: ${{ runner.temp }}/hev-evaluation
+        run: |
+          "$ANDROID_NDK_HOME/ndk-build" NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk NDK_APPLICATION_MK=Application.mk APP_ABI='arm64-v8a x86_64' -j2
+          python3 "$GITHUB_WORKSPACE/tools/transport-poc/check_android_abi.py" . "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" > "$RUNNER_TEMP/android-abi-results.json"
+      - name: Upload evaluation measurements only
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-transport-evaluation
+          path: |
+            ${{ runner.temp }}/transport-results.json
+            ${{ runner.temp }}/android-abi-results.json
