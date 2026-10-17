@@ -29,6 +29,57 @@ public final class DiagnosticDnsRelayTest {
         return DiagnosticDnsRelay.process(p, length, permits, 1000, upstream);
     }
 
+    @Test public void productionRuleHitSkipsNetworkAndEmitsRealBlockedDns() throws Exception {
+        RuleSnapshotRepository repository = new RuleSnapshotRepository();
+        assertTrue(repository.publish(1, java.util.Map.of(
+                "example.com", TrafficCoreContract.Action.NXDOMAIN)));
+        byte[] query = DiagnosticDnsCodec.query(0x2731);
+        final int[] upstreamCalls = {0};
+        byte[] response = DiagnosticDnsRelay.resolveFromSnapshotOrUpstream(
+                query, repository.read(), payload -> {
+                    upstreamCalls[0]++;
+                    throw new IOException("Should not contact resolver for blocked rule");
+                });
+        assertEquals(0, upstreamCalls[0]);
+        assertTrue(DiagnosticDnsCodec.matchesResponse(query, response));
+        assertEquals(3, DiagnosticDnsCodec.responseCode(response));
+        assertEquals(query.length, response.length);
+    }
+
+    @Test public void unmatchedRuleUsesOriginalUpstreamQuestionAndDoesNotFakeSuccess()
+            throws Exception {
+        RuleSnapshotRepository repository = new RuleSnapshotRepository();
+        assertTrue(repository.publish(1, java.util.Map.of(
+                "unrelated.test", TrafficCoreContract.Action.NXDOMAIN)));
+        byte[] query = DiagnosticDnsCodec.query(0x1946);
+        final int[] upstreamCalls = {0};
+        byte[] returned = DiagnosticDnsRelay.resolveFromSnapshotOrUpstream(
+                query, repository.read(), payload -> {
+                    upstreamCalls[0]++;
+                    assertArrayEquals(query, payload);
+                    byte[] response = payload.clone();
+                    response[2] = (byte) 0x81;
+                    response[3] = (byte) 0x80;
+                    return response;
+                });
+        assertEquals(1, upstreamCalls[0]);
+        assertEquals(0, DiagnosticDnsCodec.responseCode(returned));
+        try {
+            DiagnosticDnsRelay.resolveFromSnapshotOrUpstream(
+                    query, repository.read(), payload -> {
+                        throw new IOException("Real network failed");
+                    });
+            fail("Network failure must not be converted to a fake success");
+        } catch (IOException expected) { }
+        byte[] illegal = query.clone();
+        illegal[13] = (byte)'z';
+        try {
+            DiagnosticDnsRelay.resolveFromSnapshotOrUpstream(
+                    illegal, repository.read(), payload -> payload);
+            fail("Non-whitelisted questions must not reach any upstream");
+        } catch (IOException expected) { }
+    }
+
     @Test public void replyIsRepackagedAsDiagnosticUdp() {
         byte[] q = DiagnosticDnsCodec.query(0x18ac);
         byte[] p = packet(q);

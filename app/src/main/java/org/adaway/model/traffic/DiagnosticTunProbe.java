@@ -20,13 +20,14 @@ public final class DiagnosticTunProbe {
      * underlying network DNS resolver. Only initiated by the user, and only
      * through the test-only TUN IP and UDP port.
      */
-    public static boolean dnsRoundTrip() {
-        if (!DiagnosticVpnService.isActive()) return false;
+    /** -1 = transport/validation failure; 0..15 = actual DNS RCODE. */
+    public static int dnsResponseCode() {
+        if (!DiagnosticVpnService.isActive()) return -1;
         byte[] request = DiagnosticDnsCodec.query(RANDOM.nextInt(65536));
         try (DatagramSocket socket = new DatagramSocket()) {
             try (DiagnosticDnsAuthorization.Lease permit = DiagnosticVpnService.authorizeDnsProbe(
                     socket.getLocalPort(), request)) {
-            if (permit == null) return false;
+            if (permit == null) return -1;
             socket.setSoTimeout(2500);
             InetAddress address = InetAddress.getByName(DiagnosticTunPlan.DIAGNOSTIC_TARGET);
             socket.send(new DatagramPacket(request, request.length,
@@ -35,14 +36,19 @@ public final class DiagnosticTunProbe {
             DatagramPacket packet = new DatagramPacket(data, data.length);
             socket.receive(packet);
             if (!address.equals(packet.getAddress())
-                    || packet.getPort() != DiagnosticDnsCodec.PORT) return false;
+                    || packet.getPort() != DiagnosticDnsCodec.PORT) return -1;
             byte[] answer = Arrays.copyOf(data, packet.getLength());
             return DiagnosticDnsCodec.matchesResponse(request, answer)
-                    && DiagnosticDnsCodec.responseCode(answer) == 0;
+                    ? DiagnosticDnsCodec.responseCode(answer) : -1;
             }
         } catch (IOException | RuntimeException ignored) {
-            return false;
+            return -1;
         }
+    }
+
+    /** Retained for callers that need an affirmative NOERROR result only. */
+    public static boolean dnsRoundTrip() {
+        return dnsResponseCode() == 0;
     }
 
     public static boolean relayRoundTrip() {

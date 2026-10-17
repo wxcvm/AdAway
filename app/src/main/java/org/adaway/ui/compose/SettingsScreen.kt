@@ -551,12 +551,16 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         enabled = diagnosticActive,
                         onClick = {
                             tunScope.launch {
-                                val ok = withContext(Dispatchers.IO) {
-                                    org.adaway.model.traffic.DiagnosticTunProbe.dnsRoundTrip()
+                                val rcode = withContext(Dispatchers.IO) {
+                                    org.adaway.model.traffic.DiagnosticTunProbe.dnsResponseCode()
                                 }
                                 tunStatus = context.getString(
-                                    if (ok) R.string.compose_tun_diagnostic_dns_ok
-                                    else R.string.compose_tun_diagnostic_dns_failed,
+                                    when (rcode) {
+                                        0 -> R.string.compose_tun_diagnostic_dns_ok
+                                        3 -> R.string.compose_tun_diagnostic_dns_nxdomain
+                                        5 -> R.string.compose_tun_diagnostic_dns_refused
+                                        else -> R.string.compose_tun_diagnostic_dns_failed
+                                    },
                                 )
                                 tunRefreshKey++
                             }
