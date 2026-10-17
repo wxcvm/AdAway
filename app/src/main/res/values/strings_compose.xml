@@ -434,4 +434,25 @@
     <string name="compose_settings_boot_test_script">Test the boot script</string>
     <string name="compose_settings_boot_test_running">Testing the boot script...</string>
     <string name="compose_settings_boot_test_result_title">Test result</string>
+
+    <!-- Network integration center: current capabilities are intentionally previews. -->
+    <string name="compose_nav_network">Network</string>
+    <string name="compose_network_title">Network center</string>
+    <string name="compose_network_status_title">Capture coverage</string>
+    <string name="compose_network_status_body">The planned system-wide VPN/TUN capture mode is not yet connected to this screen. Existing Root and hosts filtering continue to use their current controls. A running local server alone does not prove all device traffic is filtered.</string>
+    <string name="compose_network_not_active">Global capture not enabled here</string>
+    <string name="compose_network_roadmap_heading">Planned integrations</string>
+    <string name="compose_network_planned">Planned · not configurable yet</string>
+    <string name="compose_network_capture_title">Full traffic capture</string>
+    <string name="compose_network_capture_description">IPv4/IPv6, TCP/UDP and per-app coverage via VPNService or Root; clear active mode and recovery state.</string>
+    <string name="compose_network_adguard_title">AdGuard coexistence</string>
+    <string name="compose_network_adguard_description">Conflict evidence, listen-only mode and a verified AdGuard Home blocking-IP setup wizard.</string>
+    <string name="compose_network_dns_title">DNS and rule engine</string>
+    <string name="compose_network_dns_description">Upstream DNS health, encrypted DNS and consistent rule-matching diagnostics.</string>
+    <string name="compose_network_https_title">HTTPS and QUIC diagnostics</string>
+    <string name="compose_network_https_description">Certificate trust, TLS negotiation and UDP/443 coverage diagnostics without promising all HTTPS can be decrypted.</string>
+    <string name="compose_network_recovery_title">Network recovery</string>
+    <string name="compose_network_recovery_description">Show ownership of changed routes and restore only this app’s network settings if capture fails.</string>
+    <string name="compose_network_available_heading">Available features</string>
+    <string name="compose_network_available_body">Manage existing blocking and local server settings, rules and statistics through their current pages.</string>
 </resources>
