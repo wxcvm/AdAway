@@ -27,6 +27,25 @@ public final class RuleSnapshotRepository {
             // Construct once per immutable generation, never on packet arrival.
             this.wildcardIndex = new WildcardRuleIndex(rules.keySet());
         }
+        /**
+         * Retrieve the replacement chosen by the SAME exact-then-wildcard
+         * precedence used in decide(). Exact non-replacement entries must
+         * suppress any matching wildcard replacement.
+         */
+        public String replacementFor(String host) {
+            String canonical = canonicalDomain(host);
+            if (canonical == null) return null;
+            String direct = replacements.get(canonical);
+            if (direct != null || rules.containsKey(canonical)) return direct;
+            String wildcard = wildcardIndex.findBest(canonical);
+            return wildcard == null ? null : replacements.get(wildcard);
+        }
+
+        /** Pure DNS policy response; does not touch sockets, TUN or DNS settings. */
+        public byte[] answerDns(byte[] query) {
+            return DnsPolicyWire.respond(query, this);
+        }
+
         public TrafficCoreContract.Decision decide(String host, int type, int qclass) {
             String canonical = canonicalDomain(host);
             TrafficCoreContract.Action action = canonical == null ? null : rules.get(canonical);
