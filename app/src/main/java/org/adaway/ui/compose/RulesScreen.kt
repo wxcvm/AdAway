@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -229,57 +230,54 @@ fun RulesScreen(
                 .padding(padding)
                 .fillMaxSize(),
         ) {
-            Box(
+            // Keep the three real host counts visible without repeating the
+            // three tall dashboard KPI cards above every rule list.
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
+                listOf(
+                    stringResource(R.string.compose_hosts_blocked) to blockedCount,
+                    stringResource(R.string.compose_hosts_allowed) to allowedCount,
+                    stringResource(R.string.compose_hosts_redirected) to redirectCount,
+                ).forEach { (label, count) ->
+                    Text(
+                        "$label: ${ChartUtils.compactNumber(count.toLong())}",
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-
             TabRow(selectedTabIndex = selectedTab) {
                 tabs.forEachIndexed { index, tab ->
                     Tab(
                         selected = index == selectedTab,
                         onClick = { selectedTab = index },
-                        text = { Text(stringResource(tab.labelRes)) },
+                        text = { Text(stringResource(tab.labelRes), maxLines = 1) },
                     )
                 }
             }
 
-            // 解除过滤（按域名放行）入口：只在劫持过滤模式下真正可用，页面里会说明原因
+            // Related rule tools share one horizontally scrollable line.
+            // Keep both existing working routes, but reclaim space for rows.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    stringResource(R.string.compose_exempt_entry),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
                 TextButton(onClick = onOpenExempt) {
-                    Text(stringResource(R.string.compose_exempt_open))
+                    Text(stringResource(R.string.compose_exempt_entry))
                 }
-            }
-
-            // 二级入口：按域覆盖响应（仍然拦截，只是改用指定状态码回答）
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(R.string.compose_settings_rule_override),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
                 TextButton(onClick = onOpenOverrides) {
-                    Text(stringResource(R.string.compose_exempt_open))
+                    Text(stringResource(R.string.compose_settings_rule_override))
                 }
             }
 
