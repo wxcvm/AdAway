@@ -50,9 +50,9 @@ jobs:
           assert "sectionSearchHints" in page
           assert "else sectionTitles[selectedSection]" in page
           assert "selectedSection = -1" in page
+          nav = Path("app/src/main/java/org/adaway/ui/compose/SettingsCategoryNavigation.kt").read_text()
           assert "ScrollableTabRow" not in nav
           assert "LazyColumn" in nav
-          nav = Path("app/src/main/java/org/adaway/ui/compose/SettingsCategoryNavigation.kt").read_text()
           assert "OutlinedTextField" in nav and "SettingsCategoryNavigation" in nav
           for i in range(7):
               assert f"{i} ->" in page, f"Missing settings page section {i}"
