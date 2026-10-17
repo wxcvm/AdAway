@@ -549,35 +549,12 @@ static uint64_t uptime_seconds(void) {
 
 /* 修饰符判据同样来自 rule_norm.h（与测试共用一份）。 */
 
+#include "domain_allow_snapshot.h"
+static struct da_repository s_domain_allow_repository = DA_REPOSITORY_INITIALIZER;
 static bool domain_is_allowed(const char *host, const char *resource_dir) {
-    if (host == NULL || host[0] == '\0' || resource_dir == NULL) return false;
-    char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/domain_allowlist.txt", resource_dir);
-    FILE *f = fopen(path, "r");
-    if (f == NULL) return false;
-    char line[256], rule[192];
-    bool found = false;
-    size_t hl = strlen(host);
-    while (!found && fgets(line, sizeof(line), f) != NULL) {
-        size_t n = strlen(line);
-        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) line[--n] = '\0';
-        char *s = line;
-        while (*s == ' ' || *s == '\t') s++;
-        if (*s == '\0' || *s == '#' || *s == '!') continue;
-        domain_rule_normalize(s, rule, sizeof(rule));
-        size_t rl = strlen(rule);
-        /* Reject overly broad rules; a bare TLD ("com") or a wildcard would
-           otherwise exempt most of the internet. */
-        if (rl < 4 || strchr(rule, '.') == NULL || strchr(rule, '*') != NULL) continue;
-        if (rl == hl && strcasecmp(rule, host) == 0) {
-            found = true;
-        } else if (rl < hl && host[hl - rl - 1] == '.' &&
-                   strcasecmp(rule, host + (hl - rl)) == 0) {
-            found = true;
-        }
-    }
-    fclose(f);
-    return found;
+    struct da_result result = da_lookup(&s_domain_allow_repository, host, resource_dir);
+    if (!result.update_valid) LOG_WARN("Domain exemption update rejected; retaining last valid rules");
+    return result.allowed;
 }
 
 static bool uid_is_allowed(uid_t uid, const char *resource_dir) {
@@ -3172,122 +3149,29 @@ static struct proxy_state *s_proxies[PROXY_MAX];
    lookup entirely while no proxy request is active. */
 static int s_proxy_active;
 
-/* ── blocked-host table (64-bit FNV-1a hashes, open addressing) ──
- * Grown on demand (512 KB at first, doubling up to 16 MB) so the common case
- * of a few thousand rules costs almost no memory.
- */
-#define BLOCK_HASH_MIN_SLOTS (1u << 16)
-#define BLOCK_HASH_MAX_SLOTS (1u << 21)
-static uint64_t *s_block_slots;
-static size_t s_block_cap;    /* allocated slots (power of two, 0 = none) */
-static size_t s_block_used;
-static bool s_block_grow(void);
-
-static uint64_t fnv1a_lower(const char *s, size_t n) {
-    uint64_t h = 1469598103934665603ULL;
-    for (size_t i = 0; i < n; i++) {
-        unsigned char c = (unsigned char) s[i];
-        if (c >= 'A' && c <= 'Z') c = (unsigned char) (c + 32);
-        h ^= c;
-        h *= 1099511628211ULL;
-    }
-    return h ? h : 1;
+#include "block_rule_snapshot.h"
+static struct bs_store s_native_block_rules = BS_STORE_INITIALIZER;
+static bool block_set_contains(const char *host, size_t length) {
+    if (!host || !length || length > 253) return false;
+    char domain[254]; memcpy(domain, host, length); domain[length] = 0;
+    return bs_query(&s_native_block_rules, domain).decision.action == CORE_NXDOMAIN;
 }
-
-/* Double the table (rehashing in place); keeps the load factor below 50%. */
-static bool s_block_grow(void) {
-    size_t newCap = s_block_cap ? s_block_cap * 2 : BLOCK_HASH_MIN_SLOTS;
-    if (newCap > BLOCK_HASH_MAX_SLOTS) return false;
-    uint64_t *slots = (uint64_t *) calloc(newCap, sizeof(uint64_t));
-    if (!slots) return false;
-    for (size_t i = 0; i < s_block_cap; i++) {
-        uint64_t h = s_block_slots ? s_block_slots[i] : 0;
-        if (!h) continue;
-        size_t k = (size_t) (h & (newCap - 1));
-        while (slots[k]) k = (k + 1) & (newCap - 1);
-        slots[k] = h;
-    }
-    free(s_block_slots);
-    s_block_slots = slots;
-    s_block_cap = newCap;
-    return true;
-}
-
-static void block_set_add_hash(uint64_t h) {
-    if (!s_block_slots || s_block_used * 2 >= s_block_cap) {
-        if (!s_block_grow() && !s_block_slots) return;
-    }
-    size_t i = (size_t) (h & (s_block_cap - 1));
-    for (size_t probe = 0; probe < 128; probe++) {
-        size_t k = (i + probe) & (s_block_cap - 1);
-        if (s_block_slots[k] == 0) { s_block_slots[k] = h; s_block_used++; return; }
-        if (s_block_slots[k] == h) return;
-    }
-}
-
-static bool block_set_contains(const char *host, size_t len) {
-    if (!s_block_slots || len == 0 || len > 255) return false;
-    uint64_t h = fnv1a_lower(host, len);
-    size_t i = (size_t) (h & (s_block_cap - 1));
-    for (size_t probe = 0; probe < 128; probe++) {
-        size_t k = (i + probe) & (s_block_cap - 1);
-        if (s_block_slots[k] == 0) return false;
-        if (s_block_slots[k] == h) return true;
-    }
-    return false;
-}
-
-#ifndef _WIN32
-/* Parse one rules file ("<ip> <host>") and return the number of entries added. */
-static size_t block_set_load_file(const char *path) {
-    FILE *f = fopen(path, "r");
-    if (!f) return 0;
-    char line[512];
-    size_t n = 0;
-    while (fgets(line, sizeof(line), f)) {
-        char *p = line;
-        while (*p == ' ' || *p == '\t') p++;
-        if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0') continue;
-        char *ip = p;
-        while (*p && *p != ' ' && *p != '\t') p++;
-        if (!*p) continue;
-        *p++ = '\0';
-        if (strcmp(ip, "127.0.0.1") != 0 && strcmp(ip, "0.0.0.0") != 0 &&
-            strcmp(ip, "::1") != 0 && strcmp(ip, "::") != 0) continue;
-        while (*p == ' ' || *p == '\t') p++;
-        char *h = p;
-        while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') p++;
-        *p = '\0';
-        if (*h) { block_set_add_hash(fnv1a_lower(h, strlen(h))); n++; }
-    }
-    fclose(f);
-    return n;
-}
-#endif
-
-/*
- * Load the blocked hosts from the rules file the app exports
- * (<resource>/blocklist.txt) and fall back to the system hosts file when it is
- * missing OR empty - the export is written before the first sync, and an empty
- * rule set must never silently disable filtering. Only entries pointing at
- * 127.0.0.1, 0.0.0.0, ::1 or :: count as blocked.
- */
 static void block_set_load(const char *resource_dir) {
-    free(s_block_slots);
-    s_block_slots = NULL;
-    s_block_used = 0;
-#ifndef _WIN32
     char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/blocklist.txt", resource_dir);
-    size_t n = block_set_load_file(path);
-    if (n == 0) {
-        snprintf(path, sizeof(path), "/system/etc/hosts");
-        n = block_set_load_file(path);
+    int length = snprintf(path, sizeof(path), "%s/blocklist.txt", resource_dir);
+    if (length < 0 || (size_t)length >= sizeof(path)) {
+        LOG_WARN("proxy: blocked-host path is invalid; retaining previous rules"); return;
     }
-    LOG_INFO("proxy: %zu blocked hosts loaded from %s", n, path);
-#else
-    (void) resource_dir;
+#ifndef _WIN32
+    /* Initial startup alone may read the legacy system hosts fallback; an update failure never replaces valid state. */
+    if (bs_query(&s_native_block_rules, "localhost").generation == 0 && access(path, F_OK) != 0 && errno == ENOENT)
+        snprintf(path, sizeof(path), "/system/etc/hosts");
 #endif
+    if (!bs_reload(&s_native_block_rules, path)) {
+        LOG_WARN("proxy: blocked-host update rejected; retaining previous rules"); return;
+    }
+    struct bs_result state = bs_query(&s_native_block_rules, "localhost");
+    LOG_INFO("proxy: %zu domain rules published at generation %llu", state.count, (unsigned long long)state.generation);
 }
 
 static bool host_is_local(const char *h) {
@@ -4241,7 +4125,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                  * instead and say so once. (The app only enables the proxy in
                  * hijack mode now, but the server must not depend on that.) */
                 static bool warned_empty;
-                if (s_block_used == 0) {
+                if (bs_query(&s_native_block_rules, "localhost").count == 0) {
                     if (!warned_empty) {
                         warned_empty = true;
                         LOG_WARN("proxy: block list is empty - refusing to proxy, blocking instead");

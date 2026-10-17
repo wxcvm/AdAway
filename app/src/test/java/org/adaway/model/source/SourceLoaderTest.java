@@ -5,9 +5,7 @@ import org.junit.Test;
 
 import java.util.HashSet;
 import java.util.Set;
-import java.util.regex.Matcher;
 
-import static org.adaway.model.source.SourceLoader.HOSTS_PARSER_PATTERN;
 import static org.junit.Assert.*;
 
 public class SourceLoaderTest {
@@ -105,16 +103,29 @@ public class SourceLoaderTest {
 
     @Test
     public void testHostParser() {
-        Matcher matcher = HOSTS_PARSER_PATTERN.matcher("# [mocean.mobi]");
-        assertFalse(matcher.matches());
-        matcher = HOSTS_PARSER_PATTERN.matcher("127.0.0.1 www.domain.com ## some comments #");
-        assertTrue(matcher.matches());
-        assertEquals("127.0.0.1", matcher.group(1));
-        assertEquals("www.domain.com", matcher.group(2));
-        matcher = HOSTS_PARSER_PATTERN.matcher("127.0.0.1 ad.domain.net ## some comments");
-        assertTrue(matcher.matches());
-        assertEquals("127.0.0.1", matcher.group(1));
-        assertEquals("ad.domain.net", matcher.group(2));
+        assertTrue(DomainSourceParser.parse("# [mocean.mobi]", false, false).entries.isEmpty());
+        DomainSourceParser.Parsed parsed = DomainSourceParser.parse("127.0.0.1 www.domain.com ## some comments #", false, false);
+        assertFalse(parsed.cosmetic);
+        assertEquals("www.domain.com", parsed.entries.get(0).domain);
+        assertEquals(DomainSourceParser.Kind.BLOCK, parsed.entries.get(0).kind);
+        assertEquals("ad.domain.net", DomainSourceParser.parse("127.0.0.1 ad.domain.net ## some comments", false, false).entries.get(0).domain);
+    }
+
+    @Test
+    public void realImporterPreservesExistingHostAndWildcardValidation() {
+        for (String host : VALID_NAMES) assertEquals(host.toLowerCase(java.util.Locale.ROOT),
+                DomainSourceParser.parse("0.0.0.0 " + host, false, false).entries.get(0).domain);
+        for (String host : VALID_WILDCARD_NAMES) assertEquals(host,
+                DomainSourceParser.parse(host, true, false).entries.get(0).domain);
+        for (String host : INVALID_NAMES) {
+            if (host.trim().isEmpty()) continue;
+            try { DomainSourceParser.parse("0.0.0.0 " + host, false, false); fail(host); }
+            catch (IllegalArgumentException expected) { }
+        }
+        for (String host : INVALID_WILDCARD_NAMES) {
+            try { DomainSourceParser.parse(host, true, false); fail(host); }
+            catch (IllegalArgumentException expected) { }
+        }
     }
 
     @Test

@@ -99,7 +99,8 @@ def renameJniLibAsExecutable = tasks.register('renameJniLibAsExecutable', Copy) 
      * Fail the build loudly instead of packaging garbage.
      */
     doFirst {
-        def exe = file("${buildFolder.get().asFile}/arm64-v8a/webserver")
+        def checkedAbi = project.findProperty('ruleLoaderTestAbi')?.toString() ?: 'arm64-v8a'
+        def exe = file("${buildFolder.get().asFile}/${checkedAbi}/webserver")
         if (!exe.exists()) {
             throw new GradleException(
                 "Native webserver executable not found at ${exe} — " +

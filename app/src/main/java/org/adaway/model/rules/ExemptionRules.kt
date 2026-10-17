@@ -4,6 +4,8 @@ import android.content.Context
 import org.adaway.util.BlockMode
 import timber.log.Timber
 import java.io.File
+import org.adaway.model.source.AtomicRuleFile
+import org.adaway.model.source.DomainSourceParser
 
 /**
  * 解除过滤（豁免）规则：单独一份给原生服务器读的名单。
@@ -49,6 +51,12 @@ object ExemptionRules {
     fun normalize(raw: String): String? {
         var p = raw.trim()
         if (p.isEmpty() || p.startsWith("#") || p.startsWith("!")) return null
+        if (p.startsWith("||") || p.startsWith("@@")) {
+            val parsed = try { DomainSourceParser.parse(p, true, false) } catch (e: IllegalArgumentException) { return null }
+            if (parsed.unsupported || parsed.entries.size != 1) return null
+            return parsed.entries[0].domain
+        }
+        if (org.adaway.model.source.RuleModifiers.hasUnsupportedModifier(p)) return null
         p = p.trimStart('@', '|', ' ', '\t')
         // hosts 行：空白之后的字段才是主机
         val sp = p.indexOfFirst { it == ' ' || it == '\t' }
@@ -63,7 +71,7 @@ object ExemptionRules {
             it == '/' || it == '?' || it == '#' || it == ':' || it == '^' || it == ' ' || it == '\t'
         }
         if (cut >= 0) p = p.substring(0, cut)
-        p = p.lowercase()
+        p = DomainSourceParser.canonicalDomain(p.trimEnd('|')) ?: return null
         // 与原生一致的三重拒绝：太短 / 不含点（裸 TLD）/ 含通配 —— 否则一行 "com" 等于放行半个互联网
         if (p.length < 4 || !p.contains('.') || p.contains('*')) return null
         return p
@@ -114,12 +122,10 @@ object ExemptionRules {
         val f = file(context)
         return try {
             if (!f.parentFile.exists()) f.parentFile.mkdirs()
-            val existing = list(context)
-            if (existing.contains(cleaned)) return cleaned
-            if (!f.exists()) {
-                f.writeText("# ADBlock 解除过滤规则（按域名放行，原生服务器每次请求都会重读）\n")
+            AtomicRuleFile.update(f) { previous ->
+                if (previous.lineSequence().any { it.trim().lowercase() == cleaned }) previous
+                else previous + (if (previous.isNotEmpty() && !previous.endsWith("\n")) "\n" else "") + cleaned + "\n"
             }
-            f.appendText(cleaned + "\n")
             cleaned
         } catch (e: Exception) {
             Timber.w(e, "ExemptionRules: cannot write %s", f.absolutePath)
@@ -133,8 +139,9 @@ object ExemptionRules {
         if (!f.exists()) return
         val target = host.trim().lowercase()
         try {
-            val kept = f.readLines().filter { it.trim().lowercase() != target }
-            f.writeText(kept.joinToString("\n", postfix = "\n"))
+            AtomicRuleFile.update(f) { previous ->
+                previous.lineSequence().filter { it.trim().lowercase() != target }.joinToString("\n", postfix = "\n")
+            }
         } catch (e: Exception) {
             Timber.w(e, "ExemptionRules: cannot rewrite %s", f.absolutePath)
         }
@@ -184,17 +191,19 @@ object ExemptionRules {
         val f = overridesFile(context)
         return try {
             if (!f.parentFile.exists()) f.parentFile.mkdirs()
-            val kept = if (f.exists()) {
-                f.readLines().filter { line ->
-                    val t = line.trim()
-                    if (t.isEmpty() || t.startsWith("#")) return@filter true
-                    /* 保留域不同的行；同一个域的旧行被丢掉，由下面重写 —— 覆盖语义 */
-                    t.substringBefore('=').trim().lowercase() != domain
+            AtomicRuleFile.update(f) { previous ->
+                val kept = if (previous.isNotEmpty()) {
+                    previous.lineSequence().filter { line ->
+                        val t = line.trim()
+                        if (t.isEmpty() || t.startsWith("#")) return@filter true
+                        /* 保留域不同的行；同一个域的旧行被丢掉，由下面重写 —— 覆盖语义 */
+                        t.substringBefore('=').trim().lowercase() != domain
+                    }.toList()
+                } else {
+                    listOf("# ADBlock 按域覆盖响应规则（<域> = <策略>，原生服务器每次请求都会重读）")
                 }
-            } else {
-                listOf("# ADBlock 按域覆盖响应规则（<域> = <策略>，原生服务器每次请求都会重读）")
+                kept.joinToString("\n", postfix = "\n") + "$domain = $policy\n"
             }
-            f.writeText(kept.joinToString("\n", postfix = "\n") + "$domain = $policy\n")
             domain
         } catch (e: Exception) {
             Timber.w(e, "ExemptionRules: cannot write %s", f.absolutePath)
@@ -209,8 +218,9 @@ object ExemptionRules {
         val domain = line.substringBefore('=').trim().lowercase()
         if (domain.isEmpty()) return
         try {
-            val kept = f.readLines().filter { it.substringBefore('=').trim().lowercase() != domain }
-            f.writeText(kept.joinToString("\n", postfix = "\n"))
+            AtomicRuleFile.update(f) { previous ->
+                previous.lineSequence().filter { it.substringBefore('=').trim().lowercase() != domain }.joinToString("\n", postfix = "\n")
+            }
         } catch (e: Exception) {
             Timber.w(e, "ExemptionRules: cannot rewrite %s", f.absolutePath)
         }
