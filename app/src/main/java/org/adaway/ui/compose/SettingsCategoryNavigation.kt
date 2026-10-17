@@ -1,6 +1,8 @@
 package org.adaway.ui.compose
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -76,8 +78,13 @@ internal fun SettingsCategoryNavigation(
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(top = 12.dp),
                     )
+                    // One scrollable quick-access row instead of two fixed rows:
+                    // this frees ~50dp on phones and prevents large-font chips
+                    // from pushing the category list below the fold.
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         AssistChip(
@@ -88,10 +95,6 @@ internal fun SettingsCategoryNavigation(
                             onClick = { onSelect(2) },
                             label = { Text(stringResource(R.string.compose_settings_frequent_certificate)) },
                         )
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
                         AssistChip(
                             onClick = { onSelect(1) },
                             label = { Text(stringResource(R.string.compose_settings_frequent_ports)) },
