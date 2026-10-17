@@ -59,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -144,34 +145,8 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 hostsCount = blockedCount,
             )
 
-            AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
-
-            // Web server quick stats row（利用空位：证书/请求/拦截率）
-            if (serverStats != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatTile(
-                        stringResource(R.string.compose_ws_control_certs),
-                        serverStats!!.sniCertsIssued.toInt(),
-                        Modifier.weight(1f),
-                    )
-                    StatTile(
-                        stringResource(R.string.compose_stats_kpi_requests),
-                        serverStats!!.totalRequests.toInt(),
-                        Modifier.weight(1f),
-                    )
-                    val rate = if (serverStats!!.totalRequests > 0)
-                        (serverStats!!.totalBlocked * 100 / serverStats!!.totalRequests).toInt() else 0
-                    StatTile(
-                        stringResource(R.string.compose_stats_kpi_rate),
-                        rate,
-                        Modifier.weight(1f),
-                    )
-                }
-            }
-
+            // Place the controllable service before secondary counters, so
+            // users see the current mode and action without scrolling.
             // Keep one actionable Web Server surface instead of repeating the
             // same running status in a separate summary card.
             // Web server control card
@@ -223,6 +198,35 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                     }
                 },
             )
+
+            AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
+
+            // Keep optional server details below the primary control.
+            // Web server quick stats row（利用空位：证书/请求/拦截率）
+            if (serverStats != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    StatTile(
+                        stringResource(R.string.compose_ws_control_certs),
+                        serverStats!!.sniCertsIssued.toInt(),
+                        Modifier.weight(1f),
+                    )
+                    StatTile(
+                        stringResource(R.string.compose_stats_kpi_requests),
+                        serverStats!!.totalRequests.toInt(),
+                        Modifier.weight(1f),
+                    )
+                    val rate = if (serverStats!!.totalRequests > 0)
+                        (serverStats!!.totalBlocked * 100 / serverStats!!.totalRequests).toInt() else 0
+                    StatTile(
+                        stringResource(R.string.compose_stats_kpi_rate),
+                        rate,
+                        Modifier.weight(1f),
+                    )
+                }
+            }
 
             // Quick actions
             Card(
@@ -431,7 +435,7 @@ private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
         ),
     ) {
         Row(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Canvas(modifier = Modifier.size(12.dp)) {
@@ -453,10 +457,12 @@ private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
                 )
             }
             Text(
-                String.format(Locale.US, "%,d", hostsCount),
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontFamily = FontFamily.Monospace,
-                ),
+                if (running) stringResource(R.string.compose_status_active)
+                else stringResource(R.string.compose_status_not_applied),
+                style = MaterialTheme.typography.labelMedium,
+                color = color,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -465,7 +471,9 @@ private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
 @Composable
 internal fun AdaptiveHostSummary(blocked: Int, allowed: Int, redirected: Int) {
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        if (maxWidth < 480.dp) {
+        // At normal phone widths prefer one compact KPI row. Reserve wrapping
+        // for genuinely narrow split-screen or accessibility layouts.
+        if (maxWidth < 300.dp) {
             // Give numbers and localized labels enough room at large font scales.
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -499,12 +507,13 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 14.dp),
+                .padding(vertical = 9.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 String.format(Locale.US, "%,d", value),
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,
@@ -515,6 +524,8 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) 
                 label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

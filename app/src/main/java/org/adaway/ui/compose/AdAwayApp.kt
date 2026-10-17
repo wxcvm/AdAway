@@ -1,21 +1,24 @@
 package org.adaway.ui.compose
 
 /**
- * 应用根导航组件：底部导航栏 + 5 个页面。
+ * 应用根导航组件：五个主入口 + 次级功能中心。
  *
  * 页面：
  *  - overview  概览（服务状态、hosts 统计、Web 服务器控制）
  *  - stats     统计（累计/环形图/趋势图/活跃应用/证书）
  *  - rules     规则（hosts 黑白名单 + 订阅源管理）
- *  - logs      日志（实时 DNS 请求日志）
+ *  - more      更多功能（日志、放行、覆盖响应、网络中心）
  *  - settings  设置（外观/数据/Web服务器/图表/应用监控/关于）
  */
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.outlined.DonutLarge
-import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Icon
@@ -38,9 +41,8 @@ import androidx.navigation.compose.rememberNavController
 import org.adaway.R
 
 /**
- * Root Compose navigation: four destinations (Overview, Statistics,
- * Rules, Logs) in a bottom navigation bar, matching the system-tool
- * pattern.
+ * Root Compose navigation: Overview, Statistics, Rules, Settings, More.
+ * Secondary screens are reachable from More without crowding five primary tabs.
  */
 object Destinations {
     const val OVERVIEW = "overview"
@@ -48,6 +50,7 @@ object Destinations {
     const val RULES = "rules"
     const val SETTINGS = "settings"
     const val NETWORK = "network"
+    const val MORE = "more"
     /** Secondary page (not a bottom-bar tab): the full request log. */
     const val LOGS = "logs"
     /** Secondary page: per-domain exemptions (解除过滤), reachable from the rules page. */
@@ -68,8 +71,8 @@ private val destinations = listOf(
     Destination(Destinations.OVERVIEW, R.string.compose_nav_overview, Icons.Filled.Home),
     Destination(Destinations.STATS, R.string.compose_nav_stats, Icons.Outlined.DonutLarge),
     Destination(Destinations.RULES, R.string.compose_nav_rules, Icons.Outlined.Shield),
-    Destination(Destinations.NETWORK, R.string.compose_nav_network, Icons.Outlined.Language),
     Destination(Destinations.SETTINGS, R.string.compose_nav_settings, Icons.Outlined.Settings),
+    Destination(Destinations.MORE, R.string.compose_nav_more, Icons.Outlined.Menu),
 )
 
 @Composable
@@ -79,11 +82,17 @@ fun AdAwayApp() {
     val currentDestination = backStackEntry?.destination
 
     Scaffold(
+        // Child page TopAppBars handle the status bar inset. The root scaffold
+        // owns only the bottom NavigationBar; consuming statusBars here adds a
+        // second blank strip above the active page on many Android versions.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             NavigationBar {
                 destinations.forEach { dest ->
                     val selected = currentDestination?.hierarchy
-                        ?.any { it.route == dest.route } == true
+                        ?.any { it.route == dest.route } == true ||
+                        (dest.route == Destinations.MORE && currentDestination?.route in
+                            listOf(Destinations.NETWORK, Destinations.LOGS, Destinations.EXEMPT, Destinations.OVERRIDES))
                     NavigationBarItem(
                         selected = selected,
                         onClick = {
@@ -106,7 +115,10 @@ fun AdAwayApp() {
         NavHost(
             navController = navController,
             startDestination = Destinations.OVERVIEW,
-            modifier = Modifier.padding(innerPadding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
         ) {
             composable(Destinations.OVERVIEW) {
                 OverviewScreen(viewModel)
@@ -123,6 +135,15 @@ fun AdAwayApp() {
                     viewModel,
                     onOpenExempt = { navController.navigate(Destinations.EXEMPT) },
                     onOpenOverrides = { navController.navigate(Destinations.OVERRIDES) },
+                )
+            }
+            composable(Destinations.MORE) {
+                MoreScreen(
+                    onOpenLogs = { navController.navigate(Destinations.LOGS) },
+                    onOpenExempt = { navController.navigate(Destinations.EXEMPT) },
+                    onOpenOverrides = { navController.navigate(Destinations.OVERRIDES) },
+                    onOpenNetwork = { navController.navigate(Destinations.NETWORK) },
+                    onOpenSettings = { navController.navigate(Destinations.SETTINGS) },
                 )
             }
             composable(Destinations.NETWORK) {
