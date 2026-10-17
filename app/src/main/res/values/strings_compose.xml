@@ -434,4 +434,18 @@
     <string name="compose_settings_boot_test_script">Test the boot script</string>
     <string name="compose_settings_boot_test_running">Testing the boot script...</string>
     <string name="compose_settings_boot_test_result_title">Test result</string>
+    <string name="compose_settings_section_1_title">Blocking &amp; redirection</string>
+    <string name="compose_settings_section_1_description">Blocking mode, scoped network tests, AdGuard coexistence and app exceptions</string>
+    <string name="compose_settings_section_2_title">Web server &amp; ports</string>
+    <string name="compose_settings_section_2_description">Listener configuration, network ports and low-memory operation</string>
+    <string name="compose_settings_section_3_title">Certificates &amp; HTTPS</string>
+    <string name="compose_settings_section_3_description">Certificate trust, export and certificate-pinning handling</string>
+    <string name="compose_settings_section_4_title">Content &amp; rules</string>
+    <string name="compose_settings_section_4_description">Block replacements, request deduplication, cache and per-domain policy</string>
+    <string name="compose_settings_section_5_title">Statistics &amp; charts</string>
+    <string name="compose_settings_section_5_description">Charts, trends and live statistics</string>
+    <string name="compose_settings_section_6_title">Apps, appearance &amp; background</string>
+    <string name="compose_settings_section_6_description">App tracking, startup behavior and visual preferences</string>
+    <string name="compose_settings_section_7_title">Data &amp; about</string>
+    <string name="compose_settings_section_7_description">Backups, diagnostics, updates and application information</string>
 </resources>
