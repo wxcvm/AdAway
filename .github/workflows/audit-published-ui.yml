@@ -37,10 +37,12 @@ jobs:
           gh release download 6.7.5.758 --repo "$GITHUB_REPOSITORY" --pattern 'ADBlock-latest.apk' --dir previous
           sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           bt=$(find "$sdk_root/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-          "$bt/apksigner" verify --verbose --print-certs previous/ADBlock-latest.apk > old-signer.txt
-          "$bt/apksigner" verify --verbose --print-certs official/ADBlock-latest.apk > new-signer.txt
-          old=$(grep 'Signer #1 certificate SHA-256 digest:' old-signer.txt | head -1 | sed 's/.*: //')
-          new=$(grep 'Signer #1 certificate SHA-256 digest:' new-signer.txt | head -1 | sed 's/.*: //')
+          "$bt/apksigner" verify --min-sdk-version 30 --verbose --print-certs previous/ADBlock-latest.apk > old-signer.txt 2>&1 || { cat old-signer.txt; exit 1; }
+          "$bt/apksigner" verify --min-sdk-version 30 --verbose --print-certs official/ADBlock-latest.apk > new-signer.txt 2>&1 || { cat new-signer.txt; exit 1; }
+          grep -E 'Signer #1 certificate|Verifies' old-signer.txt | head -12
+          grep -E 'Signer #1 certificate|Verifies' new-signer.txt | head -12
+          old=$(grep -i 'certificate SHA-256 digest:' old-signer.txt | head -1 | sed 's/.*: //')
+          new=$(grep -i 'certificate SHA-256 digest:' new-signer.txt | head -1 | sed 's/.*: //')
           echo "758 signer SHA-256: $old"
           echo "773 signer SHA-256: $new"
           test -n "$old" && test "$old" = "$new" || {
