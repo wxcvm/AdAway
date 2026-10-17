@@ -104,6 +104,12 @@ public class UpdateModel {
     // registered receiver cannot be trusted to survive process termination.
     private static final String UPDATE_DOWNLOAD_PREFS = "update_download_state";
     private static final String PENDING_DOWNLOAD_ID = "pending_download_id";
+    private static final String EXPECTED_APK_VERSION_CODE = "expected_apk_version_code";
+
+    static long expectedDownloadedVersionCode(Context context) {
+        return context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                .getLong(EXPECTED_APK_VERSION_CODE, -1);
+    }
 
     public enum DownloadState { NONE, DOWNLOADING, READY_TO_INSTALL, FAILED }
 
@@ -146,7 +152,8 @@ public class UpdateModel {
 
     public static void clearPendingDownload(Context context) {
         context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-                .edit().remove(PENDING_DOWNLOAD_ID).apply();
+                .edit().remove(PENDING_DOWNLOAD_ID)
+                .remove(EXPECTED_APK_VERSION_CODE).apply();
     }
 
     private final Context context;
@@ -335,7 +342,13 @@ public class UpdateModel {
                 return null;
             }
             boolean updateAvailable = versionCode > this.versionInfo.code;
-            return new Manifest(version, versionCode, changelog, LATEST_APK_URL,
+            // Version-specific Release assets have unique immutable URLs.
+            // The fixed android-latest APK URL is re-uploaded on every CI run
+            // and can be stale in intermediary caches even when its JSON
+            // manifest already advertises the newer version.
+            String versionedApkUrl = "https://github.com/" + RELEASES_REPO
+                    + "/releases/download/" + Uri.encode(version) + "/ADBlock-latest.apk";
+            return new Manifest(version, versionCode, changelog, versionedApkUrl,
                     updateAvailable);
         } catch (IOException | JSONException exception) {
             Timber.w(exception, "Unable to read the fixed-tag manifest.");
@@ -565,7 +578,10 @@ public class UpdateModel {
         // Save the id before waiting for a process-scoped callback: users must
         // be able to open the installer after a download outlives this process.
         this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-                .edit().putLong(PENDING_DOWNLOAD_ID, downloadId).apply();
+                .edit()
+                .putLong(PENDING_DOWNLOAD_ID, downloadId)
+                .putLong(EXPECTED_APK_VERSION_CODE, manifest.versionCode)
+                .apply();
         // Register new broadcast receiver
         this.receiver = new ApkDownloadReceiver(downloadId);
         // DownloadManager's completion may be broadcast by the privileged
