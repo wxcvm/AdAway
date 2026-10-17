@@ -2,8 +2,6 @@ package org.adaway.model.traffic;
 
 import com.google.common.net.InetAddresses;
 
-import java.io.ByteArrayOutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 /**
