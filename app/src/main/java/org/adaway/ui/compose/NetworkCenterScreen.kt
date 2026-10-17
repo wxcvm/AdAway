@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -67,7 +69,7 @@ fun NetworkCenterScreen(
         },
     ) { innerPadding ->
         LazyColumn(
-            modifier = Modifier.padding(innerPadding),
+            modifier = Modifier.fillMaxSize().padding(innerPadding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -156,19 +158,28 @@ fun NetworkCenterScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = onOpenSettings) {
-                                Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.size(6.dp))
-                                Text(stringResource(R.string.compose_nav_settings))
-                            }
-                            OutlinedButton(onClick = onOpenRules) {
-                                Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.size(6.dp))
-                                Text(stringResource(R.string.compose_nav_rules))
-                            }
+                        // Three full-width, minimum-touch-size actions avoid
+                        // clipped localized text at 320dp and large font scale.
+                        Button(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) {
+                            Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text(stringResource(R.string.compose_nav_settings))
                         }
-                        OutlinedButton(onClick = onOpenStats) {
+                        OutlinedButton(
+                            onClick = onOpenRules,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) {
+                            Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text(stringResource(R.string.compose_nav_rules))
+                        }
+                        OutlinedButton(
+                            onClick = onOpenStats,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        ) {
                             Text(stringResource(R.string.compose_nav_stats))
                         }
                     }
