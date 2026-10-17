@@ -132,8 +132,6 @@
     <string name="compose_settings_chart_donut_hint">各类请求占比环形图</string>
     <string name="compose_settings_chart_trend">请求趋势</string>
     <string name="compose_settings_chart_trend_hint">每小时请求折线图</string>
-    <string name="compose_settings_chart_bars">流量柱状图</string>
-    <string name="compose_settings_chart_bars_hint">24小时/30天柱状图</string>
     <string name="compose_settings_chart_apps">活跃应用</string>
     <string name="compose_settings_chart_apps_hint">各应用连接列表</string>
     <string name="compose_settings_chart_certs">最近签发证书</string>
@@ -392,7 +390,7 @@
     <string name="compose_logs_export_failed">导出失败：%1$s</string>
     <string name="compose_logs_load_more">加载更早的记录（已显示 %1$d / 共 %2$d）</string>
     <string name="compose_stats_app_rate">每秒请求数</string>
-    <string name="compose_stats_app_tls_fail">握手失败 %1$d 次（证书固定/被拒的信号）</string>
+    <string name="compose_stats_app_tls_fail">握手失败 %1$d 次（证书固定/被拒的信号）（仅拒绝：该应用不信任本机证书，连接是它自己拒绝的，不是拦截成功）</string>
     <string name="compose_stats_app_detail_hint">这些数字来自服务端的按应用统计；它命中最多的域列在上面，完整历史见查询日志。</string>
     <string name="compose_stats_app_hosts">它命中最多的域</string>
     <string name="compose_settings_cert_level_user">用户信任库（多数 App 默认不信任它 —— 系统级需写入 /system 或 APEX；其中 apexdata 非空时 Conscrypt 优先读它）</string>

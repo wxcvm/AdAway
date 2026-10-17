@@ -243,7 +243,9 @@ internal fun userAllowedUids(context: Context): List<Int> {
 
 
 /** Whether a statistics card is enabled. Keys: chart_donut, chart_trend,
- *  chart_bars, chart_apps, chart_certs. All default true. */
+ *  chart_apps, chart_certs. All default true.
+ *  Bar/line/area is NOT a separate toggle any more: it is the chart_style value
+ *  (CHART_STYLE_LINE / AREA / BARS), so the old chart_bars key and its labels are gone. */
 internal fun isChartEnabled(context: Context, key: String): Boolean {
     return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
         .getBoolean(key, true)
@@ -371,6 +373,10 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+// ===== [C9-GROUP-6 of 7] 应用、外观与后台 =====
+// 目标顺序：第 6 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
+// 归入分区：应用监控；开机自动启动；省内存；外观/主题
+// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
             // ── Appearance (theme) ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -412,6 +418,13 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
 
+// ===== [C9-GROUP-1 of 7] 拦截与重定向 =====
+// 目标顺序：第 1 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
+// 归入分区：拦截模式；自定义重定向地址；允许清单
+// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
+// ===== [E-WIZARD-SLOT] AdGuard Home custom_ip 写配置向导的界面入口 =====
+// 逻辑三层已完成并 CI 验证：AdGuardCoexistence / AdGuardHomeConfigFile / AdGuardHomeVerification；
+// 界面只差：展示将改什么 → 复制配置值 → 一键应用 → 实测(DNS/连接/issuer) → 失败一键回滚。见 docs/ui-handoff.md
             // Explicitly opt-in network-path diagnostic. Routes only one
             // benchmark destination; no default route, DNS or TCP/UDP forwarding.
             Card(
@@ -841,6 +854,10 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
 
+// ===== [C9-GROUP-7 of 7] 数据与关于 =====
+// 目标顺序：第 7 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
+// 归入分区：数据管理；备份 / 恢复；调试；更多设置；关于
+// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
 // ── Data management ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -931,6 +948,10 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
 
+// ===== [C9-GROUP-2 of 7] Web 服务器与端口 =====
+// 目标顺序：第 2 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
+// 归入分区：Web 服务器设置；轻量模式
+// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
             // ── Web server settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1129,6 +1150,10 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+// ===== [C9-GROUP-4 of 7] 内容与规则 =====
+// 目标顺序：第 4 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
+// 归入分区：可见型占位；F5 去重 / 重试护栏；决策缓存 / 按域熔断；按域覆盖响应
+// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
                     // ── 可见型占位（默认关；关闭时行为与历史版本一致）──
                     Spacer(Modifier.height(8.dp))
                     var visibleReply by remember {
@@ -1607,6 +1632,10 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
+// ===== [C9-GROUP-3 of 7] 证书与 HTTPS =====
+// 目标顺序：第 3 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
+// 归入分区：证书管理区；一键信任 / 手动安装；固定证书的应用
+// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
                     // ── 证书管理区 ──
                     Spacer(Modifier.height(12.dp))
                     Text(
@@ -1751,6 +1780,10 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     }
                 }
             }
+// ===== [C9-GROUP-5 of 7] 统计与图表 =====
+// 目标顺序：第 5 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
+// 归入分区：统计图表设置；实时推送；趋势范围；图表样式
+// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
             // ── Statistics chart settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
