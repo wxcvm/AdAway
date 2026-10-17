@@ -12,6 +12,9 @@ package org.adaway.ui.compose
  */
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.outlined.DonutLarge
@@ -79,6 +82,10 @@ fun AdAwayApp() {
     val currentDestination = backStackEntry?.destination
 
     Scaffold(
+        // Child page TopAppBars handle the status bar inset. The root scaffold
+        // owns only the bottom NavigationBar; consuming statusBars here adds a
+        // second blank strip above the active page on many Android versions.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             NavigationBar {
                 destinations.forEach { dest ->
@@ -106,7 +113,10 @@ fun AdAwayApp() {
         NavHost(
             navController = navController,
             startDestination = Destinations.OVERVIEW,
-            modifier = Modifier.padding(innerPadding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
         ) {
             composable(Destinations.OVERVIEW) {
                 OverviewScreen(viewModel)
