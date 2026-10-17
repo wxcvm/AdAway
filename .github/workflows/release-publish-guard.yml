@@ -42,9 +42,9 @@ jobs:
               "secrets.SIGNING_KEY_PASSWORD",
               "sign --ks",
               "release-assets/AdAway-preview-arm64.apk",
-              "Signer #1 certificate SHA-256 digest",
+              "tools/compare_apk_signers.py",
               "gh release download",
-              "if production != preview:",
+              "release-assets/APK-SIGNATURE.txt",
               "--prerelease --latest=false",
           ):
               assert required in preview, 'Preview signer/publish guard missing: ' + required
@@ -56,3 +56,6 @@ jobs:
 
           print('PASS: ordinary main branch merges do not publish an APK and preview must match production signing key')
           PY
+      - name: Test APK signer fingerprint compatibility across Build Tools versions
+        run: python3 -m unittest discover -s tools -p 'test_compare_apk_signers.py'
+
