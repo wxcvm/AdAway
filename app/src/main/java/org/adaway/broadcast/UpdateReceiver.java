@@ -23,6 +23,9 @@ public class UpdateReceiver extends BroadcastReceiver {
             String versionName = application.getUpdateModel().getVersionName();
             Timber.d("UpdateReceiver invoked");
             Timber.i("Application update to version %s", versionName);
+            // Installation actually completed. Forget the cached DownloadManager
+            // id so we never offer to re-install this same APK afterward.
+            org.adaway.model.update.UpdateModel.clearPendingDownload(context);
         }
     }
 }
