@@ -256,7 +256,9 @@ fun StatisticsScreen(
 
             // A compact local-rules summary stays visible without a running
             // server; avoid the previous full card above the primary KPIs.
-            AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
+            if (serverStats != null) {
+                AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
+            }
 
             // Show recent traffic directly after the live KPIs, before the
             // category breakdown and lifetime diagnostics.
