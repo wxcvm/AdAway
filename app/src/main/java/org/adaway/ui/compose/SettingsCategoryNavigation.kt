@@ -4,7 +4,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,19 +15,12 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -48,10 +40,11 @@ internal fun SettingsCategoryNavigation(
     titles: List<String>,
     descriptions: List<String>,
     keywords: List<String>,
+    search: String,
+    onSearchChange: (String) -> Unit,
     onSelect: (Int) -> Unit,
 ) {
     require(titles.size == 7 && descriptions.size == 7 && keywords.size == 7)
-    var search by rememberSaveable { mutableStateOf("") }
     val query = search.trim().lowercase(Locale.ROOT)
     val filtered = titles.indices.filter { index ->
         query.isEmpty() || listOf(titles[index], descriptions[index], keywords[index])
@@ -68,7 +61,7 @@ internal fun SettingsCategoryNavigation(
         item {
             OutlinedTextField(
                 value = search,
-                onValueChange = { search = it },
+                onValueChange = onSearchChange,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 label = { Text(stringResource(R.string.compose_settings_search_hint)) },
