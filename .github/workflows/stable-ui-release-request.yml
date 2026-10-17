@@ -1,0 +1,35 @@
+name: One-time Android stable release request (2026-10-17)
+on:
+  push:
+    branches: ['release-request/stable-ui-20261017']
+    paths: ['.github/workflows/stable-ui-release-request.yml']
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  request-release:
+    if: github.repository == 'wxcvm/AdAway'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Require approved merged source and successful master CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=a84affea63350c3a9858a67b6177e8a98a68b8f3
+          gh run watch 39005358124 --repo "$GITHUB_REPOSITORY" --exit-status
+          actual=$(gh api "repos/$GITHUB_REPOSITORY/branches/master" --jq '.commit.sha')
+          test "$actual" = "$expected" || {
+            echo "::error::master changed after UI release approval; refusing to publish"
+            exit 1
+          }
+      - name: Trigger existing production-signed Android release workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run android-ci.yml --repo "$GITHUB_REPOSITORY" --ref master
+          echo "Dispatched production Android CI on approved master commit"
