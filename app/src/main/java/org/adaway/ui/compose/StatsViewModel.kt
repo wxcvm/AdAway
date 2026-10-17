@@ -1010,9 +1010,9 @@ fun refreshServerStats() {
     }
 
     /** 下载最新版本 APK（校验签名/版本后由系统安装器安装）。 */
-    fun downloadUpdate() {
+    fun downloadUpdate(): Long {
         val app = getApplication<Application>()
-        (app as org.adaway.AdAwayApplication).getUpdateModel().update()
+        return (app as org.adaway.AdAwayApplication).getUpdateModel().update()
     }
 
     override fun onCleared() {
