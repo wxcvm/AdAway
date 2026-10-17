@@ -15,6 +15,7 @@ public final class RuleSnapshotRepository {
         public final long generation;
         public final Map<String, TrafficCoreContract.Action> rules;
         public final Map<String, String> replacements;
+        private final WildcardRuleIndex wildcardIndex;
         private Snapshot(long generation, Map<String, TrafficCoreContract.Action> rules) {
             this(generation, rules, Collections.emptyMap());
         }
@@ -23,6 +24,8 @@ public final class RuleSnapshotRepository {
             // The constructor is private; only maps already owned by this repository enter here.
             this.rules = Collections.unmodifiableMap(rules);
             this.replacements = Collections.unmodifiableMap(replacements);
+            // Construct once per immutable generation, never on packet arrival.
+            this.wildcardIndex = new WildcardRuleIndex(rules.keySet());
         }
         public TrafficCoreContract.Decision decide(String host, int type, int qclass) {
             String canonical = canonicalDomain(host);
@@ -30,13 +33,10 @@ public final class RuleSnapshotRepository {
             String address = canonical == null ? null : replacements.get(canonical);
             // Existing explicit wildcard replacements are preserved; exact entries take precedence.
             if (canonical != null && action == null) {
-                String chosen = null;
-                for (Map.Entry<String, TrafficCoreContract.Action> entry : rules.entrySet()) {
-                    if ((entry.getKey().indexOf('*') >= 0 || entry.getKey().indexOf('?') >= 0)
-                            && wildcard(entry.getKey(), canonical) && (chosen == null || entry.getKey().length() > chosen.length()
-                            || (entry.getKey().length() == chosen.length() && entry.getKey().compareTo(chosen) < 0))) {
-                        chosen = entry.getKey(); action = entry.getValue(); address = replacements.get(entry.getKey());
-                    }
+                String chosen = wildcardIndex.findBest(canonical);
+                if (chosen != null) {
+                    action = rules.get(chosen);
+                    address = replacements.get(chosen);
                 }
             }
             int family = address == null ? 0 : InetAddresses.forString(address).getAddress().length == 4 ? 4 : 6;
@@ -99,16 +99,5 @@ public final class RuleSnapshotRepository {
         String domain = raw.toLowerCase(Locale.ROOT);
         if (domain.endsWith(".")) domain = domain.substring(0, domain.length() - 1);
         return canonicalDomain(domain.replace('*', 'a').replace('?', 'a')) == null ? null : domain;
-    }
-    private static boolean wildcard(String pattern, String host) {
-        int p = 0, h = 0, star = -1, retry = 0;
-        while (h < host.length()) {
-            if (p < pattern.length() && (pattern.charAt(p) == '?' || pattern.charAt(p) == host.charAt(h))) { p++; h++; }
-            else if (p < pattern.length() && pattern.charAt(p) == '*') { star = p++; retry = h; }
-            else if (star >= 0) { p = star + 1; h = ++retry; }
-            else return false;
-        }
-        while (p < pattern.length() && pattern.charAt(p) == '*') p++;
-        return p == pattern.length();
     }
 }
