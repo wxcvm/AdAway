@@ -81,6 +81,7 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     var older by remember { mutableStateOf<List<QueryLogEntry>>(emptyList()) }
     var olderTotal by remember { mutableIntStateOf(0) }
     var loadingOlder by remember { mutableStateOf(false) }
+    var olderHasMore by remember { mutableStateOf(true) }
     val shownOlder = if (filter == FILTER_ALL) older else older.filter { it.action == filter }
 
     Scaffold(
@@ -193,7 +194,7 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                 items(shownOlder) { entry -> QueryLogRow(entry) }
                 // Never hide the load-more action just because the current
                 // filtered subset is empty. Suppress it at the true end.
-                if (olderTotal == 0 || entries.size + older.size < olderTotal) {
+                if (olderHasMore && (olderTotal == 0 || entries.size + older.size < olderTotal)) {
                     item {
                         Row(
                             modifier = Modifier
@@ -210,8 +211,11 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                                         offset = entries.size + older.size,
                                         limit = 300,
                                     ) { page, total ->
-                                        older = older + page
+                                        val combined = older + page
+                                        older = combined
                                         olderTotal = total
+                                        olderHasMore = page.isNotEmpty() &&
+                                            (total == 0 || entries.size + combined.size < total)
                                         loadingOlder = false
                                     }
                                 },
