@@ -49,5 +49,10 @@ jobs:
           ):
               assert required in preview, 'Preview signer/publish guard missing: ' + required
           assert "debug signing key" not in preview.lower()
+          assert preview.count("      - name: Publish signed, isolated inspection prerelease") == 1, 'duplicated preview publish steps'
+          assert preview.count("      - name: Sign preview using SAME production Android keystore and verify fingerprint") == 1, 'duplicated signer stage'
+          assert preview.count("mapfile -t release_apks") == 1, 'duplicated APK selector'
+          assert preview.count("          gh release create ") == 2, 'unexpected release publication paths'
+
           print('PASS: ordinary main branch merges do not publish an APK and preview must match production signing key')
           PY
