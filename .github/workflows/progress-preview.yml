@@ -35,7 +35,7 @@ jobs:
             *)
               echo "::error::not an authorized preview ref"; exit 1;;
           esac
-          [[ "$tag" =~ ^progress-android-[0-9]{8}\\.[0-9]+$ ]] || {
+          [[ "$tag" =~ ^progress-android-[0-9]{8}\.[0-9]+$ ]] || {
             echo "::error::preview tag must be dated, unique and immutable"; exit 1;
           }
           echo "PREVIEW_TAG=$tag" >> "$GITHUB_ENV"
@@ -101,12 +101,13 @@ jobs:
           "$bt/aapt" dump badging release-assets/AdAway-preview-arm64.apk > release-assets/APK-IDENTITY.txt
           grep -Fq "package: name='com.wxcvm.Adaway.preview'" release-assets/APK-IDENTITY.txt
           grep -Fq "native-code: 'arm64-v8a'" release-assets/APK-IDENTITY.txt
-          unzip -l release-assets/AdAway-preview-arm64.apk | grep -Fq 'lib/arm64-v8a/libwebserver_exec.so'
+          unzip -Z1 release-assets/AdAway-preview-arm64.apk > "$RUNNER_TEMP/preview-apk-entries.txt"
+          grep -Fxq 'lib/arm64-v8a/libwebserver_exec.so' "$RUNNER_TEMP/preview-apk-entries.txt"
 
           # Reference must be an actual stable production APK from this same
           # repository, not the former CI-debug-signed preview.
           stable_tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
-          [[ "$stable_tag" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$ ]] || {
+          [[ "$stable_tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "::error::latest stable release is not a production Android version"; exit 1;
           }
           gh release download "$stable_tag" --repo "$GITHUB_REPOSITORY" \
