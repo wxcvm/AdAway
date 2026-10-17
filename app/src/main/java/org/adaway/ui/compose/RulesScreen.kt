@@ -162,6 +162,8 @@ fun RulesScreen(
 
     // Rule search (a list of thousands without one was unusable).
     var searchQuery by remember { mutableStateOf("") }
+    var searchGeneration by remember { mutableIntStateOf(0) }
+    var ruleSearchLoading by remember { mutableStateOf(false) }
     // "View the system hosts file" dialog: the rules screen is exactly where a
     // user asks "what is actually applied on this device?".
     var showHostsDialog by remember { mutableStateOf(false) }
@@ -176,20 +178,23 @@ fun RulesScreen(
         reloadSources()
     }
     LaunchedEffect(selectedTab, searchQuery) {
+        val generation = ++searchGeneration
+        ruleSearchLoading = true
         val query = searchQuery.trim()
+        val receive: (List<HostListItem>, Int) -> Unit = { items, total ->
+            // Repository callbacks may finish out of order. Never show
+            // results from a tab/query that the user has already left.
+            if (generation == searchGeneration) {
+                rules = items
+                totalCount = total
+                ruleSearchLoading = false
+            }
+        }
         if (query.isEmpty()) {
-            viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items, total ->
-                rules = items
-                totalCount = total
-            }
+            viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE, receive)
         } else {
-            // Debounce: this effect restarts on every keystroke, so the delay
-            // only elapses for the query the user stopped typing.
             kotlinx.coroutines.delay(250)
-            viewModel.searchRules(tabs[selectedTab].type, query, RULES_PAGE_SIZE) { items, total ->
-                rules = items
-                totalCount = total
-            }
+            viewModel.searchRules(tabs[selectedTab].type, query, RULES_PAGE_SIZE, receive)
         }
     }
 
@@ -307,6 +312,13 @@ fun RulesScreen(
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (ruleSearchLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp).padding(end = 2.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
                 Text(
                     stringResource(R.string.compose_rules_total, totalCount),
                     style = MaterialTheme.typography.labelMedium.copy(
