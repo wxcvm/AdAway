@@ -88,11 +88,8 @@ public class UpdateModel {
      */
     private static final String LATEST_MANIFEST_URL =
             "https://github.com/wxcvm/AdAway/releases/download/" + LATEST_TAG + "/manifest.json";
-    /**
-     * URL of the fixed-tag APK (same asset name in every build).
-     */
-    private static final String LATEST_APK_URL =
-            "https://github.com/wxcvm/AdAway/releases/download/" + LATEST_TAG + "/ADBlock-latest.apk";
+    // The fixed tag is used only for discovering the latest version.
+    // Downloads instead use an immutable versioned release URL below.
     /**
      * How long a successful check is reused before hitting the API again.
      * The unauthenticated GitHub API is limited to 60 requests per hour per
