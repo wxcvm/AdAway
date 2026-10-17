@@ -5,11 +5,13 @@ on:
     paths:
       - '.github/workflows/android-ci.yml'
       - '.github/workflows/release-publish-guard.yml'
+      - '.github/workflows/progress-preview.yml'
   pull_request:
     branches: [master]
     paths:
       - '.github/workflows/android-ci.yml'
       - '.github/workflows/release-publish-guard.yml'
+      - '.github/workflows/progress-preview.yml'
   workflow_dispatch:
 
 permissions:
@@ -30,5 +32,22 @@ jobs:
           assert "if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') || startsWith(github.ref, 'refs/tags/v')" in data, 'Unconditional in-app feed update'
           assert "if: startsWith(github.ref, 'refs/tags/v')" in data, 'Missing tag-only release guard'
           assert data.count('gh release upload android-latest') == 1, 'Unexpected release feed writes'
-          print('PASS: ordinary main branch merges do not publish an APK')
+          preview = Path('.github/workflows/progress-preview.yml').read_text()
+          for required in (
+              "branches: ['preview/release-*']",
+              "Sign preview using SAME production Android keystore",
+              "secrets.SIGNING_KEYSTORE_BASE64",
+              "secrets.SIGNING_STORE_PASSWORD",
+              "secrets.SIGNING_KEY_ALIAS",
+              "secrets.SIGNING_KEY_PASSWORD",
+              "sign --ks",
+              "release-assets/AdAway-preview-arm64.apk",
+              "Signer #1 certificate SHA-256 digest",
+              "gh release download",
+              "if production != preview:",
+              "--prerelease --latest=false",
+          ):
+              assert required in preview, 'Preview signer/publish guard missing: ' + required
+          assert "debug signing key" not in preview.lower()
+          print('PASS: ordinary main branch merges do not publish an APK and preview must match production signing key')
           PY
