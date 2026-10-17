@@ -100,3 +100,24 @@ jobs:
             app/build/intermediates/apk/androidTest/debug/*.apk
           if-no-files-found: error
           retention-days: 7
+      - name: Verify separate preview package and manual update behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :app:assembleDebug --no-daemon --max-workers=2 -PprogressPreview=true -Pandroid.injected.build.abi=arm64-v8a
+          apk=$(find app/build -path '*/apk/debug/*.apk' -type f | head -1)
+          test -n "$apk"
+          bt=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$bt/aapt" dump badging "$apk" > preview-identity.txt
+          grep -Fq "package: name='com.wxcvm.Adaway.preview'" preview-identity.txt
+          grep -Fq "native-code: 'arm64-v8a'" preview-identity.txt
+          "$bt/apksigner" verify --verbose "$apk"
+          mkdir -p preview-apk
+          cp "$apk" preview-apk/AdAway-preview-arm64.apk
+      - name: Upload isolated preview APK (CI artifact only, no public release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: adaway-isolated-preview-debug
+          path: preview-apk/AdAway-preview-arm64.apk
+          if-no-files-found: error
+          retention-days: 7
