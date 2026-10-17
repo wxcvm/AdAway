@@ -18,6 +18,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -88,6 +89,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     // 也不能在主线程做：旧代码是 remember { isWebServerRunning() }，进页面
     // 就阻塞主线程，慢机器上还会 ANR。这里只给保守初值，真实状态在 IO 线程解析。
     var wsEnabled by remember { mutableStateOf(false) }
+    var wsTransitioning by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         val running = withContext(Dispatchers.IO) {
             org.adaway.util.WebServerUtils.isWebServerRunning()
@@ -142,15 +144,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 hostsCount = blockedCount,
             )
 
-            // Hosts statistics summary row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                StatTile(stringResource(R.string.compose_hosts_blocked), blockedCount, Modifier.weight(1f))
-                StatTile(stringResource(R.string.compose_hosts_allowed), allowedCount, Modifier.weight(1f))
-                StatTile(stringResource(R.string.compose_hosts_redirected), redirectCount, Modifier.weight(1f))
-            }
+            AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
 
             // Web server quick stats row（利用空位：证书/请求/拦截率）
             if (serverStats != null) {
@@ -178,35 +172,47 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // Web server card
-            WebServerCard(
-                running = wsEnabled,
-                stats = serverStats,
-            )
-
-                        // Web server control card
+            // Keep one actionable Web Server surface instead of repeating the
+            // same running status in a separate summary card.
+            // Web server control card
             WebServerControlCard(
                 enabled = wsEnabled,
+                transitioning = wsTransitioning,
                 stats = serverStats,
                 httpPort = org.adaway.util.WebServerUtils.getHttpPort(context),
                 httpsPort = org.adaway.util.WebServerUtils.getHttpsPort(context),
                 certStateRes = certStateRes,
                 startLog = startLog,
                 onToggle = { enable ->
-                    // 乐观更新：start/stop 之后的进程检测同样要走 root shell，
-                    // 放后台复核，避免点一下卡一下。
-                    wsEnabled = enable
-                    if (enable) {
-                        org.adaway.util.WebServerUtils.startWebServer(context)
-                    } else {
-                        org.adaway.util.WebServerUtils.stopWebServer()
-                    }
-                    uiScope.launch {
-                        val running = withContext(Dispatchers.IO) {
-                            org.adaway.util.WebServerUtils.isWebServerRunning() ||
-                                org.adaway.util.WebServerUtils.isWebServerReachable(context)
+                    if (!wsTransitioning) {
+                        wsTransitioning = true
+                        uiScope.launch {
+                            try {
+                                // Root shell, process checks and port probing are blocking IO.
+                                // Never perform them in a Compose switch callback.
+                                withContext(Dispatchers.IO) {
+                                    if (enable) {
+                                        org.adaway.util.WebServerUtils.startWebServer(context)
+                                    } else {
+                                        org.adaway.util.WebServerUtils.stopWebServer()
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // State comes from a fresh probe, not optimistic preference.
+                                timber.log.Timber.w(e, "Failed to change Web Server state")
+                            } finally {
+                                wsEnabled = try {
+                                    withContext(Dispatchers.IO) {
+                                        org.adaway.util.WebServerUtils.isWebServerRunning() ||
+                                            org.adaway.util.WebServerUtils.isWebServerReachable(context)
+                                    }
+                                } catch (e: Exception) {
+                                    timber.log.Timber.w(e, "Unable to verify Web Server status")
+                                    false
+                                }
+                                wsTransitioning = false
+                            }
                         }
-                        wsEnabled = running
                     }
                 },
                 onTest = {
@@ -260,6 +266,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
  */
 private fun WebServerControlCard(
     enabled: Boolean,
+    transitioning: Boolean,
     stats: ServerStats?,
     httpPort: Int,
     httpsPort: Int,
@@ -305,10 +312,14 @@ private fun WebServerControlCard(
                         else MaterialTheme.colorScheme.error,
                     )
                 }
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = onToggle,
-                )
+                if (transitioning) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = onToggle,
+                    )
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(
@@ -452,6 +463,32 @@ private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
 }
 
 @Composable
+internal fun AdaptiveHostSummary(blocked: Int, allowed: Int, redirected: Int) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        if (maxWidth < 480.dp) {
+            // Give numbers and localized labels enough room at large font scales.
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatTile(stringResource(R.string.compose_hosts_blocked), blocked, Modifier.weight(1f))
+                    StatTile(stringResource(R.string.compose_hosts_allowed), allowed, Modifier.weight(1f))
+                }
+                StatTile(
+                    stringResource(R.string.compose_hosts_redirected),
+                    redirected,
+                    Modifier.fillMaxWidth(),
+                )
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                StatTile(stringResource(R.string.compose_hosts_blocked), blocked, Modifier.weight(1f))
+                StatTile(stringResource(R.string.compose_hosts_allowed), allowed, Modifier.weight(1f))
+                StatTile(stringResource(R.string.compose_hosts_redirected), redirected, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
 internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
@@ -467,6 +504,7 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) 
         ) {
             Text(
                 String.format(Locale.US, "%,d", value),
+                maxLines = 1,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,

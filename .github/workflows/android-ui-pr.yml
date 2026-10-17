@@ -1,0 +1,57 @@
+name: Android Compose UI PR build
+
+on:
+  push:
+    branches:
+      - refactor/ui-overview-logs-20261017
+  pull_request:
+    paths:
+      - 'app/src/main/java/org/adaway/ui/compose/**'
+      - 'app/src/main/res/values/strings_compose.xml'
+      - 'app/src/main/res/values-zh/strings_compose.xml'
+      - '.github/workflows/android-ui-pr.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: compose-ui-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: Compose Kotlin compilation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Validate network center reservations and translations
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          nav = Path("app/src/main/java/org/adaway/ui/compose/AdAwayApp.kt").read_text()
+          screen = Path("app/src/main/java/org/adaway/ui/compose/NetworkCenterScreen.kt").read_text()
+          assert "Destinations.NETWORK" in nav and "NetworkCenterScreen(" in nav
+          assert "onOpenSettings" in screen and "onOpenRules" in screen
+          assert "PlannedCapability" in screen
+          assert "compose_network_planned" in screen
+          keys = {
+              "compose_nav_network", "compose_network_capture_title",
+              "compose_network_adguard_title", "compose_network_dns_title",
+              "compose_network_https_title", "compose_network_recovery_title",
+              "compose_network_not_active", "compose_network_planned",
+          }
+          for path in ("app/src/main/res/values/strings_compose.xml",
+                       "app/src/main/res/values-zh/strings_compose.xml"):
+              found = {e.attrib["name"] for e in ET.parse(path).getroot().iter("string")}
+              assert keys <= found, (path, keys - found)
+          print("Network center navigation and pending feature labels are present")
+          PY
+      - name: Compile Compose UI
+        run: ./gradlew :app:compileDebugKotlin --no-daemon --stacktrace

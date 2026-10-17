@@ -3,6 +3,9 @@ package org.adaway.ui.compose
 import android.content.Context
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,10 +23,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -78,6 +83,7 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     var older by remember { mutableStateOf<List<QueryLogEntry>>(emptyList()) }
     var olderTotal by remember { mutableIntStateOf(0) }
     var loadingOlder by remember { mutableStateOf(false) }
+    var olderHasMore by remember { mutableStateOf(true) }
     val shownOlder = if (filter == FILTER_ALL) older else older.filter { it.action == filter }
 
     Scaffold(
@@ -99,7 +105,7 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                     IconButton(
                         /* 导出当前筛选下的两段：最新一页 + 用户已经加载出来的历史 */
                         onClick = { shareQueryLogCsv(context, shown + shownOlder) },
-                        enabled = shown.isNotEmpty(),
+                        enabled = shown.isNotEmpty() || shownOlder.isNotEmpty(),
                     ) {
                         Icon(
                             Icons.Outlined.Share,
@@ -124,9 +130,12 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            /* Scroll the filters on narrow screens and with large system fonts.
+             * Keeping every chip in a fixed Row clipped the last choices. */
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -151,24 +160,43 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                     label = { Text(stringResource(R.string.compose_stats_recent_action_proxied)) },
                 )
             }
+            /* Always show the loaded record count; do not suggest that a filter
+             * includes records which haven't been downloaded yet. */
+            Text(
+                text = "${shown.size + shownOlder.size} / ${if (olderTotal > 0) olderTotal else entries.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             /* 空状态要看两段：只判断 shown 会在最新一页没有命中筛选时把已加载的历史整段藏起来 */
-            if (shown.isEmpty() && shownOlder.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        stringResource(R.string.compose_logs_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            // A filter may have no matches in the newest batch but many in
+            // older batches. Keep pagination reachable even in empty state.
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            ) {
+                if (shown.isEmpty() && shownOlder.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 36.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                stringResource(R.string.compose_logs_empty),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                ) {
-                    items(shown) { entry -> QueryLogRow(entry) }
-                    items(shownOlder) { entry -> QueryLogRow(entry) }
-                    /* 只在这里按需取更早的页：本地列表再长，也不会一次性把 10000 条
-                       全塞进状态里（内存与 compose 重组成本都可控）。 */
+                items(shown) { entry -> QueryLogRow(entry) }
+                items(shownOlder) { entry -> QueryLogRow(entry) }
+                // Never hide the load-more action just because the current
+                // filtered subset is empty. Suppress it at the true end.
+                if (olderHasMore && (olderTotal == 0 || entries.size + older.size < olderTotal)) {
                     item {
                         Row(
                             modifier = Modifier
@@ -178,18 +206,18 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.Center,
                         ) {
                             androidx.compose.material3.TextButton(
-                                /* 到最早一条之后禁用：此前只在加载中禁用，到底还能一直点，
-                                   每点一次都白跑一轮原生请求 */
-                                enabled = !loadingOlder &&
-                                    (olderTotal == 0 || older.size < olderTotal),
+                                enabled = !loadingOlder,
                                 onClick = {
                                     loadingOlder = true
                                     viewModel.loadQueryLogPage(
                                         offset = entries.size + older.size,
                                         limit = 300,
                                     ) { page, total ->
-                                        older = older + page
+                                        val combined = older + page
+                                        older = combined
                                         olderTotal = total
+                                        olderHasMore = page.isNotEmpty() &&
+                                            (total == 0 || entries.size + combined.size < total)
                                         loadingOlder = false
                                     }
                                 },
@@ -232,32 +260,46 @@ private fun QueryLogRow(entry: QueryLogEntry) {
             .fillMaxWidth()
             .padding(vertical = 6.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            entry.host.ifEmpty { "-" },
+            style = MaterialTheme.typography.titleSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Row(
+            modifier = Modifier.padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 time,
                 style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.width(10.dp))
-            Text(
-                queryActionSummary(entry),
-                style = MaterialTheme.typography.labelMedium,
-                color = actionColor,
-            )
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = actionColor.copy(alpha = 0.10f),
+            ) {
+                Text(
+                    queryActionSummary(entry),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = actionColor,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
             Text(
                 appNameForUid(entry.uid),
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Text(
-            entry.host.ifEmpty { "-" },
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        HorizontalDivider(
+            modifier = Modifier.padding(top = 10.dp),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
         )
     }
 }

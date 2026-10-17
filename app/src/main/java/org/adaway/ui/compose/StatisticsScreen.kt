@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -69,6 +70,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -452,6 +454,7 @@ private fun KpiCardRow(stats: ServerStats) {
                             fontWeight = FontWeight.Bold,
                         ),
                         color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
                     )
                     Text(
                         stringResource(R.string.compose_stats_kpi_rate),
@@ -476,6 +479,7 @@ private fun KpiCardRow(stats: ServerStats) {
                         stringResource(R.string.compose_stats_kpi_blocked),
                         ChartUtils.compactNumber(stats.totalBlocked),
                         MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 Spacer(Modifier.height(10.dp))
@@ -487,11 +491,13 @@ private fun KpiCardRow(stats: ServerStats) {
                         stringResource(R.string.compose_stats_kpi_connections),
                         ChartUtils.compactNumber(stats.totalConnections),
                         MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.weight(1f),
                     )
                     HeroMini(
                         stringResource(R.string.compose_stats_kpi_certs),
                         ChartUtils.compactNumber(stats.sniCertsIssued),
                         Color(0xFFE6A23C),
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -500,8 +506,13 @@ private fun KpiCardRow(stats: ServerStats) {
 }
 
 @Composable
-private fun HeroMini(label: String, value: String, color: androidx.compose.ui.graphics.Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun HeroMini(
+    label: String,
+    value: String,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             value,
             style = MaterialTheme.typography.titleMedium.copy(
@@ -510,12 +521,14 @@ private fun HeroMini(label: String, value: String, color: androidx.compose.ui.gr
             ),
             color = color,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -1054,31 +1067,33 @@ private fun TrafficTrendCard(
         ),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            // A weighted title and four chips on the same Row overflowed on
+            // narrow devices and with large accessibility font scales.
+            Text(
+                stringResource(R.string.compose_stats_history_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(
-                    stringResource(R.string.compose_stats_history_title),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
                 FilterChip(selected = mode == 0, onClick = { setMode(0) },
                     label = { Text(stringResource(R.string.compose_stats_range_24h)) })
-                Spacer(Modifier.width(6.dp))
                 FilterChip(selected = mode == 1, onClick = { setMode(1) },
                     label = { Text(stringResource(R.string.compose_stats_range_7d)) })
-                Spacer(Modifier.width(6.dp))
                 FilterChip(selected = mode == 2, onClick = { setMode(2) },
                     label = { Text(stringResource(R.string.compose_stats_range_30d)) })
-                Spacer(Modifier.width(6.dp))
                 FilterChip(selected = mode == 3, onClick = { setMode(3) },
                     label = { Text(stringResource(R.string.compose_stats_range_all)) })
             }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
                     .padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
