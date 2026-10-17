@@ -70,6 +70,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -453,6 +454,7 @@ private fun KpiCardRow(stats: ServerStats) {
                             fontWeight = FontWeight.Bold,
                         ),
                         color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
                     )
                     Text(
                         stringResource(R.string.compose_stats_kpi_rate),
@@ -477,6 +479,7 @@ private fun KpiCardRow(stats: ServerStats) {
                         stringResource(R.string.compose_stats_kpi_blocked),
                         ChartUtils.compactNumber(stats.totalBlocked),
                         MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
                     )
                 }
                 Spacer(Modifier.height(10.dp))
@@ -488,11 +491,13 @@ private fun KpiCardRow(stats: ServerStats) {
                         stringResource(R.string.compose_stats_kpi_connections),
                         ChartUtils.compactNumber(stats.totalConnections),
                         MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.weight(1f),
                     )
                     HeroMini(
                         stringResource(R.string.compose_stats_kpi_certs),
                         ChartUtils.compactNumber(stats.sniCertsIssued),
                         Color(0xFFE6A23C),
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -501,8 +506,13 @@ private fun KpiCardRow(stats: ServerStats) {
 }
 
 @Composable
-private fun HeroMini(label: String, value: String, color: androidx.compose.ui.graphics.Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun HeroMini(
+    label: String,
+    value: String,
+    color: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             value,
             style = MaterialTheme.typography.titleMedium.copy(
@@ -511,12 +521,14 @@ private fun HeroMini(label: String, value: String, color: androidx.compose.ui.gr
             ),
             color = color,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
