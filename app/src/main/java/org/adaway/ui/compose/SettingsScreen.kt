@@ -2614,16 +2614,16 @@ private fun UpdateCheckRow(viewModel: StatsViewModel, currentVersion: String) {
     var message by remember { mutableStateOf<String?>(null) }
     var available by remember { mutableStateOf<org.adaway.model.update.Manifest?>(null) }
     val updateModel = remember(context) {
-        (context.applicationContext as org.adaway.AdAwayApplication).updateModel
+        (context.applicationContext as org.adaway.AdAwayApplication).getUpdateModel()
     }
     var pendingState by remember {
-        mutableStateOf(updateModel.pendingDownloadState)
+        mutableStateOf(updateModel.getPendingDownloadState())
     }
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, updateModel) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                pendingState = updateModel.pendingDownloadState
+                pendingState = updateModel.getPendingDownloadState()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -2693,8 +2693,13 @@ private fun UpdateCheckRow(viewModel: StatsViewModel, currentVersion: String) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Button(
                     onClick = {
-                        val downloadId = viewModel.downloadUpdate()
-                        pendingState = updateModel.pendingDownloadState
+                        val downloadId = try {
+                            viewModel.downloadUpdate()
+                        } catch (e: Exception) {
+                            Timber.w(e, "Unable to queue APK update")
+                            -1L
+                        }
+                        pendingState = updateModel.getPendingDownloadState()
                         message = if (downloadId >= 0) {
                             context.getString(R.string.compose_settings_update_downloading)
                         } else {
@@ -2728,7 +2733,7 @@ private fun UpdateCheckRow(viewModel: StatsViewModel, currentVersion: String) {
             Spacer(Modifier.height(6.dp))
             TextButton(
                 onClick = {
-                    pendingState = updateModel.pendingDownloadState
+                    pendingState = updateModel.getPendingDownloadState()
                     message = when (pendingState) {
                         org.adaway.model.update.UpdateModel.DownloadState.READY_TO_INSTALL -> {
                             if (updateModel.retryInstallDownloadedUpdate()) {
