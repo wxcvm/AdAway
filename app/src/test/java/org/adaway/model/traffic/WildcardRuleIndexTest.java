@@ -72,6 +72,9 @@ public class WildcardRuleIndexTest {
         assertNull(index.findBest("completely.different.invalid"));
         assertEquals(0, index.candidatesExamined("completely.different.invalid"));
         assertNotNull(index.findBest("host1712x.example.test"));
+        // Without global rarity selection, a common *.example.test suffix
+        // causes all 100000 patterns to be examined for one matching host.
+        assertTrue(index.candidatesExamined("host1712x.example.test") < 1000);
     }
 
     @Test public void snapshotUsesWildcardIndexWithoutChangingExactPrecedence() {
