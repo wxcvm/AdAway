@@ -22,6 +22,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -42,6 +43,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Info
@@ -78,6 +80,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -355,10 +358,84 @@ fun SettingsScreen(viewModel: StatsViewModel) {
         tunRefreshKey++
     }
 
+    // Keep the chosen section across activity recreation, but never persist
+    // transient UI state or change the underlying settings.
+    var selectedSection by rememberSaveable { mutableIntStateOf(-1) }
+    var settingsSearch by rememberSaveable { mutableStateOf("") }
+    BackHandler(enabled = selectedSection >= 0) { selectedSection = -1 }
+    val settingsScroll = rememberScrollState()
+    LaunchedEffect(selectedSection) { settingsScroll.scrollTo(0) }
+    val sectionTitles = listOf(
+        stringResource(R.string.compose_settings_section_1_title),
+        stringResource(R.string.compose_settings_section_2_title),
+        stringResource(R.string.compose_settings_section_3_title),
+        stringResource(R.string.compose_settings_section_4_title),
+        stringResource(R.string.compose_settings_section_5_title),
+        stringResource(R.string.compose_settings_section_6_title),
+        stringResource(R.string.compose_settings_section_7_title),
+    )
+    val sectionDescriptions = listOf(
+        stringResource(R.string.compose_settings_section_1_description),
+        stringResource(R.string.compose_settings_section_2_description),
+        stringResource(R.string.compose_settings_section_3_description),
+        stringResource(R.string.compose_settings_section_4_description),
+        stringResource(R.string.compose_settings_section_5_description),
+        stringResource(R.string.compose_settings_section_6_description),
+        stringResource(R.string.compose_settings_section_7_description),
+    )
+
+    // Search uses existing localized option names. A hit opens its category,
+    // never changes a preference and never silently activates network mode.
+    val sectionSearchHints = listOf(
+        listOf(
+            stringResource(R.string.compose_settings_block_mode_title),
+            stringResource(R.string.compose_settings_allowlist_title),
+            stringResource(R.string.compose_tun_diagnostic_title),
+            "AdGuard",
+        ),
+        listOf(stringResource(R.string.compose_settings_light_mode), "HTTP", "HTTPS"),
+        listOf(
+            stringResource(R.string.compose_settings_cert_title),
+            stringResource(R.string.compose_settings_pin_policy),
+        ),
+        listOf(stringResource(R.string.compose_settings_cache_reuse)),
+        listOf(
+            stringResource(R.string.compose_settings_charts_title),
+            stringResource(R.string.compose_settings_realtime),
+        ),
+        listOf(
+            stringResource(R.string.compose_settings_autostart),
+            stringResource(R.string.compose_settings_theme_title),
+        ),
+        listOf(
+            stringResource(R.string.compose_settings_backup),
+            stringResource(R.string.compose_settings_debug_title),
+            stringResource(R.string.compose_settings_ipv6),
+            stringResource(R.string.compose_settings_about_title),
+        ),
+    )
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.compose_settings_title)) },
+                title = {
+                    Text(
+                        if (selectedSection < 0) stringResource(R.string.compose_settings_title)
+                        else sectionTitles[selectedSection],
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    if (selectedSection >= 0) {
+                        IconButton(onClick = { selectedSection = -1 }) {
+                            Icon(
+                                Icons.Outlined.ArrowBack,
+                                contentDescription = stringResource(R.string.compose_settings_home_back),
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                 ),
@@ -366,62 +443,42 @@ fun SettingsScreen(viewModel: StatsViewModel) {
         },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(androidx.compose.foundation.rememberScrollState())
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-// ===== [C9-GROUP-6 of 7] 应用、外观与后台 =====
-// 目标顺序：第 6 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
-// 归入分区：应用监控；开机自动启动；省内存；外观/主题
-// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
-            // ── Appearance (theme) ──
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        stringResource(R.string.compose_settings_theme_title),
-                        style = MaterialTheme.typography.titleMedium,
+            if (selectedSection < 0) {
+                SettingsCategoryNavigation(
+                    titles = sectionTitles,
+                    descriptions = sectionDescriptions,
+                    keywords = listOf(
+                        stringResource(R.string.compose_settings_section_1_keywords),
+                        stringResource(R.string.compose_settings_section_2_keywords),
+                        stringResource(R.string.compose_settings_section_3_keywords),
+                        stringResource(R.string.compose_settings_section_4_keywords),
+                        stringResource(R.string.compose_settings_section_5_keywords),
+                        stringResource(R.string.compose_settings_section_6_keywords),
+                        stringResource(R.string.compose_settings_section_7_keywords),
+                    ).mapIndexed { index, aliases ->
+                        aliases + " " + sectionSearchHints[index].joinToString(" ")
+                    },
+                    search = settingsSearch,
+                    onSearchChange = { settingsSearch = it },
+                    onSelect = { selectedSection = it },
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(settingsScroll)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    SettingsCategoryIntroduction(
+                        index = selectedSection + 1,
+                        title = sectionTitles[selectedSection],
+                        description = sectionDescriptions[selectedSection],
                     )
-                    Text(
-                        stringResource(R.string.compose_settings_theme_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    var theme by remember { mutableStateOf(themeMode(context)) }
-                    LaunchedEffect(Unit) { theme = themeMode(context) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(
-                            Triple(0, R.string.compose_settings_theme_system, 0),
-                            Triple(1, R.string.compose_settings_theme_light, 1),
-                            Triple(2, R.string.compose_settings_theme_dark, 2),
-                        ).forEach { (mode, labelRes, _) ->
-                            FilterChip(
-                                selected = theme == mode,
-                                onClick = {
-                                    theme = mode
-                                    setThemeMode(context, mode)
-                                    // Recreate activity to apply theme
-                                    (context as? android.app.Activity)?.recreate()
-                                },
-                                label = { Text(stringResource(labelRes)) },
-                            )
-                        }
-                    }
-                }
-            }
-
-// ===== [C9-GROUP-1 of 7] 拦截与重定向 =====
-// 目标顺序：第 1 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
-// 归入分区：拦截模式；自定义重定向地址；允许清单
-// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
+                    when (selectedSection) {
+                    0 -> {
 // ===== [E-WIZARD-SLOT] AdGuard Home custom_ip 写配置向导的界面入口 =====
 // 逻辑三层已完成并 CI 验证：AdGuardCoexistence / AdGuardHomeConfigFile / AdGuardHomeVerification；
 // 界面只差：展示将改什么 → 复制配置值 → 一键应用 → 实测(DNS/连接/issuer) → 失败一键回滚。见 docs/ui-handoff.md
@@ -858,11 +915,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
 
-// ===== [C9-GROUP-7 of 7] 数据与关于 =====
-// 目标顺序：第 7 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
-// 归入分区：数据管理；备份 / 恢复；调试；更多设置；关于
-// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
-// ── Data management ──
+            // ── Allowlist (bypass blocking) ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -870,92 +923,106 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 ),
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        stringResource(R.string.compose_settings_data_title),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        stringResource(R.string.compose_settings_data_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    val prefs = context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-                    /*
-                     * 二次确认 + 真正调用原生重置。
-                     *
-                     * 之前这里只删了 s_hist_pos / s_daily_pos 两个设置键 —— 真正的计数、历史曲线、
-                     * 应用统计与查询日志都在原生进程内存里（并各自有 .dat 文件），所以按钮点了
-                     * 等于没点、也没有任何反馈。现在：第一次点击进入确认态，第二次才真正清除；
-                     * 清除走回环管理端口（8686）的 /internal-reset?what=all，并如实反馈结果。
-                     * 刻意不用协程/新 import：后台线程 + Handler 回主线程即可。
-                     */
-                    var clearArmed by remember { mutableStateOf(false) }
-                    Button(
-                        onClick = {
-                            if (!clearArmed) {
-                                clearArmed = true
-                            } else {
-                                clearArmed = false
-                                Thread {
-                                    val done = org.adaway.util.WebServerUtils.resetStatistics(context)
-                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        Toast.makeText(
-                                            context,
-                                            if (done) R.string.compose_settings_clear_stats_ok
-                                            else R.string.compose_settings_clear_stats_fail,
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
-                                }.start()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                    ) {
-                        Text(
-                            stringResource(
-                                if (clearArmed) R.string.compose_settings_clear_stats_confirm
-                                else R.string.compose_settings_clear_stats,
-                            )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
                         )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_title),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_warning),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
-                    // 备份/恢复：导出规则+设置到文件，或从文件恢复
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                exportBackup(context)
-                            },
-                            modifier = Modifier.weight(1f),
+                    // 默认白名单（系统门户登录，自动维护）
+                    Text(
+                        stringResource(R.string.compose_settings_allowlist_default),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    defaultAllowlistUids(context).forEach { uid ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(stringResource(R.string.compose_settings_backup))
+                            Text(
+                                appNameForUid(uid),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_allowlist_uid, uid),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                        OutlinedButton(
-                            onClick = {
-                                importBackup(context, viewModel) {
-                                    // 恢复后重启应用使全部设置生效
-                                    val pm = context.packageManager
-                                    val launch = pm.getLaunchIntentForPackage(context.packageName)
-                                    if (launch != null) {
-                                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                                        context.startActivity(launch)
-                                    }
-                                    kotlin.system.exitProcess(0)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 用户放行的应用（可移除）
+                    Text(
+                        stringResource(R.string.compose_settings_allowlist_user),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val userUids = userAllowedUids(context)
+                    if (userUids.isEmpty()) {
+                        Text(
+                            stringResource(R.string.compose_settings_allowlist_empty),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        userUids.forEach { uid ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    appNameForUid(uid),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    stringResource(R.string.compose_settings_allowlist_uid, uid),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                IconButton(onClick = {
+                                    setAppAllowed(context, uid, false)
+                                    refreshKey++
+                                }) {
+                                    Icon(
+                                        Icons.Outlined.RemoveCircle,
+                                        contentDescription = stringResource(R.string.compose_settings_allowlist_remove),
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
                                 }
-                            },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(stringResource(R.string.compose_settings_restore))
+                            }
                         }
                     }
                 }
             }
-
-// ===== [C9-GROUP-2 of 7] Web 服务器与端口 =====
-// 目标顺序：第 2 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
-// 归入分区：Web 服务器设置；轻量模式
-// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
+                    }
+                    1 -> {
             // ── Web server settings ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1121,7 +1188,173 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
-                    // ── 固定证书的应用：由用户决定怎么处理 ──
+
+                }
+            }
+                    }
+                    2 -> {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {// ===== [C9-GROUP-3 of 7] 证书与 HTTPS =====
+// 目标顺序：第 3 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
+// 归入分区：证书管理区；一键信任 / 手动安装；固定证书的应用
+// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
+                    // ── 证书管理区 ──
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_cert_title),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    // 证书状态（后台获取避免主线程网络）
+                    /*
+                     * 四态 + 可刷新：之前只在进页面时算一次，安装/删除之后不更新，用户看到的是旧结论；
+                     * 而且"已安装"只看用户库 —— targetSdk>=24 的 App 默认不信任用户库，必须把
+                     * "用户级"与"系统级"分开显示（系统级要写 /system 或 APEX，或 apexdata ——
+                     * 后者非空时 Conscrypt 优先读它，只覆盖 APEX 是不够的）。
+                     */
+                    var certStateRes by remember { mutableIntStateOf(R.string.pref_webserver_state_not_running) }
+                    var certTrust by remember { mutableIntStateOf(0) }
+                    var certRefresh by remember { mutableIntStateOf(0) }
+                    LaunchedEffect(certRefresh) {
+                        val probe = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            org.adaway.util.WebServerUtils.getWebServerState(context) to
+                                org.adaway.util.WebServerUtils.certificateTrustLevel(context)
+                        }
+                        certStateRes = probe.first
+                        certTrust = probe.second
+                    }
+                    Text(
+                        stringResource(certStateRes),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (certStateRes == R.string.pref_webserver_state_running_and_installed ||
+                            certStateRes == R.string.pref_webserver_state_running_and_installed_system)
+                            MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error,
+                    )
+                    if (certTrust > 0) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            stringResource(
+                                if (certTrust >= org.adaway.util.WebServerUtils.TRUST_SYSTEM)
+                                    R.string.compose_settings_cert_level_system
+                                else R.string.compose_settings_cert_level_user,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (certTrust >= org.adaway.util.WebServerUtils.TRUST_SYSTEM)
+                                MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // ── 一键信任（写入用户库）/ 手动安装 ──
+                    /* 复用同一次探测的结果，避免两处各自查一遍还互相不一致 */
+                    val certTrusted = certTrust > 0
+                    Spacer(Modifier.height(8.dp))
+                    if (certTrusted) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.Lock,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                stringResource(R.string.compose_settings_cert_trusted),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    val ok = org.adaway.util.WebServerUtils
+                                        .installCertificateToUserStore(context)
+                                    /*
+                                     * Verify instead of trusting the return
+                                     * value: the root copy can "succeed" while
+                                     * the store still does not list the CA
+                                     * (wrong hash name, SELinux context, a
+                                     * Magisk module that shadows the file).
+                                     * The user then wonders why HTTPS still
+                                     * warns.
+                                     */
+                                    val verified = ok && org.adaway.util.WebServerUtils
+                                        .isUserCertificateInstalled(context)
+                                    Toast.makeText(
+                                        context,
+                                        if (verified) R.string.compose_settings_cert_trust_ok
+                                        else R.string.compose_settings_cert_trust_fail,
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    /* 重新探测：状态与信任级别都要按事实刷新，而不是沿用旧结论。
+                                       certTrusted 现在是派生值（certTrust > 0），不能再赋值。 */
+                                    certRefresh++
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(stringResource(R.string.compose_settings_cert_trust))
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    org.adaway.util.WebServerUtils.installUserCertificate(context)
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(stringResource(R.string.compose_settings_cert_install_manual))
+                            }
+                        }
+                    }
+                    // 剩余天数
+                    val daysLeft = org.adaway.util.WebServerUtils.getCertificateDaysLeft(context)
+                    if (daysLeft != null) {
+                        Text(
+                            stringResource(R.string.compose_settings_cert_days, daysLeft),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (daysLeft < 30) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    /*
+                     * NOTE: the SHA-256 fingerprint block (and its QR share
+                     * button) used to sit here. It is not part of installing or
+                     * trusting the CA - it only helped someone compare the
+                     * fingerprint by hand - and it made this card the busiest
+                     * part of the screen. Removed on request: the card now ends
+                     * with the one action that matters, exporting the
+                     * certificate.
+                     */
+                    Spacer(Modifier.height(4.dp))
+                    // 导出证书到 Download 目录（供其他设备/模块使用）
+                    OutlinedButton(
+                        onClick = { exportCertificate(context) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Save,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.compose_settings_cert_export))
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {                    // ── 固定证书的应用：由用户决定怎么处理 ──
                     Spacer(Modifier.height(8.dp))
                     var pinDeny by remember {
                         mutableStateOf(
@@ -1154,7 +1387,18 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
-// ===== [C9-GROUP-4 of 7] 内容与规则 =====
+
+                }
+            }
+                    }
+                    3 -> {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {// ===== [C9-GROUP-4 of 7] 内容与规则 =====
 // 目标顺序：第 4 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
 // 归入分区：可见型占位；F5 去重 / 重试护栏；决策缓存 / 按域熔断；按域覆盖响应
 // 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
@@ -1324,7 +1568,286 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
-                    // ── 开机自动启动 ──
+
+                }
+            }
+                    }
+                    4 -> {
+            // ── Statistics chart settings ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_charts_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_settings_charts_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    var refreshKey by remember { mutableStateOf(0) }
+                    val chartToggles = listOf(
+                        Triple("chart_lifetime", R.string.compose_settings_chart_lifetime, R.string.compose_settings_chart_lifetime_hint),
+                        Triple("chart_rate", R.string.compose_settings_chart_rate, R.string.compose_settings_chart_rate_hint),
+                        Triple("chart_donut", R.string.compose_settings_chart_donut, R.string.compose_settings_chart_donut_hint),
+                        Triple("chart_trend", R.string.compose_settings_chart_trend, R.string.compose_settings_chart_trend_hint),
+                        Triple("chart_conn", R.string.compose_settings_chart_conn, R.string.compose_settings_chart_conn_hint),
+                        Triple("chart_apps", R.string.compose_settings_chart_apps, R.string.compose_settings_chart_apps_hint),
+                        Triple("chart_top_hosts", R.string.compose_settings_chart_top_hosts, R.string.compose_settings_chart_top_hosts_hint),
+                        Triple("chart_certs", R.string.compose_settings_chart_certs, R.string.compose_settings_chart_certs_hint),
+                        Triple("chart_qlog", R.string.compose_settings_chart_qlog, R.string.compose_settings_chart_qlog_hint),
+                    )
+                    chartToggles.forEach { (key, labelRes, hintRes) ->
+                        val enabled = remember(refreshKey, key) { isChartEnabled(context, key) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(stringResource(labelRes), style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    stringResource(hintRes),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = enabled,
+                                onCheckedChange = { v ->
+                                    setChartEnabled(context, key, v)
+                                    refreshKey++
+                                },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.compose_settings_chart_style),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    var style by remember { mutableStateOf(chartStyle(context)) }
+                    // Sync from preferences on composition start
+                    LaunchedEffect(Unit) { style = chartStyle(context) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            R.string.compose_stats_style_line to CHART_STYLE_LINE,
+                            R.string.compose_stats_style_area to CHART_STYLE_AREA,
+                            R.string.compose_stats_style_bars to CHART_STYLE_BARS,
+                        ).forEach { (labelRes, s) ->
+                            FilterChip(
+                                selected = style == s,
+                                onClick = {
+                                    style = s
+                                    setChartStyle(context, s)
+                                },
+                                label = { Text(stringResource(labelRes)) },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    // 实时推送开关（WebSocket）
+                    var realtime by remember { mutableStateOf(isRealtimeEnabled(context)) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_realtime),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_realtime_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = realtime,
+                            onCheckedChange = { v ->
+                                realtime = v
+                                setRealtimeEnabled(context, v)
+                                // 实际启停 WebSocket 连接
+                                if (v) viewModel.startRealtime() else viewModel.stopRealtime()
+                            },
+                        )
+                    }
+                }
+            }
+                    }
+                    5 -> {
+            // ── App monitoring (可折叠) ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    var appsExpanded by remember { mutableStateOf(false) }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { appsExpanded = !appsExpanded },
+                    ) {
+                        Icon(
+                            Icons.Outlined.Apps,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.compose_settings_apps_title),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                stringResource(R.string.compose_settings_apps_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Icon(
+                            imageVector = if (appsExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                            contentDescription = stringResource(
+                                if (appsExpanded) R.string.compose_action_collapse else R.string.compose_action_expand,
+                            ),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    androidx.compose.animation.AnimatedVisibility(visible = appsExpanded) {
+                        Column {
+                            Spacer(Modifier.height(8.dp))
+                            if (apps.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.compose_settings_apps_empty),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                // Re-read switch states after toggling (refreshKey changes)
+                                apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
+                                    val monitored = remember(refreshKey, app.uid) {
+                                        isAppMonitored(context, app.uid)
+                                    }
+                                    val allowed = remember(refreshKey, app.uid) {
+                                        isAppAllowed(context, app.uid)
+                                    }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        appNameForUid(app.uid),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        stringResource(
+                                            R.string.compose_settings_app_sub,
+                                            app.connections,
+                                            app.requests,
+                                            app.blocked,
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                /*
+                                 * 放行开关：该应用流量完全绕过拦截 —— 这不是普通显示偏好，而是会改变
+                                 * 拦截效果的策略变更。首次放行时解释后果，并说明怎么撤销（把开关拨回去
+                                 * 即可）；解释只弹一次，之后不再打扰。
+                                 */
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Switch(
+                                        checked = allowed,
+                                        onCheckedChange = { v ->
+                                            setAppAllowed(context, app.uid, v)
+                                            refreshKey++
+                                            val sp = context.getSharedPreferences(
+                                                PREFS_GENERAL,
+                                                Context.MODE_PRIVATE,
+                                            )
+                                            if (v) {
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(
+                                                        if (sp.getBoolean("app_allow_explained", false)) {
+                                                            R.string.compose_settings_app_allow_hint
+                                                        } else {
+                                                            R.string.compose_settings_app_allow_explain
+                                                        },
+                                                    ),
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
+                                                sp.edit().putBoolean("app_allow_explained", true).apply()
+                                            } else {
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.compose_settings_app_allow_undone),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                            }
+                                        },
+                                    )
+                                    Text(
+                                        stringResource(R.string.compose_settings_app_allow),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (allowed) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(Modifier.width(4.dp))
+                                /*
+                                 * 第二个开关此前是裸 Switch：没有可见文字、也没有无障碍标签，
+                                 * 读屏只会念"开关，开启/关闭"，用户分不清它和左边的放行开关各管什么。
+                                 * 这里照放行开关的样式补上文字标签（并被左侧放行开关形成对照）。
+                                 */
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Switch(
+                                        checked = monitored,
+                                        onCheckedChange = { newValue ->
+                                            setAppMonitored(context, app.uid, newValue)
+                                            refreshKey++
+                                        },
+                                    )
+                                    Text(
+                                        stringResource(R.string.compose_settings_app_monitor),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (monitored) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        }
+                    }
+                }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {                    // ── 开机自动启动 ──
                     Spacer(Modifier.height(8.dp))
                     var autostart by remember {
                         mutableStateOf(
@@ -1636,159 +2159,11 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
-// ===== [C9-GROUP-3 of 7] 证书与 HTTPS =====
-// 目标顺序：第 3 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
-// 归入分区：证书管理区；一键信任 / 手动安装；固定证书的应用
-// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
-                    // ── 证书管理区 ──
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(R.string.compose_settings_cert_title),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    // 证书状态（后台获取避免主线程网络）
-                    /*
-                     * 四态 + 可刷新：之前只在进页面时算一次，安装/删除之后不更新，用户看到的是旧结论；
-                     * 而且"已安装"只看用户库 —— targetSdk>=24 的 App 默认不信任用户库，必须把
-                     * "用户级"与"系统级"分开显示（系统级要写 /system 或 APEX，或 apexdata ——
-                     * 后者非空时 Conscrypt 优先读它，只覆盖 APEX 是不够的）。
-                     */
-                    var certStateRes by remember { mutableIntStateOf(R.string.pref_webserver_state_not_running) }
-                    var certTrust by remember { mutableIntStateOf(0) }
-                    var certRefresh by remember { mutableIntStateOf(0) }
-                    LaunchedEffect(certRefresh) {
-                        val probe = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            org.adaway.util.WebServerUtils.getWebServerState(context) to
-                                org.adaway.util.WebServerUtils.certificateTrustLevel(context)
-                        }
-                        certStateRes = probe.first
-                        certTrust = probe.second
-                    }
-                    Text(
-                        stringResource(certStateRes),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (certStateRes == R.string.pref_webserver_state_running_and_installed ||
-                            certStateRes == R.string.pref_webserver_state_running_and_installed_system)
-                            MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.error,
-                    )
-                    if (certTrust > 0) {
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            stringResource(
-                                if (certTrust >= org.adaway.util.WebServerUtils.TRUST_SYSTEM)
-                                    R.string.compose_settings_cert_level_system
-                                else R.string.compose_settings_cert_level_user,
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (certTrust >= org.adaway.util.WebServerUtils.TRUST_SYSTEM)
-                                MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    // ── 一键信任（写入用户库）/ 手动安装 ──
-                    /* 复用同一次探测的结果，避免两处各自查一遍还互相不一致 */
-                    val certTrusted = certTrust > 0
-                    Spacer(Modifier.height(8.dp))
-                    if (certTrusted) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Outlined.Lock,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                stringResource(R.string.compose_settings_cert_trusted),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    val ok = org.adaway.util.WebServerUtils
-                                        .installCertificateToUserStore(context)
-                                    /*
-                                     * Verify instead of trusting the return
-                                     * value: the root copy can "succeed" while
-                                     * the store still does not list the CA
-                                     * (wrong hash name, SELinux context, a
-                                     * Magisk module that shadows the file).
-                                     * The user then wonders why HTTPS still
-                                     * warns.
-                                     */
-                                    val verified = ok && org.adaway.util.WebServerUtils
-                                        .isUserCertificateInstalled(context)
-                                    Toast.makeText(
-                                        context,
-                                        if (verified) R.string.compose_settings_cert_trust_ok
-                                        else R.string.compose_settings_cert_trust_fail,
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    /* 重新探测：状态与信任级别都要按事实刷新，而不是沿用旧结论。
-                                       certTrusted 现在是派生值（certTrust > 0），不能再赋值。 */
-                                    certRefresh++
-                                },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(stringResource(R.string.compose_settings_cert_trust))
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    org.adaway.util.WebServerUtils.installUserCertificate(context)
-                                },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(stringResource(R.string.compose_settings_cert_install_manual))
-                            }
-                        }
-                    }
-                    // 剩余天数
-                    val daysLeft = org.adaway.util.WebServerUtils.getCertificateDaysLeft(context)
-                    if (daysLeft != null) {
-                        Text(
-                            stringResource(R.string.compose_settings_cert_days, daysLeft),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (daysLeft < 30) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    /*
-                     * NOTE: the SHA-256 fingerprint block (and its QR share
-                     * button) used to sit here. It is not part of installing or
-                     * trusting the CA - it only helped someone compare the
-                     * fingerprint by hand - and it made this card the busiest
-                     * part of the screen. Removed on request: the card now ends
-                     * with the one action that matters, exporting the
-                     * certificate.
-                     */
-                    Spacer(Modifier.height(4.dp))
-                    // 导出证书到 Download 目录（供其他设备/模块使用）
-                    OutlinedButton(
-                        onClick = { exportCertificate(context) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(
-                            Icons.Outlined.Save,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.compose_settings_cert_export))
-                    }
+
                 }
             }
-// ===== [C9-GROUP-5 of 7] 统计与图表 =====
-// 目标顺序：第 5 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
-// 归入分区：统计图表设置；实时推送；趋势范围；图表样式
-// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
-            // ── Statistics chart settings ──
+
+            // ── Appearance (theme) ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -1797,105 +2172,125 @@ fun SettingsScreen(viewModel: StatsViewModel) {
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        stringResource(R.string.compose_settings_charts_title),
+                        stringResource(R.string.compose_settings_theme_title),
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        stringResource(R.string.compose_settings_charts_hint),
+                        stringResource(R.string.compose_settings_theme_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
-                    var refreshKey by remember { mutableStateOf(0) }
-                    val chartToggles = listOf(
-                        Triple("chart_lifetime", R.string.compose_settings_chart_lifetime, R.string.compose_settings_chart_lifetime_hint),
-                        Triple("chart_rate", R.string.compose_settings_chart_rate, R.string.compose_settings_chart_rate_hint),
-                        Triple("chart_donut", R.string.compose_settings_chart_donut, R.string.compose_settings_chart_donut_hint),
-                        Triple("chart_trend", R.string.compose_settings_chart_trend, R.string.compose_settings_chart_trend_hint),
-                        Triple("chart_conn", R.string.compose_settings_chart_conn, R.string.compose_settings_chart_conn_hint),
-                        Triple("chart_apps", R.string.compose_settings_chart_apps, R.string.compose_settings_chart_apps_hint),
-                        Triple("chart_top_hosts", R.string.compose_settings_chart_top_hosts, R.string.compose_settings_chart_top_hosts_hint),
-                        Triple("chart_certs", R.string.compose_settings_chart_certs, R.string.compose_settings_chart_certs_hint),
-                        Triple("chart_qlog", R.string.compose_settings_chart_qlog, R.string.compose_settings_chart_qlog_hint),
-                    )
-                    chartToggles.forEach { (key, labelRes, hintRes) ->
-                        val enabled = remember(refreshKey, key) { isChartEnabled(context, key) }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(stringResource(labelRes), style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    stringResource(hintRes),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = enabled,
-                                onCheckedChange = { v ->
-                                    setChartEnabled(context, key, v)
-                                    refreshKey++
-                                },
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        stringResource(R.string.compose_settings_chart_style),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    var style by remember { mutableStateOf(chartStyle(context)) }
-                    // Sync from preferences on composition start
-                    LaunchedEffect(Unit) { style = chartStyle(context) }
+                    var theme by remember { mutableStateOf(themeMode(context)) }
+                    LaunchedEffect(Unit) { theme = themeMode(context) }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf(
-                            R.string.compose_stats_style_line to CHART_STYLE_LINE,
-                            R.string.compose_stats_style_area to CHART_STYLE_AREA,
-                            R.string.compose_stats_style_bars to CHART_STYLE_BARS,
-                        ).forEach { (labelRes, s) ->
+                            Triple(0, R.string.compose_settings_theme_system, 0),
+                            Triple(1, R.string.compose_settings_theme_light, 1),
+                            Triple(2, R.string.compose_settings_theme_dark, 2),
+                        ).forEach { (mode, labelRes, _) ->
                             FilterChip(
-                                selected = style == s,
+                                selected = theme == mode,
                                 onClick = {
-                                    style = s
-                                    setChartStyle(context, s)
+                                    theme = mode
+                                    setThemeMode(context, mode)
+                                    // Recreate activity to apply theme
+                                    (context as? android.app.Activity)?.recreate()
                                 },
                                 label = { Text(stringResource(labelRes)) },
                             )
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    // 实时推送开关（WebSocket）
-                    var realtime by remember { mutableStateOf(isRealtimeEnabled(context)) }
-                    Row(
+                }
+            }
+                    }
+                    6 -> {
+// ── Data management ──
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        stringResource(R.string.compose_settings_data_title),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        stringResource(R.string.compose_settings_data_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    val prefs = context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
+                    /*
+                     * 二次确认 + 真正调用原生重置。
+                     *
+                     * 之前这里只删了 s_hist_pos / s_daily_pos 两个设置键 —— 真正的计数、历史曲线、
+                     * 应用统计与查询日志都在原生进程内存里（并各自有 .dat 文件），所以按钮点了
+                     * 等于没点、也没有任何反馈。现在：第一次点击进入确认态，第二次才真正清除；
+                     * 清除走回环管理端口（8686）的 /internal-reset?what=all，并如实反馈结果。
+                     * 刻意不用协程/新 import：后台线程 + Handler 回主线程即可。
+                     */
+                    var clearArmed by remember { mutableStateOf(false) }
+                    Button(
+                        onClick = {
+                            if (!clearArmed) {
+                                clearArmed = true
+                            } else {
+                                clearArmed = false
+                                Thread {
+                                    val done = org.adaway.util.WebServerUtils.resetStatistics(context)
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        Toast.makeText(
+                                            context,
+                                            if (done) R.string.compose_settings_clear_stats_ok
+                                            else R.string.compose_settings_clear_stats_fail,
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }.start()
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_realtime),
-                                style = MaterialTheme.typography.bodyMedium,
+                        Text(
+                            stringResource(
+                                if (clearArmed) R.string.compose_settings_clear_stats_confirm
+                                else R.string.compose_settings_clear_stats,
                             )
-                            Text(
-                                stringResource(R.string.compose_settings_realtime_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = realtime,
-                            onCheckedChange = { v ->
-                                realtime = v
-                                setRealtimeEnabled(context, v)
-                                // 实际启停 WebSocket 连接
-                                if (v) viewModel.startRealtime() else viewModel.stopRealtime()
-                            },
                         )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 备份/恢复：导出规则+设置到文件，或从文件恢复
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                exportBackup(context)
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.compose_settings_backup))
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                importBackup(context, viewModel) {
+                                    // 恢复后重启应用使全部设置生效
+                                    val pm = context.packageManager
+                                    val launch = pm.getLaunchIntentForPackage(context.packageName)
+                                    if (launch != null) {
+                                        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                        context.startActivity(launch)
+                                    }
+                                    kotlin.system.exitProcess(0)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.compose_settings_restore))
+                        }
                     }
                 }
             }
@@ -2106,267 +2501,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // ── Allowlist (bypass blocking) ──
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Outlined.Warning,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                stringResource(R.string.compose_settings_allowlist_title),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_allowlist_warning),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    // 默认白名单（系统门户登录，自动维护）
-                    Text(
-                        stringResource(R.string.compose_settings_allowlist_default),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    defaultAllowlistUids(context).forEach { uid ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                appNameForUid(uid),
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_allowlist_uid, uid),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    // 用户放行的应用（可移除）
-                    Text(
-                        stringResource(R.string.compose_settings_allowlist_user),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    val userUids = userAllowedUids(context)
-                    if (userUids.isEmpty()) {
-                        Text(
-                            stringResource(R.string.compose_settings_allowlist_empty),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        userUids.forEach { uid ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    appNameForUid(uid),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    stringResource(R.string.compose_settings_allowlist_uid, uid),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                IconButton(onClick = {
-                                    setAppAllowed(context, uid, false)
-                                    refreshKey++
-                                }) {
-                                    Icon(
-                                        Icons.Outlined.RemoveCircle,
-                                        contentDescription = stringResource(R.string.compose_settings_allowlist_remove),
-                                        tint = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── App monitoring (可折叠) ──
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    var appsExpanded by remember { mutableStateOf(false) }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { appsExpanded = !appsExpanded },
-                    ) {
-                        Icon(
-                            Icons.Outlined.Apps,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_apps_title),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_apps_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Icon(
-                            imageVector = if (appsExpanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                            contentDescription = stringResource(
-                                if (appsExpanded) R.string.compose_action_collapse else R.string.compose_action_expand,
-                            ),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    androidx.compose.animation.AnimatedVisibility(visible = appsExpanded) {
-                        Column {
-                            Spacer(Modifier.height(8.dp))
-                            if (apps.isEmpty()) {
-                                Text(
-                                    stringResource(R.string.compose_settings_apps_empty),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            } else {
-                                // Re-read switch states after toggling (refreshKey changes)
-                                apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
-                                    val monitored = remember(refreshKey, app.uid) {
-                                        isAppMonitored(context, app.uid)
-                                    }
-                                    val allowed = remember(refreshKey, app.uid) {
-                                        isAppAllowed(context, app.uid)
-                                    }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        appNameForUid(app.uid),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        stringResource(
-                                            R.string.compose_settings_app_sub,
-                                            app.connections,
-                                            app.requests,
-                                            app.blocked,
-                                        ),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                /*
-                                 * 放行开关：该应用流量完全绕过拦截 —— 这不是普通显示偏好，而是会改变
-                                 * 拦截效果的策略变更。首次放行时解释后果，并说明怎么撤销（把开关拨回去
-                                 * 即可）；解释只弹一次，之后不再打扰。
-                                 */
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Switch(
-                                        checked = allowed,
-                                        onCheckedChange = { v ->
-                                            setAppAllowed(context, app.uid, v)
-                                            refreshKey++
-                                            val sp = context.getSharedPreferences(
-                                                PREFS_GENERAL,
-                                                Context.MODE_PRIVATE,
-                                            )
-                                            if (v) {
-                                                Toast.makeText(
-                                                    context,
-                                                    context.getString(
-                                                        if (sp.getBoolean("app_allow_explained", false)) {
-                                                            R.string.compose_settings_app_allow_hint
-                                                        } else {
-                                                            R.string.compose_settings_app_allow_explain
-                                                        },
-                                                    ),
-                                                    Toast.LENGTH_LONG,
-                                                ).show()
-                                                sp.edit().putBoolean("app_allow_explained", true).apply()
-                                            } else {
-                                                Toast.makeText(
-                                                    context,
-                                                    context.getString(R.string.compose_settings_app_allow_undone),
-                                                    Toast.LENGTH_SHORT,
-                                                ).show()
-                                            }
-                                        },
-                                    )
-                                    Text(
-                                        stringResource(R.string.compose_settings_app_allow),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (allowed) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                Spacer(Modifier.width(4.dp))
-                                /*
-                                 * 第二个开关此前是裸 Switch：没有可见文字、也没有无障碍标签，
-                                 * 读屏只会念"开关，开启/关闭"，用户分不清它和左边的放行开关各管什么。
-                                 * 这里照放行开关的样式补上文字标签（并被左侧放行开关形成对照）。
-                                 */
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Switch(
-                                        checked = monitored,
-                                        onCheckedChange = { newValue ->
-                                            setAppMonitored(context, app.uid, newValue)
-                                            refreshKey++
-                                        },
-                                    )
-                                    Text(
-                                        stringResource(R.string.compose_settings_app_monitor),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (monitored) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                        }
-                    }
-                }
-                }
-            }
             // ── About ──
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -2456,9 +2590,15 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     }
                 }
             }
+                    }
+                    else -> Unit
+                    }
+                }
+            }
         }
     }
 }
+
 
 /**
  * 检查更新行：更新源为 GitHub Releases（wxcvm/AdAway）。
