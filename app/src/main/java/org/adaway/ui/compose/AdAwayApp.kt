@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.outlined.DonutLarge
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Icon
@@ -46,6 +47,7 @@ object Destinations {
     const val STATS = "stats"
     const val RULES = "rules"
     const val SETTINGS = "settings"
+    const val NETWORK = "network"
     /** Secondary page (not a bottom-bar tab): the full request log. */
     const val LOGS = "logs"
     /** Secondary page: per-domain exemptions (解除过滤), reachable from the rules page. */
@@ -66,6 +68,7 @@ private val destinations = listOf(
     Destination(Destinations.OVERVIEW, R.string.compose_nav_overview, Icons.Filled.Home),
     Destination(Destinations.STATS, R.string.compose_nav_stats, Icons.Outlined.DonutLarge),
     Destination(Destinations.RULES, R.string.compose_nav_rules, Icons.Outlined.Shield),
+    Destination(Destinations.NETWORK, R.string.compose_nav_network, Icons.Outlined.Language),
     Destination(Destinations.SETTINGS, R.string.compose_nav_settings, Icons.Outlined.Settings),
 )
 
@@ -120,6 +123,13 @@ fun AdAwayApp() {
                     viewModel,
                     onOpenExempt = { navController.navigate(Destinations.EXEMPT) },
                     onOpenOverrides = { navController.navigate(Destinations.OVERRIDES) },
+                )
+            }
+            composable(Destinations.NETWORK) {
+                NetworkCenterScreen(
+                    onOpenSettings = { navController.navigate(Destinations.SETTINGS) },
+                    onOpenRules = { navController.navigate(Destinations.RULES) },
+                    onOpenStats = { navController.navigate(Destinations.STATS) },
                 )
             }
             composable(Destinations.SETTINGS) {
