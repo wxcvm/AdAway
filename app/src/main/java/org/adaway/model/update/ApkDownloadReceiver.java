@@ -188,7 +188,18 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
                 return R.string.update_verify_package;
             }
             PackageInfo current = packageManager.getPackageInfo(context.getPackageName(), GET_SIGNING_CERTIFICATES);
-            if (archive.getLongVersionCode() < current.getLongVersionCode()) {
+            // Installing an equal-version APK is not an update: this used to
+            // silently reinstall 758 when a cached fixed-tag asset was stale
+            // while the update manifest already advertised 773.
+            if (archive.getLongVersionCode() <= current.getLongVersionCode()) {
+                Timber.w("Downloaded APK is not newer: current=%s archive=%s",
+                        current.getLongVersionCode(), archive.getLongVersionCode());
+                return R.string.update_verify_version;
+            }
+            long expected = UpdateModel.expectedDownloadedVersionCode(context);
+            if (expected > 0 && archive.getLongVersionCode() != expected) {
+                Timber.w("Downloaded APK version does not match feed: expected=%s archive=%s",
+                        expected, archive.getLongVersionCode());
                 return R.string.update_verify_version;
             }
             String archiveSigner = signerDigest(archive);
