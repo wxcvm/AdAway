@@ -361,6 +361,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     // Keep the chosen section across activity recreation, but never persist
     // transient UI state or change the underlying settings.
     var selectedSection by rememberSaveable { mutableIntStateOf(-1) }
+    var settingsSearch by rememberSaveable { mutableStateOf("") }
     BackHandler(enabled = selectedSection >= 0) { selectedSection = -1 }
     val settingsScroll = rememberScrollState()
     LaunchedEffect(selectedSection) { settingsScroll.scrollTo(0) }
@@ -459,6 +460,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     ).mapIndexed { index, aliases ->
                         aliases + " " + sectionSearchHints[index].joinToString(" ")
                     },
+                    search = settingsSearch,
+                    onSearchChange = { settingsSearch = it },
                     onSelect = { selectedSection = it },
                 )
             } else {
