@@ -25,14 +25,30 @@ final class WildcardRuleIndex {
     private final List<String> noLiteralAnchor = new ArrayList<>();
 
     WildcardRuleIndex(Iterable<String> ruleKeys) {
+        // Pick the rarest REQUIRED literal anchor per pattern. Choosing
+        // the longest run's first trigram would make common suffixes such as
+        // *.example.test concentrate into a single enormous bucket.
+        Map<String, Integer> occurrences = new HashMap<>();
+        List<String> wildcardPatterns = new ArrayList<>();
         for (String pattern : ruleKeys) {
             if (pattern.indexOf('*') < 0 && pattern.indexOf('?') < 0) continue;
-            String anchor = requiredAnchor(pattern);
-            if (anchor.isEmpty()) {
-                noLiteralAnchor.add(pattern);
-            } else {
-                byAnchor.computeIfAbsent(anchor, unused -> new ArrayList<>()).add(pattern);
+            wildcardPatterns.add(pattern);
+            for (String anchor : candidateAnchors(pattern))
+                occurrences.merge(anchor, 1, Integer::sum);
+        }
+        for (String pattern : wildcardPatterns) {
+            String selected = "";
+            int count = Integer.MAX_VALUE;
+            for (String anchor : candidateAnchors(pattern)) {
+                int frequency = occurrences.get(anchor);
+                if (frequency < count ||
+                        (frequency == count && anchor.compareTo(selected) < 0)) {
+                    count = frequency;
+                    selected = anchor;
+                }
             }
+            if (selected.isEmpty()) noLiteralAnchor.add(pattern);
+            else byAnchor.computeIfAbsent(selected, unused -> new ArrayList<>()).add(pattern);
         }
     }
 
@@ -86,21 +102,26 @@ final class WildcardRuleIndex {
                 || (candidate.length() == best.length() && candidate.compareTo(best) < 0);
     }
 
-    /** Longest uninterrupted literal, capped at three characters. */
-    private static String requiredAnchor(String pattern) {
-        int bestStart = 0, bestLength = 0, start = 0;
-        for (int i = 0; i <= pattern.length(); i++) {
-            if (i == pattern.length() || pattern.charAt(i) == '*'
-                    || pattern.charAt(i) == '?') {
-                int length = i - start;
-                if (length > bestLength) {
-                    bestStart = start;
-                    bestLength = length;
+    /**
+     * Every required anchor at the strongest available literal width.
+     * No candidate may cross '*' or '?' because matching text can expand.
+     * HashSet avoids counting the same literal twice for one rule.
+     */
+    private static Set<String> candidateAnchors(String pattern) {
+        for (int width = ANCHOR_WIDTH; width >= 1; width--) {
+            Set<String> anchors = new HashSet<>();
+            int start = 0;
+            for (int at = 0; at <= pattern.length(); at++) {
+                if (at == pattern.length() || pattern.charAt(at) == '*'
+                        || pattern.charAt(at) == '?') {
+                    for (int i = start; i + width <= at; i++)
+                        anchors.add(pattern.substring(i, i + width));
+                    start = at + 1;
                 }
-                start = i + 1;
             }
+            if (!anchors.isEmpty()) return anchors;
         }
-        return pattern.substring(bestStart, bestStart + Math.min(bestLength, ANCHOR_WIDTH));
+        return new HashSet<>();
     }
 
     /** The prior RuleSnapshotRepository wildcard matching semantics. */
