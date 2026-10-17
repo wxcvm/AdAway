@@ -448,4 +448,10 @@
     <string name="compose_settings_section_6_description">应用监控、开机启动和外观偏好</string>
     <string name="compose_settings_section_7_title">数据与关于</string>
     <string name="compose_settings_section_7_description">备份、诊断、更新及应用信息</string>
+    <string name="compose_settings_home_search">搜索设置或分类</string>
+    <string name="compose_settings_home_frequent">常用入口</string>
+    <string name="compose_settings_home_categories">全部分类</string>
+    <string name="compose_settings_home_matches">找到 %1$d 个分类</string>
+    <string name="compose_settings_home_no_results">没有找到相关分类，可以换个设置名称试试。</string>
+    <string name="compose_settings_home_back">返回设置分类</string>
 </resources>
