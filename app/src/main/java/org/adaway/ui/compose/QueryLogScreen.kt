@@ -167,23 +167,33 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             /* 空状态要看两段：只判断 shown 会在最新一页没有命中筛选时把已加载的历史整段藏起来 */
-            if (shown.isEmpty() && shownOlder.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        stringResource(R.string.compose_logs_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            // A filter may have no matches in the newest batch but many in
+            // older batches. Keep pagination reachable even in empty state.
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            ) {
+                if (shown.isEmpty() && shownOlder.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 36.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                stringResource(R.string.compose_logs_empty),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                ) {
-                    items(shown) { entry -> QueryLogRow(entry) }
-                    items(shownOlder) { entry -> QueryLogRow(entry) }
-                    /* 只在这里按需取更早的页：本地列表再长，也不会一次性把 10000 条
-                       全塞进状态里（内存与 compose 重组成本都可控）。 */
+                items(shown) { entry -> QueryLogRow(entry) }
+                items(shownOlder) { entry -> QueryLogRow(entry) }
+                // Never hide the load-more action just because the current
+                // filtered subset is empty. Suppress it at the true end.
+                if (olderTotal == 0 || entries.size + older.size < olderTotal) {
                     item {
                         Row(
                             modifier = Modifier
@@ -193,10 +203,7 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                             horizontalArrangement = Arrangement.Center,
                         ) {
                             androidx.compose.material3.TextButton(
-                                /* 到最早一条之后禁用：此前只在加载中禁用，到底还能一直点，
-                                   每点一次都白跑一轮原生请求 */
-                                enabled = !loadingOlder &&
-                                    (olderTotal == 0 || older.size < olderTotal),
+                                enabled = !loadingOlder,
                                 onClick = {
                                     loadingOlder = true
                                     viewModel.loadQueryLogPage(
