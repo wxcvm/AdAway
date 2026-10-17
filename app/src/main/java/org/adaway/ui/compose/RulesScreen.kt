@@ -23,6 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -228,16 +229,12 @@ fun RulesScreen(
                 .padding(padding)
                 .fillMaxSize(),
         ) {
-            // Hosts statistics summary row
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                StatTile(stringResource(R.string.compose_hosts_blocked), blockedCount, Modifier.weight(1f))
-                StatTile(stringResource(R.string.compose_hosts_allowed), allowedCount, Modifier.weight(1f))
-                StatTile(stringResource(R.string.compose_hosts_redirected), redirectCount, Modifier.weight(1f))
+                AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
             }
 
             TabRow(selectedTabIndex = selectedTab) {
