@@ -417,7 +417,14 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.compose_settings_title)) },
+                title = {
+                    Text(
+                        if (selectedSection < 0) stringResource(R.string.compose_settings_title)
+                        else sectionTitles[selectedSection],
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
                 navigationIcon = {
                     if (selectedSection >= 0) {
                         IconButton(onClick = { selectedSection = -1 }) {
@@ -437,21 +444,31 @@ fun SettingsScreen(viewModel: StatsViewModel) {
         Column(
             modifier = Modifier.padding(padding).fillMaxSize(),
         ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(settingsScroll)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (selectedSection < 0) {
-                    SettingsCategoryHome(
-                        titles = sectionTitles,
-                        descriptions = sectionDescriptions,
-                        searchHints = sectionSearchHints,
-                        onSelect = { selectedSection = it },
-                    )
-                } else {
+            if (selectedSection < 0) {
+                SettingsCategoryNavigation(
+                    titles = sectionTitles,
+                    descriptions = sectionDescriptions,
+                    keywords = listOf(
+                        stringResource(R.string.compose_settings_section_1_keywords),
+                        stringResource(R.string.compose_settings_section_2_keywords),
+                        stringResource(R.string.compose_settings_section_3_keywords),
+                        stringResource(R.string.compose_settings_section_4_keywords),
+                        stringResource(R.string.compose_settings_section_5_keywords),
+                        stringResource(R.string.compose_settings_section_6_keywords),
+                        stringResource(R.string.compose_settings_section_7_keywords),
+                    ).mapIndexed { index, aliases ->
+                        aliases + " " + sectionSearchHints[index].joinToString(" ")
+                    },
+                    onSelect = { selectedSection = it },
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(settingsScroll)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
                     SettingsCategoryIntroduction(
                         index = selectedSection + 1,
                         title = sectionTitles[selectedSection],
