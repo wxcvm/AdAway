@@ -88,6 +88,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     // 也不能在主线程做：旧代码是 remember { isWebServerRunning() }，进页面
     // 就阻塞主线程，慢机器上还会 ANR。这里只给保守初值，真实状态在 IO 线程解析。
     var wsEnabled by remember { mutableStateOf(false) }
+    var wsTransitioning by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         val running = withContext(Dispatchers.IO) {
             org.adaway.util.WebServerUtils.isWebServerRunning()
@@ -187,26 +188,37 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                         // Web server control card
             WebServerControlCard(
                 enabled = wsEnabled,
+                transitioning = wsTransitioning,
                 stats = serverStats,
                 httpPort = org.adaway.util.WebServerUtils.getHttpPort(context),
                 httpsPort = org.adaway.util.WebServerUtils.getHttpsPort(context),
                 certStateRes = certStateRes,
                 startLog = startLog,
                 onToggle = { enable ->
-                    // 乐观更新：start/stop 之后的进程检测同样要走 root shell，
-                    // 放后台复核，避免点一下卡一下。
-                    wsEnabled = enable
-                    if (enable) {
-                        org.adaway.util.WebServerUtils.startWebServer(context)
-                    } else {
-                        org.adaway.util.WebServerUtils.stopWebServer()
-                    }
-                    uiScope.launch {
-                        val running = withContext(Dispatchers.IO) {
-                            org.adaway.util.WebServerUtils.isWebServerRunning() ||
-                                org.adaway.util.WebServerUtils.isWebServerReachable(context)
+                    if (!wsTransitioning) {
+                        wsTransitioning = true
+                        uiScope.launch {
+                            try {
+                                // Root shell, process checks and port probing are blocking IO.
+                                // Never perform them in a Compose switch callback.
+                                withContext(Dispatchers.IO) {
+                                    if (enable) {
+                                        org.adaway.util.WebServerUtils.startWebServer(context)
+                                    } else {
+                                        org.adaway.util.WebServerUtils.stopWebServer()
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // State comes from a fresh probe, not optimistic preference.
+                                timber.log.Timber.w(e, "Failed to change Web Server state")
+                            } finally {
+                                wsEnabled = withContext(Dispatchers.IO) {
+                                    org.adaway.util.WebServerUtils.isWebServerRunning() ||
+                                        org.adaway.util.WebServerUtils.isWebServerReachable(context)
+                                }
+                                wsTransitioning = false
+                            }
                         }
-                        wsEnabled = running
                     }
                 },
                 onTest = {
@@ -260,6 +272,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
  */
 private fun WebServerControlCard(
     enabled: Boolean,
+    transitioning: Boolean,
     stats: ServerStats?,
     httpPort: Int,
     httpsPort: Int,
@@ -305,10 +318,14 @@ private fun WebServerControlCard(
                         else MaterialTheme.colorScheme.error,
                     )
                 }
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = onToggle,
-                )
+                if (transitioning) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else {
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = onToggle,
+                    )
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(
