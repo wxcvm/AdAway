@@ -21,6 +21,7 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
 import org.adaway.R;
+import org.adaway.AdAwayApplication;
 import org.adaway.model.root.HijackModel;
 import org.adaway.ui.compose.MainActivity;
 
@@ -242,7 +243,17 @@ public final class DiagnosticVpnService extends VpnService {
         byte[] response = DiagnosticUdpRelay.process(packet, packet.length, this::relayLocally);
         if (response != null || stopped) return response;
         return DiagnosticDnsRelay.process(packet, packet.length, dnsPermits,
-                android.os.Process.myUid(), question -> DiagnosticDnsNetwork.exchange(this, question, sockets));
+                android.os.Process.myUid(), question -> {
+                    // The only permitted question is example.com A, issued by
+                    // this app's explicit probe. Match its real, immutable
+                    // production rule generation before network I/O.
+                    RuleSnapshotRepository.Snapshot snapshot =
+                            ((AdAwayApplication) getApplication())
+                                    .getSourceModel().getRuleSnapshot();
+                    return DiagnosticDnsRelay.resolveFromSnapshotOrUpstream(
+                            question, snapshot,
+                            original -> DiagnosticDnsNetwork.exchange(this, original, sockets));
+                });
     }
 
     private byte[] relayLocally(byte[] payload) throws IOException {
