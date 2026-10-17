@@ -344,7 +344,7 @@
     <string name="compose_settings_block_mode_custom_hint">Custom redirect address (edit the IPv4/IPv6 targets in the advanced settings).</string>
     <string name="compose_settings_update_check">Check for updates</string>
     <string name="compose_settings_update_check_hint">Installed %1$s · source: GitHub Releases</string>
-    <string name="compose_settings_update_downloading">Download started — the installer will pop up when it finishes</string>
+    <string name="compose_settings_update_downloading">Download queued. Confirm the system installer when prompted, or tap Resume installation if it does not appear.</string>
     <!-- Rules source: local file -->
     <string name="compose_rules_source_type_url">Subscription URL</string>
     <string name="compose_rules_source_type_file">Local file</string>
