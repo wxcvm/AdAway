@@ -96,6 +96,19 @@ public class ServerWatchdogWorker extends Worker {
         ensureScheduled(context);
         scheduleFollowUp(context);
         if (!PreferenceHelper.getWebServerEnabled(context)) {
+            /*
+             * Turning the response server off must not leave a stale TCP
+             * redirect in place. Otherwise 80/443 traffic goes to ports with
+             * nobody listening, even though periodic checks are still running.
+             */
+            if (org.adaway.model.root.HijackModel.wasEnabled(context)) {
+                boolean restored = org.adaway.model.root.HijackModel.disable();
+                if (restored) {
+                    org.adaway.model.root.HijackModel.clearActiveFlag(context);
+                } else {
+                    Timber.w("ServerWatchdog: server disabled but redirect cleanup failed");
+                }
+            }
             return Result.success();
         }
         // Reachability first: it is a single socket connect to the management

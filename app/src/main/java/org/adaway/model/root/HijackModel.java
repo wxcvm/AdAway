@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import com.topjohnwu.superuser.Shell;
 
 import org.adaway.util.BlockMode;
+import org.adaway.model.traffic.AndroidVpnObserver;
+import org.adaway.model.traffic.TrafficModePolicy;
 import org.adaway.util.Constants;
 import org.adaway.util.WebServerUtils;
 
@@ -66,7 +68,7 @@ public final class HijackModel {
         int httpsPort = WebServerUtils.getHttpsPort(context);
         int appUid = android.os.Process.myUid();
         List<String> commands = new ArrayList<>();
-        commands.add("iptables -t nat -N " + CHAIN + " 2>/dev/null || true");
+        commands.add("iptables -t nat -N " + CHAIN + " 2>/dev/null || iptables -t nat -S " + CHAIN + " >/dev/null");
         commands.add("iptables -t nat -F " + CHAIN);
         // Never touch our own traffic (root runs the server) nor the app's.
         commands.add("iptables -t nat -A " + CHAIN + " -m owner --uid-owner 0 -j RETURN");
@@ -81,7 +83,8 @@ public final class HijackModel {
         commands.add("iptables -t nat -A " + CHAIN + " -d 192.168.0.0/16 -j RETURN");
         commands.add("iptables -t nat -A " + CHAIN + " -p tcp --dport 80 -j REDIRECT --to-ports " + httpPort);
         commands.add("iptables -t nat -A " + CHAIN + " -p tcp --dport 443 -j REDIRECT --to-ports " + httpsPort);
-        commands.add("iptables -t nat -C OUTPUT -j " + CHAIN + " 2>/dev/null || iptables -t nat -I OUTPUT 1 -j " + CHAIN);
+        commands.add("if iptables -t nat -C OUTPUT -j " + CHAIN + " 2>/dev/null; then :; else "
+                + "status=$?; [ \"$status\" -eq 1 ] || exit 2; iptables -t nat -I OUTPUT 1 -j " + CHAIN + "; fi");
         return commands;
     }
 
@@ -93,6 +96,39 @@ public final class HijackModel {
      */
     public static boolean enable(Context context) {
         try {
+            /*
+             * Network ownership comes BEFORE the fast-path isEnabled(): a
+             * previously installed iptables chain must not remain hooked after
+             * AdGuard (or another application) has acquired Android VPN.
+             *
+             * The local web server is left running, but we do NOT claim its
+             * listener receives the other VPN's blocked DNS requests.
+             */
+            TrafficModePolicy.VpnOwner owner = AndroidVpnObserver.read(context, false);
+            TrafficModePolicy.Decision decision = TrafficModePolicy.decide(
+                    new TrafficModePolicy.Evidence(
+                            TrafficModePolicy.Preference.CAPTURE,
+                            owner,
+                            false, /* package presence alone is not proof */
+                            false, /* foreign traffic interception unverified */
+                            false, /* no verified path from foreign VPN */
+                            true,  /* root authorization checked by shell */
+                            false));
+            if (owner == TrafficModePolicy.VpnOwner.OTHER) {
+                if (isEnabled()) {
+                    if (!disable()) {
+                        Timber.e("External VPN detected; failed to remove own hijack chain");
+                        return false;
+                    }
+                }
+                clearActiveFlag(context);
+                Timber.i("External VPN active: transparent redirect paused; listener untouched");
+                return false;
+            }
+            if (decision.target != TrafficModePolicy.Target.START_CAPTURE) {
+                Timber.w("VPN ownership unverified; skip installing new redirect rules");
+                return isEnabled(); /* keep prior state unchanged, not a new takeover */
+            }
             // Already in place (the common case when the watchdog re-runs):
             // skip the ~15 iptables invocations entirely.
             if (isEnabled()) {
@@ -111,7 +147,13 @@ public final class HijackModel {
                 prefs(context).edit().putBoolean(PREF_ACTIVE, false).apply();
                 return false;
             }
-            Shell.Result result = Shell.cmd(enableCommands(context).toArray(new String[0])).exec();
+            Shell.Result result = Shell.cmd("(\nset -e\n"
+                    + String.join("\n", enableCommands(context)) + "\n)").exec();
+            if (!result.isSuccess()) {
+                boolean cleaned = disable();
+                Timber.w("Hijack install failed; own-chain cleanup confirmed: %s", cleaned);
+                return false;
+            }
             boolean active = Shell.cmd("iptables -t nat -C OUTPUT -j " + CHAIN).exec().isSuccess();
             prefs(context).edit().putBoolean(PREF_ACTIVE, active).apply();
             Timber.i("Hijack rules installed: %s (shell %s)", active, result.isSuccess());
@@ -139,14 +181,8 @@ public final class HijackModel {
      */
     public static boolean disable() {
         try {
-            Shell.Result result = Shell.cmd(
-                    "iptables -t nat -D OUTPUT -j " + CHAIN + " 2>/dev/null || true",
-                    "iptables -t nat -F " + CHAIN + " 2>/dev/null || true",
-                    "iptables -t nat -X " + CHAIN + " 2>/dev/null || true",
-                    "iptables -t nat -C OUTPUT -j " + CHAIN + " 2>/dev/null && echo STILL_ACTIVE || echo CLEAN"
-            ).exec();
-            boolean clean = result.getOut().stream().anyMatch(line -> line.contains("CLEAN"))
-                    || !isEnabled();
+            Shell.Result result = Shell.cmd(HijackCleanupCommands.script(CHAIN)).exec();
+            boolean clean = result.isSuccess() && result.getOut().stream().anyMatch("CLEAN"::equals);
             Timber.i("Hijack rules removed: %s", clean);
             return clean;
         } catch (Exception exception) {

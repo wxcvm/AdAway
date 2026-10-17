@@ -915,6 +915,19 @@ fun refreshServerStats() {
             val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
                     val app = getApplication<Application>()
+                    if (mode == org.adaway.util.BlockMode.HIJACK) {
+                        /*
+                         * Refuse a new transparent hijack before changing
+                         * persisted block mode or rewriting the hosts file.
+                         * VPN ownership is independent of whether AdGuard is
+                         * merely installed. Unknown is not authorization.
+                         */
+                        val owner = org.adaway.model.traffic.AndroidVpnObserver.read(app, false)
+                        if (owner != org.adaway.model.traffic.TrafficModePolicy.VpnOwner.NONE) {
+                            Timber.w("Cannot enable hijack while VPN owner is %s", owner)
+                            return@withContext false
+                        }
+                    }
                     org.adaway.util.BlockMode.apply(app, mode)
                     // 1) 先把新目标地址写进 hosts 并生效，再导出规则文件让
                     //    服务器重读（透明代理直接按导出规则过滤）
