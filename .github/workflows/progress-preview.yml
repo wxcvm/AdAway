@@ -87,10 +87,27 @@ jobs:
           printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 -d > "$keystore"
           test -s "$keystore"
           sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          bt=$(find "$sdk_root/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
-          test -n "$bt" && test -x "$bt/apksigner" && test -x "$bt/aapt"
+          if [[ ! -d "$sdk_root/build-tools" ]]; then
+            echo "::error::Android SDK build tools missing from $sdk_root"; exit 1
+          fi
+          bt=""
+          while IFS= read -r candidate; do
+            if [[ -x "$candidate/apksigner" && -x "$candidate/aapt" ]]; then
+              bt="$candidate"; break
+            fi
+          done < <(find "$sdk_root/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -Vr)
+          if [[ -z "$bt" ]]; then
+            echo "::error::No installed Android build-tools version offers both apksigner and aapt"
+            find "$sdk_root/build-tools" -maxdepth 2 -type f | grep -E "/(aapt|apksigner)$" || true
+            exit 1
+          fi
+          echo "Using Android build tools: ${bt##*/}"
           unsigned=app/build/outputs/apk/release/app-release-unsigned.apk
-          test -s "$unsigned"
+          if [[ ! -s "$unsigned" ]]; then
+            echo "::error::Unsigned release-variant APK missing"
+            find app/build/outputs/apk -maxdepth 4 -type f -print || true
+            exit 1
+          fi
           export SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD
           "$bt/apksigner" sign --ks "$keystore" \
             --ks-pass env:SIGNING_STORE_PASSWORD \
