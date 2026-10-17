@@ -454,4 +454,20 @@
     <string name="compose_settings_home_matches">找到 %1$d 个分类</string>
     <string name="compose_settings_home_no_results">没有找到相关分类，可以换个设置名称试试。</string>
     <string name="compose_settings_home_back">返回设置分类</string>
+    <string name="compose_settings_search_hint">搜索设置，例如 DNS、AdGuard、端口、证书</string>
+    <string name="compose_settings_frequent_title">常用入口</string>
+    <string name="compose_settings_frequent_blocking">拦截模式</string>
+    <string name="compose_settings_frequent_certificate">证书</string>
+    <string name="compose_settings_frequent_ports">端口</string>
+    <string name="compose_settings_frequent_backup">备份</string>
+    <string name="compose_settings_all_categories">全部设置</string>
+    <string name="compose_settings_search_results">相关分类</string>
+    <string name="compose_settings_search_empty">没有找到相关分类，试试 DNS、AdGuard、端口或证书</string>
+    <string name="compose_settings_section_1_keywords">DNS VPN TUN AdGuard 白名单 允许清单 hosts 广告 拦截 重定向 代理 VPN冲突</string>
+    <string name="compose_settings_section_2_keywords">http https localhost web 服务 服务器 监听 端口 80 443 8080 8443 内存</string>
+    <string name="compose_settings_section_3_keywords">CA TLS SSL 根证书 证书 信任 固定证书 HTTPS 导出</string>
+    <string name="compose_settings_section_4_keywords">规则 广告 去重 缓存 熔断 覆盖 响应 图片</string>
+    <string name="compose_settings_section_5_keywords">统计 图表 趋势 实时 websocket 曲线</string>
+    <string name="compose_settings_section_6_keywords">应用 监控 开机 自启动 后台 主题 外观 浅色 深色</string>
+    <string name="compose_settings_section_7_keywords">备份 恢复 导入 导出 重置 调试 日志 更新 关于 版本</string>
 </resources>
