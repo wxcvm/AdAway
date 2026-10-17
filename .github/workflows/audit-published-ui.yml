@@ -1,0 +1,57 @@
+name: Verify published Android UI APK
+on:
+  push:
+    branches: ['audit/release-ui-identity-20261017']
+    paths: ['.github/workflows/audit-published-ui.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download exact official APK and compare with its signed CI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p official ci
+          gh release download 6.7.5.773 --repo "$GITHUB_REPOSITORY" --pattern 'ADBlock-latest.apk' --dir official
+          test -s official/ADBlock-latest.apk
+          sha256sum official/ADBlock-latest.apk
+          gh run download 39005813539 --repo "$GITHUB_REPOSITORY" -n ADBlock-release-signed -D ci
+          find ci -name '*.apk' -type f -print
+          match=$(find ci -name app-release-signed.apk -type f | head -1)
+          test -s "$match"
+          sha256sum "$match"
+          cmp official/ADBlock-latest.apk "$match"
+          echo "PASS: stable release APK is byte-identical to official signed CI APK"
+      - name: Inspect package identity, launcher, and packaged Network Center strings
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=official/ADBlock-latest.apk
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          bt=$(find "$sdk_root/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          aapt="$bt/aapt"
+          test -x "$aapt"
+          "$aapt" dump badging "$apk" > package.txt
+          "$aapt" dump xmltree "$apk" AndroidManifest.xml > manifest.txt
+          "$aapt" dump resources "$apk" > resources.txt
+          grep -E "^package:|^launchable-activity:|^native-code:" package.txt | head -10
+          grep -F "6.7.5.773" package.txt
+          grep -F "org.adaway.ui.compose.MainActivity" package.txt
+          grep -F "org.adaway.ui.compose.MainActivity" manifest.txt
+          # These are referenced from live, non-preview navigation and must
+          # survive R8/resource shrinking in the APK actually downloaded by users.
+          for label in compose_nav_network compose_network_title compose_network_capture_title compose_network_adguard_title compose_network_recovery_title; do
+            if grep -Fq "$label" resources.txt; then
+              echo "PASS: packaged UI resource $label"
+            else
+              echo "::error::Missing packaged UI resource $label"; exit 1
+            fi
+          done
+          echo "PASS: official Android APK includes the new Compose navigation and Network Center resources"
