@@ -454,4 +454,20 @@
     <string name="compose_settings_home_matches">Matching categories: %1$d</string>
     <string name="compose_settings_home_no_results">No matching category. Try a different setting name.</string>
     <string name="compose_settings_home_back">Back to settings categories</string>
+    <string name="compose_settings_search_hint">Search settings (DNS, AdGuard, ports, certificates…)</string>
+    <string name="compose_settings_frequent_title">Quick access</string>
+    <string name="compose_settings_frequent_blocking">Blocking</string>
+    <string name="compose_settings_frequent_certificate">Certificates</string>
+    <string name="compose_settings_frequent_ports">Web ports</string>
+    <string name="compose_settings_frequent_backup">Backup</string>
+    <string name="compose_settings_all_categories">All settings</string>
+    <string name="compose_settings_search_results">Matching categories</string>
+    <string name="compose_settings_search_empty">No matching settings category. Try DNS, AdGuard, ports or certificates.</string>
+    <string name="compose_settings_section_1_keywords">DNS VPN TUN AdGuard whitelist allowed apps hosts intercept block redirect</string>
+    <string name="compose_settings_section_2_keywords">http https localhost local server listen port 80 443 8080 8443 network memory</string>
+    <string name="compose_settings_section_3_keywords">CA TLS SSL root cert trust pinning fingerprint HTTPS</string>
+    <string name="compose_settings_section_4_keywords">rules filter dedup cache circuit-breaker override cosmetic image</string>
+    <string name="compose_settings_section_5_keywords">charts statistics graph trend websocket live</string>
+    <string name="compose_settings_section_6_keywords">app monitor startup boot background theme light dark</string>
+    <string name="compose_settings_section_7_keywords">backup export import reset debug log update about version</string>
 </resources>
