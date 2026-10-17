@@ -137,20 +137,8 @@ jobs:
             --pattern 'ADBlock-latest.apk' --dir "$RUNNER_TEMP/reference-release"
           "$bt/apksigner" verify --verbose --print-certs \
             "$RUNNER_TEMP/reference-release/ADBlock-latest.apk" > "$RUNNER_TEMP/stable-signature.txt"
-          python3 - "$RUNNER_TEMP/stable-signature.txt" release-assets/APK-SIGNATURE.txt <<'PY'
-          import pathlib, re, sys
-          def fingerprint(path):
-              contents = pathlib.Path(path).read_text()
-              values = re.findall(r"Signer #1 certificate SHA-256 digest:\s*([0-9a-fA-F]{64})", contents)
-              if len(values) != 1:
-                  raise SystemExit("signature certificate fingerprint missing or ambiguous")
-              return values[0].lower()
-          production = fingerprint(sys.argv[1])
-          preview = fingerprint(sys.argv[2])
-          if production != preview:
-              raise SystemExit("Preview signer does NOT match published production signer; publication refused")
-          print("PASS: preview and production certificates share SHA-256:", preview)
-          PY
+          python3 tools/compare_apk_signers.py \
+            "$RUNNER_TEMP/stable-signature.txt" release-assets/APK-SIGNATURE.txt
 
       - name: Verify bundled preview status and checksums
         shell: bash
