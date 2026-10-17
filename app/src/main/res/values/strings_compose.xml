@@ -491,4 +491,20 @@
     <string name="compose_settings_section_5_keywords">charts statistics graph trend websocket live</string>
     <string name="compose_settings_section_6_keywords">app monitor startup boot background theme light dark</string>
     <string name="compose_settings_section_7_keywords">backup export import reset debug log update about version</string>
+
+    <string name="compose_nav_more">More</string>
+    <string name="compose_more_hint">More tools and diagnostics. These shortcuts open existing working pages.</string>
+    <string name="compose_more_logs">Query log</string>
+    <string name="compose_more_logs_desc">Inspect recently received DNS and server requests, outcomes and exports</string>
+    <string name="compose_more_exempt">Domain exemptions</string>
+    <string name="compose_more_exempt_desc">Allow selected domains when the interception method supports exemptions</string>
+    <string name="compose_more_overrides">Response overrides</string>
+    <string name="compose_more_overrides_desc">Choose custom blocked response behavior for individual domains</string>
+    <string name="compose_more_network">Network center</string>
+    <string name="compose_more_network_desc">Status and future slots for global capture, AdGuard coexistence, DNS and rollback</string>
+    <string name="compose_more_settings">All settings</string>
+    <string name="compose_more_settings_desc">Blocking preferences, Web server, certificates, storage and appearance</string>
+    <string name="compose_more_planned">Coming later · not enabled</string>
+    <string name="compose_more_planned_desc">Global VPN/TUN interception, automatic AdGuard conflict resolution and route rollback are planned but not active. Open Network center to view their scope.</string>
+
 </resources>
