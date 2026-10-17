@@ -124,12 +124,6 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
                 .padding(padding)
                 .fillMaxSize(),
         ) {
-            Text(
-                stringResource(R.string.compose_logs_hint),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
             /* Scroll the filters on narrow screens and with large system fonts.
              * Keeping every chip in a fixed Row clipped the last choices. */
             Row(
@@ -162,12 +156,27 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
             }
             /* Always show the loaded record count; do not suggest that a filter
              * includes records which haven't been downloaded yet. */
-            Text(
-                text = "${shown.size + shownOlder.size} / ${if (olderTotal > 0) olderTotal else entries.size}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stringResource(R.string.compose_logs_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${shown.size + shownOlder.size} / ${if (olderTotal > 0) olderTotal else entries.size}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             /* 空状态要看两段：只判断 shown 会在最新一页没有命中筛选时把已加载的历史整段藏起来 */
             // A filter may have no matches in the newest batch but many in
