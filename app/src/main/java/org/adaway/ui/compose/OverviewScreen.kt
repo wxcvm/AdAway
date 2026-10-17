@@ -179,13 +179,9 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // Web server card
-            WebServerCard(
-                running = wsEnabled,
-                stats = serverStats,
-            )
-
-                        // Web server control card
+            // Keep one actionable Web Server surface instead of repeating the
+            // same running status in a separate summary card.
+            // Web server control card
             WebServerControlCard(
                 enabled = wsEnabled,
                 transitioning = wsTransitioning,
@@ -212,9 +208,14 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                                 // State comes from a fresh probe, not optimistic preference.
                                 timber.log.Timber.w(e, "Failed to change Web Server state")
                             } finally {
-                                wsEnabled = withContext(Dispatchers.IO) {
-                                    org.adaway.util.WebServerUtils.isWebServerRunning() ||
-                                        org.adaway.util.WebServerUtils.isWebServerReachable(context)
+                                wsEnabled = try {
+                                    withContext(Dispatchers.IO) {
+                                        org.adaway.util.WebServerUtils.isWebServerRunning() ||
+                                            org.adaway.util.WebServerUtils.isWebServerReachable(context)
+                                    }
+                                } catch (e: Exception) {
+                                    timber.log.Timber.w(e, "Unable to verify Web Server status")
+                                    false
                                 }
                                 wsTransitioning = false
                             }
@@ -484,6 +485,7 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) 
         ) {
             Text(
                 String.format(Locale.US, "%,d", value),
+                maxLines = 1,
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold,
