@@ -61,5 +61,8 @@ Windows 端的 Web 服务端、Win32 控制面板与安装器已迁到独立仓�
   本项目的任何一端都不使用 VPN 接管方式）；
 - 端上能读的配置与统计口径与 Android 端一致，契约见本仓库 `docs/windows-core-contract.md`
   （`block_config.json` 键名、`/internal-stats` 字段、规则/策略文件、规则语义子集）；
-- 该仓库按**固定提交**从本仓库取用 `webserver/jni`（C 服务端核心）与 webroot 资源，因此两端引用同一份
-  源码；分支前移会让它的 CI 大声失败，需要有人有意识地更新 pin 并同步契约。
+- 该仓库按**固定提交**取用上游的 `webserver/jni` 与 webroot 资源，并在自己的 CI 里断言取到的就是被 pin 的那一个提交；
+  但请注意：**两端核心并非同一份文件** —— Windows 端在 `webserver.c` 上有若干**独有功能**
+  （日志镜像、面板可选的按类型处置、监听器注册表等），Android 端近期的一些修复也尚未包含在 Windows 端。
+  共同的**规则语义、配置键名与 `/internal-stats` 字段**以 `docs/windows-core-contract.md` 为准（那部分是严格对齐的），
+  差异与将来合一的工作清单见该文档 §6.1/§6.2。

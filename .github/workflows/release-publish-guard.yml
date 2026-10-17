@@ -1,0 +1,34 @@
+name: Release feed publishing safety
+on:
+  push:
+    branches: [ci/safe-merge-no-auto-publish-20261017]
+    paths:
+      - '.github/workflows/android-ci.yml'
+      - '.github/workflows/release-publish-guard.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/android-ci.yml'
+      - '.github/workflows/release-publish-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prevent publishing on ordinary merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          data = Path('.github/workflows/android-ci.yml').read_text()
+          assert "if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') || startsWith(github.ref, 'refs/tags/v')" in data, 'Unconditional in-app feed update'
+          assert "if: startsWith(github.ref, 'refs/tags/v')" in data, 'Missing tag-only release guard'
+          assert data.count('gh release upload android-latest') == 1, 'Unexpected release feed writes'
+          print('PASS: ordinary main branch merges do not publish an APK')
+          PY

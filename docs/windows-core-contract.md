@@ -1,13 +1,9 @@
 # Windows / Android 共享核心契约（F 第一步：先冻结，再迁出）
 
-## M0/M1 草稿升级说明
+## M1：版本化规则决策接口与跨平台固定测试
 
-Android #45 与 Windows #3 是 M0 安全修复草稿；Android #46 提出新的域名决策/数据接口。
-Windows M1 草稿用 `fetch-core-contract.sh` 独立固定契约与测试文件（`c2bff508a1607c2f7a0ce19ef96109a50fa202b2`），保存在验证过的 `shared-contract/` 缓存中。
-`fetch-upstream.sh` 的服务端 pin 保持 `4470606366e614abdb308fdfe94734d28167439c`。尝试整体升级时，真实 Windows CI 发现新核心直接依赖 Android 头文件，因此未采用该升级；服务端跨平台兼容改造需要单独审查。默认发布分支仍未改变。
-M0 新脚本直接 fetch 提交对象，不依赖移动分支当前 HEAD；下面的“分支前移即失败”是旧脚本的历史行为。
-升级须通过固定对象/缓存哈希校验、规则与核心契约测试、完整 Windows 编译和冒烟；不得自动合并或发布。
-详情：[M1 统一接口与决策](traffic-core-contract-v1.md)。
+Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `traffic_core_contract.h` 的共享协议和测试向量。Windows CI 可独立获取固定提交下的契约文件，但这不意味着 Windows 的整个 `webserver.c` 已经与 Android 合并。
+生产捕获、自动修改 DNS/路由和系统回滚仍须分别实现及验收。
 
 本文件由脚本从真实源码抽取生成（不是手写清单）：两个端口的实现若与本文不一致，以代码为准并立刻更新本文。
 
@@ -108,12 +104,14 @@ M0 新脚本直接 fetch 提交对象，不依赖移动分支当前 HEAD；下�
 
 ## 3. 规则与策略文件（以源码为准）
 
-C 服务端读取的文件（名称取自源码三种写法：宏定义、裸字面量、内联路径 "%s/xxx.txt"）：
+C 服务端读取的文件（名称取自源码的三种写法：宏定义、裸字面量、内联路径，含 .txt 与 .css "%s/xxx.txt"）：
 
 | 文件 | 用途 | 写入方 | C 端读取处 |
 |---|---|---|---|
 | `pin_policy.txt` | 固定证书（pin）策略：域名与模式 | 应用/用户 | PIN_POLICY_FILE 宏 |
 | `rule_overrides.txt` | 按域覆盖响应（自定义格式） | 应用按域覆盖页 | RULE_OVERRIDE_FILE 宏 |
+| `cosmetic.css` | 元素隐藏样式表（AdGuard/ABP 的 `##selector` 收集结果），注入被过滤页面的 `<style>` **内部**（此前被注入在 `</style>` 之后，等于从未生效，已修） | 应用 `CosmeticRules.toCss()`（经 `WebServerUtils` 落盘） | `webserver.c` 的 `load_cosmetic_css()`（`%s/cosmetic.css`） |
+| `cosmetic_rules.txt` | **域名限定**的元素隐藏规则（`domain<TAB>selector`，`*` = 全局）；服务端按当前页面主机筛选后注入 `<style>` 内部（精确主机或子域，大小写不敏感）。**文件不存在时行为与没有本功能时完全一致** | 应用 `CosmeticRules.toScopedRules()`（经 `WebServerUtils` 落盘） | `webserver.c` 的 `load_cosmetic_rules()`（`%s/cosmetic_rules.txt`） |
 | `domain_allowlist.txt` | 按域名豁免（ALLOWED 条目导出） | 应用 ExemptionRules | 内联路径 "%s/domain_allowlist.txt" |
 | `allowlist.txt` | 按 uid 放行（每行一个十进制 uid） | 应用 SettingsScreen | 内联路径 "%s/allowlist.txt" |
 | `blocklist.txt` | 拦截列表本体（服务端 block_set_contains 检索的主机集合） | 应用导出规则库 | 内联路径 "%s/blocklist.txt" |
@@ -136,6 +134,58 @@ webserver/jni/rule_norm_test.c 在 CI 中执行。
   （否则会抢走 Android 的 latest，曾经真的发生过）；
 - 所有 Action 固定到 commit SHA，文件行尾 LF；
 - 迁出后原仓库移除 Windows 目录与流水线，README 指向新仓库。
+
+### 6.1 核心已分叉：`webserver.c` 需要一次真正的合并（2026-10-15 核实）
+
+**结论：不能靠"改一行 pin"同步两端。** Windows 仓库的 `fetch-upstream.sh` 目前 pin 在
+`feat/win11-webserver-release` 的提交 `4470606…`，那份 `webserver/jni` 只有 8 个文件，而 master 有
+**19 个**；同名文件 `webserver.c` 两侧也不同：
+
+| | files in jni | webserver.c | `_WIN32` 出现 | 预处理条件 | `cosmetic` | 纯函数头引用 |
+|---|---|---|---|---|---|---|
+| `master`（Android） | 19 | 218,142 B | 8 | 10 | 76 | 65 |
+| `feat/win11-webserver-release`（Windows） | 8 | 250,980 B | 38 | 37 | 19 | 2 |
+
+逐行差分：**2435 行新增 / 1620 行删除**（相对 master）—— 两侧各自演进了很久：
+
+- **只有 Windows 侧有**：`win32_dirent.h`（opendir/readdir shim）、`winsock2.h`/`_stricmp` 等
+  `_WIN32` 分支、以及"没有 `/proc` 时 uid 视为 unknown"这类 Windows 适配；
+- **只有 master 有**：G1 抽出的纯函数头与宿主测试（`rule_norm.h`、`pin_window.h`、`f5_guard.h`、
+  `cosmetic_sanitize.h`、`cosmetic_scope.h` 及各自测试、`rule_vectors.txt`），以及 cosmetic 的两处修复
+  （`<style>` 上下文与域名作用域）。
+
+**因此目前的状态是"漂移"而不是"故障"**：Windows CI 仍然绿（它 pin 的旧提交里有那 8 个文件），
+但它**拿不到** Android 侧的新修复。
+
+### 6.2 结论修订（2026-10-15 实测后）：这是**特性分家**，不是行级漂移
+
+上一节按「行数差异」描述（master↔Windows 之间 2435/1620 行），据此得出的「逐段合并」设想**经实测被否定**：
+
+- 以共同祖先 `13cdcdf3`（2026-09-03）为基准做三方比对：**master 相对基准 115 个 hunk**、
+  **Windows 相对基准 148 个 hunk**；两侧**同一基准行号上已是完全不同的内容**（例：基准第 265 行是
+  `cfg_images` 声明，master 同处是 `s_sni_mutex`，Windows 同处是 `GetExitCodeProcess` 调用）。
+  因此按行号做的「冲突计数」是**度量假象**，不能据此逐段合并。
+- Windows 相对基准的 148 个 hunk 里，带 Windows 标记的 **30 个**（+2350 / -19 行）——其中**多数是
+  Windows 独有功能**（webserver.log 镜像、面板可选的按类型处置、监听器注册表、`img_mode_name()` 等），
+  只有少数是编译/系统垫片（`win32_dirent.h`、`winsock2.h`/`_stricmp`、无 `/proc` 时的 uid 处理、
+  CA 私钥用 `icacls` 收紧、`GetExitCodeProcess` 等）。
+
+**决定（与迁出计划一致）**：本计划原本就写明「**不抽取共享 webserver.c**」，因此**接受两端核心不同源**
+（特性分家），不做逐段合并。对用户的影响必须在 UI/文档里讲清：
+
+- 两端的**规则语义、配置键名、`/internal-stats` 字段**以本契约为准（这部分**是对齐的**）；
+- 但 **Windows 端另有若干独有功能**（上列），Android 端没有；反之 Android 端的近期修复
+  （cosmetic 的 `<style>` 上下文、`##` 域名作用域、G1 的纯函数校验）**Windows 端尚未包含**。
+
+**若将来要真正合一**（需另行决策，不在本计划内）：工作清单已生成（Windows 相对基准的 30 个区域），
+做法是**在独立分支上把 Windows 功能与适配搬进 master 并全部 `#ifdef` 守卫**，由**两端 CI**共同验收；
+`webserver.c` 在 CI 通过前不得改动（上一节的红线仍然有效）。
+
+**合并方案（未执行）**：以共同祖先为基准做三方比对，把差量分成「Windows 专属 / Android 新增 /
+双方都改」三类，冲突段逐个判定（依据写进提交信息），在**独立分支**上重建一份 = master 全部 +
+Windows 专属增量，让 Windows 仓库 pin 到**新提交**，并让它的 CI（编译 + 冒烟 + 打包 + 发布 +
+`--latest=false`）通过后才算完成。**在独立分支与 CI 通过之前，不要动 `webserver.c`。**
+
 
 ## 6. 迁出状态（F 项）
 
