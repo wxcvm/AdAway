@@ -2,7 +2,7 @@ name: Traffic mode decision tests
 
 on:
   pull_request:
-    branches: [master, feat/traffic-mode-foundation]
+    branches: [master, feat/traffic-mode-foundation, fix/android-diagnostic-p0]
     paths:
       - 'app/src/main/java/org/adaway/model/traffic/**'
       - 'app/src/test/java/org/adaway/model/traffic/**'
@@ -31,6 +31,14 @@ jobs:
           cache: gradle
       - name: Run traffic mode regression tests
         run: ./gradlew :app:testDebugUnitTest --tests 'org.adaway.model.traffic.*' --tests org.adaway.model.root.HijackCleanupCommandsTest --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
+      - name: Run portable shared core contract tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic webserver/jni/traffic_core_contract_test.c -o "$RUNNER_TEMP/core-contract-test"
+          "$RUNNER_TEMP/core-contract-test"
+      - name: Validate shared interface schema
+        run: |
+          python3 -m pip install --disable-pip-version-check -r tools/core-contract-requirements.txt
+          python3 tools/core_contract_schema_test.py
       - name: Build debug APK for device testing
         run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
       - name: Upload debug APK artifact

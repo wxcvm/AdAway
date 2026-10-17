@@ -1,0 +1,370 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:adblock:traffic-core-contract:v1-draft",
+  "title": "Proposed v1 cross-platform interface shapes; no wire parser or OS recovery authority",
+  "$defs": {
+    "Packet": {
+      "type": "object",
+      "required": [
+        "family",
+        "protocol",
+        "wireHex",
+        "sessionGeneration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "enum": [
+            4,
+            6
+          ]
+        },
+        "protocol": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "wireHex": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{2}){20,65535}$"
+        },
+        "sessionGeneration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": 6
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "wireHex": {
+                "minLength": 80
+              }
+            }
+          }
+        }
+      ]
+    },
+    "FlowKey": {
+      "type": "object",
+      "required": [
+        "family",
+        "protocol",
+        "sourceHex",
+        "destinationHex",
+        "sourcePort",
+        "destinationPort",
+        "sessionGeneration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "enum": [
+            4,
+            6
+          ]
+        },
+        "protocol": {
+          "enum": [
+            6,
+            17
+          ]
+        },
+        "sourceHex": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{8}|[0-9a-f]{32})$"
+        },
+        "destinationHex": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{8}|[0-9a-f]{32})$"
+        },
+        "sourcePort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "destinationPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "sessionGeneration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": 4
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sourceHex": {
+                "minLength": 8,
+                "maxLength": 8
+              },
+              "destinationHex": {
+                "minLength": 8,
+                "maxLength": 8
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "sourceHex": {
+                "minLength": 32,
+                "maxLength": 32
+              },
+              "destinationHex": {
+                "minLength": 32,
+                "maxLength": 32
+              }
+            }
+          }
+        }
+      ]
+    },
+    "DnsQuestion": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "class",
+        "dnssec",
+        "edns",
+        "networkGeneration",
+        "rulesGeneration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "type": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "class": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "dnssec": {
+          "type": "boolean"
+        },
+        "edns": {
+          "type": "boolean"
+        },
+        "networkGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rulesGeneration": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "RuleMatch": {
+      "type": "object",
+      "required": [
+        "rulesGeneration",
+        "scope",
+        "matched",
+        "priority"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rulesGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scope": {
+          "enum": [
+            "DOMAIN_ONLY",
+            "VISIBLE_HTTP",
+            "UNCLASSIFIED"
+          ]
+        },
+        "matched": {
+          "type": "boolean"
+        },
+        "priority": {
+          "enum": [
+            "USER_OVERRIDE",
+            "ALLOW_EXCEPTION",
+            "REPLACEMENT_RULE",
+            "BLOCK_RULE",
+            "UNCLASSIFIED"
+          ]
+        }
+      }
+    },
+    "Decision": {
+      "type": "object",
+      "required": [
+        "action",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "PASS",
+            "NXDOMAIN",
+            "REFUSED",
+            "ZERO_ADDRESS",
+            "REPLACE"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "UNCLASSIFIED",
+            "USER_OVERRIDE",
+            "ALLOW_EXCEPTION",
+            "REPLACEMENT_RULE",
+            "BLOCK_RULE",
+            "INVALID_DATA",
+            "UNSUPPORTED_CLASS"
+          ]
+        }
+      }
+    },
+    "ConnectionStats": {
+      "type": "object",
+      "required": [
+        "seen",
+        "blocked",
+        "forwardAttempted",
+        "forwardConfirmed",
+        "unclassified"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seen": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "forwardAttempted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "forwardConfirmed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unclassified": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ModeState": {
+      "enum": [
+        "UNKNOWN",
+        "FOREIGN_VPN",
+        "COEXIST_PREPARING",
+        "COEXIST_VERIFIED",
+        "STANDALONE_ACTIVE",
+        "DEGRADED",
+        "RESTORING"
+      ]
+    },
+    "ChangeJournal": {
+      "type": "object",
+      "required": [
+        "version",
+        "owner",
+        "interfaceId",
+        "intentId",
+        "expectedOld",
+        "proposedNew",
+        "phase",
+        "verifiedOsState"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "interfaceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "intentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expectedOld": {
+          "type": "object"
+        },
+        "proposedNew": {
+          "type": "object"
+        },
+        "phase": {
+          "enum": [
+            "PREPARED",
+            "APPLIED",
+            "UNDO_PENDING",
+            "UNDONE",
+            "CONFLICT"
+          ]
+        },
+        "verifiedOsState": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Packet"
+    },
+    {
+      "$ref": "#/$defs/FlowKey"
+    },
+    {
+      "$ref": "#/$defs/DnsQuestion"
+    },
+    {
+      "$ref": "#/$defs/RuleMatch"
+    },
+    {
+      "$ref": "#/$defs/Decision"
+    },
+    {
+      "$ref": "#/$defs/ConnectionStats"
+    },
+    {
+      "$ref": "#/$defs/ModeState"
+    },
+    {
+      "$ref": "#/$defs/ChangeJournal"
+    }
+  ]
+}

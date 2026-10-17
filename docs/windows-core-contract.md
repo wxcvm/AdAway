@@ -1,5 +1,10 @@
 # Windows / Android 共享核心契约（F 第一步：先冻结，再迁出）
 
+## M1：版本化规则决策接口与跨平台固定测试
+
+Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `traffic_core_contract.h` 的共享协议和测试向量。Windows CI 可独立获取固定提交下的契约文件，但这不意味着 Windows 的整个 `webserver.c` 已经与 Android 合并。
+生产捕获、自动修改 DNS/路由和系统回滚仍须分别实现及验收。
+
 本文件由脚本从真实源码抽取生成（不是手写清单）：两个端口的实现若与本文不一致，以代码为准并立刻更新本文。
 
 ## 1. block_config.json（阻断响应策略）
