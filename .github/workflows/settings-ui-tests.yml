@@ -40,16 +40,20 @@ jobs:
               for path in paths
           ]
           for i in range(1, 8):
-              for suffix in ("title", "description"):
+              for suffix in ("title", "description", "keywords"):
                   key = f"compose_settings_section_{i}_{suffix}"
                   assert all(key in group for group in groups), key
           page = Path("app/src/main/java/org/adaway/ui/compose/SettingsScreen.kt").read_text()
-          assert "rememberSaveable" in page and "SettingsCategoryHome" in page
+          assert "rememberSaveable" in page and "SettingsCategoryNavigation" in page
           assert "BackHandler(enabled = selectedSection >= 0)" in page
           assert "if (selectedSection < 0)" in page
           assert "sectionSearchHints" in page
+          assert "else sectionTitles[selectedSection]" in page
+          assert "selectedSection = -1" in page
+          assert "ScrollableTabRow" not in nav
+          assert "LazyColumn" in nav
           nav = Path("app/src/main/java/org/adaway/ui/compose/SettingsCategoryNavigation.kt").read_text()
-          assert "OutlinedTextField" in nav and "SettingsCategoryHome" in nav
+          assert "OutlinedTextField" in nav and "SettingsCategoryNavigation" in nav
           for i in range(7):
               assert f"{i} ->" in page, f"Missing settings page section {i}"
           print("All seven categorized settings sections present and localized")
