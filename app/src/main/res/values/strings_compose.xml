@@ -448,4 +448,10 @@
     <string name="compose_settings_section_6_description">App tracking, startup behavior and visual preferences</string>
     <string name="compose_settings_section_7_title">Data &amp; about</string>
     <string name="compose_settings_section_7_description">Backups, diagnostics, updates and application information</string>
+    <string name="compose_settings_home_search">Search settings and categories</string>
+    <string name="compose_settings_home_frequent">Frequently used</string>
+    <string name="compose_settings_home_categories">All categories</string>
+    <string name="compose_settings_home_matches">Matching categories: %1$d</string>
+    <string name="compose_settings_home_no_results">No matching category. Try a different setting name.</string>
+    <string name="compose_settings_home_back">Back to settings categories</string>
 </resources>
