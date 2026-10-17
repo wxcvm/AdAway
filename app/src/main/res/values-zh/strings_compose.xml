@@ -434,4 +434,18 @@
     <string name="compose_settings_boot_test_script">测试开机脚本</string>
     <string name="compose_settings_boot_test_running">正在测试开机脚本…</string>
     <string name="compose_settings_boot_test_result_title">测试结果</string>
+    <string name="compose_settings_section_1_title">拦截与重定向</string>
+    <string name="compose_settings_section_1_description">拦截模式、隔离网络测试、AdGuard 共存和应用放行</string>
+    <string name="compose_settings_section_2_title">Web 服务与端口</string>
+    <string name="compose_settings_section_2_description">服务监听、网络端口及轻量运行方式</string>
+    <string name="compose_settings_section_3_title">证书与 HTTPS</string>
+    <string name="compose_settings_section_3_description">证书信任、证书导出和固定证书处理</string>
+    <string name="compose_settings_section_4_title">内容与规则</string>
+    <string name="compose_settings_section_4_description">拦截替代响应、请求去重、缓存及按域规则</string>
+    <string name="compose_settings_section_5_title">统计与图表</string>
+    <string name="compose_settings_section_5_description">图表显示、趋势范围和实时统计</string>
+    <string name="compose_settings_section_6_title">应用、外观与后台</string>
+    <string name="compose_settings_section_6_description">应用监控、开机启动和外观偏好</string>
+    <string name="compose_settings_section_7_title">数据与关于</string>
+    <string name="compose_settings_section_7_description">备份、诊断、更新及应用信息</string>
 </resources>
