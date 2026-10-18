@@ -49,6 +49,7 @@ static inline bool tr_parse(const char *line, struct tr_record *record) {
         record->entry.family = dr_ip(fields[6], 4, record->entry.address) ? 4
                 : dr_ip(fields[6], 6, record->entry.address) ? 6 : 0;
         if (!record->entry.family) return false;
+        dr_normalize_address(&record->entry);
     } else if (strcmp(fields[6], "-") != 0) return false;
     return true;
 }

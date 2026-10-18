@@ -57,3 +57,9 @@ R	userprecision	1	1	1	x.parent.test
 R	userprecision	1	0	1	||parent.test^
 Q	userprecision	x.parent.test	1	1	0	1	1	0	-
 Q	userprecision	y.parent.test	1	1	1	1	2	1	-
+R	mapped	2	0	1	::ffff:192.0.2.8 mapped.test
+R	mapped	2	0	1	::ffff:0.0.0.0 zero-mapped.test
+Q	mapped	mapped.test	1	1	4	2	1	0	192.0.2.8
+Q	mapped	mapped.test	28	1	0	2	1	0	-
+Q	mapped	zero-mapped.test	1	1	1	2	2	0	-
+Q	mapped	zero-mapped.test	28	1	1	2	2	0	-

@@ -135,7 +135,8 @@ public final class RuleSnapshotRepository {
             if (nameBytes > MAX_NAME_BYTES) return null;
             if (rule.action == TrafficCoreContract.Action.REPLACE ? rule.address == null || !InetAddresses.isInetAddress(rule.address)
                     : rule.address != null) return null;
-            owned.add(new DomainRule(domain, rule.action, rule.scope, rule.address, rule.sourceId, rule.order, rule.legacy));
+            String address = rule.address == null ? null : InetAddresses.toAddrString(InetAddresses.forString(rule.address));
+            owned.add(new DomainRule(domain, rule.action, rule.scope, address, rule.sourceId, rule.order, rule.legacy));
         }
         return new Snapshot(generation, owned);
     }

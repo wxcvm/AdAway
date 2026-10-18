@@ -38,7 +38,7 @@ public class TypedRuleSnapshotTest {
                 assertEquals(7, result.generation); queries++;
             }
         }
-        assertTrue(queries >= 25);
+        assertEquals(30, queries);
     }
     @Test public void ownershipStaleInvalidUpdatesAndTypedDnsStayConsistent() {
         List<DomainRule> input = new ArrayList<>();

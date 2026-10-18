@@ -95,6 +95,15 @@ static inline bool dr_ip(const char *text, int family, uint8_t address[16]) {
     return inet_pton(family == 4 ? AF_INET : AF_INET6, text, address) == 1;
 #endif
 }
+/* Guava/InetAddress canonicalize IPv4-mapped IPv6 to IPv4. Preserve that
+ * existing Android behavior in both native imports and typed record reloads. */
+static inline void dr_normalize_address(struct dr_entry *entry) {
+    static const uint8_t prefix[12] = {0,0,0,0,0,0,0,0,0,0,255,255};
+    if (entry->family == 6 && memcmp(entry->address, prefix, 12) == 0) {
+        memmove(entry->address, entry->address + 12, 4);
+        memset(entry->address + 4, 0, 12); entry->family = 4;
+    }
+}
 static inline enum dr_parse_status dr_parse_line(const char *raw, bool allow, bool redirects,
                                                 dr_sink sink, void *context) {
     if (!raw || !sink) return DR_INVALID;
@@ -147,6 +156,7 @@ static inline enum dr_parse_status dr_parse_line(const char *raw, bool allow, bo
     *space++ = 0;
     entry.family = dr_ip(p, 4, entry.address) ? 4 : dr_ip(p, 6, entry.address) ? 6 : 0;
     if (!entry.family) return DR_INVALID;
+    dr_normalize_address(&entry);
     uint8_t empty[16] = {0};
     bool zero = memcmp(entry.address, empty, entry.family == 4 ? 4u : 16u) == 0
             || strcmp(p, "127.0.0.1") == 0 || strcmp(p, "::1") == 0;

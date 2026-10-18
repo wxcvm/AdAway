@@ -25,6 +25,9 @@ is still available. Action and address resolve in one immutable snapshot.
 Android IDN-to-ASCII behavior is retained; native input remains ASCII-only.
 Unicode source imports are therefore a documented platform difference, not
 claimed equivalent. Canonical ASCII/punycode fixtures are the shared subset.
+IPv4-mapped IPv6 literals normalize to IPv4, matching existing Guava behavior;
+this applies before zero-address classification and on typed record reload.
+Replacement output addresses are canonicalized so byte family and text agree.
 
 ## Persistence and compatibility
 
@@ -65,7 +68,7 @@ Remote source text cannot inject these internal records through the importer.
 `SourceLoaderRoomTest` exercises real v8 migration, persisted scope, refresh,
 restart, source disable/delete, rollback, exact Hosts export and DNS answers
 on disposable API 30/35 emulators. `TypedRuleSnapshotTest` and native
-`typed_rule_snapshot_test.c` consume the same 26 query vectors; C also passes
+`typed_rule_snapshot_test.c` consume the same 30 query vectors; C also passes
 through the subscription serialization and production index. Existing
 concurrent readers, 300k rules, and Windows file-transaction checks remain.
 CI runs the full app JVM suite, strict C, ASan/UBSan and APK builds.

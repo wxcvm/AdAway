@@ -39,7 +39,7 @@ static void vectors(const char *path) {
         }
     }
     CHECK(!ferror(vectors)); CHECK(fclose(vectors) == 0); if (staged) CHECK(fclose(staged) == 0);
-    CHECK(queries >= 25); printf("%u shared typed parser/serialization/production snapshot decisions passed\n", queries);
+    CHECK(queries == 30); printf("%u shared typed parser/serialization/production snapshot decisions passed\n", queries);
 }
 static void failed_and_stale(void) {
     struct bs_store store = BS_STORE_INITIALIZER; struct bs_builder b; memset(&b, 0, sizeof(b));

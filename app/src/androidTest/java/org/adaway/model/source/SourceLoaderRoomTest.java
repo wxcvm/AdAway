@@ -213,7 +213,7 @@ public class SourceLoaderRoomTest {
                 }
             } finally { db.close(); }
         }
-        assertEquals(26, queries);
+        assertEquals(30, queries);
     }
     @Test public void effectiveDaoPriorityMatchesUserExceptionReplacementBlockOrder() throws Exception {
         load("0.0.0.0 ads.test\n192.0.2.8 ads.test\n@@||ads.test^\n");
