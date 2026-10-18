@@ -12,8 +12,18 @@ boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
         project.hasProperty('signingKeyPassword')
 boolean progressPreview = project.findProperty('progressPreview')?.toString() == 'true'
 
+def typedRuleAssets = layout.buildDirectory.dir('generated/typedRuleAssets')
+def copyTypedRuleTestFixture = tasks.register('copyTypedRuleTestFixture', Sync) {
+    from "$rootDir/webserver/jni/typed_rule_vectors.tsv"
+    into typedRuleAssets
+}
+tasks.configureEach {
+    if (name == 'mergeDebugAndroidTestAssets') dependsOn copyTypedRuleTestFixture
+}
+
 android {
     sourceSets.androidTest.assets.srcDirs += ["$projectDir/schemas"]
+    sourceSets.androidTest.assets.srcDir typedRuleAssets
     compileSdk 37
     ndkVersion '28.1.13356709'
     namespace 'org.adaway'

@@ -154,6 +154,66 @@ public class SourceLoaderRoomTest {
         try { database.hostEntryDao().sync(); fail(); } catch (IllegalStateException expected) { }
         assertNotNull(database.hostEntryDao().getEntry("old.test"));
     }
+    @Test public void sharedVectorsPassThroughActualRoomImportPersistenceAndDns() throws Exception {
+        java.util.Map<String, java.util.List<String[]>> cases = new java.util.LinkedHashMap<>();
+        try (BufferedReader reader = new BufferedReader(new java.io.InputStreamReader(
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getContext()
+                        .getAssets().open("typed_rule_vectors.tsv"), java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String[] fields = line.split("\t", -1);
+                cases.computeIfAbsent(fields[1], unused -> new java.util.ArrayList<>()).add(fields);
+            }
+        }
+        int queries = 0;
+        for (java.util.List<String[]> fixture : cases.values()) {
+            Context context = ApplicationProvider.getApplicationContext();
+            try (AppDatabase db = Room.inMemoryDatabaseBuilder(context, AppDatabase.class).allowMainThreadQueries().build()) {
+                for (int id = 1; id <= 4; id++) {
+                    HostsSource input = new HostsSource(); input.setId(id); input.setLabel("fixture");
+                    input.setUrl(id == 1 ? HostsSource.USER_SOURCE_URL : "https://fixture.test/" + id);
+                    db.hostsSourceDao().insert(input);
+                    StringBuilder text = new StringBuilder(); long order = 0;
+                    for (String[] f : fixture) {
+                        if (!f[0].equals("R") || Integer.parseInt(f[2]) != id) continue;
+                        input.setAllowEnabled(f[3].equals("1")); input.setRedirectEnabled(f[4].equals("1"));
+                        if (id != 1) text.append(f[5]).append('\n');
+                        else for (DomainSourceParser.Entry entry : DomainSourceParser.parse(f[5], f[3].equals("1"), f[4].equals("1")).entries) {
+                            // User rules use the same typed DAO insertion as the rules editor,
+                            // rather than pretending the user source is a downloaded subscription.
+                            HostListItem row = new HostListItem(); row.setHost(entry.domain); row.setSourceId(1); row.setEnabled(true);
+                            row.setMatchScope(entry.scope.ordinal()); row.setSourceOrder(++order); row.setRedirection(entry.address);
+                            row.setType(entry.kind == DomainSourceParser.Kind.ALLOW ? ListType.ALLOWED
+                                    : entry.kind == DomainSourceParser.Kind.REPLACE ? ListType.REDIRECTED : ListType.BLOCKED);
+                            db.hostsListItemDao().insert(row);
+                        }
+                    }
+                    if (id != 1) new SourceLoader(input).parse(new BufferedReader(new StringReader(text.toString())), db.hostsListItemDao(), db);
+                }
+                org.adaway.model.traffic.RuleSnapshotRepository.Snapshot snapshot = PersistedRuleSnapshots.prepare(db.hostsListItemDao(), 1);
+                assertNotNull(snapshot); db.hostEntryDao().syncPrepared(snapshot);
+                for (String[] f : fixture) {
+                    if (!f[0].equals("Q")) continue;
+                    String label = String.join("\t", f);
+                    org.adaway.model.traffic.RuleSnapshotRepository.Resolution result = snapshot.resolve(f[2], Integer.parseInt(f[3]), Integer.parseInt(f[4]));
+                    assertEquals(label, Integer.parseInt(f[5]), result.decision.action.ordinal());
+                    assertEquals(label, Long.parseLong(f[6]), result.rule == null ? 0 : result.rule.sourceId);
+                    // User ordering uses DB row identity; source ordering is the emitted ordinal.
+                    if (result.rule == null || !result.rule.user()) assertEquals(label, Long.parseLong(f[7]), result.rule == null ? 0 : result.rule.order);
+                    assertEquals(label, Integer.parseInt(f[8]), result.rule == null ? 0 : result.rule.scope.ordinal());
+                    assertEquals(label, f[9].equals("-") ? null : f[9], result.address);
+                    byte[] query = dns(f[2].endsWith(".") ? f[2].substring(0, f[2].length() - 1) : f[2], Integer.parseInt(f[3]));
+                    query[query.length - 1] = (byte)Integer.parseInt(f[4]);
+                    byte[] answer = snapshot.answerDns(query);
+                    if (result.decision.action == org.adaway.model.traffic.TrafficCoreContract.Action.PASS) assertNull(label, answer);
+                    else { assertNotNull(label, answer); assertEquals(label, result.decision.action == org.adaway.model.traffic.TrafficCoreContract.Action.NXDOMAIN ? 3 : 0, answer[3]); }
+                    queries++;
+                }
+            }
+        }
+        assertEquals(26, queries);
+    }
     @Test public void effectiveDaoPriorityMatchesUserExceptionReplacementBlockOrder() throws Exception {
         load("0.0.0.0 ads.test\n192.0.2.8 ads.test\n@@||ads.test^\n");
         database.hostEntryDao().sync(); assertNull(database.hostEntryDao().getEntry("ads.test"));
