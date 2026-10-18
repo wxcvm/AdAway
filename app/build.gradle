@@ -23,7 +23,7 @@ tasks.configureEach {
 
 android {
     sourceSets.androidTest.assets.srcDirs += ["$projectDir/schemas"]
-    sourceSets.androidTest.assets.srcDir typedRuleAssets
+    sourceSets.androidTest.assets.srcDir typedRuleAssets.get().asFile
     compileSdk 37
     ndkVersion '28.1.13356709'
     namespace 'org.adaway'
