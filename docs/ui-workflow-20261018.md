@@ -11,3 +11,10 @@ The rules page exposes source management above the list, shows matching scope pe
 Verification uses actual production Compose components with deterministic data in `RuleWorkflowUiTest`, without launching the first-run MainActivity flow. Screenshots are stored through MediaStore on the disposable API 35 emulator, so AGP test-package cleanup does not remove them. Interaction checks exercise busy/retry actions and subscription management labels; screenshots cover light and dark/large text. `SourceLoaderRoomTest` adds local edit/override/removal, offline source disable and invalid edit rollback using a private database on API 30 and 35.
 
 Screenshots do not establish real Root availability, device filtering, or recovery acceptance. APKs remain CI inspection artifacts; no release, merge, daily-device install or network capture activation is part of this UI change.
+
+
+## Browsing follow-up
+
+The rules browser now queries original entries joined to their source state. Search never groups different sources/scopes by hostname, and enabled/disabled labels reflect both the item and source flag. All/enabled/disabled/personal filters use the same predicate for row and count queries. Searches are literal case-insensitive substrings rather than SQL wildcard expansion. Stable 300-entry pages let users reach later rules without increasing the import or per-page bounds; count, page clamping and rows share one Room read transaction. Cancelled queries cannot overwrite a new page or its loading state. A read failure has a retry action and is distinct from an empty result.
+
+Room browser tests cover duplicate names with different scopes/sources, legacy source/item state differences, pagination boundaries, literal percent/underscore queries, and source disable/delete. Component tests cover filter selection, paging boundaries, disabled labels and screenshots. Large-text screenshot evidence includes the action after scrolling.

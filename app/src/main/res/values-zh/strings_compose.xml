@@ -537,4 +537,17 @@
 
     <string name="compose_rules_saved">本地规则已保存，Hosts 已应用。</string>
     <string name="compose_rules_save_failed">修改未能保存，继续使用原有规则。请检查输入后重试。</string>
+
+    <string name="compose_rules_filter_all">全部</string>
+    <string name="compose_rules_filter_enabled">已启用</string>
+    <string name="compose_rules_filter_disabled">已停用</string>
+    <string name="compose_rules_filter_personal">个人规则</string>
+    <string name="compose_rules_previous_page">上一页</string>
+    <string name="compose_rules_next_page">下一页</string>
+    <string name="compose_rules_page_number">%1$d / %2$d</string>
+    <string name="compose_rules_range">第 %1$d–%2$d 条，共 %3$d 条</string>
+    <string name="compose_rules_load_failed">规则读取失败</string>
+    <string name="compose_rules_reload">重新读取</string>
+    <string name="compose_rules_source_enabled">已启用 · %1$s</string>
+    <string name="compose_rules_source_disabled">已停用 · %1$s</string>
 </resources>

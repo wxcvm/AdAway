@@ -8,7 +8,7 @@ package org.adaway.ui.compose
  *  - 放行（ALLOWED）   豁免拦截的域名
  *  - 重定向（REDIRECTED）重定向到自定义地址的域名
  *
- * 底部 SourcesCard：规则订阅源列表（名称/条数/开关/添加按钮），
+ * 顶部 SourcesCard：规则订阅源列表（名称/条数/开关/添加按钮），
  * 空状态时订阅卡片仍保留以便用户添加第一个订阅源。
  */
 
@@ -90,6 +90,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import org.adaway.R
 import org.adaway.db.entity.HostListItem
@@ -99,10 +100,9 @@ import timber.log.Timber
 /**
  * Rules screen: whitelist / blacklist / redirect tabs backed by the
  * hosts lists table. Blacklist and redirect show real entries from all
- * enabled sources (capped at [RULES_PAGE_SIZE] rows with a total), so
+ * sources (bounded [RULES_PAGE_SIZE]-row pages with a matching total), so
  * the page is never empty even when the user has no manual rules.
  */
-private const val RULES_PAGE_SIZE = 300
 
 private data class RuleTab(
     @StringRes val labelRes: Int,
@@ -117,14 +117,13 @@ fun RulesScreen(
     onOpenExempt: () -> Unit = {},
     onOpenOverrides: () -> Unit = {},
 ) {
-    val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
-    val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
-    val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
-
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-    var rules by remember { mutableStateOf<List<HostListItem>>(emptyList()) }
-    var totalCount by remember { mutableIntStateOf(0) }
-    var sourceLabels by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var browserPage by remember { mutableStateOf(RuleBrowserPage(emptyList(), 0, 0)) }
+    val rules = browserPage.rows
+    val totalCount = browserPage.total
+    var browseFilter by rememberSaveable { mutableIntStateOf(0) }
+    var requestedPage by rememberSaveable { mutableIntStateOf(0) }
+    var browseFailed by remember { mutableStateOf(false) }
     var sources by remember { mutableStateOf<List<org.adaway.db.entity.HostsSource>>(emptyList()) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showAddRuleDialog by remember { mutableStateOf(false) }
@@ -177,8 +176,8 @@ fun RulesScreen(
     var sourceSaving by remember { mutableStateOf(false) }
     var ruleSaving by remember { mutableStateOf(false) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
-    var searchGeneration by remember { mutableIntStateOf(0) }
-    var ruleSearchLoading by remember { mutableStateOf(false) }
+    var ruleSearchLoading by remember { mutableStateOf(true) }
+    var browseRequest by remember { mutableIntStateOf(0) }
     // "View the system hosts file" dialog: the rules screen is exactly where a
     // user asks "what is actually applied on this device?".
     var showHostsDialog by remember { mutableStateOf(false) }
@@ -188,30 +187,26 @@ fun RulesScreen(
         viewModel.loadSources { sources = it }
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.loadSourceLabels { sourceLabels = it }
-        reloadSources()
-    }
-    LaunchedEffect(selectedTab, searchQuery, refreshVersion, syncing) {
-        val generation = ++searchGeneration
-        viewModel.loadSourceLabels { sourceLabels = it }
-        reloadSources()
+    LaunchedEffect(selectedTab, searchQuery, browseFilter, requestedPage, refreshVersion, syncing) {
+        val request = ++browseRequest
         ruleSearchLoading = true
-        val query = searchQuery.trim()
-        val receive: (List<HostListItem>, Int) -> Unit = { items, total ->
-            // Repository callbacks may finish out of order. Never show
-            // results from a tab/query that the user has already left.
-            if (generation == searchGeneration) {
-                rules = items
-                totalCount = total
-                ruleSearchLoading = false
-            }
-        }
-        if (query.isEmpty()) {
-            viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE, receive)
-        } else {
-            kotlinx.coroutines.delay(250)
-            viewModel.searchRules(tabs[selectedTab].type, query, RULES_PAGE_SIZE, receive)
+        browseFailed = false
+        reloadSources()
+        try {
+            val query = searchQuery.trim()
+            if (query.isNotEmpty()) kotlinx.coroutines.delay(250)
+            val loaded = viewModel.loadRulePage(tabs[selectedTab].type, query, browseFilter, requestedPage)
+            // A cancelled old request must never replace the latest query's page.
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            browserPage = loaded
+            listState.scrollToItem(0)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            if (request == browseRequest) browseFailed = true
+            Timber.w(failure, "Unable to load rule browser page")
+        } finally {
+            if (request == browseRequest) ruleSearchLoading = false
         }
     }
 
@@ -245,34 +240,11 @@ fun RulesScreen(
                 .padding(padding)
                 .fillMaxSize(),
         ) {
-            // Keep the three real host counts visible without repeating the
-            // three tall dashboard KPI cards above every rule list.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                listOf(
-                    stringResource(R.string.compose_hosts_blocked) to blockedCount,
-                    stringResource(R.string.compose_hosts_allowed) to allowedCount,
-                    stringResource(R.string.compose_hosts_redirected) to redirectCount,
-                ).forEach { (label, count) ->
-                    Text(
-                        "$label: ${ChartUtils.compactNumber(count.toLong())}",
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             TabRow(selectedTabIndex = selectedTab) {
                 tabs.forEachIndexed { index, tab ->
                     Tab(
                         selected = index == selectedTab,
-                        onClick = { selectedTab = index },
+                        onClick = { selectedTab = index; requestedPage = 0 },
                         text = { Text(stringResource(tab.labelRes), maxLines = 1) },
                     )
                 }
@@ -304,7 +276,7 @@ fun RulesScreen(
             // Rule search box
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = { searchQuery = it; requestedPage = 0 },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -312,13 +284,15 @@ fun RulesScreen(
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
+                        IconButton(onClick = { searchQuery = ""; requestedPage = 0 }) {
                             Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.compose_rules_clear_search))
                         }
                     }
                 },
                 placeholder = { Text(stringResource(R.string.compose_rules_search_hint)) },
             )
+
+            RuleBrowserFilters(browseFilter) { browseFilter = it; requestedPage = 0 }
 
             // Total count for the active tab
             Row(
@@ -335,9 +309,14 @@ fun RulesScreen(
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
-                    if (ruleSearchLoading) stringResource(R.string.compose_rules_loading)
-                    else if (rules.size < totalCount) stringResource(R.string.compose_rules_loaded, rules.size, totalCount)
-                    else stringResource(R.string.compose_rules_total, totalCount),
+                    when {
+                        ruleSearchLoading -> stringResource(R.string.compose_rules_loading)
+                        browseFailed -> stringResource(R.string.compose_rules_load_failed)
+                        totalCount == 0 -> stringResource(R.string.compose_rules_total, 0)
+                        else -> stringResource(R.string.compose_rules_range,
+                            browserPage.index * RULES_PAGE_SIZE + 1,
+                            browserPage.index * RULES_PAGE_SIZE + rules.size, totalCount)
+                    },
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontFamily = FontFamily.Monospace,
                     ),
@@ -380,16 +359,25 @@ fun RulesScreen(
                         }
                     }
                 }
-                if (rules.isEmpty() && !ruleSearchLoading) {
-                    item(key = "empty") {
-                        EmptyRulesPlaceholder(if (searchQuery.isNotBlank()) R.string.compose_rules_search_empty else tabs[selectedTab].emptyRes)
+                if (browseFailed) {
+                    item(key = "load-error") {
+                        TextButton(onClick = { refreshVersion++ }, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.compose_rules_reload))
+                        }
                     }
                 }
-                if (!ruleSearchLoading) {
-                    items(rules, key = { it.id }) { item ->
+                if (rules.isEmpty() && !ruleSearchLoading && !browseFailed) {
+                    item(key = "empty") {
+                        EmptyRulesPlaceholder(if (searchQuery.isNotBlank() || browseFilter != 0) R.string.compose_rules_search_empty else tabs[selectedTab].emptyRes)
+                    }
+                }
+                if (!ruleSearchLoading && !browseFailed) {
+                    items(rules, key = { it.item.id }) { row ->
+                        val item = row.item
                         RuleRow(
                             item = item,
-                            sourceLabel = sourceLabels[item.sourceId],
+                            sourceLabel = row.sourceLabel,
+                            active = row.isActive,
                             enabled = !syncing,
                             onDelete = {
                                 if (item.sourceId == 1) {
@@ -402,6 +390,10 @@ fun RulesScreen(
                     }
                 }
             }
+            if (browserPage.pageCount > 1 && !browseFailed) {
+                RuleBrowserPager(browserPage.index, browserPage.pageCount, ruleSearchLoading) { requestedPage = it }
+            }
+
         }
     }
 
@@ -789,6 +781,7 @@ internal fun RuleRow(
     item: HostListItem,
     sourceLabel: String?,
     enabled: Boolean = true,
+    active: Boolean = item.isEnabled,
     onDelete: (() -> Unit)? = null,
 ) {
     Card(
@@ -807,14 +800,14 @@ internal fun RuleRow(
                 Icons.Outlined.Shield,
                 contentDescription = null,
                 modifier = Modifier.width(20.dp),
-                tint = ruleTint(item.type),
+                tint = if (active) ruleTint(item.type) else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     item.host,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 if (item.type == ListType.REDIRECTED && !item.redirection.isNullOrEmpty()) {
@@ -839,7 +832,7 @@ internal fun RuleRow(
                 val label = if (item.sourceId == 1) stringResource(R.string.compose_rules_personal) else sourceLabel
                 if (!label.isNullOrEmpty()) {
                     Text(
-                        label,
+                        stringResource(if (active) R.string.compose_rules_source_enabled else R.string.compose_rules_source_disabled, label),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -854,7 +847,7 @@ internal fun RuleRow(
                     ListType.REDIRECTED -> stringResource(R.string.compose_logs_filter_redirected)
                 },
                 style = MaterialTheme.typography.labelSmall,
-                color = ruleTint(item.type),
+                color = if (active) ruleTint(item.type) else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             // 用户自定义规则（source_id == 1）可删除；订阅源规则也可触发提示
             if (onDelete != null) {

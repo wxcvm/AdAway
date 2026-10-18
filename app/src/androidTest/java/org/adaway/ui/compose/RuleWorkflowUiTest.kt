@@ -52,6 +52,54 @@ class RuleWorkflowUiTest {
         compose.runOnIdle { assertEquals(true, managed) }
     }
 
+    @Test fun browserFiltersAndPagerKeepNavigationBoundaries() {
+        var filter = -1
+        var page = -1
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                Column {
+                    RuleBrowserFilters(0) { filter = it }
+                    RuleBrowserPager(0, 2, false) { page = it }
+                }
+            }
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_filter_disabled)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_previous_page)).assertIsNotEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_next_page)).performClick()
+        compose.runOnIdle { assertEquals(2, filter); assertEquals(1, page) }
+    }
+
+    @Test fun disabledSourceIsNotShownAsEnabled() {
+        val item = HostListItem().apply {
+            id = 43; host = "disabled.test"; type = ListType.BLOCKED; sourceId = 3; matchScope = 1; isEnabled = true
+        }
+        compose.setContent { AdAwayTheme(dynamicColor = false) { RuleRow(item, "Paused source", active = false) {} } }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_disabled, "Paused source")).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_enabled, "Paused source")).assertDoesNotExist()
+    }
+
+    @Test fun browserRowsScreenshot() {
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                Surface(color = MaterialTheme.colorScheme.background) {
+                    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())) {
+                        RuleBrowserFilters(0) {}
+                        repeat(3) { index ->
+                            val item = HostListItem().apply {
+                                id = 50 + index; host = "ads.example.com"; type = ListType.BLOCKED
+                                sourceId = index + 2; matchScope = if (index == 0) 0 else 1; isEnabled = true
+                            }
+                            RuleRow(item, "Source ${index + 2}", active = index != 2) {}
+                        }
+                        RuleBrowserPager(0, 2, false) {}
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        saveScreenshot("rules-browser-light")
+    }
+
     @Test fun lightOverviewScreenshot() = overviewScreenshot(false, 1f, "overview-light")
     @Test fun darkLargeTextOverviewScreenshot() = overviewScreenshot(true, 1.6f, "overview-dark-large-text")
 
@@ -61,7 +109,7 @@ class RuleWorkflowUiTest {
             CompositionLocalProvider(LocalDensity provides Density(density, scale)) {
                 AdAwayTheme(darkTheme = dark, dynamicColor = false) {
                     Surface(color = MaterialTheme.colorScheme.background) {
-                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+                        Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             StatusCard(true, "Hosts")
                             AdaptiveHostSummary(300000, 24, 8)
@@ -74,6 +122,12 @@ class RuleWorkflowUiTest {
         compose.onNodeWithText(compose.activity.getString(R.string.compose_status_active)).assertIsDisplayed()
         compose.onNodeWithText("300,000").assertExists()
         compose.waitForIdle()
+        saveScreenshot(name)
+        compose.onNode(hasClickAction()).performScrollTo().assertIsEnabled()
+        if (scale > 1f) saveScreenshot("$name-actions")
+    }
+
+    private fun saveScreenshot(name: String) {
         // AGP uninstalls test APKs after the run. MediaStore output survives that
         // cleanup on the disposable emulator and needs no storage permission.
         val values = ContentValues().apply {
@@ -86,6 +140,5 @@ class RuleWorkflowUiTest {
         requireNotNull(resolver.openOutputStream(uri)).use {
             check(compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
         }
-        compose.onNode(hasClickAction()).performScrollTo().assertIsEnabled()
     }
 }

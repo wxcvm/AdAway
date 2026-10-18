@@ -537,4 +537,17 @@
 
     <string name="compose_rules_saved">Local rules saved and Hosts applied.</string>
     <string name="compose_rules_save_failed">The change could not be saved. The previous rules are still in use. Check the input and try again.</string>
+
+    <string name="compose_rules_filter_all">All</string>
+    <string name="compose_rules_filter_enabled">Enabled</string>
+    <string name="compose_rules_filter_disabled">Disabled</string>
+    <string name="compose_rules_filter_personal">Personal</string>
+    <string name="compose_rules_previous_page">Previous</string>
+    <string name="compose_rules_next_page">Next</string>
+    <string name="compose_rules_page_number">%1$d / %2$d</string>
+    <string name="compose_rules_range">%1$d–%2$d of %3$d entries</string>
+    <string name="compose_rules_load_failed">Unable to load rules</string>
+    <string name="compose_rules_reload">Reload rules</string>
+    <string name="compose_rules_source_enabled">Enabled · %1$s</string>
+    <string name="compose_rules_source_disabled">Disabled · %1$s</string>
 </resources>

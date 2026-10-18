@@ -545,6 +545,18 @@ fun refreshServerStats() {
         }
     }
 
+    /** A bounded page and its count share one committed database view. */
+    suspend fun loadRulePage(type: Int, query: String, filter: Int, requestedPage: Int): RuleBrowserPage =
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            require(filter in 0..3 && requestedPage >= 0)
+            database.runInTransaction(java.util.concurrent.Callable {
+                val total = hostsListItemDao.countBrowserRules(type, query, filter)
+                val page = requestedPage.coerceAtMost(if (total == 0) 0 else (total - 1) / RULES_PAGE_SIZE)
+                RuleBrowserPage(hostsListItemDao.browseRules(type, query, filter, RULES_PAGE_SIZE,
+                    page * RULES_PAGE_SIZE), total, page)
+            })
+        }
+
     /**
      * Load hosts-list entries of the given type (0=BLOCKED, 1=ALLOWED,
      * 2=REDIRECTED), capped at [limit] rows, plus the total count.
