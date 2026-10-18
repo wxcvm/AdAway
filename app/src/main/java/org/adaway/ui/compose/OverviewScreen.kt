@@ -6,22 +6,18 @@ package org.adaway.ui.compose
  * 卡片顺序：
  *  1. StatusCard         hosts 拦截服务状态（启用/运行中/规则数）
  *  2. StatTile x3        拦截/放行/重定向 hosts 数量摘要
- *  3. WebServerCard      Web 服务器运行状态摘要
- *  4. WebServerControlCard Web 服务器开关/端口/测试入口（设置项移入概览）
- *  5. Quick actions      同步 hosts 等快捷操作
+ *  3. RuleSyncCard       同步进度、阶段结果与重试
+ *  4. WebServerControlCard Web 服务器开关/端口/测试入口
  */
 
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Surface
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -36,12 +32,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator

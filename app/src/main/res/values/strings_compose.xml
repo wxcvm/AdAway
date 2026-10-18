@@ -517,7 +517,7 @@
     <string name="compose_status_hosts_method">Hosts rules · known domain names</string>
     <string name="compose_sync_complete">Enabled sources processed and Hosts applied.</string>
     <string name="compose_sync_source_failed">Rule update could not finish. Check your connection and enabled sources, then retry.</string>
-    <string name="compose_sync_apply_failed">Rules were retrieved, but Hosts could not be applied. Check root access and the current status above.</string>
+    <string name="compose_sync_apply_failed">Rules were saved, but Hosts could not be applied. Check root access and the current status above.</string>
     <string name="compose_sync_server_failed">Hosts applied, but the server rules could not be refreshed. Retry or check the server settings.</string>
     <string name="compose_sync_retry">Retry sync</string>
     <string name="compose_ws_toggle_failed">The server did not reach the requested state. Check the status and startup log before retrying.</string>
@@ -534,4 +534,7 @@
     <string name="compose_rules_loaded">Showing %1$d of %2$d rules. Search to narrow the results.</string>
     <string name="compose_rules_source_help">Subscription rules follow their source. Disable a source to stop using its rules.</string>
     <string name="compose_rules_clear_search">Clear search</string>
+
+    <string name="compose_rules_saved">Local rules saved and Hosts applied.</string>
+    <string name="compose_rules_save_failed">The change could not be saved. The previous rules are still in use. Check the input and try again.</string>
 </resources>

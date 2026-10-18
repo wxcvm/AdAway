@@ -610,66 +610,51 @@ fun refreshServerStats() {
         }
     }
 
-    /** Toggle a subscription's enabled state (source + its items). */
-    fun toggleSource(source: org.adaway.db.entity.HostsSource, onDone: () -> Unit) {
-        viewModelScope.launch {
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val dao = database.hostsSourceDao()
-                // Re-read from DB so the toggle always flips the persisted
-                // value, not a possibly-stale in-memory snapshot (which made
-                // toggling one source look like it flipped another).
-                val fresh = dao.getById(source.id).orElse(null) ?: return@withContext
-                val enabled = !fresh.isEnabled()
-                dao.setSourceEnabled(source.id, enabled)
-                dao.setSourceItemsEnabled(source.id, enabled)
-            }
-            onDone()
-        }
-    }
+    /** Local edits rebuild the active snapshot without requiring a source download. */
+    fun setSourceEnabled(id: Int, enabled: Boolean, onDone: (Boolean) -> Unit) = editLocalRules({
+        val dao = database.hostsSourceDao()
+        dao.setSourceEnabled(id, enabled)
+        dao.setSourceItemsEnabled(id, enabled)
+    }, onDone)
 
-    /** Set a subscription's enabled state directly (source + its items). */
-    fun setSourceEnabled(id: Int, enabled: Boolean, onDone: () -> Unit) {
-        viewModelScope.launch {
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val dao = database.hostsSourceDao()
-                dao.setSourceEnabled(id, enabled)
-                dao.setSourceItemsEnabled(id, enabled)
-            }
-            onDone()
-        }
-    }
+    fun removeSource(source: org.adaway.db.entity.HostsSource, onDone: (Boolean) -> Unit) = editLocalRules({
+        require(source.id != 1)
+        database.hostsSourceDao().delete(source)
+    }, onDone)
 
-    /**
-     * 删除订阅源及其所有规则条目（source_id != 1 的订阅）。
-     * 删除后重新同步 hosts 文件使变更生效。
-     */
-    fun removeSource(source: org.adaway.db.entity.HostsSource, onDone: () -> Unit) {
-        viewModelScope.launch {
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val dao = database.hostsSourceDao()
-                dao.delete(source)
-                hostsListItemDao.clearSourceHosts(source.id)
-            }
-            onDone()
-        }
-    }
+    fun removeRule(host: String, onDone: (Boolean) -> Unit) = editLocalRules({
+        hostsListItemDao.deleteUserFromHost(host)
+    }, onDone)
 
-    /**
-     * 删除一条用户自定义规则（source_id == 1 的手动规则）。
-     * 使用 HostListItemDao.deleteUserFromHost() 清理 hosts_lists，
-     * 并用 HostEntryDao.allowHost() 从生效的 host_entries 中移除该域名，
-     * 随后重新同步 hosts 文件使变更生效。
-     */
-    fun removeRule(host: String, onDone: () -> Unit) {
+    private fun editLocalRules(edit: () -> Unit, onDone: (Boolean) -> Unit) {
+        if (!_syncing.compareAndSet(false, true)) { onDone(false); return }
+        _syncStatus.value = HostsSyncStatus.RUNNING
         viewModelScope.launch {
-            withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val app = getApplication<Application>()
-                hostsListItemDao.deleteUserFromHost(host)
-                hostEntryDao.allowHost(host)
-                // 豁免名单是派生文件：规则一改就重写，避免文件与列表不一致
-                exportExemptions(app)
+            var committed = false
+            var failure = HostsSyncStatus.SAVE_FAILED
+            try {
+                withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val app = getApplication<org.adaway.AdAwayApplication>()
+                    app.getSourceModel().editRules { edit() }
+                    committed = true
+                    failure = HostsSyncStatus.APPLY_FAILED
+                    adBlockModel.apply()
+                    failure = HostsSyncStatus.SERVER_REFRESH_FAILED
+                    check(WebServerUtils.exportBlockList(app) >= 0)
+                    exportExemptions(app)
+                    if (WebServerUtils.isWebServerReachable(app)) check(WebServerUtils.reloadConfig())
+                }
+                _syncStatus.value = HostsSyncStatus.LOCAL_SUCCESS
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                _syncStatus.value = HostsSyncStatus.IDLE
+                throw e
+            } catch (e: Exception) {
+                _syncStatus.value = failure
+                Timber.w(e, "Local rule edit or application failed")
+            } finally {
+                _syncing.value = false
+                onDone(committed)
             }
-            onDone()
         }
     }
 
@@ -796,39 +781,25 @@ fun refreshServerStats() {
      * 关闭（用户以为添加成功）。改签名而不是复制一份实现 —— Kotlin 允许把无参 lambda 传给
      * 单参函数类型（忽略 it 即可），所以既有调用点不需要改动。</p>
      */
-    fun addUserRule(host: String, type: Int, redirection: String?, onDone: (Boolean) -> Unit) {
-        viewModelScope.launch {
-            val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                try {
-                    val item = org.adaway.db.entity.HostListItem()
-                    item.host = host.trim().lowercase()
-                    item.type = org.adaway.db.entity.ListType.fromValue(type)
-                    item.sourceId = 1
-                    if (type == 2 && !redirection.isNullOrBlank()) {
-                        item.redirection = redirection.trim()
-                    }
-                    hostsListItemDao.insert(item)
-                    // 生效到 host_entries（拦截/重定向写入，放行清理）
-                    when (type) {
-                        0 -> hostEntryDao.importBlocked()
-                        2 -> if (redirection != null) {
-                            val entry = org.adaway.db.entity.HostEntry()
-                            entry.host = item.host
-                            entry.type = org.adaway.db.entity.ListType.REDIRECTED
-                            entry.redirection = redirection.trim()
-                            hostEntryDao.redirectHosts(listOf(entry))
-                        }
-                        else -> hostEntryDao.allowHost(item.host)
-                    }
-                    true
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to add user rule %s", host)
-                    false
-                }
+    fun addUserRule(host: String, type: Int, redirection: String?, onDone: (Boolean) -> Unit) = editLocalRules({
+        val normalized = host.trim().lowercase(java.util.Locale.ROOT).removeSuffix(".")
+        val wildcard = normalized.contains('*') || normalized.contains('?')
+        require(if (wildcard) type != ListType.BLOCKED.value && org.adaway.util.RegexUtils.isValidWildcardHostname(normalized)
+            else org.adaway.util.RegexUtils.isValidHostname(normalized))
+        val item = org.adaway.db.entity.HostListItem().apply {
+            this.host = normalized
+            this.type = ListType.fromValue(type)
+            sourceId = 1
+            isEnabled = true
+            if (type == ListType.REDIRECTED.value) {
+                require(!redirection.isNullOrBlank() && org.adaway.util.RegexUtils.isValidIP(redirection.trim()))
+                this.redirection = redirection.trim()
             }
-            onDone(ok)
         }
-    }
+        // One personal action per name: replacing it retains the documented later-write priority.
+        hostsListItemDao.deleteUserFromHost(normalized)
+        hostsListItemDao.insert(item)
+    }, onDone)
 
     /**
      * 添加一个规则源：远程订阅链接（https://…）或本地规则文件（content://…）。

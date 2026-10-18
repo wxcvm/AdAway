@@ -32,6 +32,36 @@ public class SourceLoaderRoomTest {
         database.hostsSourceDao().insert(source);
     }
     @After public void closeDatabase() { database.close(); }
+    @Test public void localUiEditsPublishWithoutDownloadAndInvalidEditsRollBack() throws Exception {
+        load("||ads.test^\n");
+        SourceModel model = new SourceModel(ApplicationProvider.getApplicationContext(), database);
+        model.syncHostEntries();
+        HostListItem allow = new HostListItem();
+        allow.setHost("child.ads.test"); allow.setSourceId(1);
+        allow.setEnabled(true); allow.setType(ListType.ALLOWED);
+        model.editRules(() -> database.hostsListItemDao().insert(allow));
+        assertEquals(org.adaway.model.traffic.TrafficCoreContract.Action.PASS,
+                model.getRuleSnapshot().decide("child.ads.test", 1, 1).action);
+        model.editRules(() -> database.hostsListItemDao().deleteUserFromHost("child.ads.test"));
+        assertEquals(org.adaway.model.traffic.TrafficCoreContract.Action.NXDOMAIN,
+                model.getRuleSnapshot().decide("child.ads.test", 1, 1).action);
+        long generation = model.getRuleSnapshot().generation;
+        HostListItem invalid = new HostListItem();
+        invalid.setHost("bad.test"); invalid.setSourceId(1);
+        invalid.setType(ListType.REDIRECTED); invalid.setEnabled(true); invalid.setRedirection("not-an-ip");
+        try {
+            model.editRules(() -> database.hostsListItemDao().insert(invalid));
+            fail("Invalid local edit must not commit");
+        } catch (IllegalStateException expected) { /* transaction rolled back */ }
+        assertEquals(generation, model.getRuleSnapshot().generation);
+        assertTrue(database.hostsListItemDao().getAll().stream().noneMatch(rule -> rule.getHost().equals("bad.test")));
+        model.editRules(() -> {
+            database.hostsSourceDao().setSourceEnabled(2, false);
+            database.hostsSourceDao().setSourceItemsEnabled(2, false);
+        });
+        assertEquals(org.adaway.model.traffic.TrafficCoreContract.Action.PASS,
+                model.getRuleSnapshot().decide("child.ads.test", 1, 1).action);
+    }
     @Test public void atomicRuleEditingWorksOnTheSupportedAndroidRuntime() throws Exception {
         Context context = ApplicationProvider.getApplicationContext();
         java.io.File file = java.io.File.createTempFile("adaway-rule-test-", ".txt", context.getCacheDir());

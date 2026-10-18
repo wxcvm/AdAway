@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
@@ -140,6 +141,8 @@ fun RulesScreen(
     var pickedFileName by remember { mutableStateOf("") }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    var sourceAddFailed by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -285,7 +288,7 @@ fun RulesScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { showSources = !showSources }) {
+                TextButton(onClick = { showSources = !showSources; if (showSources) scope.launch { listState.scrollToItem(0) } }) {
                     Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(stringResource(R.string.compose_rules_manage_sources, sources.size))
@@ -342,7 +345,7 @@ fun RulesScreen(
                     modifier = Modifier.weight(1f),
                 )
                 // 添加用户规则按钮（当前标签页类型）
-                TextButton(onClick = { showAddRuleDialog = true }) {
+                TextButton(enabled = !syncing, onClick = { showAddRuleDialog = true; ruleType = tabs[selectedTab].type }) {
                     Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(stringResource(R.string.compose_rules_add_rule))
@@ -350,6 +353,7 @@ fun RulesScreen(
             }
 
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 20.dp),
             ) {
@@ -359,10 +363,9 @@ fun RulesScreen(
                             sources = sources,
                             enabled = !syncing,
                             onToggle = { source, checked ->
-                                viewModel.setSourceEnabled(source.id, checked) {
+                                viewModel.setSourceEnabled(source.id, checked) { saved ->
                                     reloadSources()
-                                    refreshVersion++
-                                    viewModel.syncHosts()
+                                    if (saved) refreshVersion++
                                 }
                             },
                             onAddClick = { showAddDialog = true },
@@ -387,9 +390,10 @@ fun RulesScreen(
                         RuleRow(
                             item = item,
                             sourceLabel = sourceLabels[item.sourceId],
+                            enabled = !syncing,
                             onDelete = {
                                 if (item.sourceId == 1) {
-                                    viewModel.removeRule(item.host) { refreshVersion++ }
+                                    viewModel.removeRule(item.host) { saved -> if (saved) refreshVersion++ }
                                 } else {
                                     sourceRuleInfo = item
                                 }
@@ -456,6 +460,10 @@ fun RulesScreen(
                             ),
                         )
                     }
+                    if (sourceAddFailed) {
+                        Text(stringResource(R.string.compose_rules_add_source_failed),
+                            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             },
             confirmButton = {
@@ -466,6 +474,7 @@ fun RulesScreen(
                         val url = if (sourceIsFile) pickedFileUri else urlInput
                         val label = if (sourceIsFile) pickedFileName else null
                         sourceSaving = true
+                        sourceAddFailed = false
                         viewModel.addSource(url, label) { ok ->
                             sourceSaving = false
                             if (ok) {
@@ -478,7 +487,7 @@ fun RulesScreen(
                                 reloadSources()
                                 viewModel.syncHosts()
                             } else {
-                                // 链接非法或订阅已存在：给出明确反馈而不是静默失败
+                                sourceAddFailed = true
                                 scope.launch {
                                     snackbarHostState.showSnackbar(
                                         context.getString(R.string.compose_rules_add_source_failed),
@@ -589,6 +598,7 @@ fun RulesScreen(
                 TextButton(onClick = {
                     sourceRuleInfo = null
                     showSources = true
+                    scope.launch { listState.scrollToItem(0) }
                 }) { Text(stringResource(R.string.compose_rules_manage_source)) }
             },
             dismissButton = {
@@ -607,9 +617,9 @@ fun RulesScreen(
                 TextButton(onClick = {
                     val s = source
                     deleteSourceHint = null
-                    viewModel.removeSource(s) {
+                    viewModel.removeSource(s) { saved ->
                         reloadSources()
-                        viewModel.syncHosts()
+                        if (saved) refreshVersion++
                     }
                 }) {
                     Text(stringResource(R.string.compose_rules_delete))
@@ -778,6 +788,7 @@ private fun SourcesCard(
 internal fun RuleRow(
     item: HostListItem,
     sourceLabel: String?,
+    enabled: Boolean = true,
     onDelete: (() -> Unit)? = null,
 ) {
     Card(
@@ -848,7 +859,7 @@ internal fun RuleRow(
             // 用户自定义规则（source_id == 1）可删除；订阅源规则也可触发提示
             if (onDelete != null) {
                 Spacer(Modifier.width(8.dp))
-                IconButton(onClick = onDelete) {
+                IconButton(enabled = enabled, onClick = onDelete) {
                     Icon(
                         if (item.sourceId == 1) Icons.Outlined.Delete else Icons.Outlined.Info,
                         contentDescription = stringResource(if (item.sourceId == 1) R.string.compose_rules_delete else R.string.compose_rules_manage_source),

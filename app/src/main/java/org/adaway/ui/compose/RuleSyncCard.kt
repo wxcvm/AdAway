@@ -12,10 +12,10 @@ import androidx.compose.ui.unit.dp
 import org.adaway.R
 
 enum class HostsSyncStatus {
-    IDLE, RUNNING, SUCCESS, SOURCE_FAILED, APPLY_FAILED, SERVER_REFRESH_FAILED;
+    IDLE, RUNNING, SUCCESS, LOCAL_SUCCESS, SAVE_FAILED, SOURCE_FAILED, APPLY_FAILED, SERVER_REFRESH_FAILED;
 
     val isFailure: Boolean
-        get() = this == SOURCE_FAILED || this == APPLY_FAILED || this == SERVER_REFRESH_FAILED
+        get() = this == SAVE_FAILED || this == SOURCE_FAILED || this == APPLY_FAILED || this == SERVER_REFRESH_FAILED
 }
 
 @Composable
@@ -23,6 +23,8 @@ internal fun RuleSyncCard(status: HostsSyncStatus, onSync: () -> Unit) {
     val message = when (status) {
         HostsSyncStatus.IDLE -> R.string.compose_sync_hosts_subtitle
         HostsSyncStatus.RUNNING -> R.string.compose_sync_hosts_running
+        HostsSyncStatus.LOCAL_SUCCESS -> R.string.compose_rules_saved
+        HostsSyncStatus.SAVE_FAILED -> R.string.compose_rules_save_failed
         HostsSyncStatus.SUCCESS -> R.string.compose_sync_complete
         HostsSyncStatus.SOURCE_FAILED -> R.string.compose_sync_source_failed
         HostsSyncStatus.APPLY_FAILED -> R.string.compose_sync_apply_failed

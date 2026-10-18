@@ -139,16 +139,19 @@ public class SourceModel {
      * @param context The application context.
      */
     public SourceModel(Context context) {
+        this(context, AppDatabase.getInstance(context));
+        SourceUpdateService.syncPreferences(context);
+    }
+
+    // Also permits isolated runtime verification with a private database.
+    SourceModel(Context context, AppDatabase database) {
         this.context = context;
-        AppDatabase database = AppDatabase.getInstance(this.context);
         this.database = database;
         this.hostsSourceDao = database.hostsSourceDao();
         this.hostListItemDao = database.hostsListItemDao();
         this.hostEntryDao = database.hostEntryDao();
         this.state = new MutableLiveData<>("");
-        this.updateAvailable = new MutableLiveData<>();
-        this.updateAvailable.setValue(false);
-        SourceUpdateService.syncPreferences(context);
+        this.updateAvailable = new MutableLiveData<>(false);
     }
 
     /**
@@ -418,10 +421,16 @@ public class SourceModel {
      * Synchronize hosts entries from current source states.
      */
     public void syncHostEntries() {
+        editRules(() -> {});
+    }
+
+    /** Commit a local edit and its derived index together, then publish after commit. */
+    public void editRules(Runnable edit) {
         synchronized (this.updateLock) {
             setState(R.string.status_sync_database);
             RuleSnapshotRepository.Snapshot[] prepared = new RuleSnapshotRepository.Snapshot[1];
             this.database.runInTransaction(() -> {
+                edit.run();
                 prepared[0] = org.adaway.model.source.PersistedRuleSnapshots.prepare(
                         this.hostListItemDao, this.ruleSnapshots.read().generation + 1);
                 if (prepared[0] == null) throw new IllegalStateException("Invalid typed rules");
