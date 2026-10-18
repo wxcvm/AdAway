@@ -169,7 +169,8 @@ public class SourceLoaderRoomTest {
         int queries = 0;
         for (java.util.List<String[]> fixture : cases.values()) {
             Context context = ApplicationProvider.getApplicationContext();
-            try (AppDatabase db = Room.inMemoryDatabaseBuilder(context, AppDatabase.class).allowMainThreadQueries().build()) {
+            AppDatabase db = Room.inMemoryDatabaseBuilder(context, AppDatabase.class).allowMainThreadQueries().build();
+            try {
                 for (int id = 1; id <= 4; id++) {
                     HostsSource input = new HostsSource(); input.setId(id); input.setLabel("fixture");
                     input.setUrl(id == 1 ? HostsSource.USER_SOURCE_URL : "https://fixture.test/" + id);
@@ -210,7 +211,7 @@ public class SourceLoaderRoomTest {
                     else { assertNotNull(label, answer); assertEquals(label, result.decision.action == org.adaway.model.traffic.TrafficCoreContract.Action.NXDOMAIN ? 3 : 0, answer[3]); }
                     queries++;
                 }
-            }
+            } finally { db.close(); }
         }
         assertEquals(26, queries);
     }
