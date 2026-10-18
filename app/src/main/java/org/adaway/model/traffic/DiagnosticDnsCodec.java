@@ -40,16 +40,25 @@ public final class DiagnosticDnsCodec {
     }
 
     public static boolean matchesResponse(byte[] query, byte[] response) {
+        return matchesHeaderAndQuestion(query, response)
+                && (response[2] & 0x02) == 0 && validRecords(response);
+    }
+
+    /** Only a matching, bounded UDP reply may request one TCP retry. */
+    public static boolean shouldRetryOverTcp(byte[] query, byte[] response) {
+        return matchesHeaderAndQuestion(query, response) && (response[2] & 0x02) != 0;
+    }
+
+    private static boolean matchesHeaderAndQuestion(byte[] query, byte[] response) {
         if (!isAllowedQuery(query) || response == null
                 || response.length < HEADER_LENGTH + QUESTION.length
                 || response.length > MAX_DATAGRAM) return false;
         if (query[0] != response[0] || query[1] != response[1]) return false;
-        // QR=1, OPCODE=0, not truncated. Ignore AA/RA/rcode for diagnostics.
-        if ((response[2] & 0x80) == 0 || (response[2] & 0x78) != 0
-                || (response[2] & 0x02) != 0) return false;
+        // QR=1 and OPCODE=0. Ignore AA/RA/rcode for diagnostics.
+        if ((response[2] & 0x80) == 0 || (response[2] & 0x78) != 0) return false;
         if ((response[4] & 0xff) != 0 || (response[5] & 0xff) != 1)
             return false;
-        return matchesQuestion(response) && validRecords(response);
+        return matchesQuestion(response);
     }
 
     private static int unsigned16(byte[] bytes, int offset) {
