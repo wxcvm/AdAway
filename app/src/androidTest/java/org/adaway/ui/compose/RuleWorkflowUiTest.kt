@@ -13,6 +13,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.Density
@@ -23,6 +24,7 @@ import org.adaway.db.entity.ListType
 import org.adaway.db.entity.RuleListRow
 import org.adaway.ui.compose.theme.AdAwayTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -213,6 +215,74 @@ class RuleWorkflowUiTest {
         saveScreenshot("rule-removal-failed-dark", dialog = true)
         compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_remove_retry)).performClick()
         compose.runOnIdle { assertEquals(2, removals) }
+    }
+
+    @Test fun sourceFieldsFreezeLinkTypeAndFilePickerWhileSaving() {
+        val fileMode = androidx.compose.runtime.mutableStateOf(false)
+        val busy = androidx.compose.runtime.mutableStateOf(true)
+        var picked = 0
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                SourceEditorFields(fileMode.value, "https://example.test/hosts", "local-hosts.txt", busy.value, false,
+                    onTypeChange = { fileMode.value = it }, onUrlChange = {}, onPickFile = { picked++ })
+            }
+        }
+        compose.onNodeWithText("https://example.test/hosts").assertIsNotEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_type_url)).assertIsNotEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_type_file)).assertIsNotEnabled()
+        compose.runOnIdle { fileMode.value = true }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_pick_file)).assertIsNotEnabled()
+        compose.onNodeWithText("local-hosts.txt").assertIsDisplayed()
+        compose.runOnIdle { busy.value = false }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_pick_file)).performClick()
+        compose.runOnIdle { assertEquals(1, picked) }
+    }
+
+    @Test fun personalFieldsKeepFailedInputAndUnlockOnlyAfterSaving() {
+        val busy = androidx.compose.runtime.mutableStateOf(true)
+        val failed = androidx.compose.runtime.mutableStateOf(false)
+        val host = androidx.compose.runtime.mutableStateOf("ads.example.com")
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                PersonalRuleEditorFields(host.value, ListType.REDIRECTED.value, "2001:db8::1", busy.value, failed.value,
+                    onHostChange = { host.value = it; failed.value = false }, onTypeChange = {}, onRedirectChange = {})
+            }
+        }
+        compose.onNodeWithText("ads.example.com").assertIsNotEnabled()
+        compose.onNodeWithText("2001:db8::1").assertIsNotEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_filter_allowed)).assertIsNotEnabled()
+        compose.runOnIdle { busy.value = false; failed.value = true }
+        compose.onNodeWithText("ads.example.com").assertIsEnabled()
+        compose.onNodeWithText("2001:db8::1").assertIsEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_add_failed)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("ads.example.com").performScrollTo().performTextReplacement("fixed.example.com")
+        compose.runOnIdle { assertEquals("fixed.example.com", host.value) }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_add_failed)).assertDoesNotExist()
+    }
+
+    @Test fun largeTextRuleEditorScrollsToPersistentErrorInSmallViewport() {
+        compose.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, 1.6f)) {
+                AdAwayTheme(darkTheme = true, dynamicColor = false) {
+                    Surface(color = MaterialTheme.colorScheme.background) {
+                        Box(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
+                            Box(Modifier.width(280.dp).height(200.dp)) {
+                                PersonalRuleEditorFields("ads.example.com", ListType.REDIRECTED.value, "2001:db8::1", false, true,
+                                    onHostChange = {}, onTypeChange = {}, onRedirectChange = {})
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        compose.onNodeWithText("2001:db8::1").performScrollTo().assertIsDisplayed()
+        val error = compose.activity.getString(R.string.compose_rules_add_failed)
+        compose.onNodeWithText(error).performScrollTo().assertIsDisplayed()
+        val scroll = compose.onNode(hasScrollAction() and hasAnyDescendant(hasText(error)))
+            .fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        compose.runOnIdle { assertTrue("Form must actually scroll in the constrained viewport", scroll.value() > 0f) }
+        saveScreenshot("rule-editor-dark-large-text-error")
     }
 
     private fun overviewScreenshot(dark: Boolean, scale: Float, name: String) {

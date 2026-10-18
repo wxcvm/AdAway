@@ -26,7 +26,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,7 +48,6 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.AlertDialog
@@ -58,11 +56,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -134,6 +130,7 @@ fun RulesScreen(
     var ruleHostInput by remember { mutableStateOf("") }
     var ruleType by remember { mutableIntStateOf(ListType.BLOCKED.value) }
     var ruleRedirectInput by remember { mutableStateOf("") }
+    var ruleAddFailed by remember { mutableStateOf(false) }
     // 订阅源规则删除提示
     var deleteSourceHint by remember { mutableStateOf<org.adaway.db.entity.HostsSource?>(null) }
     var deletePersonalRule by remember { mutableStateOf<HostListItem?>(null) }
@@ -159,10 +156,11 @@ fun RulesScreen(
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
             } catch (e: SecurityException) {
-                Timber.w(e, "Failed to persist read permission for %s", uri)
+                Timber.w("Unable to persist source file access (%s)", e.javaClass.simpleName)
             }
             pickedFileUri = uri.toString()
             pickedFileName = queryDisplayName(context, uri)
+            sourceAddFailed = false
         }
     }
 
@@ -410,61 +408,13 @@ fun RulesScreen(
             onDismissRequest = { if (!sourceSaving) showAddDialog = false },
             title = { Text(stringResource(R.string.compose_rules_add_source)) },
             text = {
-                Column {
-                    // 来源类型：远程订阅链接 / 本地规则文件
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterChip(
-                            selected = !sourceIsFile,
-                            onClick = { sourceIsFile = false },
-                            label = { Text(stringResource(R.string.compose_rules_source_type_url)) },
-                        )
-                        FilterChip(
-                            selected = sourceIsFile,
-                            onClick = { sourceIsFile = true },
-                            label = { Text(stringResource(R.string.compose_rules_source_type_file)) },
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    if (sourceIsFile) {
-                        // 本地规则：用系统文件选择器挑选 hosts / 规则文本文件
-                        OutlinedButton(
-                            onClick = { filePicker.launch(arrayOf("*/*")) },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(
-                                Icons.Outlined.FolderOpen,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(stringResource(R.string.compose_rules_pick_file))
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            pickedFileName.ifBlank {
-                                stringResource(R.string.compose_rules_pick_file_hint)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    } else {
-                        OutlinedTextField(
-                            value = urlInput,
-                            onValueChange = { urlInput = it },
-                            label = { Text(stringResource(R.string.compose_rules_source_url_hint)) },
-                            singleLine = true,
-                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
-                            ),
-                        )
-                    }
-                    if (sourceAddFailed) {
-                        Text(stringResource(R.string.compose_rules_add_source_failed),
-                            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    }
-                }
+                SourceEditorFields(
+                    fileSource = sourceIsFile, url = urlInput, fileName = pickedFileName,
+                    busy = sourceSaving, failed = sourceAddFailed,
+                    onTypeChange = { sourceIsFile = it; sourceAddFailed = false },
+                    onUrlChange = { urlInput = it; sourceAddFailed = false },
+                    onPickFile = { filePicker.launch(arrayOf("*/*")) },
+                )
             },
             confirmButton = {
                 val ready = if (sourceIsFile) pickedFileUri.isNotBlank() else urlInput.isNotBlank()
@@ -512,41 +462,13 @@ fun RulesScreen(
             onDismissRequest = { if (!ruleSaving) showAddRuleDialog = false },
             title = { Text(stringResource(R.string.compose_rules_add_rule_title)) },
             text = {
-                Column {
-                    OutlinedTextField(
-                        value = ruleHostInput,
-                        onValueChange = { ruleHostInput = it },
-                        label = { Text(stringResource(R.string.compose_rules_rule_host_hint)) },
-                        singleLine = true,
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii,
-                        ),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    // 规则类型选择：拦截 / 放行 / 重定向
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(
-                            Triple(ListType.BLOCKED.value, R.string.compose_logs_filter_blocked, 0),
-                            Triple(ListType.ALLOWED.value, R.string.compose_logs_filter_allowed, 1),
-                            Triple(ListType.REDIRECTED.value, R.string.compose_logs_filter_redirected, 2),
-                        ).forEach { (value, labelRes, _) ->
-                            FilterChip(
-                                selected = ruleType == value,
-                                onClick = { ruleType = value },
-                                label = { Text(stringResource(labelRes)) },
-                            )
-                        }
-                    }
-                    if (ruleType == ListType.REDIRECTED.value) {
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = ruleRedirectInput,
-                            onValueChange = { ruleRedirectInput = it },
-                            label = { Text(stringResource(R.string.compose_rules_rule_redirect_hint)) },
-                            singleLine = true,
-                        )
-                    }
-                }
+                PersonalRuleEditorFields(
+                    host = ruleHostInput, type = ruleType, redirect = ruleRedirectInput,
+                    busy = ruleSaving, failed = ruleAddFailed,
+                    onHostChange = { ruleHostInput = it; ruleAddFailed = false },
+                    onTypeChange = { ruleType = it; ruleAddFailed = false },
+                    onRedirectChange = { ruleRedirectInput = it; ruleAddFailed = false },
+                )
             },
             confirmButton = {
                 TextButton(
@@ -562,6 +484,7 @@ fun RulesScreen(
                          * 数据库写入失败都表现为对话框关了但列表里没有）。
                          */
                         ruleSaving = true
+                        ruleAddFailed = false
                         viewModel.addUserRule(host, type, redirect) { added ->
                             ruleSaving = false
                             if (added) {
@@ -570,12 +493,7 @@ fun RulesScreen(
                                 ruleRedirectInput = ""
                                 refreshVersion++
                             } else {
-                                /* 失败：保留对话框与输入，用户可以直接改一改再试 */
-                                Toast.makeText(
-                                    context,
-                                    R.string.compose_rules_add_failed,
-                                    Toast.LENGTH_LONG,
-                                ).show()
+                                ruleAddFailed = true
                             }
                         }
                     },

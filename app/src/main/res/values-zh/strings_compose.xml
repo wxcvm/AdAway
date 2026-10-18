@@ -314,7 +314,7 @@
     <string name="compose_rules_view_hosts_copy">复制</string>
     <string name="compose_rules_view_hosts_copied">已复制到剪贴板</string>
     <string name="compose_rules_cancel">取消</string>
-    <string name="compose_rules_add_failed">未添加：规则可能已存在、域名格式不合法，或数据库写入失败</string>
+    <string name="compose_rules_add_failed">规则未能保存。请检查域名和替换地址后重试，已保留输入。</string>
     <string name="compose_rules_source_size">%1$d 条</string>
     <string name="compose_rules_sources_empty">暂无订阅，添加一个即可开始拦截。</string>
     <string name="compose_stats_kpi_connections">连接数</string>
@@ -351,7 +351,7 @@
     <string name="compose_rules_source_type_file">本地文件</string>
     <string name="compose_rules_pick_file">选择本地规则文件</string>
     <string name="compose_rules_pick_file_hint">支持 hosts 或规则文本文件；读取本地文件不联网。</string>
-    <string name="compose_rules_add_source_failed">添加失败：链接无效或该订阅已存在</string>
+    <string name="compose_rules_add_source_failed">来源未能添加。请检查链接或文件、已有来源及存储后重试，已保留输入。</string>
     <string name="compose_settings_block_mode_adguard_hint">AdGuard 的部分版本支持将 DNS 层拦截的域名应答为自定义 IP，但必须先确认该功能存在、本地目标地址与 80/443 可达，以及 HTTPS 证书信任。仅检测到 AdGuard 已安装或某个 VPN 正在运行，并不能说明协同已生效；其他 VPN 活动时不要叠加透明劫持。</string>
     <string name="compose_settings_block_mode_hijack">劫持过滤</string>
     <string name="compose_settings_block_mode_hijack_hint">劫持过滤（Root）：仅重定向符合条件的本机 TCP 80/443 连接至内置服务器；不等于接管所有 IPv4/IPv6、UDP、QUIC 或其他 VPN 的流量。HTTPS 内容处理需要信任本机 CA，证书固定的应用仍可能拒绝。其他 VPN 占用接管路径时应暂停透明劫持。</string>
@@ -567,4 +567,5 @@
     <string name="compose_rules_removing">正在删除…</string>
     <string name="compose_rules_remove_failed">删除未能保存，内容尚未移除。请重试或取消。</string>
     <string name="compose_rules_remove_retry">重试删除</string>
+    <string name="compose_rules_personal_write_hint">同名个人规则会被替换。通配符适用于放行和重定向规则。</string>
 </resources>

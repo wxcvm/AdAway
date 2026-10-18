@@ -313,7 +313,7 @@
     <string name="compose_rules_view_hosts_copy">Copy</string>
     <string name="compose_rules_view_hosts_copied">Copied to the clipboard</string>
     <string name="compose_rules_cancel">Cancel</string>
-    <string name="compose_rules_add_failed">Not added: the rule may already exist, the domain may be invalid, or the database write failed</string>
+    <string name="compose_rules_add_failed">Could not save the rule. Check the domain and replacement address, then retry. Your input has been kept.</string>
     <string name="compose_rules_source_size">%1$d items</string>
     <string name="compose_rules_sources_empty">No subscriptions yet — add one to start blocking.</string>
     <string name="compose_stats_kpi_connections">Connections</string>
@@ -350,7 +350,7 @@
     <string name="compose_rules_source_type_file">Local file</string>
     <string name="compose_rules_pick_file">Choose a local rules file</string>
     <string name="compose_rules_pick_file_hint">hosts or rules text files; local files are read offline.</string>
-    <string name="compose_rules_add_source_failed">Could not add: invalid URL or the subscription already exists</string>
+    <string name="compose_rules_add_source_failed">Could not add the source. Check the link or file, existing sources and storage, then retry. Your input has been kept.</string>
     <string name="compose_settings_block_mode_adguard_hint">AdGuard DNS-level custom blocking IP may point blocked DNS domains at the local response server, but only if the version supports the option and the IP, standard ports, and certificate trust are verified. The presence of AdGuard or another VPN alone does not confirm cooperation. Never overlap transparent hijack with another active VPN.</string>
     <string name="compose_settings_block_mode_hijack">Hijack + filter</string>
     <string name="compose_settings_block_mode_hijack_hint">Hijack + filter (Root): redirects eligible local TCP connections on ports 80/443 to the built-in server. This does not cover all IPv4/IPv6, UDP, QUIC or traffic protected by other VPNs. HTTPS rewriting requires trusted CA and may fail with certificate pinning. Keep the mode off when another VPN owns the connection path.</string>
@@ -567,4 +567,5 @@
     <string name="compose_rules_removing">Deleting…</string>
     <string name="compose_rules_remove_failed">Deletion could not be saved. The item was not removed. Retry or cancel.</string>
     <string name="compose_rules_remove_retry">Retry deletion</string>
+    <string name="compose_rules_personal_write_hint">A personal rule for the same name is replaced. Wildcards are supported for allow and redirect rules.</string>
 </resources>

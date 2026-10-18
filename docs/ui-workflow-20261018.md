@@ -32,3 +32,9 @@ Deleting a personal rule now requires an explicit confirmation that names the fu
 The dialog disables repeat submission and dismissal while the transaction/application operation runs. An uncommitted deletion retains the target and dialog with inline failure/retry feedback; a committed deletion closes the dialog and invalidates browser data. The existing ViewModel callback reports the database commit independently of subsequent Hosts/server application, so a saved deletion followed by an apply failure is not offered as an unsaved deletion retry. Existing phase feedback remains visible on the rules page.
 
 Production-component tests cover confirmation/cancel, busy controls and failed-delete retry. Room transaction/import tests remain the storage evidence; component tests do not establish Root or full-activity acceptance.
+
+## UI closeout
+
+Add-source and personal-rule fields now share extracted production field components. While a save is pending, text, source mode, rule action and file selection are disabled together, so the visible form cannot diverge from the submitted values before a success callback clears it. Both forms scroll vertically; option chips scroll horizontally. Personal-rule failures persist inline with retained input and clear when editing resumes. Wording reflects later-write replacement of personal rules, supported wildcard actions and source storage failures. Source-add diagnostics omit subscription URLs and raw exception messages.
+
+Closeout component checks cover source/link/file busy state, personal address/action busy state, retained failed input and editing, and actual vertical scroll movement to the error in a small 1.6x-text viewport. This closes the current UI implementation scope. Dedicated whole-activity rotation, TalkBack and real Root/device acceptance, plus Windows multi-monitor DPI/network recovery checks, remain separate validation gates; passing component/CI tests does not silently mark them complete.

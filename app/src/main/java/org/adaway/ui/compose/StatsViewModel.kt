@@ -821,7 +821,7 @@ fun refreshServerStats() {
      *
      * @param url   订阅链接或本地文件 URI
      * @param label 显示名称（本地文件使用文件名；为空时按 URL 推导）
-     * @param onDone 结果回调（false = 链接非法或已存在）
+     * @param onDone 结果回调（false = 链接非法、已存在或未能写入）
      */
     fun addSource(url: String, label: String? = null, onDone: (Boolean) -> Unit) {
         viewModelScope.launch {
@@ -829,7 +829,7 @@ fun refreshServerStats() {
                 try {
                     val normalized = url.trim()
                     if (!org.adaway.db.entity.HostsSource.isValidUrl(normalized)) {
-                        Timber.w("Rejected hosts source, unsupported URL: %s", normalized)
+                        Timber.w("Rejected hosts source: unsupported URL format")
                         return@withContext false
                     }
                     val dao = database.hostsSourceDao()
@@ -842,7 +842,7 @@ fun refreshServerStats() {
                     true
                 } catch (e: Exception) {
                     // 唯一索引冲突（源已存在）等：返回 false 由界面提示
-                    Timber.w(e, "Failed to add source %s", url)
+                    Timber.w("Failed to add source (%s)", e.javaClass.simpleName)
                     false
                 }
             }
