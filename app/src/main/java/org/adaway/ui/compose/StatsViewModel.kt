@@ -597,6 +597,8 @@ fun refreshServerStats() {
     /** True while a hosts sync (sources + apply) is in progress. */
     private val _syncing = MutableStateFlow(false)
     val syncing: StateFlow<Boolean> = _syncing
+    private val _syncStatus = MutableStateFlow(HostsSyncStatus.IDLE)
+    val syncStatus: StateFlow<HostsSyncStatus> = _syncStatus
 
     /** Load all rule sources (id != 1, i.e. everything but the user list). */
     fun loadSources(onResult: (List<org.adaway.db.entity.HostsSource>) -> Unit) {
@@ -875,29 +877,33 @@ fun refreshServerStats() {
         }
     }
 
-    /**
-     * Synchronize hosts: enable all sources, download them and apply the
-     * hosts file. Mirrors the legacy HomeViewModel.sync() flow, kept
-     * off the main thread. Errors are logged; the UI reflects failure by
-     * clearing the syncing flag (the overview row stays actionable).
-     */
+    /** Synchronize enabled sources and report the phase that failed to the UI. */
     fun syncHosts() {
-        if (_syncing.value) return
+        if (!_syncing.compareAndSet(false, true)) return
+        _syncStatus.value = HostsSyncStatus.RUNNING
         viewModelScope.launch {
-            _syncing.value = true
+            var failure = HostsSyncStatus.SOURCE_FAILED
             try {
                 withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val application = getApplication<org.adaway.AdAwayApplication>()
                     val sourceModel = application.getSourceModel()
                     sourceModel.retrieveHostsSources()
+                    failure = HostsSyncStatus.APPLY_FAILED
                     adBlockModel.apply()
-                    // 规则变了：导出规则文件并让服务器重读（透明代理按规则过滤，
-                    // 不依赖 hosts 文件是否真的写进了系统）
-                    org.adaway.util.WebServerUtils.exportBlockList(application)
-                    org.adaway.util.WebServerUtils.reloadConfig()
+                    failure = HostsSyncStatus.SERVER_REFRESH_FAILED
+                    check(WebServerUtils.exportBlockList(application) >= 0)
+                    // A stopped optional server does not make a Hosts sync fail.
+                    if (WebServerUtils.isWebServerReachable(application)) {
+                        check(WebServerUtils.reloadConfig())
+                    }
                 }
+                _syncStatus.value = HostsSyncStatus.SUCCESS
                 Timber.i("Hosts sync completed")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                _syncStatus.value = HostsSyncStatus.IDLE
+                throw e
             } catch (e: Exception) {
+                _syncStatus.value = failure
                 Timber.w(e, "Hosts sync failed")
             } finally {
                 _syncing.value = false

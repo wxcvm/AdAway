@@ -13,9 +13,9 @@
     <string name="compose_status_ad_blocking">Ad blocking</string>
     <string name="compose_status_active">Active</string>
     <string name="compose_status_not_applied">Not applied</string>
-    <string name="compose_hosts_blocked">Blocked</string>
-    <string name="compose_hosts_allowed">Allowed</string>
-    <string name="compose_hosts_redirected">Redirected</string>
+    <string name="compose_hosts_blocked">Block rules</string>
+    <string name="compose_hosts_allowed">Allow rules</string>
+    <string name="compose_hosts_redirected">Redirect rules</string>
     <string name="compose_web_server">Web server</string>
     <string name="compose_web_server_not_running">Not running</string>
     <string name="compose_web_server_loading">Running · fetching stats…</string>
@@ -512,4 +512,26 @@
     <string name="compose_more_settings_desc">Blocking preferences, Web server, certificates, storage and appearance</string>
     <string name="compose_more_planned">Coming later · not enabled</string>
     <string name="compose_more_planned_desc">Global VPN/TUN interception, automatic AdGuard conflict resolution and route rollback are planned but not active. Open Network center to view their scope.</string>
+
+    <!-- Rule workflow and status feedback -->
+    <string name="compose_status_hosts_method">Hosts rules · known domain names</string>
+    <string name="compose_sync_complete">Enabled sources processed and Hosts applied.</string>
+    <string name="compose_sync_source_failed">Rule update could not finish. Check your connection and enabled sources, then retry.</string>
+    <string name="compose_sync_apply_failed">Rules were retrieved, but Hosts could not be applied. Check root access and the current status above.</string>
+    <string name="compose_sync_server_failed">Hosts applied, but the server rules could not be refreshed. Retry or check the server settings.</string>
+    <string name="compose_sync_retry">Retry sync</string>
+    <string name="compose_ws_toggle_failed">The server did not reach the requested state. Check the status and startup log before retrying.</string>
+    <string name="compose_rules_manage_sources">Manage sources (%1$d)</string>
+    <string name="compose_rules_source_rule_hint">This rule comes from a subscription. Manage its source, or add a personal allow rule to exempt this domain.</string>
+    <string name="compose_rules_manage_source">Manage source</string>
+    <string name="compose_rules_scope_exact">Exact name</string>
+    <string name="compose_rules_scope_suffix">Domain and subdomains</string>
+    <string name="compose_rules_scope_wildcard">Wildcard</string>
+    <string name="compose_rules_scope_legacy">Legacy match</string>
+    <string name="compose_rules_personal">Personal rule</string>
+    <string name="compose_rules_search_empty">No matching rules. Try another domain or clear the search.</string>
+    <string name="compose_rules_loading">Loading rules…</string>
+    <string name="compose_rules_loaded">Showing %1$d of %2$d rules. Search to narrow the results.</string>
+    <string name="compose_rules_source_help">Subscription rules follow their source. Disable a source to stop using its rules.</string>
+    <string name="compose_rules_clear_search">Clear search</string>
 </resources>

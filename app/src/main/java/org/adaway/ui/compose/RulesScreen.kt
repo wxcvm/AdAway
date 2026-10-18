@@ -71,6 +71,9 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -117,7 +120,7 @@ fun RulesScreen(
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
 
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var rules by remember { mutableStateOf<List<HostListItem>>(emptyList()) }
     var totalCount by remember { mutableIntStateOf(0) }
     var sourceLabels by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
@@ -163,7 +166,14 @@ fun RulesScreen(
     )
 
     // Rule search (a list of thousands without one was unusable).
-    var searchQuery by remember { mutableStateOf("") }
+    val syncing by viewModel.syncing.collectAsStateWithLifecycle()
+    val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
+    var showSources by rememberSaveable { mutableStateOf(false) }
+    var sourceRuleInfo by remember { mutableStateOf<HostListItem?>(null) }
+    var refreshVersion by remember { mutableIntStateOf(0) }
+    var sourceSaving by remember { mutableStateOf(false) }
+    var ruleSaving by remember { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
     var searchGeneration by remember { mutableIntStateOf(0) }
     var ruleSearchLoading by remember { mutableStateOf(false) }
     // "View the system hosts file" dialog: the rules screen is exactly where a
@@ -179,8 +189,10 @@ fun RulesScreen(
         viewModel.loadSourceLabels { sourceLabels = it }
         reloadSources()
     }
-    LaunchedEffect(selectedTab, searchQuery) {
+    LaunchedEffect(selectedTab, searchQuery, refreshVersion, syncing) {
         val generation = ++searchGeneration
+        viewModel.loadSourceLabels { sourceLabels = it }
+        reloadSources()
         ruleSearchLoading = true
         val query = searchQuery.trim()
         val receive: (List<HostListItem>, Int) -> Unit = { items, total ->
@@ -216,7 +228,7 @@ fun RulesScreen(
                     }) {
                         Icon(Icons.Outlined.Description, contentDescription = stringResource(R.string.compose_rules_view_hosts))
                     }
-                    IconButton(onClick = { viewModel.syncHosts() }) { Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.compose_sync_hosts)) }
+                    IconButton(enabled = !syncing, onClick = { viewModel.syncHosts() }) { Icon(Icons.Outlined.Refresh, contentDescription = stringResource(R.string.compose_sync_hosts)) }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -273,6 +285,11 @@ fun RulesScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                TextButton(onClick = { showSources = !showSources }) {
+                    Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.compose_rules_manage_sources, sources.size))
+                }
                 TextButton(onClick = onOpenExempt) {
                     Text(stringResource(R.string.compose_exempt_entry))
                 }
@@ -293,7 +310,7 @@ fun RulesScreen(
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
                         IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Outlined.Close, contentDescription = null)
+                            Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.compose_rules_clear_search))
                         }
                     }
                 },
@@ -315,7 +332,9 @@ fun RulesScreen(
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
-                    stringResource(R.string.compose_rules_total, totalCount),
+                    if (ruleSearchLoading) stringResource(R.string.compose_rules_loading)
+                    else if (rules.size < totalCount) stringResource(R.string.compose_rules_loaded, rules.size, totalCount)
+                    else stringResource(R.string.compose_rules_total, totalCount),
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontFamily = FontFamily.Monospace,
                     ),
@@ -330,86 +349,50 @@ fun RulesScreen(
                 }
             }
 
-            if (rules.isEmpty()) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 8.dp,
-                        vertical = 4.dp,
-                    ),
-                ) {
-                    item(key = "empty") {
-                        EmptyRulesPlaceholder(tabs[selectedTab].emptyRes)
-                    }
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 20.dp),
+            ) {
+                if (showSources || sources.isEmpty()) {
                     item(key = "sources") {
                         SourcesCard(
                             sources = sources,
+                            enabled = !syncing,
                             onToggle = { source, checked ->
-                                // Optimistic update: flip in-memory state now so the
-                                // Switch responds instantly and never appears to
-                                // jump to another row while DB updates.
-                                // Optimistic update using the Switch's target state,
-                                // then persist it directly (no toggle race).
-                                source.setEnabled(checked)
-                                sources = sources.toList()
-                                viewModel.setSourceEnabled(source.id, checked) { reloadSources(); viewModel.syncHosts() }
+                                viewModel.setSourceEnabled(source.id, checked) {
+                                    reloadSources()
+                                    refreshVersion++
+                                    viewModel.syncHosts()
+                                }
                             },
                             onAddClick = { showAddDialog = true },
-                            onDelete = { source ->
-                                deleteSourceHint = source
-                            },
+                            onDelete = { deleteSourceHint = it },
                         )
                     }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 8.dp,
-                        vertical = 4.dp,
-                    ),
-                ) {
+                if (syncStatus.isFailure) {
+                    item(key = "sync-status") {
+                        Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            RuleSyncCard(syncStatus, viewModel::syncHosts)
+                        }
+                    }
+                }
+                if (rules.isEmpty() && !ruleSearchLoading) {
+                    item(key = "empty") {
+                        EmptyRulesPlaceholder(if (searchQuery.isNotBlank()) R.string.compose_rules_search_empty else tabs[selectedTab].emptyRes)
+                    }
+                }
+                if (!ruleSearchLoading) {
                     items(rules, key = { it.id }) { item ->
                         RuleRow(
                             item = item,
                             sourceLabel = sourceLabels[item.sourceId],
                             onDelete = {
                                 if (item.sourceId == 1) {
-                                    // 用户自定义规则：直接删除
-                                    viewModel.removeRule(item.host) {
-                                        viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items2, total2 ->
-                                            rules = items2
-                                            totalCount = total2
-                                        }
-                                    }
+                                    viewModel.removeRule(item.host) { refreshVersion++ }
                                 } else {
-                                    // 订阅源规则：提示可在订阅源中管理
-                                    // （该条目来自订阅，删除后会随下次同步恢复）
-                                    rules = rules.filterNot { it.host == item.host }
+                                    sourceRuleInfo = item
                                 }
-                            },
-                        )
-                    }
-                    item(key = "sources") {
-                        SourcesCard(
-                            sources = sources,
-                            onToggle = { source, checked ->
-                                // Optimistic update: flip in-memory state now so the
-                                // Switch responds instantly and never appears to
-                                // jump to another row while DB updates.
-                                // Optimistic update using the Switch's target state,
-                                // then persist it directly (no toggle race).
-                                source.setEnabled(checked)
-                                sources = sources.toList()
-                                viewModel.setSourceEnabled(source.id, checked) { reloadSources(); viewModel.syncHosts() }
-                            },
-                            onAddClick = { showAddDialog = true },
-                            onDelete = { source ->
-                                deleteSourceHint = source
                             },
                         )
                     }
@@ -420,7 +403,7 @@ fun RulesScreen(
 
     if (showAddDialog) {
         AlertDialog(
-            onDismissRequest = { showAddDialog = false },
+            onDismissRequest = { if (!sourceSaving) showAddDialog = false },
             title = { Text(stringResource(R.string.compose_rules_add_source)) },
             text = {
                 Column {
@@ -478,17 +461,20 @@ fun RulesScreen(
             confirmButton = {
                 val ready = if (sourceIsFile) pickedFileUri.isNotBlank() else urlInput.isNotBlank()
                 TextButton(
-                    enabled = ready,
+                    enabled = ready && !sourceSaving,
                     onClick = {
                         val url = if (sourceIsFile) pickedFileUri else urlInput
                         val label = if (sourceIsFile) pickedFileName else null
-                        showAddDialog = false
-                        urlInput = ""
-                        pickedFileUri = ""
-                        pickedFileName = ""
-                        sourceIsFile = false
+                        sourceSaving = true
                         viewModel.addSource(url, label) { ok ->
+                            sourceSaving = false
                             if (ok) {
+                                showAddDialog = false
+                                showSources = true
+                                urlInput = ""
+                                pickedFileUri = ""
+                                pickedFileName = ""
+                                sourceIsFile = false
                                 reloadSources()
                                 viewModel.syncHosts()
                             } else {
@@ -504,7 +490,7 @@ fun RulesScreen(
                 ) { Text(stringResource(R.string.compose_rules_add)) }
             },
             dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) {
+                TextButton(enabled = !sourceSaving, onClick = { showAddDialog = false }) {
                     Text(stringResource(R.string.compose_rules_cancel))
                 }
             },
@@ -514,7 +500,7 @@ fun RulesScreen(
     // ── 添加用户规则对话框 ──
     if (showAddRuleDialog) {
         AlertDialog(
-            onDismissRequest = { showAddRuleDialog = false },
+            onDismissRequest = { if (!ruleSaving) showAddRuleDialog = false },
             title = { Text(stringResource(R.string.compose_rules_add_rule_title)) },
             text = {
                 Column {
@@ -555,7 +541,7 @@ fun RulesScreen(
             },
             confirmButton = {
                 TextButton(
-                    enabled = ruleHostInput.isNotBlank() &&
+                    enabled = !ruleSaving && ruleHostInput.isNotBlank() &&
                         (ruleType != ListType.REDIRECTED.value || ruleRedirectInput.isNotBlank()),
                     onClick = {
                         val host = ruleHostInput
@@ -566,15 +552,14 @@ fun RulesScreen(
                          * 失败时用户既不知道原因，也丢了刚填的内容（重复规则、域名格式不合法、
                          * 数据库写入失败都表现为对话框关了但列表里没有）。
                          */
+                        ruleSaving = true
                         viewModel.addUserRule(host, type, redirect) { added ->
+                            ruleSaving = false
                             if (added) {
                                 showAddRuleDialog = false
                                 ruleHostInput = ""
                                 ruleRedirectInput = ""
-                                viewModel.loadRulesByType(tabs[selectedTab].type, RULES_PAGE_SIZE) { items2, total2 ->
-                                    rules = items2
-                                    totalCount = total2
-                                }
+                                refreshVersion++
                             } else {
                                 /* 失败：保留对话框与输入，用户可以直接改一改再试 */
                                 Toast.makeText(
@@ -588,9 +573,26 @@ fun RulesScreen(
                 ) { Text(stringResource(R.string.compose_rules_add)) }
             },
             dismissButton = {
-                TextButton(onClick = { showAddRuleDialog = false }) {
+                TextButton(enabled = !ruleSaving, onClick = { showAddRuleDialog = false }) {
                     Text(stringResource(R.string.compose_rules_cancel))
                 }
+            },
+        )
+    }
+
+    sourceRuleInfo?.let { rule ->
+        AlertDialog(
+            onDismissRequest = { sourceRuleInfo = null },
+            title = { Text(rule.host) },
+            text = { Text(stringResource(R.string.compose_rules_source_rule_hint)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    sourceRuleInfo = null
+                    showSources = true
+                }) { Text(stringResource(R.string.compose_rules_manage_source)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { sourceRuleInfo = null }) { Text(stringResource(R.string.compose_rules_cancel)) }
             },
         )
     }
@@ -683,6 +685,7 @@ fun RulesScreen(
  * 提供“添加订阅源”按钮。空列表时仍显示以便添加首个订阅。
  */
 private fun SourcesCard(
+    enabled: Boolean,
     sources: List<org.adaway.db.entity.HostsSource>,
     onToggle: (org.adaway.db.entity.HostsSource, Boolean) -> Unit,
     onAddClick: () -> Unit,
@@ -712,13 +715,15 @@ private fun SourcesCard(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = onAddClick) {
+                TextButton(enabled = enabled, onClick = onAddClick) {
                     Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(stringResource(R.string.compose_rules_add_source))
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.compose_rules_source_help),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(12.dp))
             if (sources.isEmpty()) {
                 Text(
                     stringResource(R.string.compose_rules_sources_empty),
@@ -749,11 +754,12 @@ private fun SourcesCard(
                         }
                         Switch(
                             checked = source.isEnabled(),
+                            enabled = enabled,
                             onCheckedChange = { checked -> onToggle(source, checked) },
                         )
                         Spacer(Modifier.width(4.dp))
                         // 删除订阅源（确认对话框在 RulesScreen 弹出）
-                        IconButton(onClick = { onDelete(source) }) {
+                        IconButton(enabled = enabled, onClick = { onDelete(source) }) {
                             Icon(
                                 Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.compose_rules_delete_source),
@@ -769,7 +775,7 @@ private fun SourcesCard(
 }
 
 @Composable
-private fun RuleRow(
+internal fun RuleRow(
     item: HostListItem,
     sourceLabel: String?,
     onDelete: (() -> Unit)? = null,
@@ -777,7 +783,7 @@ private fun RuleRow(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
@@ -809,9 +815,20 @@ private fun RuleRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (!sourceLabel.isNullOrEmpty()) {
+                Text(
+                    stringResource(when (item.matchScope) {
+                        0 -> R.string.compose_rules_scope_exact
+                        1 -> R.string.compose_rules_scope_suffix
+                        2 -> R.string.compose_rules_scope_wildcard
+                        else -> R.string.compose_rules_scope_legacy
+                    }),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val label = if (item.sourceId == 1) stringResource(R.string.compose_rules_personal) else sourceLabel
+                if (!label.isNullOrEmpty()) {
                     Text(
-                        sourceLabel,
+                        label,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -833,8 +850,8 @@ private fun RuleRow(
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = onDelete) {
                     Icon(
-                        Icons.Outlined.Delete,
-                        contentDescription = stringResource(R.string.compose_rules_delete),
+                        if (item.sourceId == 1) Icons.Outlined.Delete else Icons.Outlined.Info,
+                        contentDescription = stringResource(if (item.sourceId == 1) R.string.compose_rules_delete else R.string.compose_rules_manage_source),
                         tint = if (item.sourceId == 1) MaterialTheme.colorScheme.error
                                else MaterialTheme.colorScheme.onSurfaceVariant,
                     )

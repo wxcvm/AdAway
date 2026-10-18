@@ -13,6 +13,11 @@ package org.adaway.ui.compose
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material3.Surface
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +61,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,7 +87,9 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
-    val syncing by viewModel.syncing.collectAsStateWithLifecycle()
+    val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
+    val applied by viewModel.adBlockModel.isApplied().observeAsStateCompat(false)
+    val blockingState by viewModel.adBlockModel.getState().observeAsStateCompat("")
     val context = LocalContext.current
     val uiScope = androidx.compose.runtime.rememberCoroutineScope()
     // 进程检测会执行 root shell（su pgrep / ps / grep），既不能在组合期做，
@@ -91,6 +97,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
     // 就阻塞主线程，慢机器上还会 ANR。这里只给保守初值，真实状态在 IO 线程解析。
     var wsEnabled by remember { mutableStateOf(false) }
     var wsTransitioning by remember { mutableStateOf(false) }
+    var wsToggleFailed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         val running = withContext(Dispatchers.IO) {
             org.adaway.util.WebServerUtils.isWebServerRunning()
@@ -135,15 +142,17 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // Service status card
             StatusCard(
-                running = viewModel.adBlockModel.isApplied().value ?: false,
-                stateText = viewModel.adBlockModel.getState().value ?: "",
-                hostsCount = blockedCount,
+                running = applied,
+                stateText = blockingState,
             )
+
+            AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
+            RuleSyncCard(status = syncStatus, onSync = viewModel::syncHosts)
 
             // Place the controllable service before secondary counters, so
             // users see the current mode and action without scrolling.
@@ -153,6 +162,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
             WebServerControlCard(
                 enabled = wsEnabled,
                 transitioning = wsTransitioning,
+                toggleFailed = wsToggleFailed,
                 stats = serverStats,
                 httpPort = org.adaway.util.WebServerUtils.getHttpPort(context),
                 httpsPort = org.adaway.util.WebServerUtils.getHttpsPort(context),
@@ -161,6 +171,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 onToggle = { enable ->
                     if (!wsTransitioning) {
                         wsTransitioning = true
+                        wsToggleFailed = false
                         uiScope.launch {
                             try {
                                 // Root shell, process checks and port probing are blocking IO.
@@ -185,6 +196,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                                     timber.log.Timber.w(e, "Unable to verify Web Server status")
                                     false
                                 }
+                                wsToggleFailed = wsEnabled != enable
                                 wsTransitioning = false
                             }
                         }
@@ -198,8 +210,6 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                     }
                 },
             )
-
-            AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
 
             // Keep optional server details below the primary control.
             // Web server quick stats row（利用空位：证书/请求/拦截率）
@@ -228,29 +238,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 }
             }
 
-            // Quick actions
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        stringResource(R.string.compose_actions),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    ActionRow(
-                        icon = Icons.Filled.Sync,
-                        label = stringResource(R.string.compose_sync_hosts),
-                        subtitle = if (syncing) stringResource(R.string.compose_sync_hosts_running)
-                        else stringResource(R.string.compose_sync_hosts_subtitle),
-                        onClick = { viewModel.syncHosts() },
-                    )
-                }
-            }
+
         }
     }
 }
@@ -271,6 +259,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
 private fun WebServerControlCard(
     enabled: Boolean,
     transitioning: Boolean,
+    toggleFailed: Boolean,
     stats: ServerStats?,
     httpPort: Int,
     httpsPort: Int,
@@ -313,7 +302,7 @@ private fun WebServerControlCard(
                         ),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (enabled) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.error,
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 if (transitioning) {
@@ -324,6 +313,14 @@ private fun WebServerControlCard(
                         onCheckedChange = onToggle,
                     )
                 }
+            }
+            if (toggleFailed) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.compose_ws_toggle_failed),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
             Spacer(Modifier.height(12.dp))
             Row(
@@ -422,48 +419,39 @@ private fun DetailChip(label: String, value: String) {
  * 服务状态卡：显示 hosts 拦截服务是否已应用、
  * 当前状态文本与规则条数。颜色语义：运行=主色，停止=错误色。
  */
-private fun StatusCard(running: Boolean, stateText: String, hostsCount: Int) {
-    val color = if (running) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.error
-    }
+internal fun StatusCard(running: Boolean, stateText: String) {
+    val color = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Canvas(modifier = Modifier.size(12.dp)) {
-                drawCircle(color = color)
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    Modifier.size(48.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Shield, contentDescription = null, tint = color)
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.compose_status_ad_blocking), style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.compose_status_hosts_method), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
             }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.compose_status_ad_blocking),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    stateText.ifEmpty {
-                        if (running) stringResource(R.string.compose_status_active)
-                        else stringResource(R.string.compose_status_not_applied)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), shape = MaterialTheme.shapes.small) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(Modifier.size(8.dp)) { drawCircle(color) }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        stringResource(if (running) R.string.compose_status_active else R.string.compose_status_not_applied),
+                        style = MaterialTheme.typography.labelLarge, color = color,
+                    )
+                }
             }
-            Text(
-                if (running) stringResource(R.string.compose_status_active)
-                else stringResource(R.string.compose_status_not_applied),
-                style = MaterialTheme.typography.labelMedium,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (stateText.isNotBlank()) {
+                Text(stateText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
         }
     }
 }
@@ -473,7 +461,7 @@ internal fun AdaptiveHostSummary(blocked: Int, allowed: Int, redirected: Int) {
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         // At normal phone widths prefer one compact KPI row. Reserve wrapping
         // for genuinely narrow split-screen or accessibility layouts.
-        if (maxWidth < 300.dp) {
+        if (maxWidth / LocalDensity.current.fontScale < 300.dp) {
             // Give numbers and localized labels enough room at large font scales.
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -507,7 +495,7 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 9.dp),
+                .padding(horizontal = 8.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -526,97 +514,6 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-/**
- * Web 服务器状态摘要卡：运行状态点 + 关键指标
- * （请求数/拦截数/SNI 证书数，取自最近一次统计快照）。
- */
-private fun WebServerCard(running: Boolean, stats: ServerStats?) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Outlined.Public,
-                contentDescription = null,
-                tint = if (running) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.compose_web_server),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    when {
-                        !running -> stringResource(R.string.compose_web_server_not_running)
-                        stats == null -> stringResource(R.string.compose_web_server_loading)
-                        else -> stringResource(
-                            R.string.compose_web_server_running,
-                            stats.totalBlocked,
-                            stats.sniCertsIssued,
-                        )
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (running && stats != null) {
-                Text(
-                    formatUptime(stats.uptimeSeconds),
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontFamily = FontFamily.Monospace,
-                    ),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else if (running) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActionRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    subtitle: String,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.width(16.dp))
-        Column {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
