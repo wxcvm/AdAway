@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import org.adaway.R
 import org.adaway.db.entity.HostListItem
 import org.adaway.db.entity.ListType
+import org.adaway.db.entity.RuleListRow
 import org.adaway.ui.compose.theme.AdAwayTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -103,6 +104,63 @@ class RuleWorkflowUiTest {
     @Test fun lightOverviewScreenshot() = overviewScreenshot(false, 1f, "overview-light")
     @Test fun darkLargeTextOverviewScreenshot() = overviewScreenshot(true, 1.6f, "overview-dark-large-text")
 
+    @Test fun rowOpensFullDetailsWithoutDeletingAndCopiesCompleteDomain() {
+        val fullDomain = "a-very-long-subdomain.for-rule-inspection.ads.example.com"
+        val address = "2001:db8:1234:5678:90ab:cdef:1234:5678"
+        val row = RuleListRow().apply {
+            item = HostListItem().apply {
+                id = 80; host = fullDomain; type = ListType.REDIRECTED; redirection = address
+                sourceId = 4; matchScope = 1; isEnabled = true
+            }
+            sourceLabel = "Paused test source"; sourceEnabled = false
+        }
+        val show = androidx.compose.runtime.mutableStateOf(false)
+        var deleted = false
+        var copied = ""
+        var managed = false
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                RuleRow(row.item, row.sourceLabel, active = row.isActive,
+                    onInspect = { show.value = true }, onDelete = { deleted = true })
+                if (show.value) RuleDetailsDialog(row, { show.value = false }, { copied = it }, { managed = true })
+            }
+        }
+        compose.onNodeWithText(fullDomain).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_details)).assertIsDisplayed()
+        compose.onNodeWithText(address).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_filter_disabled)).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_copy_domain)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_manage_source)).performClick()
+        compose.runOnIdle { assertEquals(fullDomain, copied); assertEquals(true, managed); assertEquals(false, deleted) }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_details_close)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_details)).assertDoesNotExist()
+    }
+
+    @Test fun personalRuleDetailsRemainReadableAtLargeText() {
+        val row = RuleListRow().apply {
+            item = HostListItem().apply {
+                id = 81; host = "a-long-personal-rule.for-large-text.ads.example.com"
+                type = ListType.BLOCKED; sourceId = 1; matchScope = 0; isEnabled = true
+            }
+            sourceLabel = "ignored"; sourceEnabled = true
+        }
+        var copied = ""
+        compose.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, 1.6f)) {
+                AdAwayTheme(darkTheme = true, dynamicColor = false) {
+                    RuleDetailsDialog(row, {}, { copied = it })
+                }
+            }
+        }
+        compose.onNodeWithText(row.item.host).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_manage_source)).assertDoesNotExist()
+        saveScreenshot("rule-details-dark-large-text", dialog = true)
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_copy_domain)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(row.item.host, copied) }
+        saveScreenshot("rule-details-dark-large-text-copy", dialog = true)
+    }
+
     private fun overviewScreenshot(dark: Boolean, scale: Float, name: String) {
         compose.setContent {
             val density = LocalDensity.current.density
@@ -127,7 +185,7 @@ class RuleWorkflowUiTest {
         if (scale > 1f) saveScreenshot("$name-actions")
     }
 
-    private fun saveScreenshot(name: String) {
+    private fun saveScreenshot(name: String, dialog: Boolean = false) {
         // AGP uninstalls test APKs after the run. MediaStore output survives that
         // cleanup on the disposable emulator and needs no storage permission.
         val values = ContentValues().apply {
@@ -138,7 +196,8 @@ class RuleWorkflowUiTest {
         val resolver = compose.activity.contentResolver
         val uri = requireNotNull(resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values))
         requireNotNull(resolver.openOutputStream(uri)).use {
-            check(compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
+            val root = if (dialog) compose.onNode(isDialog()) else compose.onRoot()
+            check(root.captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
         }
     }
 }

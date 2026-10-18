@@ -550,4 +550,14 @@
     <string name="compose_rules_reload">Reload rules</string>
     <string name="compose_rules_source_enabled">Enabled · %1$s</string>
     <string name="compose_rules_source_disabled">Disabled · %1$s</string>
+    <string name="compose_rules_details">Rule details</string>
+    <string name="compose_rules_detail_domain">Domain</string>
+    <string name="compose_rules_detail_action">Action</string>
+    <string name="compose_rules_detail_scope">Match scope</string>
+    <string name="compose_rules_detail_address">Replacement address</string>
+    <string name="compose_rules_detail_source">Source</string>
+    <string name="compose_rules_detail_source_id">Source %1$d</string>
+    <string name="compose_rules_detail_state">Entry status</string>
+    <string name="compose_rules_copy_domain">Copy full domain</string>
+    <string name="compose_rules_details_close">Close</string>
 </resources>

@@ -22,6 +22,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -95,6 +96,7 @@ import kotlinx.coroutines.launch
 import org.adaway.R
 import org.adaway.db.entity.HostListItem
 import org.adaway.db.entity.ListType
+import org.adaway.db.entity.RuleListRow
 import timber.log.Timber
 
 /**
@@ -171,7 +173,7 @@ fun RulesScreen(
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     var showSources by rememberSaveable { mutableStateOf(false) }
-    var sourceRuleInfo by remember { mutableStateOf<HostListItem?>(null) }
+    var inspectedRule by remember { mutableStateOf<RuleListRow?>(null) }
     var refreshVersion by remember { mutableIntStateOf(0) }
     var sourceSaving by remember { mutableStateOf(false) }
     var ruleSaving by remember { mutableStateOf(false) }
@@ -379,11 +381,12 @@ fun RulesScreen(
                             sourceLabel = row.sourceLabel,
                             active = row.isActive,
                             enabled = !syncing,
+                            onInspect = { inspectedRule = row },
                             onDelete = {
                                 if (item.sourceId == 1) {
                                     viewModel.removeRule(item.host) { saved -> if (saved) refreshVersion++ }
                                 } else {
-                                    sourceRuleInfo = item
+                                    inspectedRule = row
                                 }
                             },
                         )
@@ -581,20 +584,18 @@ fun RulesScreen(
         )
     }
 
-    sourceRuleInfo?.let { rule ->
-        AlertDialog(
-            onDismissRequest = { sourceRuleInfo = null },
-            title = { Text(rule.host) },
-            text = { Text(stringResource(R.string.compose_rules_source_rule_hint)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    sourceRuleInfo = null
-                    showSources = true
-                    scope.launch { listState.scrollToItem(0) }
-                }) { Text(stringResource(R.string.compose_rules_manage_source)) }
+    inspectedRule?.let { row ->
+        RuleDetailsDialog(
+            row = row,
+            onDismiss = { inspectedRule = null },
+            onCopyHost = { host ->
+                (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                    .setPrimaryClip(ClipData.newPlainText(context.getString(R.string.compose_rules_detail_domain), host))
             },
-            dismissButton = {
-                TextButton(onClick = { sourceRuleInfo = null }) { Text(stringResource(R.string.compose_rules_cancel)) }
+            onManageSource = {
+                inspectedRule = null
+                showSources = true
+                scope.launch { listState.scrollToItem(0) }
             },
         )
     }
@@ -782,12 +783,16 @@ internal fun RuleRow(
     sourceLabel: String?,
     enabled: Boolean = true,
     active: Boolean = item.isEnabled,
+    onInspect: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .then(if (onInspect != null) Modifier.clickable(
+                onClickLabel = stringResource(R.string.compose_rules_details), onClick = onInspect,
+            ) else Modifier),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
@@ -820,12 +825,7 @@ internal fun RuleRow(
                     )
                 }
                 Text(
-                    stringResource(when (item.matchScope) {
-                        0 -> R.string.compose_rules_scope_exact
-                        1 -> R.string.compose_rules_scope_suffix
-                        2 -> R.string.compose_rules_scope_wildcard
-                        else -> R.string.compose_rules_scope_legacy
-                    }),
+                    stringResource(ruleScopeLabel(item.matchScope)),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

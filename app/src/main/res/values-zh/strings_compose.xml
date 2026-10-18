@@ -550,4 +550,14 @@
     <string name="compose_rules_reload">重新读取</string>
     <string name="compose_rules_source_enabled">已启用 · %1$s</string>
     <string name="compose_rules_source_disabled">已停用 · %1$s</string>
+    <string name="compose_rules_details">规则详情</string>
+    <string name="compose_rules_detail_domain">域名</string>
+    <string name="compose_rules_detail_action">动作</string>
+    <string name="compose_rules_detail_scope">匹配范围</string>
+    <string name="compose_rules_detail_address">替换地址</string>
+    <string name="compose_rules_detail_source">来源</string>
+    <string name="compose_rules_detail_source_id">来源 %1$d</string>
+    <string name="compose_rules_detail_state">条目状态</string>
+    <string name="compose_rules_copy_domain">复制完整域名</string>
+    <string name="compose_rules_details_close">关闭</string>
 </resources>
