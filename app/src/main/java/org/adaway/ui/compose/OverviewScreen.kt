@@ -212,12 +212,12 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 ) {
                     StatTile(
                         stringResource(R.string.compose_ws_control_certs),
-                        serverStats!!.sniCertsIssued.toInt(),
+                        serverStats!!.sniCertsIssued,
                         Modifier.weight(1f),
                     )
                     StatTile(
                         stringResource(R.string.compose_stats_kpi_requests),
-                        serverStats!!.totalRequests.toInt(),
+                        serverStats!!.totalRequests,
                         Modifier.weight(1f),
                     )
                     val rate = if (serverStats!!.totalRequests > 0)
@@ -226,6 +226,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                         stringResource(R.string.compose_stats_kpi_rate),
                         rate,
                         Modifier.weight(1f),
+                        suffix = "%",
                     )
                 }
             }
@@ -477,7 +478,11 @@ internal fun AdaptiveHostSummary(blocked: Int, allowed: Int, redirected: Int) {
 }
 
 @Composable
-internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) {
+internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier, suffix: String = "") =
+    StatTile(label, value.toLong(), modifier, suffix)
+
+@Composable
+internal fun StatTile(label: String, value: Long, modifier: Modifier = Modifier, suffix: String = "") {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
@@ -491,7 +496,7 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier) 
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                String.format(Locale.US, "%,d", value),
+                String.format(Locale.US, "%,d", value) + suffix,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleMedium.copy(
