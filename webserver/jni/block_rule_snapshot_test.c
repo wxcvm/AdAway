@@ -37,7 +37,8 @@ static void subscription_pipeline(void) {
     CHECK(bs_query(&store, "two.test").decision.action == CORE_NXDOMAIN);
     CHECK(bs_query(&store, "plain.test").decision.action == CORE_NXDOMAIN);
     CHECK(bs_query(&store, "new.test").decision.action == CORE_PASS);
-    CHECK(bs_query(&store, "redirect.test").decision.action == CORE_PASS);
+    CHECK(bs_query(&store, "redirect.test").decision.action == CORE_REPLACE);
+    CHECK(bs_query(&store, "redirect.test").source == 2);
     CHECK(fclose(input) == 0); CHECK(fclose(output) == 0); bs_free_builder(&builder); bs_dispose(&store);
     input = text_file("0.0.0.0 valid.test\n999.1.1.1 invalid.test\n"); output = tmpfile(); CHECK(output); memset(&stats, 0, sizeof(stats));
     CHECK(!si_import(input, output, &stats)); CHECK(fclose(input) == 0); CHECK(fclose(output) == 0);

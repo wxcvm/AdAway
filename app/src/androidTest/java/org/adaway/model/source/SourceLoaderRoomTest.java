@@ -44,6 +44,86 @@ public class SourceLoaderRoomTest {
     private void load(String text) throws IOException {
         new SourceLoader(source).parse(new BufferedReader(new StringReader(text)), database.hostsListItemDao(), database);
     }
+    @Test public void persistedSuffixExceptionAndReplacementDriveRealDnsAndHostsExport() throws Exception {
+        load("||ads.test^\n0.0.0.0 child.ads.test\n@@||allowed.ads.test^\n192.0.2.8 redirect.test\n");
+        org.adaway.model.traffic.RuleSnapshotRepository.Snapshot snapshot =
+                PersistedRuleSnapshots.prepare(database.hostsListItemDao(), 1);
+        assertNotNull(snapshot);
+        assertEquals(1, database.hostsListItemDao().getAll().stream()
+                .filter(r -> r.getHost().equals("ads.test")).findFirst().get().getMatchScope());
+        assertEquals(2, snapshot.resolve("sub.ads.test", 1, 1).rule.sourceId);
+        assertEquals(org.adaway.model.traffic.TrafficCoreContract.Action.PASS,
+                snapshot.decide("child.allowed.ads.test", 1, 1).action);
+        byte[] blocked = snapshot.answerDns(dns("sub.ads.test", 1));
+        assertNotNull(blocked); assertEquals(3, blocked[3]);
+        byte[] replaced = snapshot.answerDns(dns("redirect.test", 1));
+        assertNotNull(replaced); assertEquals(8, replaced[replaced.length - 1]);
+        assertNull(snapshot.answerDns(dns("redirect.test", 28)));
+        assertNull(snapshot.answerDns(dns("child.allowed.ads.test", 1)));
+        database.hostEntryDao().sync();
+        assertNull(database.hostEntryDao().getEntry("sub.ads.test")); // No invented subdomains.
+        assertNotNull(database.hostEntryDao().getEntry("child.ads.test"));
+        database.hostsSourceDao().setSourceEnabled(2, false);
+        snapshot = PersistedRuleSnapshots.prepare(database.hostsListItemDao(), 2);
+        assertNotNull(snapshot); assertTrue(snapshot.records.isEmpty());
+        database.hostsSourceDao().setSourceEnabled(2, true);
+        database.hostsSourceDao().delete(source);
+        assertTrue(PersistedRuleSnapshots.prepare(database.hostsListItemDao(), 3).records.isEmpty());
+    }
+    static byte[] dns(String host, int type) {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] header = new byte[12]; header[2] = 1; header[5] = 1; out.write(header, 0, 12);
+        for (String label : host.split("\\.")) {
+            byte[] bytes = label.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+            out.write(bytes.length); out.write(bytes, 0, bytes.length);
+        }
+        out.write(0); out.write(type >>> 8); out.write(type & 255); out.write(0); out.write(1);
+        return out.toByteArray();
+    }
+    @Test public void versionEightMigrationPreservesLegacyScopeThenRefreshAndRestartRebuildTypedRules() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        String name = "rule-migration-" + java.util.UUID.randomUUID() + ".db";
+        java.io.File path = context.getDatabasePath(name); path.getParentFile().mkdirs();
+        AppDatabase migrated = null;
+        try {
+            // Reconstruct the tracked v7 schema plus the exact v8 composite index.
+            // No guessed Room identity hash or destructive migration is used.
+            String schema;
+            try (java.io.InputStream input = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+                    .getContext().getAssets().open("org.adaway.db.AppDatabase/7.json")) {
+                java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                byte[] buffer = new byte[4096]; int n;
+                while ((n = input.read(buffer)) != -1) bytes.write(buffer, 0, n);
+                schema = bytes.toString("UTF-8");
+            }
+            org.json.JSONArray entities = new org.json.JSONObject(schema).getJSONObject("database").getJSONArray("entities");
+            try (android.database.sqlite.SQLiteDatabase old = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(path, null)) {
+                for (int i = 0; i < entities.length(); i++) {
+                    org.json.JSONObject entity = entities.getJSONObject(i); String table = entity.getString("tableName");
+                    old.execSQL(entity.getString("createSql").replace("${TABLE_NAME}", table));
+                    org.json.JSONArray indexes = entity.getJSONArray("indices");
+                    for (int j = 0; j < indexes.length(); j++) old.execSQL(indexes.getJSONObject(j).getString("createSql").replace("${TABLE_NAME}", table));
+                }
+                old.execSQL("CREATE INDEX index_hosts_lists_type_enabled_host ON hosts_lists(type, enabled, host)");
+                old.execSQL("INSERT INTO hosts_sources(id,label,url,enabled,allowEnabled,redirectEnabled,size) VALUES(2,'test','https://fixture.test',1,0,1,1)");
+                old.execSQL("INSERT INTO hosts_lists(id,host,type,enabled,source_id) VALUES(1,'legacy.test',0,1,2)");
+                old.setVersion(8);
+            }
+            migrated = Room.databaseBuilder(context, AppDatabase.class, name).allowMainThreadQueries()
+                    .addMigrations(org.adaway.db.Migrations.MIGRATION_8_9).build();
+            HostListItem legacy = migrated.hostsListItemDao().getAll().get(0);
+            assertEquals(-1, legacy.getMatchScope());
+            org.adaway.model.traffic.RuleSnapshotRepository.Snapshot snapshot = PersistedRuleSnapshots.prepare(migrated.hostsListItemDao(), 1);
+            assertTrue(snapshot.records.get(0).legacy);
+            assertEquals(org.adaway.model.traffic.TrafficCoreContract.Action.PASS, snapshot.decide("sub.legacy.test", 1, 1).action);
+            HostsSource refresh = new HostsSource(); refresh.setId(2); refresh.setRedirectEnabled(true);
+            new SourceLoader(refresh).parse(new BufferedReader(new StringReader("||legacy.test^\n")), migrated.hostsListItemDao(), migrated);
+            migrated.close(); migrated = Room.databaseBuilder(context, AppDatabase.class, name).allowMainThreadQueries().build();
+            snapshot = PersistedRuleSnapshots.prepare(migrated.hostsListItemDao(), 1);
+            assertFalse(snapshot.records.get(0).legacy);
+            assertEquals(org.adaway.model.traffic.TrafficCoreContract.Action.NXDOMAIN, snapshot.decide("sub.legacy.test", 1, 1).action);
+        } finally { if (migrated != null) migrated.close(); context.deleteDatabase(name); }
+    }
     @Test public void networkFailureAfterAnInsertedBatchRollsBackAndKeepsOldSource() throws Exception {
         load("0.0.0.0 old.test\n");
         String text = "0.0.0.0 new.test\n".repeat(101);

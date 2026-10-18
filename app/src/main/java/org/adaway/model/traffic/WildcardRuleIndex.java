@@ -52,6 +52,22 @@ final class WildcardRuleIndex {
         }
     }
 
+    List<String> findMatches(String host) {
+        List<String> matches = new ArrayList<>();
+        for (String pattern : noLiteralAnchor) if (globMatches(pattern, host)) matches.add(pattern);
+        Set<String> seen = new HashSet<>();
+        for (int width = 1; width <= ANCHOR_WIDTH && width <= host.length(); width++) {
+            for (int at = 0; at + width <= host.length(); at++) {
+                String anchor = host.substring(at, at + width);
+                if (!seen.add(anchor)) continue;
+                List<String> bucket = byAnchor.get(anchor);
+                if (bucket != null) for (String pattern : bucket)
+                    if (globMatches(pattern, host)) matches.add(pattern);
+            }
+        }
+        return matches;
+    }
+
     /** Returns the same winner as a full wildcard scan, or null. */
     String findBest(String host) {
         return search(host).winner;

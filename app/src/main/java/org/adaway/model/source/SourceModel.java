@@ -127,6 +127,7 @@ public class SourceModel {
     private final RuleSnapshotRepository ruleSnapshots = new RuleSnapshotRepository();
 
     public RuleSnapshotRepository.Snapshot getRuleSnapshot() {
+        if (this.ruleSnapshots.read().generation == 0) syncHostEntries();
         return this.ruleSnapshots.read();
     }
     /**
@@ -422,26 +423,12 @@ public class SourceModel {
     public void syncHostEntries() {
         synchronized (this.updateLock) {
             setState(R.string.status_sync_database);
-            Map<String, TrafficCoreContract.Action> rules = new HashMap<>();
-            Map<String, String> replacements = new HashMap<>();
             RuleSnapshotRepository.Snapshot[] prepared = new RuleSnapshotRepository.Snapshot[1];
-            // Validate inside the transaction; errors roll back the effective table too.
             this.database.runInTransaction(() -> {
-                this.hostEntryDao.sync();
-                try (Cursor cursor = this.hostEntryDao.getAllCursor()) {
-                    while (cursor.moveToNext()) {
-                        if (rules.size() >= RuleSnapshotRepository.MAX_RULES)
-                            throw new IllegalStateException("Effective rules exceed snapshot limit");
-                        String host = cursor.getString(0);
-                        boolean replace = cursor.getInt(1) == 2;
-                        rules.put(host, replace ? TrafficCoreContract.Action.REPLACE : TrafficCoreContract.Action.NXDOMAIN);
-                        if (replace) replacements.put(host, cursor.getString(2));
-                    }
-                }
-                prepared[0] = RuleSnapshotRepository.prepareEffective(
-                        this.ruleSnapshots.read().generation + 1, rules, replacements);
-                if (prepared[0] == null)
-                    throw new IllegalStateException("Invalid effective domain rules");
+                prepared[0] = org.adaway.model.source.PersistedRuleSnapshots.prepare(
+                        this.hostListItemDao, this.ruleSnapshots.read().generation + 1);
+                if (prepared[0] == null) throw new IllegalStateException("Invalid typed rules");
+                this.hostEntryDao.syncPrepared(prepared[0]);
             });
             if (!this.ruleSnapshots.publishPrepared(prepared[0]))
                 throw new IllegalStateException("Rule snapshot publication failed");

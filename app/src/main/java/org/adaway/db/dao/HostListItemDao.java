@@ -40,6 +40,9 @@ public interface HostListItemDao {
     @Query("SELECT * FROM hosts_lists WHERE type = :type AND host LIKE :query AND ((:includeSources == 0 AND source_id == 1) || (:includeSources == 1)) GROUP BY host ORDER BY host ASC")
     PagingSource<Integer, HostListItem> loadList(int type, boolean includeSources, String query);
 
+    @Query("SELECT h.* FROM hosts_lists h JOIN hosts_sources s ON h.source_id = s.id WHERE h.enabled = 1 AND s.enabled = 1 ORDER BY h.source_id, h.id LIMIT 500001")
+    List<HostListItem> getEnabledRules();
+
     @Query("SELECT * FROM hosts_lists ORDER BY host ASC")
     List<HostListItem> getAll();
 

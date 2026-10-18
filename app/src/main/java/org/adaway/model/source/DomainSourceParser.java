@@ -13,9 +13,14 @@ public final class DomainSourceParser {
     public enum Kind { BLOCK, ALLOW, REPLACE }
     public static final class Entry {
         public final Kind kind;
+        public final org.adaway.model.traffic.DomainRule.Scope scope;
         public final String domain, address;
         Entry(Kind kind, String domain, String address) {
-            this.kind = kind; this.domain = domain; this.address = address;
+            this(kind, domain, address, domain.indexOf('*') >= 0 || domain.indexOf('?') >= 0
+                    ? org.adaway.model.traffic.DomainRule.Scope.WILDCARD : org.adaway.model.traffic.DomainRule.Scope.EXACT);
+        }
+        Entry(Kind kind, String domain, String address, org.adaway.model.traffic.DomainRule.Scope scope) {
+            this.kind = kind; this.domain = domain; this.address = address; this.scope = scope;
         }
     }
     public static final class Parsed {
@@ -69,7 +74,7 @@ public final class DomainSourceParser {
             }
             String domain = importDomain(rule);
             if (domain == null || domain.indexOf('.') < 0) throw new IllegalArgumentException("Invalid ABP domain");
-            result.entries.add(new Entry(exception || allowSource ? Kind.ALLOW : Kind.BLOCK, domain, null));
+            result.entries.add(new Entry(exception || allowSource ? Kind.ALLOW : Kind.BLOCK, domain, null, org.adaway.model.traffic.DomainRule.Scope.SUFFIX));
             return result;
         }
         int comment = line.indexOf('#');

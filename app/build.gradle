@@ -13,6 +13,7 @@ boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
 boolean progressPreview = project.findProperty('progressPreview')?.toString() == 'true'
 
 android {
+    sourceSets.androidTest.assets.srcDirs += ["$projectDir/schemas"]
     compileSdk 37
     ndkVersion '28.1.13356709'
     namespace 'org.adaway'

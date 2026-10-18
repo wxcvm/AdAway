@@ -61,6 +61,16 @@ public class HostListItem {
     @ColumnInfo(name = "source_id")
     private int sourceId;
 
+    // -1 means v8/legacy: exact unless the original stored name has an explicit glob.
+    @ColumnInfo(name = "match_scope", defaultValue = "-1")
+    private int matchScope;
+    @ColumnInfo(name = "source_order", defaultValue = "0")
+    private long sourceOrder;
+    public int getMatchScope() { return matchScope; }
+    public void setMatchScope(int value) { matchScope = value; }
+    public long getSourceOrder() { return sourceOrder; }
+    public void setSourceOrder(long value) { sourceOrder = value; }
+
     public int getId() {
         return id;
     }
@@ -76,6 +86,7 @@ public class HostListItem {
 
     public void setHost(@NonNull String host) {
         this.host = host;
+        if (matchScope == 0 && (host.contains("*") || host.contains("?"))) matchScope = 2;
     }
 
     @NonNull
@@ -120,7 +131,7 @@ public class HostListItem {
 
         if (id != item.id) return false;
         if (enabled != item.enabled) return false;
-        if (sourceId != item.sourceId) return false;
+        if (sourceId != item.sourceId || matchScope != item.matchScope || sourceOrder != item.sourceOrder) return false;
         if (!host.equals(item.host)) return false;
         if (type != item.type) return false;
         return Objects.equals(redirection, item.redirection);
@@ -135,6 +146,8 @@ public class HostListItem {
         result = 31 * result + (enabled ? 1 : 0);
         result = 31 * result + (redirection != null ? redirection.hashCode() : 0);
         result = 31 * result + sourceId;
+        result = 31 * result + matchScope;
+        result = 31 * result + Long.hashCode(sourceOrder);
         return result;
     }
 }

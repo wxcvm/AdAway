@@ -28,8 +28,10 @@ class SourceLoader {
                     BoundedSourceImport.read(reader, source.isAllowEnabled(), source.isRedirectEnabled(),
                             new BoundedSourceImport.Sink() {
                         private int cosmeticCharacters;
+                        private long order;
                         @Override public void entry(DomainSourceParser.Entry entry) {
                             HostListItem item = new HostListItem();
+                            item.setMatchScope(entry.scope.ordinal()); item.setSourceOrder(++order);
                             item.setHost(entry.domain); item.setEnabled(true); item.setSourceId(source.getId());
                             item.setType(entry.kind == DomainSourceParser.Kind.ALLOW ? ListType.ALLOWED
                                     : entry.kind == DomainSourceParser.Kind.REPLACE ? ListType.REDIRECTED : ListType.BLOCKED);
