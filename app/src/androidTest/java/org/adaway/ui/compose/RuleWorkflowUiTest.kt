@@ -161,6 +161,60 @@ class RuleWorkflowUiTest {
         saveScreenshot("rule-details-dark-large-text-copy", dialog = true)
     }
 
+    @Test fun personalDeletionRequiresConfirmationAndCanBeCancelled() {
+        val item = HostListItem().apply {
+            id = 90; host = "personal.example.com"; sourceId = 1; type = ListType.BLOCKED
+        }
+        val showing = androidx.compose.runtime.mutableStateOf(false)
+        var removals = 0
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                RuleRow(item, "Personal", onDelete = { showing.value = true })
+                if (showing.value) RuleRemovalDialog(
+                    title = compose.activity.getString(R.string.compose_rules_remove_personal_title),
+                    target = item.host,
+                    explanation = compose.activity.getString(R.string.compose_rules_remove_personal_effect),
+                    busy = false, failed = false, canConfirm = true,
+                    onConfirm = { removals++; showing.value = false },
+                    onDismiss = { showing.value = false },
+                )
+            }
+        }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.compose_rules_delete)).performClick()
+        compose.runOnIdle { assertEquals(0, removals) }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_cancel)).performClick()
+        compose.runOnIdle { assertEquals(0, removals) }
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.compose_rules_delete)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_remove_confirm)).performClick()
+        compose.runOnIdle { assertEquals(1, removals) }
+    }
+
+    @Test fun removalFailureKeepsTargetAndBusyWorkCannotBeRepeated() {
+        val busy = androidx.compose.runtime.mutableStateOf(false)
+        val failed = androidx.compose.runtime.mutableStateOf(false)
+        var removals = 0
+        compose.setContent {
+            AdAwayTheme(darkTheme = true, dynamicColor = false) {
+                RuleRemovalDialog(
+                    title = compose.activity.getString(R.string.compose_rules_delete_source_title),
+                    target = "Paused test source",
+                    explanation = compose.activity.getString(R.string.compose_rules_remove_source_effect),
+                    busy = busy.value, failed = failed.value, canConfirm = true,
+                    onConfirm = { removals++; busy.value = true }, onDismiss = {},
+                )
+            }
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_remove_confirm)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_removing)).assertIsNotEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_cancel)).assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(1, removals); busy.value = false; failed.value = true }
+        compose.onNodeWithText("Paused test source").assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_remove_failed)).assertIsDisplayed()
+        saveScreenshot("rule-removal-failed-dark", dialog = true)
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_remove_retry)).performClick()
+        compose.runOnIdle { assertEquals(2, removals) }
+    }
+
     private fun overviewScreenshot(dark: Boolean, scale: Float, name: String) {
         compose.setContent {
             val density = LocalDensity.current.density

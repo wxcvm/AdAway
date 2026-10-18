@@ -136,6 +136,9 @@ fun RulesScreen(
     var ruleRedirectInput by remember { mutableStateOf("") }
     // 订阅源规则删除提示
     var deleteSourceHint by remember { mutableStateOf<org.adaway.db.entity.HostsSource?>(null) }
+    var deletePersonalRule by remember { mutableStateOf<HostListItem?>(null) }
+    var removalSaving by remember { mutableStateOf(false) }
+    var removalFailed by remember { mutableStateOf(false) }
     // 添加订阅源：远程链接 or 本地规则文件（SAF）
     var sourceIsFile by remember { mutableStateOf(false) }
     var pickedFileUri by remember { mutableStateOf("") }
@@ -350,7 +353,7 @@ fun RulesScreen(
                                 }
                             },
                             onAddClick = { showAddDialog = true },
-                            onDelete = { deleteSourceHint = it },
+                            onDelete = { deleteSourceHint = it; deletePersonalRule = null; removalFailed = false },
                         )
                     }
                 }
@@ -384,7 +387,9 @@ fun RulesScreen(
                             onInspect = { inspectedRule = row },
                             onDelete = {
                                 if (item.sourceId == 1) {
-                                    viewModel.removeRule(item.host) { saved -> if (saved) refreshVersion++ }
+                                    deletePersonalRule = item
+                                    deleteSourceHint = null
+                                    removalFailed = false
                                 } else {
                                     inspectedRule = row
                                 }
@@ -600,29 +605,39 @@ fun RulesScreen(
         )
     }
 
-    // ── 订阅源规则删除提示对话框 ──
-    deleteSourceHint?.let { source ->
-        AlertDialog(
-            onDismissRequest = { deleteSourceHint = null },
-            title = { Text(stringResource(R.string.compose_rules_delete_source_title)) },
-            text = { Text(stringResource(R.string.compose_rules_delete_source_confirm, source.label)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    val s = source
-                    deleteSourceHint = null
-                    viewModel.removeSource(s) { saved ->
+    if (deleteSourceHint != null || deletePersonalRule != null) {
+        val source = deleteSourceHint
+        val personal = deletePersonalRule
+        RuleRemovalDialog(
+            title = stringResource(if (source != null) R.string.compose_rules_delete_source_title
+                else R.string.compose_rules_remove_personal_title),
+            target = if (source != null) source.label.orEmpty().ifBlank {
+                stringResource(R.string.compose_rules_detail_source_id, source.id)
+            } else personal!!.host,
+            explanation = stringResource(if (source != null) R.string.compose_rules_remove_source_effect
+                else R.string.compose_rules_remove_personal_effect),
+            busy = removalSaving,
+            failed = removalFailed,
+            canConfirm = !syncing,
+            onConfirm = {
+                if (!removalSaving && !syncing) {
+                    removalSaving = true
+                    removalFailed = false
+                    val onDone: (Boolean) -> Unit = { committed ->
+                        removalSaving = false
+                        removalFailed = !committed
                         reloadSources()
-                        if (saved) refreshVersion++
+                        if (committed) {
+                            deleteSourceHint = null
+                            deletePersonalRule = null
+                            refreshVersion++
+                        }
                     }
-                }) {
-                    Text(stringResource(R.string.compose_rules_delete))
+                    if (source != null) viewModel.removeSource(source, onDone)
+                    else viewModel.removeRule(personal!!.host, onDone)
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { deleteSourceHint = null }) {
-                    Text(stringResource(R.string.compose_rules_cancel))
-                }
-            },
+            onDismiss = { deleteSourceHint = null; deletePersonalRule = null; removalFailed = false },
         )
     }
 

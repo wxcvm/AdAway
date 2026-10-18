@@ -560,4 +560,11 @@
     <string name="compose_rules_detail_state">Entry status</string>
     <string name="compose_rules_copy_domain">Copy full domain</string>
     <string name="compose_rules_details_close">Close</string>
+    <string name="compose_rules_remove_personal_title">Delete personal rule?</string>
+    <string name="compose_rules_remove_personal_effect">Remove personal rules for this name. Subscription rules remain and may determine its next action. This cannot be undone.</string>
+    <string name="compose_rules_remove_source_effect">Remove this source and its imported rules. Other sources and personal rules remain. This cannot be undone.</string>
+    <string name="compose_rules_remove_confirm">Confirm deletion</string>
+    <string name="compose_rules_removing">Deleting…</string>
+    <string name="compose_rules_remove_failed">Deletion could not be saved. The item was not removed. Retry or cancel.</string>
+    <string name="compose_rules_remove_retry">Retry deletion</string>
 </resources>

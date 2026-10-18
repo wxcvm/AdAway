@@ -24,3 +24,11 @@ Room browser tests cover duplicate names with different scopes/sources, legacy s
 Tapping a rule row opens a read-only, scrollable detail dialog. It retains the complete domain and replacement address, shows action/scope/source and the combined entry/source enabled state, and offers explicit full-domain copying. All detail text remains selectable. Subscription rules retain their source-management action; personal rules do not show a subscription action. Existing delete controls remain separate from inspecting a row. Detail status describes the entry, not a claim that it is the winning DNS decision or has been applied through Root.
 
 Production-component checks verify inspection does not delete a rule, the complete host reaches the copy callback, source management remains available, and a personal detail dialog scrolls with 1.6x text in the dark theme. Screenshots include both the initial details and the scrolled copy action.
+
+## Removal confirmation and retry
+
+Deleting a personal rule now requires an explicit confirmation that names the full target and explains that subscription rules remain. Source removal uses the same scrollable confirmation component and explains that its imported rules are removed while other sources and personal rules remain. Neither operation starts when the confirmation opens or is cancelled.
+
+The dialog disables repeat submission and dismissal while the transaction/application operation runs. An uncommitted deletion retains the target and dialog with inline failure/retry feedback; a committed deletion closes the dialog and invalidates browser data. The existing ViewModel callback reports the database commit independently of subsequent Hosts/server application, so a saved deletion followed by an apply failure is not offered as an unsaved deletion retry. Existing phase feedback remains visible on the rules page.
+
+Production-component tests cover confirmation/cancel, busy controls and failed-delete retry. Room transaction/import tests remain the storage evidence; component tests do not establish Root or full-activity acceptance.

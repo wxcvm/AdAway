@@ -560,4 +560,11 @@
     <string name="compose_rules_detail_state">条目状态</string>
     <string name="compose_rules_copy_domain">复制完整域名</string>
     <string name="compose_rules_details_close">关闭</string>
+    <string name="compose_rules_remove_personal_title">删除个人规则？</string>
+    <string name="compose_rules_remove_personal_effect">移除此名称的个人规则。订阅规则会保留，并可能决定后续处理结果。此操作不可撤销。</string>
+    <string name="compose_rules_remove_source_effect">移除此来源及其已导入规则。其他来源和个人规则会保留。此操作不可撤销。</string>
+    <string name="compose_rules_remove_confirm">确认删除</string>
+    <string name="compose_rules_removing">正在删除…</string>
+    <string name="compose_rules_remove_failed">删除未能保存，内容尚未移除。请重试或取消。</string>
+    <string name="compose_rules_remove_retry">重试删除</string>
 </resources>
