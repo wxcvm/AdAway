@@ -80,7 +80,7 @@ jobs:
           disable-animations: true
           script: |
             ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.ui.compose.RuleWorkflowUiTest
-            adb pull /sdcard/Android/data/com.wxcvm.Adaway/files/ui-review ui-review
+            adb pull /sdcard/Pictures/AdAwayUiReview ui-review
       - name: Upload UI screenshots and interaction evidence
         if: always()
         uses: actions/upload-artifact@v4

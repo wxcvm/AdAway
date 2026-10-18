@@ -1,6 +1,8 @@
 package org.adaway.ui.compose
 
 import android.graphics.Bitmap
+import android.content.ContentValues
+import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -22,7 +24,6 @@ import org.adaway.ui.compose.theme.AdAwayTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
-import java.io.File
 
 /** Actual production components with fixed data; never launches root or network operations. */
 class RuleWorkflowUiTest {
@@ -73,9 +74,17 @@ class RuleWorkflowUiTest {
         compose.onNodeWithText(compose.activity.getString(R.string.compose_status_active)).assertIsDisplayed()
         compose.onNodeWithText("300,000").assertExists()
         compose.waitForIdle()
-        val directory = File(compose.activity.getExternalFilesDir(null), "ui-review").apply { mkdirs() }
-        File(directory, "$name.png").outputStream().use {
-            compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it)
+        // AGP uninstalls test APKs after the run. MediaStore output survives that
+        // cleanup on the disposable emulator and needs no storage permission.
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "$name.png")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/AdAwayUiReview")
+        }
+        val resolver = compose.activity.contentResolver
+        val uri = requireNotNull(resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values))
+        requireNotNull(resolver.openOutputStream(uri)).use {
+            check(compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
         }
         compose.onNode(hasClickAction()).performScrollTo().assertIsEnabled()
     }
