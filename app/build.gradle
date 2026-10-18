@@ -15,6 +15,7 @@ boolean progressPreview = project.findProperty('progressPreview')?.toString() ==
 def typedRuleAssets = layout.buildDirectory.dir('generated/typedRuleAssets')
 def copyTypedRuleTestFixture = tasks.register('copyTypedRuleTestFixture', Sync) {
     from "$rootDir/webserver/jni/typed_rule_vectors.tsv"
+    from "$rootDir/webserver/jni/diagnostic_dns_policy_vectors.tsv"
     into typedRuleAssets
 }
 tasks.configureEach {

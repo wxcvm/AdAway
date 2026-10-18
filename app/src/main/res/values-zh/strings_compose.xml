@@ -372,7 +372,9 @@
     <string name="compose_tun_diagnostic_test_relay">测试受保护 UDP 转发</string>
     <string name="compose_tun_diagnostic_relay_ok">本地受保护 UDP 转发测试通过：数据包经过 TUN → 本机 UDP 响应器 → TUN。</string>
     <string name="compose_tun_diagnostic_relay_failed">本地受保护 UDP 转发测试失败；未修改全局路由或 DNS。</string>
-    <string name="compose_tun_diagnostic_test_dns">测试底层 DNS（example.com）</string>
+    <string name="compose_tun_diagnostic_test_dns">测试 IPv4 地址 DNS（example.com A）</string>
+    <string name="compose_tun_diagnostic_test_dns_aaaa">测试 IPv6 地址 DNS（example.com AAAA）</string>
+    <string name="compose_tun_diagnostic_dns_result">%1$s · %2$s</string>
     <string name="compose_tun_diagnostic_dns_ok">隔离 TUN 收到有效的 DNS NOERROR 应答；可能来自本地规则或底层解析器，不代表已接管整机流量。</string>
     <string name="compose_tun_diagnostic_dns_nxdomain">收到有效的 DNS NXDOMAIN 应答；可能是本地阻断规则，也可能是上游否定应答，不代表已过滤整机流量。</string>
     <string name="compose_tun_diagnostic_dns_refused">收到有效的 DNS REFUSED 应答；可能是本地策略拒绝，也可能是上游拒绝，不代表已接管整机流量。</string>

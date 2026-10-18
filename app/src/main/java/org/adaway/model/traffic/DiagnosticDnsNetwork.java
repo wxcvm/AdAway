@@ -13,7 +13,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 
 /**
- * One-shot real upstream DNS transport for the fixed example.com A question.
+ * One-shot real upstream DNS transport for the fixed example.com A/AAAA question.
  *
  * No resolver addresses or user queries are stored or sent to telemetry.
  * Only an OS-provided DNS server of a validated, non-VPN network is used.

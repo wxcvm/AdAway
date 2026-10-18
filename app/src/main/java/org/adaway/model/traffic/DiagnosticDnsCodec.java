@@ -1,13 +1,15 @@
 package org.adaway.model.traffic;
 
 /**
- * Diagnostic-only DNS message validation. Exactly one fixed A question for
+ * Diagnostic-only DNS message validation. Exactly one fixed A or AAAA question for
  * example.com is permitted. This is not a recursive/open DNS proxy and must
  * not be used with default TUN routes.
  */
 public final class DiagnosticDnsCodec {
     public static final int PORT = 53537;
     public static final int MAX_DATAGRAM = 512;
+    public static final int TYPE_A = 1;
+    public static final int TYPE_AAAA = 28;
     // DNS label form: example.com. + QTYPE=A + QCLASS=IN
     private static final byte[] QUESTION = {
             7, 'e','x','a','m','p','l','e',
@@ -19,12 +21,19 @@ public final class DiagnosticDnsCodec {
     private DiagnosticDnsCodec() { }
 
     public static byte[] query(int transactionId) {
+        return query(transactionId, TYPE_A);
+    }
+
+    public static byte[] query(int transactionId, int type) {
+        if (type != TYPE_A && type != TYPE_AAAA)
+            throw new IllegalArgumentException("Unsupported diagnostic DNS type");
         byte[] value = new byte[HEADER_LENGTH + QUESTION.length];
         value[0] = (byte) (transactionId >>> 8);
         value[1] = (byte) transactionId;
         value[2] = 1; // RD: recursion requested; the query has no EDNS/extensions
         value[5] = 1; // exactly one question
         System.arraycopy(QUESTION, 0, value, HEADER_LENGTH, QUESTION.length);
+        value[HEADER_LENGTH + QUESTION.length - 3] = (byte) type;
         return value;
     }
 
@@ -58,7 +67,11 @@ public final class DiagnosticDnsCodec {
         if ((response[2] & 0x80) == 0 || (response[2] & 0x78) != 0) return false;
         if ((response[4] & 0xff) != 0 || (response[5] & 0xff) != 1)
             return false;
-        return matchesQuestion(response);
+        // Match the original type as well as name/class. A and AAAA permits
+        // and replies are never interchangeable, even with the same ID.
+        for (int i = HEADER_LENGTH; i < HEADER_LENGTH + QUESTION.length; i++)
+            if (query[i] != response[i]) return false;
+        return true;
     }
 
     private static int unsigned16(byte[] bytes, int offset) {
@@ -102,6 +115,11 @@ public final class DiagnosticDnsCodec {
     private static boolean matchesQuestion(byte[] message) {
         if (message.length < HEADER_LENGTH + QUESTION.length) return false;
         for (int i = 0; i < QUESTION.length; i++) {
+            if (i == QUESTION.length - 3) {
+                if (message[HEADER_LENGTH + i] != TYPE_A
+                        && message[HEADER_LENGTH + i] != TYPE_AAAA) return false;
+                continue;
+            }
             if (message[HEADER_LENGTH + i] != QUESTION[i]) return false;
         }
         return true;

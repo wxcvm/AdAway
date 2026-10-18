@@ -16,8 +16,8 @@
 - `DiagnosticUdpRelay` 把测试地址 UDP 53536 的小报文（不超过 256 字节）交给受保护的 DatagramSocket，固定发往本机 `127.0.0.1` 的临时端口，响应再封装到 TUN。响应器将首字节异或 `0x5a`，可以与直接 Echo 区分。不存在任意公网目的地转发。
 - `DiagnosticUdpEcho` 的报文解析已加强：源/目标诊断地址固定、协议与端口白名单、分片拒绝、IP/UDP 长度一致性及非零校验和验证。
 - 入口有单工作线程及 200 ms 冷却限制，转发套接字设 900 ms 接收超时；停止服务会关闭本机 UDP 监听与 TUN。追加 JVM 用例验证包重封装、校验和、错误输入和异常隔离。
-- 新增 `DiagnosticDnsCodec`、`DiagnosticDnsRelay`、`DiagnosticDnsNetwork`：只允许 `example.com A` 的 DNS 消息，经测试 IP 的 UDP 53537 端口触发；每次用户点击才从 Android 已验证的非 VPN 底层网络选择系统 IPv4 DNS 服务器，以 `protect(socket)` 加 `Network.bindSocket` 的方式向其 53/UDP 发送一次查询。
-- DNS 查询内容、事务 ID、应答的来源地址/端口与 DNS 问题均需匹配，512 字节以上、截断/非法数据拒绝，不实现任意域名/任意服务器的通用 DNS 代理。严格 Private DNS、网络阻断 UDP 53 或无非 VPN IPv4 DNS 时允许测试失败，**不触碰系统 DNS 配置**。
+- `DiagnosticDnsCodec`、`DiagnosticDnsRelay`、`DiagnosticDnsNetwork`：只允许 `example.com A/AAAA` 的 DNS 消息，经测试 IP 的 UDP 53537 端口触发；每次用户点击才从 Android 已验证的非 VPN 底层网络选择系统 IPv4 DNS 服务器，以 `protect(socket)` 加 `Network.bindSocket` 的方式向其 53/UDP 发送一次查询。AAAA 是 IPv6 地址记录测试，仍使用现有 IPv4 诊断通路，不代表 IPv6 TUN 接管。
+- DNS 查询内容、事务 ID、应答的来源地址/端口与原始问题类型均需匹配。有效截断 UDP 仅触发一次同端点 TCP 重试，共享 1200 毫秒总预算；512 字节以上、TCP 再次截断或非法数据拒绝。没有任意域名/任意服务器的通用 DNS 代理。严格 Private DNS、网络阻断或无非 VPN IPv4 DNS 时允许测试失败，**不触碰系统 DNS 配置**。
 - Windows 新增只读 `wintun_probe_win32`，安全加载本地 DLL 并检查必要的 Wintun API、驱动是否运行；`windows_capture_plan` 在转发、DNS 或回滚尚未就绪时拒绝进入真实接管。
 
 

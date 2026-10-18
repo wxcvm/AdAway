@@ -5,6 +5,18 @@ import static org.junit.Assert.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class DiagnosticDnsAuthorizationTest {
+    @Test public void aAndAaaaPermitsWithTheSameIdAreNotInterchangeable() {
+        DiagnosticDnsAuthorization permits = new DiagnosticDnsAuthorization(1, () -> 0);
+        byte[] a = DiagnosticDnsCodec.query(42), aaaa = DiagnosticDnsCodec.query(42, 28);
+        try (DiagnosticDnsAuthorization.Lease lease = permits.issue(1, 4000, aaaa)) {
+            assertNotNull(lease);
+            assertFalse(permits.consume(1, 4000, a));
+            assertTrue(permits.consume(1, 4000, aaaa));
+            assertFalse(permits.consume(1, 4000, aaaa));
+        }
+        permits.close();
+        assertNull(permits.issue(1, 4000, aaaa));
+    }
     @Test public void boundsUidPortQuestionExpiryReplayAndCancellation() {
         AtomicLong now = new AtomicLong(100);
         DiagnosticDnsAuthorization permits = new DiagnosticDnsAuthorization(1000, now::get);

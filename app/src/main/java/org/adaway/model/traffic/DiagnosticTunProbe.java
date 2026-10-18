@@ -16,14 +16,19 @@ public final class DiagnosticTunProbe {
     private DiagnosticTunProbe() {}
 
     /**
-     * Public-network diagnostic for exactly example.com A via the OS-selected
+     * Public-network diagnostic for exactly example.com A/AAAA via the OS-selected
      * underlying network DNS resolver. Only initiated by the user, and only
      * through the test-only TUN IP and UDP port.
      */
     /** -1 = transport/validation failure; 0..15 = actual DNS RCODE. */
     public static int dnsResponseCode() {
+        return dnsResponseCode(DiagnosticDnsCodec.TYPE_A);
+    }
+
+    public static int dnsResponseCode(int type) {
         if (!DiagnosticVpnService.isActive()) return -1;
-        byte[] request = DiagnosticDnsCodec.query(RANDOM.nextInt(65536));
+        if (type != DiagnosticDnsCodec.TYPE_A && type != DiagnosticDnsCodec.TYPE_AAAA) return -1;
+        byte[] request = DiagnosticDnsCodec.query(RANDOM.nextInt(65536), type);
         try (DatagramSocket socket = new DatagramSocket()) {
             try (DiagnosticDnsAuthorization.Lease permit = DiagnosticVpnService.authorizeDnsProbe(
                     socket.getLocalPort(), request)) {

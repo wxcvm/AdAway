@@ -2,7 +2,7 @@ name: Traffic mode decision tests
 
 on:
   pull_request:
-    branches: [master, feat/typed-rule-provenance-v1, feat/traffic-mode-foundation, fix/android-diagnostic-p0, feat/isolated-transport-poc, feat/rule-loader-atomic-v1]
+    branches: [master, feat/dns-tcp-diagnostics-v1, feat/typed-rule-provenance-v1, feat/traffic-mode-foundation, fix/android-diagnostic-p0, feat/isolated-transport-poc, feat/rule-loader-atomic-v1]
     paths:
       - 'app/src/main/java/org/adaway/model/traffic/**'
       - 'app/src/test/java/org/adaway/model/traffic/**'

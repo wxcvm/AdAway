@@ -17,7 +17,7 @@ public class DiagnosticDnsSharedVectorsTest {
                 : DiagnosticDnsCodec.shouldRetryOverTcp(q, r) ? 2 : 0;
             assertEquals(cells[0], Integer.parseInt(cells[3]), actual); cases++;
         }
-        assertTrue(cases >= 20);
+        assertEquals(53, cases);
     }
     private static byte[] hex(String value) {
         if (value.equals("-")) return new byte[0];

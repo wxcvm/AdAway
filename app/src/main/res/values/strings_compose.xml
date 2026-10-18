@@ -371,7 +371,9 @@
     <string name="compose_tun_diagnostic_test_relay">Test protected UDP relay</string>
     <string name="compose_tun_diagnostic_relay_ok">Protected UDP socket relay passed: test packets crossed TUN → loopback responder → TUN.</string>
     <string name="compose_tun_diagnostic_relay_failed">Local protected UDP relay test failed. Global routing and DNS were not modified.</string>
-    <string name="compose_tun_diagnostic_test_dns">Test underlying DNS (example.com)</string>
+    <string name="compose_tun_diagnostic_test_dns">Test IPv4 address DNS (example.com A)</string>
+    <string name="compose_tun_diagnostic_test_dns_aaaa">Test IPv6 address DNS (example.com AAAA)</string>
+    <string name="compose_tun_diagnostic_dns_result">%1$s · %2$s</string>
     <string name="compose_tun_diagnostic_dns_ok">Valid DNS NOERROR response received through the isolated TUN. This may be from a local rule or the underlying resolver; it does not prove device-wide filtering.</string>
     <string name="compose_tun_diagnostic_dns_nxdomain">Valid DNS NXDOMAIN response received. This may be a local block rule or a negative upstream response; no whole-device interception is implied.</string>
     <string name="compose_tun_diagnostic_dns_refused">Valid DNS REFUSED response received. This may be a local policy rejection or an upstream refusal; no whole-device interception is implied.</string>

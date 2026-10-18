@@ -25,10 +25,13 @@ int main(int argc, char **argv) {
         if ((int)got != atoi(expected)) { fprintf(stderr, "case failed: %s\n", name); return 1; }
         cases++;
     }
-    assert(!ferror(file)); assert(!fclose(file)); assert(cases >= 20);
+    assert(!ferror(file)); assert(!fclose(file)); assert(cases == 53);
     uint8_t q[DDNS_QUERY_SIZE], response[514]; ddns_query(q, 42);
+    uint8_t original[DDNS_QUERY_SIZE]; memcpy(original,q,sizeof(q));
+    assert(!ddns_query_type(q,42,15) && !memcmp(original,q,sizeof(q)));
     uint32_t seed = 53537;
     for (unsigned i = 0; i < 10000; i++) {
+        assert(ddns_query_type(q,42,i % 2 ? 1 : 28));
         seed = seed * 1664525u + 1013904223u; size_t n = seed % sizeof(response);
         for (size_t j = 0; j < n; j++) { seed = seed * 1664525u + 1013904223u; response[j] = (uint8_t)(seed >> 24); }
         (void)ddns_classify(q, sizeof(q), response, n);

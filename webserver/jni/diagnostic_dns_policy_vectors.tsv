@@ -1,0 +1,17 @@
+# case	type	rules-with-escaped-newlines	action	source	scope	synthetic-response-hex-or-upstream
+empty-1	1	-	0	0	0	-
+empty-28	28	-	0	0	0	-
+block-1	1	||example.com^\n	1	2	1	535381030001000000000000076578616d706c6503636f6d0000010001
+block-28	28	||example.com^\n	1	2	1	535381030001000000000000076578616d706c6503636f6d00001c0001
+exception-1	1	||example.com^\n@@||example.com^\n	0	2	1	-
+exception-28	28	||example.com^\n@@||example.com^\n	0	2	1	-
+ipv4-1	1	192.0.2.7 example.com\n	4	2	0	535381000001000100000000076578616d706c6503636f6d0000010001c00c00010001000000000004c0000207
+ipv4-28	28	192.0.2.7 example.com\n	0	2	0	-
+ipv6-1	1	2001:db8::7 example.com\n	0	2	0	-
+ipv6-28	28	2001:db8::7 example.com\n	4	2	0	535381000001000100000000076578616d706c6503636f6d00001c0001c00c001c000100000000001020010db8000000000000000000000007
+ipv6-exception-1	1	2001:db8::7 example.com\n@@||example.com^\n	0	2	1	-
+ipv6-exception-28	28	2001:db8::7 example.com\n@@||example.com^\n	0	2	1	-
+unsupported-condition-1	1	||example.com^$script\n	0	0	0	-
+unsupported-condition-28	28	||example.com^$script\n	0	0	0	-
+hosts-block-1	1	0.0.0.0 example.com\n	1	2	0	535381030001000000000000076578616d706c6503636f6d0000010001
+hosts-block-28	28	0.0.0.0 example.com\n	1	2	0	535381030001000000000000076578616d706c6503636f6d00001c0001

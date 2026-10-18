@@ -74,6 +74,46 @@ public class SourceLoaderRoomTest {
     private void load(String text) throws IOException {
         new SourceLoader(source).parse(new BufferedReader(new StringReader(text)), database.hostsListItemDao(), database);
     }
+    @Test public void fixedAAndAaaaPolicyVectorsSurviveRealImportPersistenceAndRelay() throws Exception {
+        int cases = 0;
+        try (BufferedReader reader = new BufferedReader(new java.io.InputStreamReader(
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getContext()
+                    .getAssets().open("diagnostic_dns_policy_vectors.tsv"), java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                String[] f = line.split("\t");
+                load(f[2].equals("-") ? "" : f[2].replace("\\n", "\n"));
+                org.adaway.model.traffic.RuleSnapshotRepository.Snapshot snapshot =
+                    PersistedRuleSnapshots.prepare(database.hostsListItemDao(), 1);
+                assertNotNull(f[0], snapshot);
+                int type = Integer.parseInt(f[1]);
+                org.adaway.model.traffic.RuleSnapshotRepository.Resolution hit = snapshot.resolve("example.com",type,1);
+                assertEquals(f[0],Integer.parseInt(f[3]),hit.decision.action.ordinal());
+                assertEquals(f[0],Long.parseLong(f[4]),hit.rule == null ? 0 : hit.rule.sourceId);
+                assertEquals(f[0],Integer.parseInt(f[5]),hit.rule == null ? 0 : hit.rule.scope.ordinal());
+                byte[] q = org.adaway.model.traffic.DiagnosticDnsCodec.query(0x5353,type);
+                int[] calls = {0};
+                byte[] answer = org.adaway.model.traffic.DiagnosticDnsRelay.resolveFromSnapshotOrUpstream(q,snapshot,request -> {
+                    calls[0]++; assertArrayEquals(q,request);
+                    byte[] reply = request.clone(); reply[2] = (byte)0x81; return reply;
+                });
+                assertTrue(f[0],org.adaway.model.traffic.DiagnosticDnsCodec.matchesResponse(q,answer));
+                if (f[6].equals("-")) {
+                    assertEquals(f[0],1,calls[0]);
+                    byte[] expected = q.clone(); expected[2] = (byte)0x81;
+                    assertArrayEquals(f[0],expected,answer);
+                } else {
+                    assertEquals(f[0],0,calls[0]);
+                    byte[] expected = new byte[f[6].length()/2];
+                    for (int i = 0; i < expected.length; i++) expected[i] = (byte)Integer.parseInt(f[6].substring(i*2,i*2+2),16);
+                    assertArrayEquals(f[0],expected,answer);
+                }
+                cases++;
+            }
+        }
+        assertEquals(16,cases);
+    }
     @Test public void persistedSuffixExceptionAndReplacementDriveRealDnsAndHostsExport() throws Exception {
         load("||ads.test^\n0.0.0.0 child.ads.test\n@@||allowed.ads.test^\n192.0.2.8 redirect.test\n");
         org.adaway.model.traffic.RuleSnapshotRepository.Snapshot snapshot =

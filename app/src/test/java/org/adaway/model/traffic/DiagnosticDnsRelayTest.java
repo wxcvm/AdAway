@@ -6,7 +6,7 @@ import java.io.IOException;
 import org.junit.Test;
 
 public final class DiagnosticDnsRelayTest {
-    private static byte[] packet(byte[] question) {
+    static byte[] packet(byte[] question) {
         int len = 28 + question.length;
         byte[] packet = new byte[len];
         packet[0] = 0x45;
