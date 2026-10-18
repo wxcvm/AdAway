@@ -23,7 +23,7 @@
     <string name="compose_actions">Actions</string>
     <string name="compose_sync_hosts">Synchronize hosts</string>
     <string name="compose_sync_hosts_running">Syncing…</string>
-    <string name="compose_sync_hosts_subtitle">Apply latest sources to hosts file</string>
+    <string name="compose_sync_hosts_subtitle">Apply known names to hosts; unknown subdomains are not expanded</string>
     <string name="compose_ws_settings">Web server settings</string>
     <string name="compose_ws_settings_subtitle">TLS, block images, statistics</string>
     <string name="compose_ws_control_title">Web server</string>

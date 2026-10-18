@@ -35,7 +35,6 @@ import org.adaway.db.entity.HostsSource;
 import org.adaway.model.error.HostErrorException;
 import org.adaway.model.git.GitHostsSource;
 import org.adaway.model.traffic.RuleSnapshotRepository;
-import org.adaway.model.traffic.TrafficCoreContract;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -48,8 +47,6 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
 
 import okhttp3.Cache;
 import okhttp3.OkHttpClient;

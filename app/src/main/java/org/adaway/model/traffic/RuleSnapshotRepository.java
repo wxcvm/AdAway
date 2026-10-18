@@ -13,6 +13,7 @@ import org.adaway.model.source.DomainSourceParser;
 /** Immutable effective domain rules, published after a successful source/database sync. */
 public final class RuleSnapshotRepository {
     public static final int MAX_RULES = 500000;
+    public static final long MAX_NAME_BYTES = 32L * 1024 * 1024;
     public static final class Snapshot {
         public final long generation;
         public final Map<String, TrafficCoreContract.Action> rules;
@@ -120,11 +121,18 @@ public final class RuleSnapshotRepository {
     public static Snapshot prepareRules(long generation, List<DomainRule> records) {
         if (generation < 1 || records == null || records.size() > MAX_RULES) return null;
         List<DomainRule> owned = new ArrayList<>(records.size());
+        long nameBytes = 0;
         for (DomainRule rule : records) {
             if (rule == null || rule.scope == null || rule.action == null || rule.sourceId < 1
                     || rule.sourceId > Integer.MAX_VALUE || rule.order < 1) return null;
             String domain = canonicalRule(rule.domain);
             if (domain == null || ((domain.contains("*") || domain.contains("?")) != (rule.scope == DomainRule.Scope.WILDCARD))) return null;
+            // The typed import subset uses NXDOMAIN for ordinary blocks. Other
+            // block policies remain supported by the legacy explicit-map API.
+            if (rule.action == TrafficCoreContract.Action.REFUSED || rule.action == TrafficCoreContract.Action.ZERO_ADDRESS)
+                return null;
+            nameBytes += domain.length() + 1L; // canonical rules are ASCII, as in the native name pool
+            if (nameBytes > MAX_NAME_BYTES) return null;
             if (rule.action == TrafficCoreContract.Action.REPLACE ? rule.address == null || !InetAddresses.isInetAddress(rule.address)
                     : rule.address != null) return null;
             owned.add(new DomainRule(domain, rule.action, rule.scope, rule.address, rule.sourceId, rule.order, rule.legacy));

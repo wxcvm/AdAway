@@ -65,4 +65,26 @@ public class TypedRuleSnapshotTest {
             assertEquals(TrafficCoreContract.Reason.UNCLASSIFIED, snapshot.decide("absent.other.test", 1, 1).reason);
         }
     }
+    @Test public void concurrentTypedDecisionsNeverMixSourceAddressOrGeneration() throws Exception {
+        RuleSnapshotRepository store = new RuleSnapshotRepository();
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
+        Thread writer = new Thread(() -> {
+            try {
+                for (int i = 1; i <= 1000; i++) assertTrue(store.publishPrepared(RuleSnapshotRepository.prepareRules(i,
+                        List.of(new DomainRule("ads.test", TrafficCoreContract.Action.REPLACE, DomainRule.Scope.SUFFIX,
+                                i % 2 == 0 ? "192.0.2.8" : "192.0.2.9", i % 2 == 0 ? 2 : 3, i, false)))));
+            } catch (Throwable error) { failure.set(error); }
+        });
+        writer.start();
+        for (int i = 0; i < 20000; i++) {
+            RuleSnapshotRepository.Resolution result = store.read().resolve("sub.ads.test", 1, 1);
+            if (result.generation == 0) continue;
+            assertEquals(result.generation, result.rule.order);
+            assertEquals(result.generation % 2 == 0 ? 2 : 3, result.rule.sourceId);
+            assertEquals(result.generation % 2 == 0 ? "192.0.2.8" : "192.0.2.9", result.address);
+        }
+        writer.join(10000); assertFalse(writer.isAlive());
+        if (failure.get() != null) throw new AssertionError(failure.get());
+        assertEquals(1000, store.read().generation);
+    }
 }

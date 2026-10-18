@@ -46,7 +46,10 @@ Native production block snapshots retain allow/replacement/block records,
 provenance and scope. Exact/suffix lookups use a sorted index and parent-label
 searches. Wildcard records use rare required literal anchor buckets, built
 before publication. The 500,000-entry and 32 MiB name-pool limits remain.
-Legacy native semantic files remain readable with a legacy marker. Windows
+Legacy native semantic files remain readable with a legacy marker. Java typed
+snapshots also enforce the existing native 32 MiB name budget before commit;
+ordinary imported blocks use NXDOMAIN, while other explicit block policies
+remain available through the compatibility map API. Windows
 new subscription updates serialize versioned records in one staged file:
 
 `@adaway-rule-v1<TAB>source<TAB>order<TAB>kind<TAB>scope<TAB>domain<TAB>address-or--`

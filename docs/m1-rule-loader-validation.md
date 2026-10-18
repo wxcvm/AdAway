@@ -1,5 +1,9 @@
 # M1-R1: transactional domain imports and native reload integration
 
+Update (2026-10-18): this document records the original loader stage. Typed
+Room persistence, suffix/provenance decisions and current integration limits
+are described in [typed-rule-provenance.md](typed-rule-provenance.md).
+
 Depends on Android draft #47 (and its #46/#45 parents). This change keeps the
 selected mode and diagnostic capture gates. It does not create routes, launch
 a new forwarding backend, install a CA, merge or publish a release.
@@ -83,12 +87,12 @@ results must be reported separately from physical-device acceptance.
 
 ## Remaining M1-R1 acceptance and product limits
 
-The effective Java snapshot records final actions, not full source provenance
-or persistent ABP suffix metadata. Root Hosts files still express exact names;
-the new native ABP evaluator can express suffix scope. This PR does not claim
-full Android/Windows DNS decision equivalence for every source combination.
-That typed loader/suffix/provenance bridge remains required before M1-R1 is
-accepted in full and before production DNS integration.
+The typed Java snapshot now retains persisted source/suffix metadata; the
+effective Hosts export still expresses only known concrete names. Shared
+ASCII domain decisions and the existing limited DNS encoders are covered by
+the typed-stage tests. Native HTTP exemption files, Unicode source parsing
+and full device/platform coverage remain distinct capabilities, so full M1
+acceptance is not implied by matching shared vectors.
 
 Manual exemption files intentionally treat a pasted full URL as an explicit
 whole-domain user exemption; conditional ABP imports are always skipped.

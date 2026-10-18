@@ -147,6 +147,13 @@ public class SourceLoaderRoomTest {
         assertEquals("old.test", database.hostsListItemDao().getAll().get(0).getHost());
         load("# intentionally empty\n"); assertTrue(database.hostsListItemDao().getAll().isEmpty());
     }
+    @Test public void invalidPersistedMetadataCannotEraseTheLastEffectiveHostsTable() throws Exception {
+        load("0.0.0.0 old.test\n"); database.hostEntryDao().sync();
+        HostListItem row = database.hostsListItemDao().getAll().get(0);
+        row.setMatchScope(99); database.hostsListItemDao().update(row);
+        try { database.hostEntryDao().sync(); fail(); } catch (IllegalStateException expected) { }
+        assertNotNull(database.hostEntryDao().getEntry("old.test"));
+    }
     @Test public void effectiveDaoPriorityMatchesUserExceptionReplacementBlockOrder() throws Exception {
         load("0.0.0.0 ads.test\n192.0.2.8 ads.test\n@@||ads.test^\n");
         database.hostEntryDao().sync(); assertNull(database.hostEntryDao().getEntry("ads.test"));
