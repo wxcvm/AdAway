@@ -1,4 +1,4 @@
-"""Validate the APK's real ELF entry, ARM64 ABI and build provenance, after stripping."""
+"""Validate both packaged native executables and their per-variant provenance."""
 import argparse
 import hashlib
 import struct
@@ -48,18 +48,20 @@ def main():
     parser.add_argument('--variant', choices=('debug', 'release'), default='release')
     parser.add_argument('--write-apk-path-file', type=Path)
     parser.add_argument('--executable', type=Path, required=True)
+    parser.add_argument('--tcpdump-executable', type=Path)
     args = parser.parse_args()
     apk_path = args.apk if args.apk is not None else find_apk(args.apk_root, args.variant)
+    tcpdump = args.tcpdump_executable or Path(f'tcpdump/build/generated/tcpdumpJniLibs/{args.variant}/arm64-v8a/libtcpdump_exec.so')
     with zipfile.ZipFile(apk_path) as apk:
-        packaged = apk.read('lib/arm64-v8a/libwebserver_exec.so')
-    built = args.executable.read_bytes()
-    # AGP strips section/symbol tables; runtime PT_LOAD contents and entry must still match.
-    if load_segments(packaged) != load_segments(built):
-        raise ValueError('Packaged server differs from this variant\'s generated executable')
+        for name, executable in (('webserver', args.executable), ('tcpdump', tcpdump)):
+            packaged = apk.read(f'lib/arm64-v8a/lib{name}_exec.so')
+            # AGP strips section/symbol tables; PT_LOAD contents and entry must still match.
+            if load_segments(packaged) != load_segments(executable.read_bytes()):
+                raise ValueError(f'Packaged {name} differs from this variant\'s generated executable')
+            print(f'Verified ARM64 executable {name}, entry={load_segments(packaged)[0]:#x}, '
+                  f'bytes={len(packaged)}, sha256={hashlib.sha256(packaged).hexdigest()}')
     if args.write_apk_path_file:
         args.write_apk_path_file.write_text(str(apk_path) + '\n', encoding='utf-8')
-    print(f'Verified ARM64 executable, entry={load_segments(packaged)[0]:#x}, '
-          f'bytes={len(packaged)}, sha256={hashlib.sha256(packaged).hexdigest()}')
 
 
 if __name__ == '__main__':

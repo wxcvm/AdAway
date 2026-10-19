@@ -1,12 +1,6 @@
 apply plugin: 'com.android.library'
 
 android {
-    sourceSets {
-        main {
-            jniLibs.srcDirs = ['libs']
-        }
-    }
-
     compileSdk 36
     ndkVersion '28.1.13356709'
     namespace 'org.adaway.libpcap'
@@ -14,6 +8,8 @@ android {
     defaultConfig {
         minSdkVersion 30
         targetSdk 35
+        ndk { abiFilters project.findProperty('ruleLoaderTestAbi')?.toString() ?: 'arm64-v8a' }
+        externalNativeBuild { ndkBuild { targets 'tcpdump' } }
     }
 
     externalNativeBuild {
@@ -24,45 +20,45 @@ android {
 
 }
 
-/**
- * Task to rename executables from hello_world to libhello_world_exec.so
- * If they look like libraries, they are packaged in the apk and deployed on the device in the lib folder!
- *
- * BUG FIX: apply the same LibraryJniLibsTask → task-name-matching fix
- * that webserver/build.gradle already received. Depending on an internal
- * AGP class silently breaks across AGP upgrades and can cause the real
- * executable to never get packaged.
- */
-def renameJniLibAsExecutable = tasks.register('renameJniLibAsExecutable', Copy) {
-    def flavor = gradle.startParameter.taskRequests.toString().containsIgnoreCase("debug") ? "debug" : "release"
-    def buildFolder = layout.buildDirectory.dir("intermediates/ndkBuild/${flavor}/obj/local")
+// Executables are generated per variant, without packaging a fallback stub.
+abstract class PackageTcpdumpExecutable extends DefaultTask {
+    @InputDirectory abstract DirectoryProperty getNativeDirectory()
+    @Input abstract Property<Integer> getTargetMachine()
+    @Input abstract Property<String> getTargetAbi()
+    @OutputDirectory abstract DirectoryProperty getOutputDirectory()
 
-    dependsOn ":${project.name}:externalNativeBuild${flavor.substring(0, 1).toUpperCase()}${flavor.substring(1)}"
-
-    outputs.upToDateWhen { false }
-
-    from(buildFolder) {
-        exclude "**/objs"
-        exclude "**/objs-debug"
-        exclude "**/*.a"
-        exclude "**/*.d"
-        exclude "**/*.o"
-        exclude "**/*.so"
-        exclude "**/*.txt"
-    }
-
-    into buildFolder
-
-    rename '(.+)', 'lib$1_exec.so'
-
-    eachFile {
-        println "Replacing ${it.getPath()} from ${flavor} ndkBuild directory"
+    @TaskAction void packageExecutable() {
+        def executable = nativeDirectory.file(targetAbi.get() + '/tcpdump').get().asFile
+        def header = new byte[32]
+        executable.withInputStream { stream ->
+            if (stream.read(header) != header.length)
+                throw new GradleException("Truncated native executable: ${executable}")
+        }
+        // ELF64 little-endian PIE, with a real executable entry point.
+        def entry = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(24)
+        if (header[0] != 0x7f || header[1] != 69 || header[2] != 76 || header[3] != 70 ||
+                header[4] != 2 || header[5] != 1 || (header[18] & 0xff) != targetMachine.get() || header[19] != 0 || entry == 0)
+            throw new GradleException("Not an executable for the requested ABI (placeholder libraries are forbidden): ${executable}")
+        project.copy {
+            from executable
+            into outputDirectory.dir(targetAbi.get())
+            rename { 'libtcpdump_exec.so' }
+        }
     }
 }
 
-tasks.configureEach { t ->
-    if (t.name.matches(/(?i).*merge.*(JniLibFolders|NativeLibs).*/)) {
-        t.dependsOn(renameJniLibAsExecutable)
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def capitalized = variant.name.capitalize()
+        def abi = project.findProperty('ruleLoaderTestAbi')?.toString() ?: 'arm64-v8a'
+        if (!(abi in ['arm64-v8a', 'x86_64'])) throw new GradleException("Unsupported tcpdump ABI: ${abi}")
+        def packageTask = tasks.register("package${capitalized}TcpdumpExecutable", PackageTcpdumpExecutable) {
+            dependsOn "externalNativeBuild${capitalized}"
+            targetAbi.set(abi)
+            targetMachine.set(abi == 'arm64-v8a' ? 183 : 62)
+            nativeDirectory.set(layout.buildDirectory.dir("intermediates/ndkBuild/${variant.name}/obj/local"))
+            outputDirectory.set(layout.buildDirectory.dir("generated/tcpdumpJniLibs/${variant.name}"))
+        }
+        variant.sources.jniLibs.addGeneratedSourceDirectory(packageTask, { it.outputDirectory })
     }
 }
-

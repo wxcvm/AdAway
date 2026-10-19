@@ -15,6 +15,7 @@ Root 透明重定向仍需要 IPv4 回环监听；不兼容的自定义地址会
 旧 progress-android-20261019.1 预览已转为草稿。原因是旧任务通过全局命令中的 Debug 字样选择变体，混合 Debug 测试和 Release 打包时可能仅替换 Debug 占位库。
 现在删除占位库构建，按 AndroidComponents 公共生成源码接口给每个变体独立提供真实可执行文件。
 最终 APK 必须通过 ARM64 ELF 入口、可执行加载区段和本次变体代码一致性检查；运行时在停止原服务前再次拒绝无效安装包。
+tcpdump 同样移除占位库与全局变体选择，采用每个变体的 generated jniLibs。生产包只打入 ARM64，模拟器单独构建 x86_64；最终 APK 校验同时检查服务器和抓包程序。
 
 依赖选择：保留现有 Mongoose 的 mg_http_listen 和事件循环，分别创建 IPv4 / IPv6 监听；不整体更换服务器或引入第二套 TLS/生命周期。
 本机地址使用 Android 的 java.net.NetworkInterface 枚举，排除回环、链路本地、多播、点对点和虚拟接口；兼容 API 30 虚拟网卡异常。
