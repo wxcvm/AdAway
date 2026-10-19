@@ -76,14 +76,14 @@ object AdGuardHomeConfigFile {
             }
             Outcome.Applied(backup, ready.changes.size)
         } catch (e: Exception) {
-            tmp.delete()
+            val tempCleaned = !tmp.exists() || tmp.delete()
             val restored = try {
                 configPath.writeText(original, Charsets.UTF_8)
                 configPath.readText(Charsets.UTF_8) == original
             } catch (e2: Exception) {
                 false
             }
-            Outcome.Failed("${e.message}（已回滚=$restored）", rolledBack = restored)
+            Outcome.Failed("${e.message}（已回滚=$restored；临时文件已清理=$tempCleaned）", rolledBack = restored)
         }
     }
 }

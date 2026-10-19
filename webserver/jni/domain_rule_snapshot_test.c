@@ -142,6 +142,26 @@ static void production_adapter(const char *directory) {
     dr_dispose(&repository.rules);
     puts("Actual production exemption loader: rollback, stable generation, legacy syntax and explicit deletion passed");
 }
+static void equality_ignores_padding(void) {
+    struct dr_store store = DR_STORE_INITIALIZER;
+    struct dr_builder builder = {0};
+    store.current.entries = malloc(sizeof(struct dr_entry));
+    builder.next.entries = malloc(sizeof(struct dr_entry));
+    CHECK(store.current.entries && builder.next.entries);
+    store.current.count = builder.next.count = 1;
+    memset(store.current.entries, 0xa5, sizeof(struct dr_entry));
+    memset(builder.next.entries, 0x5a, sizeof(struct dr_entry));
+    struct dr_entry *entries[] = {store.current.entries, builder.next.entries};
+    for (unsigned i = 0; i < 2; i++) {
+        strcpy(entries[i]->domain, "padding.test"); entries[i]->kind = DR_BLOCK;
+        entries[i]->suffix = false; entries[i]->user = false; entries[i]->family = 0;
+        memset(entries[i]->address, 0, sizeof(entries[i]->address));
+    }
+    CHECK(dr_same_rules(&store, &builder));
+    builder.next.entries[0].suffix = true; CHECK(!dr_same_rules(&store, &builder));
+    dr_dispose(&store); free(builder.next.entries);
+    puts("Rule equality ignores structure padding and detects semantic scope changes");
+}
 int main(int argc, char **argv) {
-    CHECK(argc == 3); vectors(argv[1]); rollback_and_priority(); concurrent(); production_adapter(argv[2]); return 0;
+    CHECK(argc == 3); vectors(argv[1]); rollback_and_priority(); concurrent(); production_adapter(argv[2]); equality_ignores_padding(); return 0;
 }

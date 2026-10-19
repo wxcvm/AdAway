@@ -24,7 +24,9 @@ static inline bool bs_append(const struct dr_entry *entry, void *context) {
     struct bs_builder *builder = (struct bs_builder *)context;
     if (builder->finished) return false;
     if (builder->next.count == BS_MAX_ENTRIES) return false;
-    size_t length = strlen(entry->domain) + 1;
+    const char *end = (const char *)memchr(entry->domain, 0, sizeof(entry->domain));
+    if (!end || end == entry->domain || builder->used > BS_MAX_POOL) return false;
+    size_t length = (size_t)(end - entry->domain) + 1;
     if (length > BS_MAX_POOL - builder->used) return false;
     if (builder->next.count == builder->capacity) {
         size_t capacity = builder->capacity ? builder->capacity * 2 : 64;

@@ -9,21 +9,24 @@ static void vectors(const char *path) {
     struct si_stats stats = {0}; unsigned queries = 0;
     while (fgets(line, sizeof(line), vectors)) {
         if (line[0] == '#' || line[0] == '\n') continue;
-        line[strcspn(line, "\r\n")] = 0;
+        char *ending = strpbrk(line, "\r\n");
+        if (ending) *ending = 0;
         char *fields[10]; fields[0] = line; unsigned count = 1;
         for (char *p = line; *p; p++) if (*p == '\t') { *p = 0; CHECK(count < 10); fields[count++] = p + 1; }
         CHECK(count == 6 || count == 10);
         if (strcmp(fields[1], current) != 0) {
             if (staged) CHECK(fclose(staged) == 0);
-            staged = tmpfile(); CHECK(staged); strcpy(current, fields[1]);
+            staged = tmpfile(); CHECK(staged); CHECK(strlen(fields[1]) < sizeof(current)); strcpy(current, fields[1]);
             memset(orders, 0, sizeof(orders)); memset(&stats, 0, sizeof(stats));
         }
         if (strcmp(fields[0], "R") == 0) {
+            CHECK(count == 6);
             unsigned source = (unsigned)atoi(fields[2]); CHECK(source < 33 && source > 0);
             struct si_sink sink = {staged, &stats, source, orders[source]};
             CHECK(dr_parse_line(fields[5], atoi(fields[3]) != 0, atoi(fields[4]) != 0, si_emit, &sink) != DR_INVALID);
             orders[source] = sink.order;
         } else {
+            CHECK(strcmp(fields[0], "Q") == 0 && count == 10);
             CHECK(fflush(staged) == 0); rewind(staged);
             struct bs_builder builder; memset(&builder, 0, sizeof(builder));
             CHECK(bs_parse_file(staged, &builder)); CHECK(bs_finish(&builder));

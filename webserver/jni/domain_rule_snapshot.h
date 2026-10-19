@@ -271,9 +271,14 @@ static inline void dr_dispose(struct dr_store *store) {
 }
 static inline bool dr_same_rules(struct dr_store *store, const struct dr_builder *builder) {
     dr_lock(store);
-    bool same = store->current.count == builder->next.count && (!builder->next.count
-            || memcmp(store->current.entries, builder->next.entries,
-                    builder->next.count * sizeof(struct dr_entry)) == 0);
+    bool same = store->current.count == builder->next.count;
+    for (size_t i = 0; same && i < builder->next.count; i++) {
+        const struct dr_entry *a = &store->current.entries[i];
+        const struct dr_entry *b = &builder->next.entries[i];
+        same = strcmp(a->domain, b->domain) == 0 && a->kind == b->kind
+                && a->suffix == b->suffix && a->user == b->user && a->family == b->family
+                && memcmp(a->address, b->address, sizeof(a->address)) == 0;
+    }
     dr_unlock(store); return same;
 }
 #endif
