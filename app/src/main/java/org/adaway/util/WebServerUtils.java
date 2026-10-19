@@ -56,6 +56,7 @@ public class WebServerUtils {
     private static final String CA_CERT_FILE = "localhost-2410.crt";
     private static final String CA_KEY_FILE  = "localhost-2410.key";
     private static final String PREFS_WS = "compose_webserver";
+    private static final java.util.concurrent.locks.ReentrantLock LISTENER_LOCK = new java.util.concurrent.locks.ReentrantLock();
     private static final String PROBE_HTTPS = "https";
     private static final String PREF_HTTPS_PORT = "https_port";
     private static final String PREF_HTTP_PORT = "http_port";
@@ -107,7 +108,13 @@ public class WebServerUtils {
         return saved;
     }
 
-    public static synchronized String checkListenerSettings(Context context, ListenerSettings settings) {
+    public static String checkListenerSettings(Context context, ListenerSettings settings) {
+        LISTENER_LOCK.lock();
+        try { return checkListenerSettingsLocked(context, settings); }
+        finally { LISTENER_LOCK.unlock(); }
+    }
+
+    private static String checkListenerSettingsLocked(Context context, ListenerSettings settings) {
         try {
             org.json.JSONObject report = listenerProbe(context, settings);
             return "HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS："
@@ -137,7 +144,13 @@ public class WebServerUtils {
     }
 
     /** Save only after a stopped-instance probe, restoring the previous configuration on failure. */
-    public static synchronized String applyListenerSettings(Context context, ListenerSettings settings) {
+    public static String applyListenerSettings(Context context, ListenerSettings settings) {
+        LISTENER_LOCK.lock();
+        try { return applyListenerSettingsLocked(context, settings); }
+        finally { LISTENER_LOCK.unlock(); }
+    }
+
+    private static String applyListenerSettingsLocked(Context context, ListenerSettings settings) {
         if (BlockMode.current(context) == BlockMode.HIJACK && !settings.supportsRootRedirect())
             return "未应用：Root 重定向需要 IPv4 回环监听。请使用 127.0.0.1、0.0.0.0 或留空。";
         ListenerSettings previous = getListenerSettings(context);
@@ -203,7 +216,13 @@ public class WebServerUtils {
                 .getInt(PREF_HTTPS_PORT, 443);
     }
 
-    public static synchronized void setWebServerSettings(Context context, boolean bindAll, int httpPort, int httpsPort) {
+    public static void setWebServerSettings(Context context, boolean bindAll, int httpPort, int httpsPort) {
+        LISTENER_LOCK.lock();
+        try { setWebServerSettingsLocked(context, bindAll, httpPort, httpsPort); }
+        finally { LISTENER_LOCK.unlock(); }
+    }
+
+    private static void setWebServerSettingsLocked(Context context, boolean bindAll, int httpPort, int httpsPort) {
         context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_BIND_ALL, bindAll)
@@ -506,7 +525,13 @@ public class WebServerUtils {
      * 注意：所有 Toast 必须通过 showToast() 切到主线程，
      * 否则在后台线程调用会抛 CalledFromWrongThreadException。
      */
-public static synchronized void startWebServer(Context context) {
+public static void startWebServer(Context context) {
+        LISTENER_LOCK.lock();
+        try { startWebServerLocked(context); }
+        finally { LISTENER_LOCK.unlock(); }
+    }
+
+    private static void startWebServerLocked(Context context) {
         Timber.d("Starting web server…");
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
@@ -579,7 +604,13 @@ public static synchronized void startWebServer(Context context) {
         }
     }
 
-    public static synchronized void stopWebServer() {
+    public static void stopWebServer() {
+        LISTENER_LOCK.lock();
+        try { stopWebServerLocked(); }
+        finally { LISTENER_LOCK.unlock(); }
+    }
+
+    private static void stopWebServerLocked() {
         killBundledExecutable(WEB_SERVER_EXECUTABLE);
     }
 
