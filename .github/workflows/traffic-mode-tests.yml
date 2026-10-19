@@ -128,7 +128,7 @@ jobs:
       - name: Build and verify mixed Debug-test Release packaging regression
         run: |
           ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
-          python3 tools/verify_webserver_apk.py --apk app/build/outputs/apk/release/app-release-unsigned.apk --executable webserver/build/generated/webserverJniLibs/release/arm64-v8a/libwebserver_exec.so
+          python3 tools/verify_webserver_apk.py --apk-root app/build --variant release --executable webserver/build/generated/webserverJniLibs/release/arm64-v8a/libwebserver_exec.so
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:

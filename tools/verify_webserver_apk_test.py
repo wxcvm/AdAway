@@ -1,6 +1,8 @@
 import struct
 import unittest
-from verify_webserver_apk import load_segments
+import tempfile
+from pathlib import Path
+from verify_webserver_apk import load_segments, find_apk
 
 
 def executable():
@@ -13,6 +15,22 @@ def executable():
 
 
 class ApkExecutableTest(unittest.TestCase):
+    def test_agp9_intermediate_output_is_found_but_duplicates_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            apk = root / 'intermediates/apk/release/app-release.apk'
+            apk.parent.mkdir(parents=True)
+            apk.touch()
+            debug = root / 'outputs/apk/debug/app-debug.apk'
+            debug.parent.mkdir(parents=True)
+            debug.touch()
+            self.assertEqual(apk, find_apk(root, 'release'))
+            duplicate = root / 'outputs/apk/release/app-release.apk'
+            duplicate.parent.mkdir(parents=True)
+            duplicate.touch()
+            with self.assertRaises(ValueError):
+                find_apk(root, 'release')
+
     def test_rejects_placeholder_and_entry_outside_code(self):
         for entry in (0, 0x200000):
             blob = executable()

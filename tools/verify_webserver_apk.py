@@ -6,6 +6,13 @@ import zipfile
 from pathlib import Path
 
 
+def find_apk(root, variant):
+    candidates = sorted(root.glob(f'**/apk/{variant}/*.apk'))
+    if len(candidates) != 1:
+        raise ValueError(f'Expected exactly one {variant} APK under {root}, found {candidates}')
+    return candidates[0]
+
+
 def load_segments(blob):
     if len(blob) < 64 or blob[:6] != b'\x7fELF\x02\x01':
         raise ValueError('Server must be little-endian ELF64')
@@ -36,15 +43,21 @@ def load_segments(blob):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--apk', type=Path, required=True)
+    parser.add_argument('--apk', type=Path)
+    parser.add_argument('--apk-root', type=Path, default=Path('app/build'))
+    parser.add_argument('--variant', choices=('debug', 'release'), default='release')
+    parser.add_argument('--write-apk-path-file', type=Path)
     parser.add_argument('--executable', type=Path, required=True)
     args = parser.parse_args()
-    with zipfile.ZipFile(args.apk) as apk:
+    apk_path = args.apk if args.apk is not None else find_apk(args.apk_root, args.variant)
+    with zipfile.ZipFile(apk_path) as apk:
         packaged = apk.read('lib/arm64-v8a/libwebserver_exec.so')
     built = args.executable.read_bytes()
     # AGP strips section/symbol tables; runtime PT_LOAD contents and entry must still match.
     if load_segments(packaged) != load_segments(built):
         raise ValueError('Packaged server differs from this variant\'s generated executable')
+    if args.write_apk_path_file:
+        args.write_apk_path_file.write_text(str(apk_path) + '\n', encoding='utf-8')
     print(f'Verified ARM64 executable, entry={load_segments(packaged)[0]:#x}, '
           f'bytes={len(packaged)}, sha256={hashlib.sha256(packaged).hexdigest()}')
 
