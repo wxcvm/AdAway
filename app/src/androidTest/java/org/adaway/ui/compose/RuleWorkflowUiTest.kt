@@ -32,6 +32,21 @@ import org.junit.Test
 class RuleWorkflowUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun listenerDraftDoesNotSaveOrRestartBeforeApplyAndRejectsHostnames() {
+        val previous = org.adaway.util.WebServerUtils.getHttpPort(compose.activity)
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                Surface { Column(Modifier.padding(16.dp)) { ListenerSettingsCard() } }
+            }
+        }
+        compose.onNodeWithText("HTTP 端口").performTextReplacement("20080")
+        compose.runOnIdle { assertEquals(previous, org.adaway.util.WebServerUtils.getHttpPort(compose.activity)) }
+        compose.onNodeWithText("监听 IP（IPv4 / IPv6）").performTextReplacement("localhost")
+        compose.onNodeWithText("应用并重启").performClick()
+        compose.onNodeWithText("请输入完整 IPv4", substring = true).assertIsDisplayed()
+        saveScreenshot("listener-invalid-address")
+    }
+
     @Test fun runningSyncCannotBeStartedTwiceAndFailureCanBeRetried() {
         var calls = 0
         val status = androidx.compose.runtime.mutableStateOf(HostsSyncStatus.RUNNING)

@@ -229,6 +229,18 @@ public final class ShellUtils {
         return "LD_LIBRARY_PATH=" + nativeLibraryDir + " " + binPath + " " + parameters;
     }
 
+    /** Use a separate file: overwriting the running executable would fail with ETXTBSY. */
+    public static List<String> checkBundledListener(Context context, String parameters) {
+        String libDir = context.getApplicationInfo().nativeLibraryDir;
+        String source = libDir + "/libwebserver_exec.so";
+        String target = "/data/local/tmp/adblock_listener_probe";
+        Shell.Result result = Shell.cmd("cp -f " + escapedString(source) + " " + escapedString(target)
+                + " && chmod 755 " + escapedString(target) + " && LD_LIBRARY_PATH=" + escapedString(libDir)
+                + " " + escapedString(target) + " --check-listen " + parameters).exec();
+        Shell.cmd("rm -f " + escapedString(target)).exec();
+        return result.getOut();
+    }
+
     public static void killBundledExecutable(String executable) {
         // Try pkill/pkill -f then killall as fallback; ignore errors
         Shell.cmd("pkill -f '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' || killall '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' || true").exec();

@@ -13,6 +13,7 @@
 #include "cosmetic_sanitize.h"
 #include "cosmetic_scope.h"
 #include "lt_map.h"
+#include "listen_address.h"
 
 
 /*
@@ -310,6 +311,7 @@ struct settings {
     int               stats_port;   /* loopback management port (default 8686) */
     bool              debug;
     bool              bind_all;   /* listen on all interfaces */
+    char              bind_ip[64]; /* explicit literal overrides legacy dual-stack mode */
     int               http_port;  /* HTTP listen port (default 80) */
     int               https_port; /* HTTPS listen port (default 443) */
     int               block_image_count;
@@ -3887,6 +3889,14 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     uint64_t last_io_ms = mg_millis();
     memcpy(c->data, &last_io_ms, sizeof(last_io_ms));
 
+    /* Custom/LAN response bindings must never expose diagnostics or a forward proxy. */
+    bool local_peer = la_loopback_peer(c->rem.addr.ip, c->rem.is_ip6) != 0;
+    bool private_path = mg_match(hm->uri, mg_str("/internal-*"), NULL) ||
+                        mg_match(hm->uri, mg_str("/control"), NULL);
+    if (!local_peer && (private_path || s->proxy_filter)) {
+        mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+        return;
+    }
     /* The management port only answers the internal endpoints. */
     if (s->stats_port != 0 && c->loc.port == (uint16_t) s->stats_port) {
         bool internal = mg_match(hm->uri, mg_str("/internal-stats"), NULL) ||
@@ -4513,6 +4523,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
     struct settings s = {0};
     s.http_port = 80;
     s.https_port = 443;
+    s.stats_port = 8686;
     s.bind_all = false;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--resources") == 0 && i < argc-1) {
@@ -4573,15 +4584,19 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             /* Loopback management port: /internal-stats and /control are
                served there too, so the app can always read statistics even
                when the user facing 80/443 ports are taken by another app. */
-            s.stats_port = atoi(argv[++i]);
+            s.stats_port = la_port(argv[++i]);
+        } else if (strcmp(argv[i], "--bind-ip") == 0 && i < argc-1) {
+            if (!la_normalize(argv[++i],s.bind_ip)) { s.init=false; return s; }
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
-            s.bind_all = strcmp(argv[++i], "all") == 0;
+            const char *mode = argv[++i];
+            if (strcmp(mode,"all") && strcmp(mode,"loop") && strcmp(mode,"loopback")) { s.init=false; return s; }
+            s.bind_all = strcmp(mode, "all") == 0;
             LOG_INFO("Bind mode: %s", s.bind_all ? "all interfaces" : "loopback");
         } else if (strcmp(argv[i], "--http-port") == 0 && i < argc-1) {
-            s.http_port = atoi(argv[++i]);
+            s.http_port = la_port(argv[++i]);
             LOG_INFO("HTTP port: %d", s.http_port);
         } else if (strcmp(argv[i], "--https-port") == 0 && i < argc-1) {
-            s.https_port = atoi(argv[++i]);
+            s.https_port = la_port(argv[++i]);
             LOG_INFO("HTTPS port: %d", s.https_port);
         }
     }
@@ -4590,6 +4605,8 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 
 /* ── main ─────────────────────────────────────────────────────── */
 int main(int argc, char *argv[]) {
+    int check=la_check_cli(argc,argv,80,443,8686);
+    if (check>=0) return check;
     setsid();
     /* NOTE: do NOT redirect stdin/stdout/stderr to /dev/null here even
        though setsid() detaches us from the controlling terminal.
@@ -4610,7 +4627,8 @@ int main(int argc, char *argv[]) {
     LOG_INFO("main() entered, argc=%d", argc);
 
     struct settings s = parse_cli_parameters(argc, argv);
-    if (!s.init) {
+    if (!s.init || s.http_port<1 || s.http_port>65535 || s.https_port<1 || s.https_port>65535 || s.stats_port<1 || s.stats_port>65535
+            || s.http_port==s.https_port || s.http_port==s.stats_port || s.https_port==s.stats_port) {
         LOG_FATAL("Bad parameters.");
         return EXIT_FAILURE;
     }
@@ -4652,12 +4670,7 @@ int main(int argc, char *argv[]) {
 
     /* Build listen URLs from the configured bind mode + ports. */
     char http_url[128], https_url[128], http_url6[128], https_url6[128];
-    const char *v4 = s.bind_all ? "0.0.0.0" : "127.0.0.1";
-    const char *v6 = s.bind_all ? "[::]" : "[::1]";
-    snprintf(http_url, sizeof(http_url), "http://%s:%d", v4, s.http_port);  // NOSONAR: URL 指向本服务自己的监听地址（仅回环端口），明文是本机通信的设计使然（Sonar c:S5332）
-    snprintf(https_url, sizeof(https_url), "https://%s:%d", v4, s.https_port);
-    snprintf(http_url6, sizeof(http_url6), "http://%s:%d", v6, s.http_port);  // NOSONAR: URL 指向本服务自己的监听地址（仅回环端口），明文是本机通信的设计使然（Sonar c:S5332）
-    snprintf(https_url6, sizeof(https_url6), "https://%s:%d", v6, s.https_port);
+    la_urls(s.bind_ip,s.bind_all,s.http_port,s.https_port,http_url,https_url,http_url6,https_url6);
 
     if (!mg_http_listen(&mgr, http_url, fn, &s)) {
         LOG_FATAL("HTTP bind failed (%s).", http_url);
@@ -4674,11 +4687,11 @@ int main(int argc, char *argv[]) {
      * log reflects the actual state.
      */
     bool ipv6_ok = true;
-    if (!mg_http_listen(&mgr, http_url6, fn, &s)) {
+    if (http_url6[0] && !mg_http_listen(&mgr, http_url6, fn, &s)) {
         LOG_WARN("HTTP IPv6 bind failed (%s) — continuing with IPv4 only.", http_url6);
         ipv6_ok = false;
     }
-    if (!mg_http_listen(&mgr, https_url6, fn, &s)) {
+    if (https_url6[0] && !mg_http_listen(&mgr, https_url6, fn, &s)) {
         LOG_WARN("HTTPS IPv6 bind failed (%s) — continuing with IPv4 only.", https_url6);
         ipv6_ok = false;
     }

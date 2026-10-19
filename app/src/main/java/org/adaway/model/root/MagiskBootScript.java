@@ -97,7 +97,6 @@ public final class MagiskBootScript {
                     SERVICE_D_DIR);
             return false;
         }
-        boolean bindAll = WebServerUtils.isBindAll(context);
         int httpPort = WebServerUtils.getHttpPort(context);
         int httpsPort = WebServerUtils.getHttpsPort(context);
         boolean proxyFilter = BlockMode.current(context) == BlockMode.HIJACK;
@@ -112,14 +111,16 @@ public final class MagiskBootScript {
         }
         String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
         String resourceDir = WebServerUtils.getResourcePath(context).toAbsolutePath().toString();
-        String script = buildScript(nativeLibDir, resourceDir, bindAll, httpPort, httpsPort,
+        String script = buildScript(nativeLibDir, resourceDir, WebServerUtils.getListenerSettings(context),
                 WebServerUtils.STATS_PORT, proxyFilter);
         // base64 keeps the shell command free of any quoting/escaping of paths.
         String encoded = Base64.encodeToString(script.getBytes(StandardCharsets.UTF_8),
                 Base64.NO_WRAP);
+        String staged = "/data/adb/.adblock-service-script.tmp";
         String cmd = "mkdir -p " + SERVICE_D_DIR
-                + " && echo " + encoded + " | base64 -d > " + SCRIPT_PATH
-                + " && chmod 755 " + SCRIPT_PATH
+                + " && echo " + encoded + " | base64 -d > " + staged
+                + " && chmod 755 " + staged
+                + " && mv -f " + staged + " " + SCRIPT_PATH
                 + " && [ -s " + SCRIPT_PATH + " ]";
         Shell.Result result = Shell.cmd(cmd).exec();
         if (!result.isSuccess()) {
@@ -135,6 +136,8 @@ public final class MagiskBootScript {
         String onDisk = readScript();
         if (!onDisk.contains("--http-port " + httpPort)
                 || !onDisk.contains("--https-port " + httpsPort)
+                || (!WebServerUtils.getBindAddress(context).isEmpty()
+                    && !onDisk.contains("--bind-ip " + WebServerUtils.getBindAddress(context)))
                 || !onDisk.contains("--stats-port " + WebServerUtils.STATS_PORT)
                 || onDisk.contains("--proxy-filter") != proxyFilter) {
             Timber.w("MagiskBootScript: verification failed for %s", SCRIPT_PATH);
@@ -226,6 +229,16 @@ public final class MagiskBootScript {
     static String buildScript(String nativeLibDir, String resourceDir,
                               boolean bindAll, int httpPort, int httpsPort,
                               int statsPort, boolean proxyFilter) {
+        return buildScript(nativeLibDir, resourceDir,
+                new org.adaway.util.ListenerSettings("", bindAll, httpPort, httpsPort), statsPort, proxyFilter);
+    }
+
+    static String buildScript(String nativeLibDir, String resourceDir,
+                             org.adaway.util.ListenerSettings settings, int statsPort, boolean proxyFilter) {
+        boolean bindAll = settings.all;
+        int httpPort = settings.http;
+        int httpsPort = settings.https;
+        String bindIp = settings.address;
         String libName = "lib" + WebServerUtils.WEB_SERVER_EXECUTABLE + "_exec.so";
         String bin = "/data/local/tmp/" + libName;
         String src = nativeLibDir + "/" + libName;
@@ -323,6 +336,7 @@ public final class MagiskBootScript {
                 + "  echo \"$(date) boot start\" >> \"$LOG\"\n"
                 + "  LD_LIBRARY_PATH=\"$APP_LIB\" \"$BIN\" --resources \"$RES\""
                 + " --bind " + (bindAll ? "all" : "loop")
+                + (bindIp.isEmpty() ? "" : " --bind-ip " + bindIp)
                 + " --stats-port " + statsPort
                 + " --http-port " + httpPort
                 + " --https-port " + httpsPort
