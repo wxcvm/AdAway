@@ -100,4 +100,14 @@ static void large_source(void) {
     CHECK(bs_query(&store, "h299999.large.test").decision.action == CORE_NXDOMAIN);
     bs_free_builder(&builder); bs_dispose(&store); puts("300000-entry production source loaded and last entry matched");
 }
-int main(void) { decision_and_rollback(); subscription_pipeline(); concurrent(); large_source(); return 0; }
+static void rejects_unterminated_domain(void) {
+    struct dr_entry invalid = {0};
+    struct bs_builder builder = {0};
+    memset(invalid.domain, 'a', sizeof(invalid.domain));
+    CHECK(!bs_append(&invalid, &builder)); CHECK(builder.next.count == 0);
+    snprintf(invalid.domain, sizeof(invalid.domain), "%s", "valid.test"); builder.used = BS_MAX_POOL + 1;
+    CHECK(!bs_append(&invalid, &builder)); CHECK(builder.next.count == 0);
+    bs_free_builder(&builder);
+    puts("Unterminated names and invalid pool offsets rejected before allocation/copy");
+}
+int main(void) { decision_and_rollback(); subscription_pipeline(); concurrent(); large_source(); rejects_unterminated_domain(); return 0; }

@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
         assert(name && q && r && expected);
         uint8_t query[514], response[514]; size_t qn = hex(q, query), rn = hex(r, response);
         enum ddns_reply got = ddns_classify(query, qn, response, rn);
-        if ((int)got != atoi(expected)) { fprintf(stderr, "case failed: %s\n", name); return 1; }
+        if ((int)got != atoi(expected)) { fprintf(stderr, "case failed: %s\n", name); fclose(file); return 1; }
         cases++;
     }
     assert(!ferror(file)); assert(!fclose(file)); assert(cases == 53);
