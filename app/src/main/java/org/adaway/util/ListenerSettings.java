@@ -33,7 +33,7 @@ public final class ListenerSettings {
         String[] parts = value.split("\\.", -1);
         if (parts.length != 4) return false;
         for (String part : parts) {
-            if (!part.matches("0|[1-9][0-9]{0,2}") || Integer.parseInt(part) > 255) return false;
+            if (!part.matches("0|[1-9]\\d{0,2}") || Integer.parseInt(part) > 255) return false;
         }
         return true;
     }

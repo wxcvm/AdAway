@@ -53,7 +53,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Build disposable x86_64 listener diagnostic fixture
         run: |
-          sdkmanager 'ndk;28.1.13356709'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;28.1.13356709'
           mkdir -p app/src/debug/jniLibs/x86_64
           "$ANDROID_HOME/ndk/28.1.13356709/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android30-clang" -std=c11 -Wall -Wextra -Werror -fPIE -pie webserver/jni/listen_address_probe.c -o app/src/debug/jniLibs/x86_64/liblistener_probe.so
       - name: Run private Room and loopback IPv6 transport tests

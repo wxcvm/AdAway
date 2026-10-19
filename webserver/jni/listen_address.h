@@ -118,12 +118,14 @@ static inline void la_urls(const char *custom,int all,int http,int https,
     char normalized[64]; int version=custom && *custom ? la_normalize(custom,normalized) : 0;
     const char *v4=all ? "0.0.0.0" : "127.0.0.1", *v6=all ? "::" : "::1";
     if (version) {
-        snprintf(h,128,version==6 ? "http://[%s]:%d" : "http://%s:%d",normalized,http);
+        snprintf(h,128,version==6 ? "http://[%s]:%d" : "http://%s:%d",normalized,http); /* NOSONAR(c:S5332): explicit HTTP response sink, not an update/subscription transport. */
         snprintf(s,128,version==6 ? "https://[%s]:%d" : "https://%s:%d",normalized,https);
         h6[0]=s6[0]=0;
     } else {
-        snprintf(h,128,"http://%s:%d",v4,http); snprintf(s,128,"https://%s:%d",v4,https);
-        snprintf(h6,128,"http://[%s]:%d",v6,http); snprintf(s6,128,"https://[%s]:%d",v6,https);
+        snprintf(h,128,"http://%s:%d",v4,http); /* NOSONAR(c:S5332): explicit HTTP response sink; internal management is separately gated to loopback. */
+        snprintf(s,128,"https://%s:%d",v4,https);
+        snprintf(h6,128,"http://[%s]:%d",v6,http); /* NOSONAR(c:S5332): explicit HTTP response sink; internal management is separately gated to loopback. */
+        snprintf(s6,128,"https://[%s]:%d",v6,https);
     }
 }
 #endif

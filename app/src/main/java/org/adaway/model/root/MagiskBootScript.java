@@ -97,9 +97,6 @@ public final class MagiskBootScript {
                     SERVICE_D_DIR);
             return false;
         }
-        boolean bindAll = WebServerUtils.isBindAll(context);
-        int httpPort = WebServerUtils.getHttpPort(context);
-        int httpsPort = WebServerUtils.getHttpsPort(context);
         boolean proxyFilter = BlockMode.current(context) == BlockMode.HIJACK;
         /*
          * In hijack mode the boot-started server reads <resources>/blocklist.txt
@@ -112,8 +109,8 @@ public final class MagiskBootScript {
         }
         String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
         String resourceDir = WebServerUtils.getResourcePath(context).toAbsolutePath().toString();
-        String script = buildScript(nativeLibDir, resourceDir, bindAll, httpPort, httpsPort,
-                WebServerUtils.STATS_PORT, proxyFilter, WebServerUtils.getBindAddress(context));
+        String script = buildScript(nativeLibDir, resourceDir, WebServerUtils.getListenerSettings(context),
+                WebServerUtils.STATS_PORT, proxyFilter);
         // base64 keeps the shell command free of any quoting/escaping of paths.
         String encoded = Base64.encodeToString(script.getBytes(StandardCharsets.UTF_8),
                 Base64.NO_WRAP);
@@ -226,14 +223,16 @@ public final class MagiskBootScript {
     static String buildScript(String nativeLibDir, String resourceDir,
                               boolean bindAll, int httpPort, int httpsPort,
                               int statsPort, boolean proxyFilter) {
-        return buildScript(nativeLibDir, resourceDir, bindAll, httpPort, httpsPort, statsPort, proxyFilter, "");
+        return buildScript(nativeLibDir, resourceDir,
+                new org.adaway.util.ListenerSettings("", bindAll, httpPort, httpsPort), statsPort, proxyFilter);
     }
 
     static String buildScript(String nativeLibDir, String resourceDir,
-                             boolean bindAll, int httpPort, int httpsPort,
-                             int statsPort, boolean proxyFilter, String bindIp) {
-        if (!bindIp.isEmpty() && !org.adaway.util.ListenerSettings.isLiteral(bindIp))
-            throw new IllegalArgumentException("Invalid listener address");
+                             org.adaway.util.ListenerSettings settings, int statsPort, boolean proxyFilter) {
+        boolean bindAll = settings.all;
+        int httpPort = settings.http;
+        int httpsPort = settings.https;
+        String bindIp = settings.address;
         String libName = "lib" + WebServerUtils.WEB_SERVER_EXECUTABLE + "_exec.so";
         String bin = "/data/local/tmp/" + libName;
         String src = nativeLibDir + "/" + libName;

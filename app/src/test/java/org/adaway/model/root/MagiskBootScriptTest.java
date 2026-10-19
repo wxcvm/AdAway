@@ -22,10 +22,10 @@ import java.util.List;
 public class MagiskBootScriptTest {
 
     @Test public void customAddressSurvivesBootWithoutShellExpansion() {
-        String script = MagiskBootScript.buildScript("/lib", "/resources", false, 8080, 8443, 8686, false, "::1");
+        String script = MagiskBootScript.buildScript("/lib", "/resources", new org.adaway.util.ListenerSettings("::1", false, 8080, 8443), 8686, false);
         assertTrue(script.contains("--bind-ip ::1"));
         org.junit.Assert.assertThrows(IllegalArgumentException.class,
-                () -> MagiskBootScript.buildScript("/lib", "/resources", false, 80, 443, 8686, false, "127.0.0.1;id"));
+                () -> MagiskBootScript.buildScript("/lib", "/resources", new org.adaway.util.ListenerSettings("127.0.0.1;id", false, 80, 443), 8686, false));
     }
 
     private static final String NATIVE_LIB = "/data/app/~~x==/org.adaway-y==/lib/arm64";

@@ -56,6 +56,11 @@ public class WebServerUtils {
     private static final String CA_CERT_FILE = "localhost-2410.crt";
     private static final String CA_KEY_FILE  = "localhost-2410.key";
     private static final String PREFS_WS = "compose_webserver";
+    private static final String PROBE_HTTPS = "https";
+    private static final String PREF_HTTPS_PORT = "https_port";
+    private static final String PREF_HTTP_PORT = "http_port";
+    private static final String PREF_BIND_IP = "bind_ip";
+    private static final String PREF_BIND_ALL = "bind_all";
     public static final String PREFS_BLOCK_REPLY_PREFIX = "block_reply_";
 
     /**
@@ -83,11 +88,11 @@ public class WebServerUtils {
     /** Whether the web server listens on all interfaces (LAN). Default false. */
     public static boolean isBindAll(Context context) {
         return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
-                .getBoolean("bind_all", false);
+                .getBoolean(PREF_BIND_ALL, false);
     }
 
     public static String getBindAddress(Context context) {
-        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE).getString("bind_ip", "");
+        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE).getString(PREF_BIND_IP, "");
     }
 
     public static ListenerSettings getListenerSettings(Context context) {
@@ -96,8 +101,8 @@ public class WebServerUtils {
 
     private static boolean saveListenerSettings(Context context, ListenerSettings settings) {
         boolean saved = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE).edit()
-                .putString("bind_ip", settings.address).putBoolean("bind_all", settings.all)
-                .putInt("http_port", settings.http).putInt("https_port", settings.https).commit();
+                .putString(PREF_BIND_IP, settings.address).putBoolean(PREF_BIND_ALL, settings.all)
+                .putInt(PREF_HTTP_PORT, settings.http).putInt(PREF_HTTPS_PORT, settings.https).commit();
         if (saved) { sHttpPortCached = settings.http; sHttpsPortCached = settings.https; }
         return saved;
     }
@@ -106,7 +111,7 @@ public class WebServerUtils {
         try {
             org.json.JSONObject report = listenerProbe(context, settings);
             return "HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS："
-                    + probeDescription(report.getInt("https"))
+                    + probeDescription(report.getInt(PROBE_HTTPS))
                     + (settings.address.isEmpty() ? "；IPv6 辅助监听：HTTP " + probeDescription(report.optInt("http6",4))
                         + " / HTTPS " + probeDescription(report.optInt("https6",4)) : "")
                     + "。占用可能来自当前服务；应用时停止旧服务后复检。VPN："
@@ -144,22 +149,29 @@ public class WebServerUtils {
         stopWebServer();
         try {
             org.json.JSONObject report = listenerProbe(context, settings);
-            if (report.getInt("http") != 0 || report.getInt("https") != 0)
-                throw new IOException("HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS：" + probeDescription(report.getInt("https")));
+            if (report.getInt("http") != 0 || report.getInt(PROBE_HTTPS) != 0)
+                throw new IOException("HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS：" + probeDescription(report.getInt(PROBE_HTTPS)));
             if (!saveListenerSettings(context, settings)) throw new IOException("配置保存失败");
             if (boot && !org.adaway.model.root.MagiskBootScript.install(context)) throw new IOException("开机配置写入失败");
             startWebServer(context);
             if (!listenerReachable(settings)) throw new IOException("新服务未就绪");
-            return "已应用：HTTP " + settings.http + " / HTTPS " + settings.https + "；监听 "
-                    + (settings.address.isEmpty() ? (settings.all ? "所有网卡" : "回环") : settings.address) + "。";
+            String address = settings.address;
+            if (address.isEmpty()) address = settings.all ? "所有网卡" : "回环";
+            return "已应用：HTTP " + settings.http + " / HTTPS " + settings.https + "；监听 " + address + "。";
         } catch (Exception exception) {
-            stopWebServer();
-            boolean restored = saveListenerSettings(context, previous);
-            if (boot) restored &= org.adaway.model.root.MagiskBootScript.install(context);
-            if (running) startWebServer(context);
-            return "未应用：" + exception.getMessage() + (restored ? "。已恢复原配置。" : "。原配置恢复失败，请检查存储权限。")
-                    + (running && !listenerReachable(previous) ? "原服务尚未恢复，请检查服务日志。" : "");
+            return restoreListenerSettings(context, previous, boot, running, exception.getMessage());
         }
+    }
+
+    private static String restoreListenerSettings(Context context, ListenerSettings previous,
+                                                 boolean boot, boolean running, String reason) {
+        stopWebServer();
+        boolean restored = saveListenerSettings(context, previous);
+        if (boot) restored &= org.adaway.model.root.MagiskBootScript.install(context);
+        if (running) startWebServer(context);
+        String result = "未应用：" + reason + (restored ? "。已恢复原配置。" : "。原配置恢复失败，请检查存储权限。");
+        if (running && !listenerReachable(previous)) result += "原服务尚未恢复，请检查服务日志。";
+        return result;
     }
 
     private static boolean listenerReachable(ListenerSettings settings) {
@@ -182,21 +194,21 @@ public class WebServerUtils {
     /** Configured HTTP listen port (default 80). */
     public static int getHttpPort(Context context) {
         return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
-                .getInt("http_port", 80);
+                .getInt(PREF_HTTP_PORT, 80);
     }
 
     /** Configured HTTPS listen port (default 443). */
     public static int getHttpsPort(Context context) {
         return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
-                .getInt("https_port", 443);
+                .getInt(PREF_HTTPS_PORT, 443);
     }
 
-    public static void setWebServerSettings(Context context, boolean bindAll, int httpPort, int httpsPort) {
+    public static synchronized void setWebServerSettings(Context context, boolean bindAll, int httpPort, int httpsPort) {
         context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
                 .edit()
-                .putBoolean("bind_all", bindAll)
-                .putInt("http_port", httpPort)
-                .putInt("https_port", httpsPort)
+                .putBoolean(PREF_BIND_ALL, bindAll)
+                .putInt(PREF_HTTP_PORT, httpPort)
+                .putInt(PREF_HTTPS_PORT, httpsPort)
                 .apply();
         sHttpPortCached = httpPort;
         sHttpsPortCached = httpsPort;
@@ -208,9 +220,9 @@ public class WebServerUtils {
     /** Load persisted ports into the static cache (called at app start). */
     public static void initPortCache(Context context) {
         sHttpPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
-                .getInt("http_port", 80);
+                .getInt(PREF_HTTP_PORT, 80);
         sHttpsPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
-                .getInt("https_port", 443);
+                .getInt(PREF_HTTPS_PORT, 443);
     }
 
     /**
@@ -494,7 +506,7 @@ public class WebServerUtils {
      * 注意：所有 Toast 必须通过 showToast() 切到主线程，
      * 否则在后台线程调用会抛 CalledFromWrongThreadException。
      */
-public static void startWebServer(Context context) {
+public static synchronized void startWebServer(Context context) {
         Timber.d("Starting web server…");
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
@@ -567,7 +579,7 @@ public static void startWebServer(Context context) {
         }
     }
 
-    public static void stopWebServer() {
+    public static synchronized void stopWebServer() {
         killBundledExecutable(WEB_SERVER_EXECUTABLE);
     }
 
