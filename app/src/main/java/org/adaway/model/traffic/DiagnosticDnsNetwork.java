@@ -9,7 +9,6 @@ import android.net.VpnService;
 
 import java.io.IOException;
 import java.net.DatagramSocket;
-import java.net.Inet4Address;
 import java.net.InetAddress;
 
 /**
@@ -24,8 +23,8 @@ public final class DiagnosticDnsNetwork {
 
     private static final class Destination {
         final Network network;
-        final Inet4Address resolver;
-        Destination(Network network, Inet4Address resolver) {
+        final InetAddress resolver;
+        Destination(Network network, InetAddress resolver) {
             this.network = network;
             this.resolver = resolver;
         }
@@ -45,15 +44,10 @@ public final class DiagnosticDnsNetwork {
             }
             LinkProperties props = manager.getLinkProperties(network);
             if (props == null) continue;
-            for (InetAddress server : props.getDnsServers()) {
-                if (server instanceof Inet4Address
-                        && !server.isAnyLocalAddress() && !server.isLoopbackAddress()
-                        && !server.isMulticastAddress()) {
-                    return new Destination(network, (Inet4Address) server);
-                }
-            }
+            InetAddress server = DiagnosticDnsResolverPolicy.select(props.getDnsServers());
+            if (server != null) return new Destination(network, server);
         }
-        throw new IOException("No validated non-VPN IPv4 DNS network");
+        throw new IOException("No validated non-VPN DNS network");
     }
 
     public static byte[] exchange(VpnService service, byte[] question,

@@ -377,7 +377,7 @@
     <string name="compose_tun_diagnostic_dns_ok">Valid DNS NOERROR response received through the isolated TUN. This may be from a local rule or the underlying resolver; it does not prove device-wide filtering.</string>
     <string name="compose_tun_diagnostic_dns_nxdomain">Valid DNS NXDOMAIN response received. This may be a local block rule or a negative upstream response; no whole-device interception is implied.</string>
     <string name="compose_tun_diagnostic_dns_refused">Valid DNS REFUSED response received. This may be a local policy rejection or an upstream refusal; no whole-device interception is implied.</string>
-    <string name="compose_tun_diagnostic_dns_failed">DNS test failed or was blocked (strict Private DNS, no validated IPv4 resolver, or timeout). System DNS and default routes were unchanged.</string>
+    <string name="compose_tun_diagnostic_dns_failed">DNS test failed or was blocked (strict Private DNS, no usable resolver on a validated network, or timeout). System DNS and default routes were unchanged.</string>
     <string name="compose_tun_diagnostic_stop_requested">Stop requested; refresh to confirm the test interface closed.</string>
     <string name="compose_settings_hijack_paused_for_vpn">Another VPN is active. Our own TCP redirect is paused or awaiting watchdog cleanup. The local response listener does not prove AdGuard is forwarding blocked domains here.</string>
     <string name="compose_settings_hijack_owner_unknown">VPN ownership could not be verified; new transparent redirect rules will not be installed automatically.</string>

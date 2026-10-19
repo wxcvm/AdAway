@@ -2,13 +2,14 @@ name: Traffic mode decision tests
 
 on:
   pull_request:
-    branches: [master, feat/dns-tcp-diagnostics-v1, feat/typed-rule-provenance-v1, feat/traffic-mode-foundation, fix/android-diagnostic-p0, feat/isolated-transport-poc, feat/rule-loader-atomic-v1]
+    branches: [master, feat/dns-aaaa-diagnostics-v1, feat/dns-tcp-diagnostics-v1, feat/typed-rule-provenance-v1, feat/traffic-mode-foundation, fix/android-diagnostic-p0, feat/isolated-transport-poc, feat/rule-loader-atomic-v1]
     paths:
       - 'app/src/main/java/org/adaway/model/traffic/**'
       - 'app/src/test/java/org/adaway/model/traffic/**'
       - 'app/src/main/java/org/adaway/model/source/**'
       - 'app/src/test/java/org/adaway/model/source/**'
       - 'app/src/androidTest/java/org/adaway/model/source/**'
+      - 'app/src/androidTest/java/org/adaway/model/traffic/**'
       - 'app/src/main/java/org/adaway/db/dao/HostEntryDao.java'
       - 'app/src/main/java/org/adaway/db/**'
       - 'app/schemas/**'
@@ -31,7 +32,7 @@ permissions:
 
 jobs:
   room-loader:
-    name: Actual Room source-loader transactions (isolated emulator)
+    name: Room transactions and IPv6 sockets (isolated emulator)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -50,14 +51,14 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Run only private in-memory Room loader tests
+      - name: Run private Room and loopback IPv6 transport tests
         uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.model.source.SourceLoaderRoomTest,org.adaway.model.source.RuleBrowserRoomTest
-      - name: Upload Room transaction evidence
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.model.source.SourceLoaderRoomTest,org.adaway.model.source.RuleBrowserRoomTest,org.adaway.model.traffic.DiagnosticIpv6TransportDeviceTest
+      - name: Upload Room and isolated IPv6 socket evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:

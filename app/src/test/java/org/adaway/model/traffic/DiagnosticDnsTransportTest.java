@@ -7,18 +7,41 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 /** Actual loopback UDP/TCP. No DNS lookup, Android service, routes or external resolver. */
+@RunWith(Parameterized.class)
 public class DiagnosticDnsTransportTest {
-    private static final InetAddress LOOPBACK;
-    static { try { LOOPBACK = InetAddress.getByAddress(new byte[]{127,0,0,1}); }
-        catch (UnknownHostException impossible) { throw new AssertionError(impossible); } }
+    @Parameterized.Parameter public InetAddress loopback;
+    @Parameterized.Parameters(name="upstream={0}") public static Object[][] addresses() throws Exception {
+        byte[] ipv6 = new byte[16]; ipv6[15] = 1;
+        return new Object[][]{{InetAddress.getByAddress(new byte[]{127,0,0,1})},{InetAddress.getByAddress(ipv6)}};
+    }
     private static final DiagnosticDnsTransport.Hooks HOOKS = new DiagnosticDnsTransport.Hooks() {
         public void prepare(DatagramSocket socket) { assertFalse(socket.isConnected()); }
         public void prepare(Socket socket) { assertFalse(socket.isConnected()); }
     };
-    private static final class Fixture implements AutoCloseable {
-        final ServerSocket tcp = new ServerSocket(); final DatagramSocket udp;
+    private static final class Endpoints {
+        final ServerSocket tcp; final DatagramSocket udp;
+        Endpoints(ServerSocket tcp, DatagramSocket udp) { this.tcp = tcp; this.udp = udp; }
+    }
+    private static Endpoints bindPair(InetAddress address) throws IOException {
+        for (int attempt = 0; ; attempt++) {
+            ServerSocket tcp = new ServerSocket(); DatagramSocket udp = null;
+            try {
+                tcp.bind(new InetSocketAddress(address,0));
+                udp = new DatagramSocket(null); udp.bind(new InetSocketAddress(address,tcp.getLocalPort()));
+                return new Endpoints(tcp,udp);
+            } catch (IOException failure) {
+                if (udp != null) udp.close(); tcp.close();
+                if (!(failure instanceof BindException) || attempt == 15) throw failure;
+            }
+        }
+    }
+    private final class Fixture implements AutoCloseable {
+        final InetAddress address = loopback;
+        final ServerSocket tcp; final DatagramSocket udp;
         final List<Thread> workers = new ArrayList<>(); final List<Socket> accepted = new CopyOnWriteArrayList<>();
         final AtomicInteger udpCount = new AtomicInteger(), tcpCount = new AtomicInteger();
         final CountDownLatch tcpRead = new CountDownLatch(1), release = new CountDownLatch(1);
@@ -28,9 +51,10 @@ public class DiagnosticDnsTransportTest {
             this(mode, 1);
         }
         Fixture(String mode, int expectedType) throws IOException {
-            this.mode = mode; tcp.bind(new InetSocketAddress(LOOPBACK,0)); tcp.setSoTimeout(100);
+            this.mode = mode; Endpoints endpoints = bindPair(address);
+            tcp = endpoints.tcp; udp = endpoints.udp; tcp.setSoTimeout(100);
             this.expectedType = expectedType;
-            udp = new DatagramSocket(new InetSocketAddress(LOOPBACK, tcp.getLocalPort())); udp.setSoTimeout(100);
+            udp.setSoTimeout(100);
             start(() -> {
                 byte[] bytes = new byte[512]; DatagramPacket packet = new DatagramPacket(bytes,bytes.length);
                 while (!stop) try {
@@ -80,7 +104,7 @@ public class DiagnosticDnsTransportTest {
         }
     }
     private static byte[] exchange(Fixture fixture, DiagnosticSockets registry, int timeout) throws IOException {
-        return DiagnosticDnsTransport.exchange(LOOPBACK,fixture.tcp.getLocalPort(),DiagnosticDnsCodec.query(42,fixture.expectedType),registry,HOOKS,timeout);
+        return DiagnosticDnsTransport.exchange(fixture.address,fixture.tcp.getLocalPort(),DiagnosticDnsCodec.query(42,fixture.expectedType),registry,HOOKS,timeout);
     }
     @Test public void aaaaTravelsThroughAuthorizedPacketRelayAndActualUdpOrTcp() throws Exception {
         for (String mode : new String[]{"UDP", "TCP"}) {
@@ -92,7 +116,7 @@ public class DiagnosticDnsTransportTest {
                 assertTrue(rules.publish(1,Map.of()));
                 byte[] reply = DiagnosticDnsRelay.process(packet,packet.length,permits,1000,
                     request -> DiagnosticDnsRelay.resolveFromSnapshotOrUpstream(request,rules.read(),
-                        p -> DiagnosticDnsTransport.exchange(LOOPBACK,f.tcp.getLocalPort(),p,sockets,HOOKS,800)));
+                        p -> DiagnosticDnsTransport.exchange(f.address,f.tcp.getLocalPort(),p,sockets,HOOKS,800)));
                 assertNotNull(reply);
                 assertTrue(DiagnosticDnsCodec.matchesResponse(q,Arrays.copyOfRange(reply,28,reply.length)));
                 assertArrayEquals(reply,DiagnosticPacketFixture.checksum(reply.clone()));
@@ -160,7 +184,7 @@ public class DiagnosticDnsTransportTest {
                 public void prepare(DatagramSocket socket) { }
                 public void prepare(Socket socket) throws IOException { throw new IOException("protect refused"); }
             };
-            try { DiagnosticDnsTransport.exchange(LOOPBACK,f.tcp.getLocalPort(),DiagnosticDnsCodec.query(42),sockets,refused); fail(); }
+            try { DiagnosticDnsTransport.exchange(f.address,f.tcp.getLocalPort(),DiagnosticDnsCodec.query(42),sockets,refused); fail(); }
             catch (IOException expected) { assertEquals(0,f.tcpCount.get()); }
         }
     }
