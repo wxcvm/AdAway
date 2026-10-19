@@ -230,14 +230,18 @@ public final class ShellUtils {
     }
 
     /** Use a separate file: overwriting the running executable would fail with ETXTBSY. */
-    public static List<String> checkBundledListener(Context context, String parameters) {
+    public static List<String> checkBundledListener(Context context, String parameters) throws java.io.IOException {
         String libDir = context.getApplicationInfo().nativeLibraryDir;
         String source = libDir + "/libwebserver_exec.so";
+        org.adaway.util.NativeServerExecutable.verify(new File(source));
         String target = "/data/local/tmp/adblock_listener_probe";
         Shell.Result result = Shell.cmd("cp -f " + escapedString(source) + " " + escapedString(target)
                 + " && chmod 755 " + escapedString(target) + " && LD_LIBRARY_PATH=" + escapedString(libDir)
                 + " " + escapedString(target) + " --check-listen " + parameters).exec();
         Shell.cmd("rm -f " + escapedString(target)).exec();
+        if (result.getOut().isEmpty())
+            throw new java.io.IOException("检测程序未返回结果（退出码 " + result.getCode()
+                    + "）；请检查 Root 授权、执行权限和服务器安装包");
         return result.getOut();
     }
 

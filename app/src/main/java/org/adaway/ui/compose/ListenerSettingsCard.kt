@@ -8,7 +8,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,16 +31,22 @@ import org.adaway.util.WebServerUtils
 internal fun ListenerSettingsCard() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var address by remember { mutableStateOf(WebServerUtils.getBindAddress(context)) }
-    var all by remember { mutableStateOf(WebServerUtils.isBindAll(context)) }
+    val saved = remember { WebServerUtils.getListenerSettings(context) }
+    var ipv4 by remember { mutableStateOf(saved.ipv4) }
+    var ipv6 by remember { mutableStateOf(saved.ipv6) }
+    var lan by remember { mutableStateOf(false) }
+    var suggestions by remember { mutableStateOf(emptyList<ListenerAddressSuggestion>()) }
+    LaunchedEffect(lan) {
+        if (lan) suggestions = withContext(Dispatchers.IO) { listenerAddressSuggestions() }
+    }
     var http by remember { mutableStateOf(WebServerUtils.getHttpPort(context).toString()) }
     var https by remember { mutableStateOf(WebServerUtils.getHttpsPort(context).toString()) }
     var busy by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf("填写本机 IP；留空使用回环或所有网卡。自定义 IP 优先于网卡开关。") }
+    var message by remember { mutableStateOf("推荐仅本机访问；IPv4、IPv6 可同时监听，留空关闭对应协议。") }
     // Probe automatically only when root is already granted; opening settings must not prompt for root.
-    LaunchedEffect(address, all, http, https) {
+    LaunchedEffect(ipv4, ipv6, http, https) {
         delay(400)
-        val candidate = runCatching { ListenerSettings(address, all, http.toInt(), https.toInt()) }
+        val candidate = runCatching { ListenerSettings(ipv4, ipv6, http.toInt(), https.toInt()) }
         message = candidate.exceptionOrNull()?.message ?: "配置尚未应用；正在检查监听地址。"
         if (candidate.isSuccess && !busy) {
             message = if (com.topjohnwu.superuser.Shell.isAppGrantedRoot() == true) {
@@ -49,7 +55,7 @@ internal fun ListenerSettingsCard() {
         }
     }
     fun act(apply: Boolean) {
-        val settings = runCatching { ListenerSettings(address, all, http.toInt(), https.toInt()) }
+        val settings = runCatching { ListenerSettings(ipv4, ipv6, http.toInt(), https.toInt()) }
             .getOrElse { message = it.message ?: "端口必须为数字。"; return }
         busy = true
         scope.launch {
@@ -61,12 +67,29 @@ internal fun ListenerSettingsCard() {
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(address, { address = it }, enabled = !busy, singleLine = true,
-            label = { Text("监听 IP（IPv4 / IPv6）") }, placeholder = { Text("例如 127.0.0.1 或 ::1；留空使用下方设置") },
-            modifier = Modifier.fillMaxWidth())
-        Row {
-            Text("所有网卡（IP 留空时）", modifier = Modifier.weight(1f))
-            Switch(all, { all = it }, enabled = !busy && address.isBlank())
+        Text("监听地址", style = MaterialTheme.typography.titleSmall)
+        Text("推荐使用本机回环地址，适合设备自身的广告响应；管理端口始终仅本机可访问。",
+            style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton({ ipv4 = "127.0.0.1"; ipv6 = "::1" }, enabled = !busy) { Text("仅本机（推荐）") }
+            TextButton({ lan = !lan }, enabled = !busy) { Text(if (lan) "收起网卡" else "选择网卡") }
+        }
+        OutlinedTextField(ipv4, { ipv4 = it }, enabled = !busy, singleLine = true,
+            label = { Text("IPv4 监听地址") }, placeholder = { Text("127.0.0.1") },
+            supportingText = { Text("留空关闭 IPv4；Root 重定向需要 IPv4 回环监听。") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(ipv6, { ipv6 = it }, enabled = !busy, singleLine = true,
+            label = { Text("IPv6 监听地址") }, placeholder = { Text("::1") },
+            supportingText = { Text("留空关闭 IPv6；不需要填写方括号。") }, modifier = Modifier.fillMaxWidth())
+        if (lan) {
+            Text("以下为当前网卡地址，切换网络后可能变化；选择地址只修改对应协议的草稿。",
+                style = MaterialTheme.typography.bodySmall)
+            suggestions.forEach { item ->
+                OutlinedButton({ if (item.ipv4) ipv4 = item.address else ipv6 = item.address }, enabled = !busy) {
+                    Text("${item.network} · ${if (item.ipv4) "IPv4" else "IPv6"} ${item.address}")
+                }
+            }
+            if (suggestions.isEmpty()) Text("未发现可用的局域网地址。", style = MaterialTheme.typography.bodySmall)
+            TextButton({ ipv4 = "0.0.0.0"; ipv6 = "::" }, enabled = !busy) { Text("所有网卡（允许局域网访问）") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(http, { http = it }, enabled = !busy, singleLine = true,

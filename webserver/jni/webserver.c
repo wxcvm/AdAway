@@ -13,7 +13,7 @@
 #include "cosmetic_sanitize.h"
 #include "cosmetic_scope.h"
 #include "lt_map.h"
-#include "listen_address.h"
+#include "listener_pair.h"
 
 
 /*
@@ -311,6 +311,7 @@ struct settings {
     int               stats_port;   /* loopback management port (default 8686) */
     bool              debug;
     bool              bind_all;   /* listen on all interfaces */
+    lp_pair           listener_pair;
     char              bind_ip[64]; /* explicit literal overrides legacy dual-stack mode */
     int               http_port;  /* HTTP listen port (default 80) */
     int               https_port; /* HTTPS listen port (default 443) */
@@ -4585,6 +4586,9 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
                served there too, so the app can always read statistics even
                when the user facing 80/443 ports are taken by another app. */
             s.stats_port = la_port(argv[++i]);
+        } else if ((!strcmp(argv[i], "--listen-ipv4") || !strcmp(argv[i], "--listen-ipv6")) && i < argc-1) {
+            const char *key=argv[i];
+            if (!lp_set(&s.listener_pair,key,argv[++i])) { s.init=false; return s; }
         } else if (strcmp(argv[i], "--bind-ip") == 0 && i < argc-1) {
             if (!la_normalize(argv[++i],s.bind_ip)) { s.init=false; return s; }
         } else if (strcmp(argv[i], "--bind") == 0 && i < argc-1) {
@@ -4605,7 +4609,7 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 
 /* ── main ─────────────────────────────────────────────────────── */
 int main(int argc, char *argv[]) {
-    int check=la_check_cli(argc,argv,80,443,8686);
+    int check=lp_check_cli(argc,argv,80,443,8686);
     if (check>=0) return check;
     setsid();
     /* NOTE: do NOT redirect stdin/stdout/stderr to /dev/null here even
@@ -4628,7 +4632,9 @@ int main(int argc, char *argv[]) {
 
     struct settings s = parse_cli_parameters(argc, argv);
     if (!s.init || s.http_port<1 || s.http_port>65535 || s.https_port<1 || s.https_port>65535 || s.stats_port<1 || s.stats_port>65535
-            || s.http_port==s.https_port || s.http_port==s.stats_port || s.https_port==s.stats_port) {
+            || s.http_port==s.https_port || s.http_port==s.stats_port || s.https_port==s.stats_port
+            || (s.listener_pair.explicit_pair && (!s.listener_pair.ipv4[0] && !s.listener_pair.ipv6[0]))
+            || (s.listener_pair.explicit_pair && s.bind_ip[0])) {
         LOG_FATAL("Bad parameters.");
         return EXIT_FAILURE;
     }
@@ -4670,7 +4676,7 @@ int main(int argc, char *argv[]) {
 
     /* Build listen URLs from the configured bind mode + ports. */
     char http_url[128], https_url[128], http_url6[128], https_url6[128];
-    la_urls(s.bind_ip,s.bind_all,s.http_port,s.https_port,http_url,https_url,http_url6,https_url6);
+    lp_urls(&s.listener_pair,s.bind_ip,s.bind_all,s.http_port,s.https_port,http_url,https_url,http_url6,https_url6);
 
     if (!mg_http_listen(&mgr, http_url, fn, &s)) {
         LOG_FATAL("HTTP bind failed (%s).", http_url);
@@ -4690,10 +4696,12 @@ int main(int argc, char *argv[]) {
     if (http_url6[0] && !mg_http_listen(&mgr, http_url6, fn, &s)) {
         LOG_WARN("HTTP IPv6 bind failed (%s) — continuing with IPv4 only.", http_url6);
         ipv6_ok = false;
+        if (s.listener_pair.explicit_pair) { mg_mgr_free(&mgr); return EXIT_FAILURE; }
     }
     if (https_url6[0] && !mg_http_listen(&mgr, https_url6, fn, &s)) {
         LOG_WARN("HTTPS IPv6 bind failed (%s) — continuing with IPv4 only.", https_url6);
         ipv6_ok = false;
+        if (s.listener_pair.explicit_pair) { mg_mgr_free(&mgr); return EXIT_FAILURE; }
     }
 
     load_block_cfg(s.resource_dir);

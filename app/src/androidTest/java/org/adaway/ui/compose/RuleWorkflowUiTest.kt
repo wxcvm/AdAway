@@ -36,14 +36,16 @@ class RuleWorkflowUiTest {
         val previous = org.adaway.util.WebServerUtils.getHttpPort(compose.activity)
         compose.setContent {
             AdAwayTheme(dynamicColor = false) {
-                Surface { Column(Modifier.padding(16.dp)) { ListenerSettingsCard() } }
+                Surface { Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) { ListenerSettingsCard() } }
             }
         }
         compose.onNodeWithText("HTTP 端口").performTextReplacement("20080")
         compose.runOnIdle { assertEquals(previous, org.adaway.util.WebServerUtils.getHttpPort(compose.activity)) }
-        compose.onNodeWithText("监听 IP（IPv4 / IPv6）").performTextReplacement("localhost")
-        compose.onNodeWithText("应用并重启").performClick()
-        compose.onNodeWithText("请输入完整 IPv4", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("仅本机（推荐）").performClick()
+        compose.onNodeWithText("IPv6 监听地址").assertExists()
+        compose.onNodeWithText("IPv4 监听地址").performTextReplacement("localhost")
+        compose.onNodeWithText("应用并重启").performScrollTo().performClick()
+        compose.onNodeWithText("请输入完整 IPv4", substring = true).performScrollTo().assertIsDisplayed()
         saveScreenshot("listener-invalid-address")
     }
 

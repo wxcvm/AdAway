@@ -18,6 +18,24 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ListenerSettingsDeviceTest {
+    @Test public void savedLegacyAddressAndExplicitPairRebuildWithDifferentSemantics() {
+        Context application = ApplicationProvider.getApplicationContext();
+        android.content.SharedPreferences prefs = application.getSharedPreferences("listener-migration-fixture", Context.MODE_PRIVATE);
+        Context isolated = new android.content.ContextWrapper(application) {
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) { return prefs; }
+        };
+        try {
+            assertTrue(prefs.edit().clear().putString("bind_ip", "::1").commit());
+            ListenerSettings legacy = org.adaway.util.WebServerUtils.getListenerSettings(isolated);
+            assertFalse(legacy.explicitPair);
+            assertEquals("", legacy.ipv4);
+            assertEquals("::1", legacy.ipv6);
+            assertTrue(prefs.edit().putString("listen_ipv4", "127.0.0.2").putString("listen_ipv6", "::1").commit());
+            ListenerSettings rebuilt = org.adaway.util.WebServerUtils.getListenerSettings(isolated);
+            assertTrue(rebuilt.explicitPair);
+            assertTrue(rebuilt.arguments().contains("--listen-ipv4 127.0.0.2 --listen-ipv6 ::1"));
+        } finally { assertTrue(prefs.edit().clear().commit()); }
+    }
     private Process probe(String... arguments) throws Exception {
         Context context=ApplicationProvider.getApplicationContext();
         String directory=context.getApplicationInfo().nativeLibraryDir;
@@ -49,6 +67,14 @@ public class ListenerSettingsDeviceTest {
         Process invalid=probe("--bind-ip","localhost");
         assertTrue(invalid.waitFor(10,TimeUnit.SECONDS));
         assertEquals(2,invalid.exitValue());
+        try (ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("::1"))) {
+            Process dual = probe("--listen-ipv4", "127.0.0.1", "--listen-ipv6", "::1",
+                    "--http-port", "" + occupied.getLocalPort(), "--https-port", "65535");
+            assertTrue(dual.waitFor(10, TimeUnit.SECONDS));
+            String output = new String(com.google.common.io.ByteStreams.toByteArray(dual.getInputStream()), StandardCharsets.UTF_8).trim();
+            assertEquals(output, 3, dual.exitValue());
+            assertEquals(output, 1, new JSONObject(output).getInt("http6"));
+        }
         assertFalse(resource.exists());
         assertFalse(ListenerSettings.isLiteral("127.0.0.1; touch /tmp/unwanted"));
     }

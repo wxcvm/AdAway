@@ -54,6 +54,9 @@ jobs:
             -PversionCode=$(($(date -u +%s) - 1577836800)) \
             -Pandroid.injected.build.abi=arm64-v8a
 
+      - name: Reject placeholder or wrong-variant server in final APK
+        run: python3 tools/verify_webserver_apk.py --apk-root app/build --variant release --executable webserver/build/generated/webserverJniLibs/release/arm64-v8a/libwebserver_exec.so --write-apk-path-file "$RUNNER_TEMP/verified-release-apk.txt"
+
       - name: Run native loader regressions before publication
         shell: bash
         run: |
@@ -112,7 +115,8 @@ jobs:
             find app/build -type f -name '*.apk' -print || true
             exit 1
           fi
-          unsigned="${release_apks[0]}"
+          unsigned=$(cat "$RUNNER_TEMP/verified-release-apk.txt")
+          [[ "$unsigned" == "${release_apks[0]}" ]] || { echo '::error::APK changed after verification'; exit 1; }
           echo "Using release APK from: $unsigned"
           export SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD
           "$bt/apksigner" sign --ks "$keystore" \

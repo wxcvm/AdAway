@@ -32,7 +32,8 @@ static inline bool bs_append(const struct dr_entry *entry, void *context) {
     if (builder->finished) return false;
     if (builder->next.count == BS_MAX_ENTRIES) return false;
     size_t length = bs_domain_length(entry, builder->used);
-    if (!length) return false;
+    // Keep the fixed source bound explicit at the copy site as well as in validation.
+    if (!length || length > sizeof(entry->domain)) return false;
     if (builder->next.count == builder->capacity) {
         size_t capacity = builder->capacity ? builder->capacity * 2 : 64;
         if (capacity > BS_MAX_ENTRIES) capacity = BS_MAX_ENTRIES;

@@ -22,6 +22,9 @@ import java.util.List;
 public class MagiskBootScriptTest {
 
     @Test public void customAddressSurvivesBootWithoutShellExpansion() {
+        String pair = MagiskBootScript.buildScript("/lib", "/resources",
+                new org.adaway.util.ListenerSettings("127.0.0.1", "::1", 8080, 8443), 8686, false);
+        assertTrue(pair.contains("--listen-ipv4 127.0.0.1 --listen-ipv6 ::1"));
         String script = MagiskBootScript.buildScript("/lib", "/resources", new org.adaway.util.ListenerSettings("::1", false, 8080, 8443), 8686, false);
         assertTrue(script.contains("--bind-ip ::1"));
         org.junit.Assert.assertThrows(IllegalArgumentException.class,
