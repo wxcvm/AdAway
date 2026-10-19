@@ -113,7 +113,7 @@ public final class MagiskBootScript {
         String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
         String resourceDir = WebServerUtils.getResourcePath(context).toAbsolutePath().toString();
         String script = buildScript(nativeLibDir, resourceDir, bindAll, httpPort, httpsPort,
-                WebServerUtils.STATS_PORT, proxyFilter);
+                WebServerUtils.STATS_PORT, proxyFilter, WebServerUtils.getBindAddress(context));
         // base64 keeps the shell command free of any quoting/escaping of paths.
         String encoded = Base64.encodeToString(script.getBytes(StandardCharsets.UTF_8),
                 Base64.NO_WRAP);
@@ -226,6 +226,14 @@ public final class MagiskBootScript {
     static String buildScript(String nativeLibDir, String resourceDir,
                               boolean bindAll, int httpPort, int httpsPort,
                               int statsPort, boolean proxyFilter) {
+        return buildScript(nativeLibDir, resourceDir, bindAll, httpPort, httpsPort, statsPort, proxyFilter, "");
+    }
+
+    static String buildScript(String nativeLibDir, String resourceDir,
+                             boolean bindAll, int httpPort, int httpsPort,
+                             int statsPort, boolean proxyFilter, String bindIp) {
+        if (!bindIp.isEmpty() && !org.adaway.util.ListenerSettings.isLiteral(bindIp))
+            throw new IllegalArgumentException("Invalid listener address");
         String libName = "lib" + WebServerUtils.WEB_SERVER_EXECUTABLE + "_exec.so";
         String bin = "/data/local/tmp/" + libName;
         String src = nativeLibDir + "/" + libName;
@@ -323,6 +331,7 @@ public final class MagiskBootScript {
                 + "  echo \"$(date) boot start\" >> \"$LOG\"\n"
                 + "  LD_LIBRARY_PATH=\"$APP_LIB\" \"$BIN\" --resources \"$RES\""
                 + " --bind " + (bindAll ? "all" : "loop")
+                + (bindIp.isEmpty() ? "" : " --bind-ip " + bindIp)
                 + " --stats-port " + statsPort
                 + " --http-port " + httpPort
                 + " --https-port " + httpsPort

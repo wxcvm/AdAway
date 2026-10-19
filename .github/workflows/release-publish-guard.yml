@@ -48,8 +48,12 @@ jobs:
               "--prerelease --latest=false",
           ):
               assert required in preview, 'Preview signer/publish guard missing: ' + required
+          assert "-PprogressPreview=true" not in preview, 'Preview must upgrade the production package'
+          assert "package: name='com.wxcvm.Adaway'" in preview
+          assert 'test "$preview_code" -gt "$stable_code"' in preview
+          assert "1577836800" in data and "1577836800" in preview
           assert "debug signing key" not in preview.lower()
-          assert preview.count("      - name: Publish signed, isolated inspection prerelease") == 1, 'duplicated preview publish steps'
+          assert preview.count("      - name: Publish signed, in-place inspection prerelease") == 1, 'duplicated preview publish steps'
           assert preview.count("      - name: Sign preview using SAME production Android keystore and verify fingerprint") == 1, 'duplicated signer stage'
           assert preview.count("mapfile -t release_apks") == 1, 'duplicated APK selector'
           assert preview.count("          gh release create ") == 2, 'unexpected release publication paths'

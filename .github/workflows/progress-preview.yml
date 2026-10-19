@@ -45,13 +45,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Build separately installable ARM64 release-variant preview
+      - name: Build production-identity ARM64 preview for in-place upgrade
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon --max-workers=2 \
-            -PprogressPreview=true -PversionName=6.7.5-preview.${GITHUB_RUN_NUMBER} \
-            -PversionCode=$((607050000 + GITHUB_RUN_NUMBER)) \
+            -PversionName=6.7.6-preview.${GITHUB_RUN_NUMBER} \
+            -PversionCode=$(($(date -u +%s) - 1577836800)) \
             -Pandroid.injected.build.abi=arm64-v8a
 
       - name: Run native loader regressions before publication
@@ -122,7 +122,7 @@ jobs:
             --out release-assets/AdAway-preview-arm64.apk "$unsigned"
           "$bt/apksigner" verify --verbose --print-certs release-assets/AdAway-preview-arm64.apk > release-assets/APK-SIGNATURE.txt
           "$bt/aapt" dump badging release-assets/AdAway-preview-arm64.apk > release-assets/APK-IDENTITY.txt
-          grep -Fq "package: name='com.wxcvm.Adaway.preview'" release-assets/APK-IDENTITY.txt
+          grep -Fq "package: name='com.wxcvm.Adaway'" release-assets/APK-IDENTITY.txt
           grep -Fq "native-code: 'arm64-v8a'" release-assets/APK-IDENTITY.txt
           unzip -Z1 release-assets/AdAway-preview-arm64.apk > "$RUNNER_TEMP/preview-apk-entries.txt"
           grep -Fxq 'lib/arm64-v8a/libwebserver_exec.so' "$RUNNER_TEMP/preview-apk-entries.txt"
@@ -137,6 +137,10 @@ jobs:
             --pattern 'ADBlock-latest.apk' --dir "$RUNNER_TEMP/reference-release"
           "$bt/apksigner" verify --verbose --print-certs \
             "$RUNNER_TEMP/reference-release/ADBlock-latest.apk" > "$RUNNER_TEMP/stable-signature.txt"
+          "$bt/aapt" dump badging "$RUNNER_TEMP/reference-release/ADBlock-latest.apk" > "$RUNNER_TEMP/stable-identity.txt"
+          preview_code=$(sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" release-assets/APK-IDENTITY.txt | head -1)
+          stable_code=$(sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" "$RUNNER_TEMP/stable-identity.txt" | head -1)
+          test "$preview_code" -gt "$stable_code" || { echo "::error::preview must upgrade current stable versionCode"; exit 1; }
           python3 tools/compare_apk_signers.py \
             "$RUNNER_TEMP/stable-signature.txt" release-assets/APK-SIGNATURE.txt
 
@@ -144,12 +148,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp docs/m1-rule-loader-validation.md release-assets/IMPLEMENTATION-STATUS.md
+          cp docs/listener-settings.md release-assets/IMPLEMENTATION-STATUS.md
           printf '%s\n' "$GITHUB_SHA" > release-assets/SOURCE-COMMIT.txt
           printf '%s\n' "Preview signature: same signing certificate as current published Android stable APK." > release-assets/SIGNING-POLICY.txt
           (cd release-assets && sha256sum * > SHA256SUMS.txt)
 
-      - name: Publish signed, isolated inspection prerelease
+      - name: Publish signed, in-place inspection prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -158,13 +162,15 @@ jobs:
           cat > "$RUNNER_TEMP/preview-notes.md" <<'NOTES'
           Android ARM64 opt-in progress preview for inspection (Android 11+).
 
-          Preview package identity is com.wxcvm.Adaway.preview, allowing it
-          to coexist with the installed com.wxcvm.Adaway production app.
+          Package identity is com.wxcvm.Adaway: this APK upgrades the installed
+          production app in place and preserves app data. No parallel app is installed.
           This preview is signed by the SAME Android signing certificate as
           the repository's latest production APK; a verified certificate
-          SHA-256 digest is attached. Different app IDs still mean Android
-          does NOT treat this APK as an in-place production upgrade.
+          SHA-256 digest is attached. Version code is verified to exceed the
+          current stable APK before publication. Stable feeds remain unchanged.
 
+          Includes custom HTTP/HTTPS listening IP, port conflict checks and
+          rollback to previous settings on application failure.
           Includes scoped TUN and DNS-policy wire foundation. This does NOT
           implement default whole-device routing or unrestricted DNS/TCP/UDP
           forwarding. No production update feeds are changed.
