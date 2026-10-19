@@ -97,6 +97,8 @@ public final class MagiskBootScript {
                     SERVICE_D_DIR);
             return false;
         }
+        int httpPort = WebServerUtils.getHttpPort(context);
+        int httpsPort = WebServerUtils.getHttpsPort(context);
         boolean proxyFilter = BlockMode.current(context) == BlockMode.HIJACK;
         /*
          * In hijack mode the boot-started server reads <resources>/blocklist.txt
@@ -132,6 +134,8 @@ public final class MagiskBootScript {
         String onDisk = readScript();
         if (!onDisk.contains("--http-port " + httpPort)
                 || !onDisk.contains("--https-port " + httpsPort)
+                || (!WebServerUtils.getBindAddress(context).isEmpty()
+                    && !onDisk.contains("--bind-ip " + WebServerUtils.getBindAddress(context)))
                 || !onDisk.contains("--stats-port " + WebServerUtils.STATS_PORT)
                 || onDisk.contains("--proxy-filter") != proxyFilter) {
             Timber.w("MagiskBootScript: verification failed for %s", SCRIPT_PATH);
