@@ -116,9 +116,11 @@ public final class MagiskBootScript {
         // base64 keeps the shell command free of any quoting/escaping of paths.
         String encoded = Base64.encodeToString(script.getBytes(StandardCharsets.UTF_8),
                 Base64.NO_WRAP);
+        String staged = "/data/adb/.adblock-service-script.tmp";
         String cmd = "mkdir -p " + SERVICE_D_DIR
-                + " && echo " + encoded + " | base64 -d > " + SCRIPT_PATH
-                + " && chmod 755 " + SCRIPT_PATH
+                + " && echo " + encoded + " | base64 -d > " + staged
+                + " && chmod 755 " + staged
+                + " && mv -f " + staged + " " + SCRIPT_PATH
                 + " && [ -s " + SCRIPT_PATH + " ]";
         Shell.Result result = Shell.cmd(cmd).exec();
         if (!result.isSuccess()) {

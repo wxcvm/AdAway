@@ -612,6 +612,11 @@ public static void startWebServer(Context context) {
 
     private static void stopWebServerLocked() {
         killBundledExecutable(WEB_SERVER_EXECUTABLE);
+        // SIGTERM is asynchronous. Re-probing immediately can mistake our old socket for a conflict.
+        for (int attempt = 0; attempt < 10 && isBundledExecutableRunning(WEB_SERVER_EXECUTABLE); attempt++) {
+            try { Thread.sleep(200); }
+            catch (InterruptedException exception) { Thread.currentThread().interrupt(); return; }
+        }
     }
 
     /**
