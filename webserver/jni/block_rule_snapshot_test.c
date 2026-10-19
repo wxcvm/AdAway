@@ -105,7 +105,7 @@ static void rejects_unterminated_domain(void) {
     struct bs_builder builder = {0};
     memset(invalid.domain, 'a', sizeof(invalid.domain));
     CHECK(!bs_append(&invalid, &builder)); CHECK(builder.next.count == 0);
-    strcpy(invalid.domain, "valid.test"); builder.used = BS_MAX_POOL + 1;
+    snprintf(invalid.domain, sizeof(invalid.domain), "%s", "valid.test"); builder.used = BS_MAX_POOL + 1;
     CHECK(!bs_append(&invalid, &builder)); CHECK(builder.next.count == 0);
     bs_free_builder(&builder);
     puts("Unterminated names and invalid pool offsets rejected before allocation/copy");

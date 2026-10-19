@@ -20,14 +20,19 @@ struct bs_builder {
     size_t capacity, pool_capacity, used;
     uint32_t source; uint64_t order; bool finished, failed;
 };
+static inline size_t bs_domain_length(const struct dr_entry *entry, size_t used) {
+    if (used > BS_MAX_POOL) return 0;
+    const char *end = (const char *)memchr(entry->domain, 0, sizeof(entry->domain));
+    if (!end || end == entry->domain) return 0;
+    size_t length = (size_t)(end - entry->domain) + 1;
+    return length <= BS_MAX_POOL - used ? length : 0;
+}
 static inline bool bs_append(const struct dr_entry *entry, void *context) {
     struct bs_builder *builder = (struct bs_builder *)context;
     if (builder->finished) return false;
     if (builder->next.count == BS_MAX_ENTRIES) return false;
-    const char *end = (const char *)memchr(entry->domain, 0, sizeof(entry->domain));
-    if (!end || end == entry->domain || builder->used > BS_MAX_POOL) return false;
-    size_t length = (size_t)(end - entry->domain) + 1;
-    if (length > BS_MAX_POOL - builder->used) return false;
+    size_t length = bs_domain_length(entry, builder->used);
+    if (!length) return false;
     if (builder->next.count == builder->capacity) {
         size_t capacity = builder->capacity ? builder->capacity * 2 : 64;
         if (capacity > BS_MAX_ENTRIES) capacity = BS_MAX_ENTRIES;

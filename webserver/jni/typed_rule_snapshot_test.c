@@ -3,20 +3,24 @@
 #include "subscription_import.h"
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); exit(1); } } while (0)
 
+static unsigned split_vector_fields(char *line, char *fields[10]) {
+    char *ending = strpbrk(line, "\r\n");
+    if (ending) *ending = 0;
+    fields[0] = line; unsigned count = 1;
+    for (char *p = line; *p; p++) if (*p == '\t') { *p = 0; CHECK(count < 10); fields[count++] = p + 1; }
+    CHECK(count == 6 || count == 10);
+    return count;
+}
 static void vectors(const char *path) {
     FILE *vectors = fopen(path, "rb"); CHECK(vectors);
     FILE *staged = NULL; char line[2048], current[80] = ""; uint64_t orders[33] = {0};
     struct si_stats stats = {0}; unsigned queries = 0;
     while (fgets(line, sizeof(line), vectors)) {
         if (line[0] == '#' || line[0] == '\n') continue;
-        char *ending = strpbrk(line, "\r\n");
-        if (ending) *ending = 0;
-        char *fields[10]; fields[0] = line; unsigned count = 1;
-        for (char *p = line; *p; p++) if (*p == '\t') { *p = 0; CHECK(count < 10); fields[count++] = p + 1; }
-        CHECK(count == 6 || count == 10);
+        char *fields[10]; unsigned count = split_vector_fields(line, fields);
         if (strcmp(fields[1], current) != 0) {
             if (staged) CHECK(fclose(staged) == 0);
-            staged = tmpfile(); CHECK(staged); CHECK(strlen(fields[1]) < sizeof(current)); strcpy(current, fields[1]);
+            staged = tmpfile(); CHECK(staged); CHECK(strlen(fields[1]) < sizeof(current)); snprintf(current, sizeof(current), "%s", fields[1]);
             memset(orders, 0, sizeof(orders)); memset(&stats, 0, sizeof(stats));
         }
         if (strcmp(fields[0], "R") == 0) {
