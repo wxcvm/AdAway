@@ -18,6 +18,24 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ListenerSettingsDeviceTest {
+    @Test public void savedLegacyAddressAndExplicitPairRebuildWithDifferentSemantics() {
+        Context application = ApplicationProvider.getApplicationContext();
+        android.content.SharedPreferences prefs = application.getSharedPreferences("listener-migration-fixture", Context.MODE_PRIVATE);
+        Context isolated = new android.content.ContextWrapper(application) {
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) { return prefs; }
+        };
+        try {
+            assertTrue(prefs.edit().clear().putString("bind_ip", "::1").commit());
+            ListenerSettings legacy = org.adaway.util.WebServerUtils.getListenerSettings(isolated);
+            assertFalse(legacy.explicitPair);
+            assertEquals("", legacy.ipv4);
+            assertEquals("::1", legacy.ipv6);
+            assertTrue(prefs.edit().putString("listen_ipv4", "127.0.0.2").putString("listen_ipv6", "::1").commit());
+            ListenerSettings rebuilt = org.adaway.util.WebServerUtils.getListenerSettings(isolated);
+            assertTrue(rebuilt.explicitPair);
+            assertTrue(rebuilt.arguments().contains("--listen-ipv4 127.0.0.2 --listen-ipv6 ::1"));
+        } finally { assertTrue(prefs.edit().clear().commit()); }
+    }
     private Process probe(String... arguments) throws Exception {
         Context context=ApplicationProvider.getApplicationContext();
         String directory=context.getApplicationInfo().nativeLibraryDir;

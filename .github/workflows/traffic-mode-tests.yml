@@ -88,6 +88,8 @@ jobs:
       - name: Test actual native loader and concurrent immutable publication
         run: |
           python3 tools/verify_webserver_apk_test.py
+          cc -std=c11 -O2 -D_GNU_SOURCE -DMG_ENABLE_IPV6=1 -DMG_IPV6_V6ONLY=1 -DMG_TLS=0 webserver/jni/listener_mongoose_test.c webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/listener-mongoose"
+          "$RUNNER_TEMP/listener-mongoose"
           cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/listener_pair_test.c -o "$RUNNER_TEMP/listener-pair"
           "$RUNNER_TEMP/listener-pair"
           cc -std=c11 -O1 -g -fsanitize=address,undefined webserver/jni/listener_pair_test.c -o "$RUNNER_TEMP/listener-pair-asan"

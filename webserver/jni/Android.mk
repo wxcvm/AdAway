@@ -23,7 +23,7 @@ include $(PREBUILT_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 
-LOCAL_CFLAGS	       := -D MG_ENABLE_IPV6 -DMG_TLS=MG_TLS_OPENSSL -std=c99 -O2 -W -Wall -pthread -pipe $(COPT)
+LOCAL_CFLAGS	       := -D MG_ENABLE_IPV6 -DMG_IPV6_V6ONLY=1 -DMG_TLS=MG_TLS_OPENSSL -std=c99 -O2 -W -Wall -pthread -pipe $(COPT)
 LOCAL_MODULE           := webserver
 LOCAL_SRC_FILES        := webserver.c mongoose/mongoose.c
 LOCAL_STATIC_LIBRARIES := official_openssl_ssl official_openssl_crypto
