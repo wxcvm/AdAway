@@ -14,6 +14,9 @@ android {
         ndk {
             abiFilters 'arm64-v8a'
         }
+        externalNativeBuild {
+            ndkBuild { targets 'webserver' }
+        }
     }
 
     externalNativeBuild {
@@ -66,116 +69,43 @@ tasks.configureEach { t ->
     }
 }
 
-/**
- * Task to rename executables from hello_world to libhello_world_exec.so
- * If they look like libraries, they are packaged in the apk and deployed on the device in the lib folder!
- *
- * Help with files: https://docs.gradle.org/current/userguide/working_with_files.html
- */
-def renameJniLibAsExecutable = tasks.register('renameJniLibAsExecutable', Copy) {
-    def flavor = gradle.startParameter.taskRequests.toString().containsIgnoreCase("debug") ? "debug" : "release"
-    def buildFolder = layout.buildDirectory.dir("intermediates/ndkBuild/${flavor}/obj/local")
+// Each variant owns its executable and generated source directory. A command
+// containing testDebugUnitTest and assembleRelease must never select one global ABI/variant.
+abstract class PackageWebserverExecutable extends DefaultTask {
+    @InputDirectory abstract DirectoryProperty getNativeDirectory()
+    @OutputDirectory abstract DirectoryProperty getOutputDirectory()
 
-    dependsOn ":${project.name}:externalNativeBuild${flavor.substring(0, 1).toUpperCase()}${flavor.substring(1)}"
-
-    // BUG FIX: this task copies FROM buildFolder INTO that same buildFolder
-    // (renaming as it goes). Gradle's incremental up-to-date checking does
-    // not handle self-referential source/destination trees reliably — a
-    // stale stub .so already sitting in the output from a previous run can
-    // make Gradle consider this task's outputs already satisfied and skip
-    // re-executing it, silently leaving the placeholder stub in place
-    // instead of the freshly-built real executable. Force it to always run.
-    outputs.upToDateWhen { false }
-
-    /*
-     * BUG FIX (build-artifact verification): previously nothing checked
-     * that ndkBuild actually produced the real `webserver` executable
-     * before this task renamed it into libwebserver_exec.so. If the
-     * BUILD_EXECUTABLE step failed or was skipped (e.g. a compile error
-     * in webserver.c), this task would silently copy nothing — or worse,
-     * a stale/stub artifact — and the AAR/APK would ship without a
-     * working binary, reproducing the exact "stub shipped instead of
-     * real executable" failure this task was originally created to fix.
-     * Fail the build loudly instead of packaging garbage.
-     */
-    doFirst {
-        def checkedAbi = project.findProperty('ruleLoaderTestAbi')?.toString() ?: 'arm64-v8a'
-        def exe = file("${buildFolder.get().asFile}/${checkedAbi}/webserver")
-        if (!exe.exists()) {
-            throw new GradleException(
-                "Native webserver executable not found at ${exe} — " +
-                "ndkBuild BUILD_EXECUTABLE failed or was skipped. " +
-                "Refusing to package a stub/empty library.")
+    @TaskAction void packageExecutable() {
+        def executable = nativeDirectory.file('arm64-v8a/webserver').get().asFile
+        def header = new byte[32]
+        executable.withInputStream { stream ->
+            if (stream.read(header) != header.length)
+                throw new GradleException("Truncated native executable: ${executable}")
         }
-        if (exe.length() < 100_000) {
-            throw new GradleException(
-                "Suspiciously small webserver executable (${exe.length()} bytes) " +
-                "at ${exe} — this looks like the placeholder stub, not the real " +
-                "linked binary. Refusing to package it.")
+        // ELF64 little-endian AArch64 PIE, with a real executable entry point.
+        def entry = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(24)
+        if (header[0] != 0x7f || header[1] != 69 || header[2] != 76 || header[3] != 70 ||
+                header[4] != 2 || header[5] != 1 || header[18] != -73 || header[19] != 0 || entry == 0)
+            throw new GradleException("Not an ARM64 executable (placeholder libraries are forbidden): ${executable}")
+        project.copy {
+            from executable
+            into outputDirectory.dir('arm64-v8a')
+            rename { 'libwebserver_exec.so' }
         }
-    }
-
-    from(buildFolder) {
-        exclude "**/objs"
-        exclude "**/objs-debug"
-        exclude "**/*.a"
-        exclude "**/*.d"
-        exclude "**/*.o"
-        exclude "**/*.so"
-        exclude "**/*.txt"
-    }
-
-    into buildFolder
-
-    rename '(.+)', 'lib$1_exec.so'
-
-    eachFile {
-        println "Replacing ${it.getPath()} from ${flavor} ndkBuild directory"
     }
 }
 
-/*
- * BUG FIX (root cause of "web server never actually starts", surviving
- * every previous fix to webserver.c / ShellUtils.java): this used to be
- * wired up as
- *
- *   tasks.withType(LibraryJniLibsTask).configureEach { dependsOn renameJniLibAsExecutable }
- *
- * where LibraryJniLibsTask is an *internal* AGP implementation class
- * (com.android.build.gradle.internal.tasks.LibraryJniLibsTask) — not a
- * public API. Google's own AGP docs explicitly warn against this exact
- * pattern: "Tasks created by AGP are considered implementation details
- * and are not exposed as a public API. You must avoid ... guessing the
- * Task names and adding ... dependencies to those Task objects
- * directly." tasks.withType(X) does not error when zero tasks match X —
- * it silently configures nothing. On-device testing confirmed the
- * shipped libwebserver_exec.so is a ~3.7KB file matching stub.c almost
- * byte-for-byte, not a real linked executable, meaning this dependency
- * was never actually being wired into the build for whatever AGP
- * version this project currently uses: renameJniLibAsExecutable was
- * silently never running as part of a normal build, and the AAR/APK
- * packaged the placeholder stub library instead of the real webserver
- * binary. No amount of fixing webserver.c could ever matter while this
- * was broken — the real binary was never shipped in the first place.
- *
- * Fix: depend on stable, public, well-documented task *names* instead
- * of an internal class reference. AGP has used the
- * "merge<Variant>JniLibFolders" / "merge<Variant>NativeLibs" naming
- * convention for native-lib packaging tasks since AGP 3.x, well before
- * LibraryJniLibsTask existed under its current package, and it's a
- * much smaller surface to break across AGP upgrades than an internal
- * class path. Match by name against every task in the project rather
- * than filtering by (possibly wrong/renamed) type.
- */
-// The disposable x86_64 Room instrumentation job exercises Java/SQLite
-// only. It must not force the arm64 executable-renaming task: with an x86-only
-// ABI injection AGP does not expose externalNativeBuildDebug, and the native
-// server is deliberately absent from this test APK. All production ARM64
-// builds still MUST package and verify the real executable above.
-def roomOnlyX86Test = project.findProperty('ruleLoaderTestAbi')?.toString() == 'x86_64'
-tasks.configureEach { t ->
-    if (!roomOnlyX86Test &&
-            t.name.matches(/(?i).*merge.*(JniLibFolders|NativeLibs).*/)) {
-        t.dependsOn(renameJniLibAsExecutable)
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        // Disposable x86 Room/UI tests deliberately omit the production ARM64 server.
+        if (project.findProperty('ruleLoaderTestAbi')?.toString() != 'x86_64') {
+            def capitalized = variant.name.capitalize()
+            def packageTask = tasks.register("package${capitalized}WebserverExecutable", PackageWebserverExecutable) {
+                dependsOn "externalNativeBuild${capitalized}"
+                nativeDirectory.set(layout.buildDirectory.dir("intermediates/ndkBuild/${variant.name}/obj/local"))
+                outputDirectory.set(layout.buildDirectory.dir("generated/webserverJniLibs/${variant.name}"))
+            }
+            variant.sources.jniLibs.addGeneratedSourceDirectory(packageTask, { it.outputDirectory })
+        }
     }
 }

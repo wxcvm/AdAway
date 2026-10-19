@@ -49,6 +49,14 @@ public class ListenerSettingsDeviceTest {
         Process invalid=probe("--bind-ip","localhost");
         assertTrue(invalid.waitFor(10,TimeUnit.SECONDS));
         assertEquals(2,invalid.exitValue());
+        try (ServerSocket occupied = new ServerSocket(0, 1, InetAddress.getByName("::1"))) {
+            Process dual = probe("--listen-ipv4", "127.0.0.1", "--listen-ipv6", "::1",
+                    "--http-port", "" + occupied.getLocalPort(), "--https-port", "65535");
+            assertTrue(dual.waitFor(10, TimeUnit.SECONDS));
+            String output = new String(com.google.common.io.ByteStreams.toByteArray(dual.getInputStream()), StandardCharsets.UTF_8).trim();
+            assertEquals(output, 3, dual.exitValue());
+            assertEquals(output, 1, new JSONObject(output).getInt("http6"));
+        }
         assertFalse(resource.exists());
         assertFalse(ListenerSettings.isLiteral("127.0.0.1; touch /tmp/unwanted"));
     }

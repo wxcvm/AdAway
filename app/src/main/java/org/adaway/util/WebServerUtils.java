@@ -97,13 +97,20 @@ public class WebServerUtils {
     }
 
     public static ListenerSettings getListenerSettings(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE);
+        if (prefs.contains("listen_ipv4"))
+            return new ListenerSettings(prefs.getString("listen_ipv4", ""), prefs.getString("listen_ipv6", ""),
+                    getHttpPort(context), getHttpsPort(context));
         return new ListenerSettings(getBindAddress(context), isBindAll(context), getHttpPort(context), getHttpsPort(context));
     }
 
     private static boolean saveListenerSettings(Context context, ListenerSettings settings) {
-        boolean saved = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE).edit()
+        SharedPreferences.Editor editor = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE).edit()
                 .putString(PREF_BIND_IP, settings.address).putBoolean(PREF_BIND_ALL, settings.all)
-                .putInt(PREF_HTTP_PORT, settings.http).putInt(PREF_HTTPS_PORT, settings.https).commit();
+                .putInt(PREF_HTTP_PORT, settings.http).putInt(PREF_HTTPS_PORT, settings.https);
+        if (settings.explicitPair) editor.putString("listen_ipv4", settings.ipv4).putString("listen_ipv6", settings.ipv6);
+        else editor.remove("listen_ipv4").remove("listen_ipv6");
+        boolean saved = editor.commit();
         if (saved) { sHttpPortCached = settings.http; sHttpsPortCached = settings.https; }
         return saved;
     }
@@ -117,18 +124,19 @@ public class WebServerUtils {
     private static String checkListenerSettingsLocked(Context context, ListenerSettings settings) {
         try {
             org.json.JSONObject report = listenerProbe(context, settings);
-            return "HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS："
-                    + probeDescription(report.getInt(PROBE_HTTPS))
-                    + (settings.address.isEmpty() ? "；IPv6 辅助监听：HTTP " + probeDescription(report.optInt("http6",4))
-                        + " / HTTPS " + probeDescription(report.optInt("https6",4)) : "")
-                    + "。占用可能来自当前服务；应用时停止旧服务后复检。VPN："
+            String details = settings.explicitPair
+                    ? "IPv4 HTTP：" + probeDescription(report.optInt("http4", -1)) + " / HTTPS：" + probeDescription(report.optInt("https4", -1))
+                        + "；IPv6 HTTP：" + probeDescription(report.optInt("http6", -1)) + " / HTTPS：" + probeDescription(report.optInt("https6", -1))
+                    : "HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS：" + probeDescription(report.getInt(PROBE_HTTPS));
+            return details + "。占用可能来自当前服务；应用时停止旧服务后复检。VPN："
                     + org.adaway.model.traffic.AndroidVpnObserver.read(context, false).name()
                     + "；Root 重定向：" + (org.adaway.model.root.HijackModel.isEnabled() ? "运行中" : "未检测到") + "。";
-        } catch (Exception exception) { return "无法完成检测：请检查 Root 授权和本机可执行文件。设置未改变。"; }
+        } catch (Exception exception) { return "无法完成检测：" + exception.getMessage() + "。设置未改变。"; }
     }
 
     private static String probeDescription(int status) {
         return switch (status) {
+            case -1 -> "已关闭";
             case 0 -> "当前可绑定";
             case 1 -> "已被占用";
             case 2 -> "地址不属于本机";
@@ -137,7 +145,7 @@ public class WebServerUtils {
         };
     }
 
-    private static org.json.JSONObject listenerProbe(Context context, ListenerSettings settings) throws org.json.JSONException {
+    private static org.json.JSONObject listenerProbe(Context context, ListenerSettings settings) throws org.json.JSONException, IOException {
         for (String line : org.adaway.model.root.ShellUtils.checkBundledListener(context, settings.arguments()))
             if (line.startsWith("{\"http\":")) return new org.json.JSONObject(line);
         throw new org.json.JSONException("No listener probe result");
@@ -151,8 +159,10 @@ public class WebServerUtils {
     }
 
     private static String applyListenerSettingsLocked(Context context, ListenerSettings settings) {
+        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so")); }
+        catch (IOException exception) { return "未应用：" + exception.getMessage() + "。原服务与配置保持不变。"; }
         if (BlockMode.current(context) == BlockMode.HIJACK && !settings.supportsRootRedirect())
-            return "未应用：Root 重定向需要 IPv4 回环监听。请使用 127.0.0.1、0.0.0.0 或留空。";
+            return "未应用：Root 重定向需要 IPv4 回环监听。请在 IPv4 填写 127.0.0.1 或 0.0.0.0。";
         ListenerSettings previous = getListenerSettings(context);
         if (org.adaway.model.root.HijackModel.isEnabled()
                 && (previous.http != settings.http || previous.https != settings.https))
@@ -162,14 +172,15 @@ public class WebServerUtils {
         stopWebServer();
         try {
             org.json.JSONObject report = listenerProbe(context, settings);
-            if (report.getInt("http") != 0 || report.getInt(PROBE_HTTPS) != 0)
+            if (report.getInt("http") != 0 || report.getInt(PROBE_HTTPS) != 0
+                    || (settings.explicitPair && (report.optInt("http6", -1) > 0 || report.optInt("https6", -1) > 0)))
                 throw new IOException("HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS：" + probeDescription(report.getInt(PROBE_HTTPS)));
             if (!saveListenerSettings(context, settings)) throw new IOException("配置保存失败");
             if (boot && !org.adaway.model.root.MagiskBootScript.install(context)) throw new IOException("开机配置写入失败");
             startWebServer(context);
             if (!listenerReachable(settings)) throw new IOException("新服务未就绪");
-            String address = settings.address;
-            if (address.isEmpty()) address = settings.all ? "所有网卡" : "回环";
+            String address = "IPv4 " + (settings.ipv4.isEmpty() ? "关闭" : settings.ipv4)
+                    + " / IPv6 " + (settings.ipv6.isEmpty() ? "关闭" : settings.ipv6);
             return "已应用：HTTP " + settings.http + " / HTTPS " + settings.https + "；监听 " + address + "。";
         } catch (Exception exception) {
             return restoreListenerSettings(context, previous, boot, running, exception.getMessage());
@@ -190,10 +201,8 @@ public class WebServerUtils {
     private static boolean listenerReachable(ListenerSettings settings) {
         for (int attempt = 0; attempt < 5; attempt++) {
             try {
-                for (int port : new int[]{settings.http, settings.https}) {
-                    try (java.net.Socket socket = new java.net.Socket()) {
-                        socket.connect(new java.net.InetSocketAddress(settings.probeAddress(), port), 300);
-                    }
+                for (String address : settings.probeAddresses()) {
+                    if (!portsReachable(address, settings.http, settings.https)) throw new IOException("监听未就绪");
                 }
                 return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
             } catch (IOException exception) {
@@ -202,6 +211,17 @@ public class WebServerUtils {
             }
         }
         return false;
+    }
+
+    private static boolean portsReachable(String address, int http, int https) {
+        try {
+            for (int port : new int[]{http, https}) {
+                try (java.net.Socket socket = new java.net.Socket()) {
+                    socket.connect(new java.net.InetSocketAddress(address, port), 300);
+                }
+            }
+            return true;
+        } catch (IOException exception) { return false; }
     }
 
     /** Configured HTTP listen port (default 80). */
@@ -346,7 +366,7 @@ public class WebServerUtils {
 
     /** Test page URL honoring the configured HTTPS port. */
     public static String getTestUrl(Context context) {
-        if (!getBindAddress(context).isEmpty())
+        if (getListenerSettings(context).explicitPair || !getBindAddress(context).isEmpty())
             return "http://127.0.0.1:" + STATS_PORT + "/internal-test";
         int port = getHttpsPort(context);
         return port == 443 ? "https://localhost/internal-test" :
@@ -533,6 +553,12 @@ public static void startWebServer(Context context) {
 
     private static void startWebServerLocked(Context context) {
         Timber.d("Starting web server…");
+        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so")); }
+        catch (IOException exception) {
+            Timber.e(exception, "Invalid packaged webserver");
+            showToast(context, exception.getMessage());
+            return;
+        }
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
         applyBlockReplyConfig(context);

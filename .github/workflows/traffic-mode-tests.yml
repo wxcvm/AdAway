@@ -17,7 +17,8 @@ on:
       - 'app/src/main/java/org/adaway/ui/compose/StatsViewModel.kt'
       - 'app/src/main/java/org/adaway/util/WebServerUtils.java'
       - 'app/build.gradle'
-      - 'webserver/jni/**'
+      - 'webserver/**'
+      - 'tools/verify_webserver_apk.py'
       - '.github/workflows/traffic-mode-tests.yml'
   push:
     branches: [feat/traffic-mode-foundation]
@@ -86,6 +87,11 @@ jobs:
         run: ./gradlew :app:testDebugUnitTest --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
       - name: Test actual native loader and concurrent immutable publication
         run: |
+          python3 tools/verify_webserver_apk_test.py
+          cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/listener_pair_test.c -o "$RUNNER_TEMP/listener-pair"
+          "$RUNNER_TEMP/listener-pair"
+          cc -std=c11 -O1 -g -fsanitize=address,undefined webserver/jni/listener_pair_test.c -o "$RUNNER_TEMP/listener-pair-asan"
+          "$RUNNER_TEMP/listener-pair-asan"
           cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/listen_address_test.c -o "$RUNNER_TEMP/listener-test"
           "$RUNNER_TEMP/listener-test"
           cc -std=c11 -O1 -g -fsanitize=address,undefined webserver/jni/listen_address_test.c -o "$RUNNER_TEMP/listener-asan"
@@ -117,6 +123,10 @@ jobs:
           python3 tools/core_contract_schema_test.py
       - name: Build debug APK for device testing
         run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
+      - name: Build and verify mixed Debug-test Release packaging regression
+        run: |
+          ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
+          python3 tools/verify_webserver_apk.py --apk app/build/outputs/apk/release/app-release-unsigned.apk --executable webserver/build/generated/webserverJniLibs/release/arm64-v8a/libwebserver_exec.so
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:

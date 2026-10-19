@@ -18,18 +18,6 @@ LOCAL_EXPORT_C_INCLUDES := $(OPENSSL_BUILT_DIR)/include
 include $(PREBUILT_STATIC_LIBRARY)
 
 #
-# Build stub library in order to declare shared library to include to AAR
-#
-
-include $(CLEAR_VARS)
-
-LOCAL_MODULE           := webserver_exec
-LOCAL_SRC_FILES        := stub.c
-
-include $(BUILD_SHARED_LIBRARY)
-
-
-#
 # Build webserver executable
 #
 
@@ -44,7 +32,8 @@ LOCAL_LDLIBS           := -llog -ldl
 include $(BUILD_EXECUTABLE)
 
 #
-# NOTE: Stub library binary is replaced by webserver executable at the end of ndkbuild by gradle build script
+# The executable is packaged by the variant's generated jniLibs source.
+# Never build a same-named placeholder: it can silently reach a release APK.
 #
 
 

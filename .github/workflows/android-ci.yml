@@ -188,6 +188,9 @@ jobs:
           echo "$VERSION_NAME|$VERSION_CODE" > version.txt
           ./gradlew test assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
 
+      - name: Reject placeholder or wrong-variant server in final APK
+        run: python3 tools/verify_webserver_apk.py --apk app/build/outputs/apk/release/app-release-unsigned.apk --executable webserver/build/generated/webserverJniLibs/release/arm64-v8a/libwebserver_exec.so
+
       # Keep the native-build cache honest: without the hit rate the ccache
       # cache above cannot be told apart from dead weight in CI timing.
       - name: ccache statistics

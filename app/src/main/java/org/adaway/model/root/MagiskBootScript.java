@@ -136,8 +136,7 @@ public final class MagiskBootScript {
         String onDisk = readScript();
         if (!onDisk.contains("--http-port " + httpPort)
                 || !onDisk.contains("--https-port " + httpsPort)
-                || (!WebServerUtils.getBindAddress(context).isEmpty()
-                    && !onDisk.contains("--bind-ip " + WebServerUtils.getBindAddress(context)))
+                || !onDisk.contains(WebServerUtils.getListenerSettings(context).arguments())
                 || !onDisk.contains("--stats-port " + WebServerUtils.STATS_PORT)
                 || onDisk.contains("--proxy-filter") != proxyFilter) {
             Timber.w("MagiskBootScript: verification failed for %s", SCRIPT_PATH);
@@ -235,10 +234,6 @@ public final class MagiskBootScript {
 
     static String buildScript(String nativeLibDir, String resourceDir,
                              org.adaway.util.ListenerSettings settings, int statsPort, boolean proxyFilter) {
-        boolean bindAll = settings.all;
-        int httpPort = settings.http;
-        int httpsPort = settings.https;
-        String bindIp = settings.address;
         String libName = "lib" + WebServerUtils.WEB_SERVER_EXECUTABLE + "_exec.so";
         String bin = "/data/local/tmp/" + libName;
         String src = nativeLibDir + "/" + libName;
@@ -335,11 +330,7 @@ public final class MagiskBootScript {
                 + "  fi\n"
                 + "  echo \"$(date) boot start\" >> \"$LOG\"\n"
                 + "  LD_LIBRARY_PATH=\"$APP_LIB\" \"$BIN\" --resources \"$RES\""
-                + " --bind " + (bindAll ? "all" : "loop")
-                + (bindIp.isEmpty() ? "" : " --bind-ip " + bindIp)
-                + " --stats-port " + statsPort
-                + " --http-port " + httpPort
-                + " --https-port " + httpsPort
+                + settings.arguments().replace("--stats-port 8686", "--stats-port " + statsPort)
                 + (proxyFilter ? " --proxy-filter" : "")
                 + " >> \"$LOG\" 2>&1 &\n"
                 + ") &\n"
