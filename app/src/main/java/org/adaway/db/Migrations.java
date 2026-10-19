@@ -12,7 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
  *
  * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
  */
-final class Migrations {
+public final class Migrations {
     /**
      * Private constructor of utility class.
      */
@@ -133,6 +133,13 @@ final class Migrations {
      * which routinely holds 100k-300k+ rows after merging several
      * community block lists.
      */
+    public static final Migration MIGRATION_8_9 = new Migration(8, 9) {
+        @Override public void migrate(@NonNull SupportSQLiteDatabase database) {
+            database.execSQL("ALTER TABLE hosts_lists ADD COLUMN match_scope INTEGER NOT NULL DEFAULT -1");
+            database.execSQL("ALTER TABLE hosts_lists ADD COLUMN source_order INTEGER NOT NULL DEFAULT 0");
+        }
+    };
+
     static final Migration MIGRATION_7_8 = new Migration(7, 8) {
         @Override
         public void migrate(@NonNull SupportSQLiteDatabase database) {

@@ -24,7 +24,7 @@ public final class DiagnosticDnsCodecTest {
         return answer;
     }
 
-    @Test public void fixedQuestionIncludesOnlyExampleComA() {
+    @Test public void fixedQuestionIncludesOnlyExampleComAOrAaaa() {
         byte[] q = DiagnosticDnsCodec.query(0x1234);
         assertEquals(29, q.length);
         assertEquals(0x12, q[0] & 255);
@@ -32,6 +32,13 @@ public final class DiagnosticDnsCodecTest {
         assertTrue(DiagnosticDnsCodec.isAllowedQuery(q));
         q[13] = 'x';
         assertFalse(DiagnosticDnsCodec.isAllowedQuery(q));
+        byte[] aaaa = DiagnosticDnsCodec.query(0x1234, DiagnosticDnsCodec.TYPE_AAAA);
+        assertTrue(DiagnosticDnsCodec.isAllowedQuery(aaaa));
+        assertEquals(28, aaaa[26]);
+        for (int type : new int[]{0, 15, 255, 256, 65535}) {
+            try { DiagnosticDnsCodec.query(1, type); fail("type " + type); }
+            catch (IllegalArgumentException expected) { }
+        }
     }
 
     @Test public void validatedResponseNeedsMatchingIdNameAndQuestion() {

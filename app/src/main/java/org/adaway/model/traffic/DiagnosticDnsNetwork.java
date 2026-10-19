@@ -8,14 +8,11 @@ import android.net.NetworkCapabilities;
 import android.net.VpnService;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
 import java.net.DatagramSocket;
-import java.net.Inet4Address;
 import java.net.InetAddress;
-import java.util.Arrays;
 
 /**
- * One-shot real upstream DNS transport for the fixed example.com A question.
+ * One-shot real upstream DNS transport for the fixed example.com A/AAAA question.
  *
  * No resolver addresses or user queries are stored or sent to telemetry.
  * Only an OS-provided DNS server of a validated, non-VPN network is used.
@@ -26,8 +23,8 @@ public final class DiagnosticDnsNetwork {
 
     private static final class Destination {
         final Network network;
-        final Inet4Address resolver;
-        Destination(Network network, Inet4Address resolver) {
+        final InetAddress resolver;
+        Destination(Network network, InetAddress resolver) {
             this.network = network;
             this.resolver = resolver;
         }
@@ -47,15 +44,10 @@ public final class DiagnosticDnsNetwork {
             }
             LinkProperties props = manager.getLinkProperties(network);
             if (props == null) continue;
-            for (InetAddress server : props.getDnsServers()) {
-                if (server instanceof Inet4Address
-                        && !server.isAnyLocalAddress() && !server.isLoopbackAddress()
-                        && !server.isMulticastAddress()) {
-                    return new Destination(network, (Inet4Address) server);
-                }
-            }
+            InetAddress server = DiagnosticDnsResolverPolicy.select(props.getDnsServers());
+            if (server != null) return new Destination(network, server);
         }
-        throw new IOException("No validated non-VPN IPv4 DNS network");
+        throw new IOException("No validated non-VPN DNS network");
     }
 
     public static byte[] exchange(VpnService service, byte[] question,
@@ -64,27 +56,16 @@ public final class DiagnosticDnsNetwork {
             throw new IOException("DNS diagnostic query not allowed");
 
         Destination target = resolver(service);
-        try (DatagramSocket socket = new DatagramSocket()) {
-            sockets.register(socket);
-            try {
-            // protect before binding so packets cannot be looped back to TUN.
-            if (!service.protect(socket)) throw new IOException("VPN protect failed");
-            target.network.bindSocket(socket);
-            socket.setSoTimeout(1200);
-            socket.send(new DatagramPacket(question, question.length,
-                    target.resolver, 53));
-            byte[] bytes = new byte[DiagnosticDnsCodec.MAX_DATAGRAM + 1];
-            DatagramPacket response = new DatagramPacket(bytes, bytes.length);
-            socket.receive(response);
-            if (!target.resolver.equals(response.getAddress())
-                    || response.getPort() != 53
-                    || response.getLength() > DiagnosticDnsCodec.MAX_DATAGRAM)
-                throw new IOException("DNS response from unexpected endpoint");
-            byte[] answer = Arrays.copyOf(bytes, response.getLength());
-            if (!DiagnosticDnsCodec.matchesResponse(question, answer))
-                throw new IOException("Unexpected or malformed DNS answer");
-            return answer;
-            } finally { sockets.remove(socket); }
-        }
+        return DiagnosticDnsTransport.exchange(target.resolver, 53, question, sockets,
+                new DiagnosticDnsTransport.Hooks() {
+                    @Override public void prepare(DatagramSocket socket) throws IOException {
+                        if (!service.protect(socket)) throw new IOException("VPN protect failed");
+                        target.network.bindSocket(socket);
+                    }
+                    @Override public void prepare(java.net.Socket socket) throws IOException {
+                        if (!service.protect(socket)) throw new IOException("VPN protect failed");
+                        target.network.bindSocket(socket);
+                    }
+                });
     }
 }

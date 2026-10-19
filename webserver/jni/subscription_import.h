@@ -1,14 +1,19 @@
 #ifndef ADAWAY_SUBSCRIPTION_IMPORT_H
 #define ADAWAY_SUBSCRIPTION_IMPORT_H
-#include "domain_rule_snapshot.h"
+#include "typed_rule_record.h"
 
 struct si_stats { size_t entries, unsupported, cosmetics, bytes; };
-struct si_sink { FILE *output; struct si_stats *stats; };
+struct si_sink { FILE *output; struct si_stats *stats; uint32_t source; uint64_t order; };
 static inline bool si_emit(const struct dr_entry *entry, void *context) {
     struct si_sink *sink = (struct si_sink *)context;
     if (sink->stats->entries >= 500000u) return false;
     char address[64] = "", line[512]; int length;
-    if (entry->kind == DR_REPLACE) {
+    if (sink->source) {
+        struct tr_record record; memset(&record, 0, sizeof(record)); record.entry = *entry;
+        record.source = sink->source; record.order = ++sink->order;
+        record.scope = entry->suffix ? TR_SUFFIX : strpbrk(entry->domain, "*?") ? TR_WILDCARD : TR_EXACT;
+        length = tr_format(line, sizeof(line), &record);
+    } else if (entry->kind == DR_REPLACE) {
 #ifdef _WIN32
         if (!InetNtopA(entry->family == 4 ? AF_INET : AF_INET6, (void *)entry->address, address, sizeof(address))) return false;
 #else
@@ -29,8 +34,9 @@ static inline bool si_consume(const char *line, struct si_sink *sink) {
     return status != DR_INVALID;
 }
 /* Validated semantic lines, not truncated host fragments, are written to the unpublished staging file. */
-static inline bool si_import(FILE *source, FILE *output, struct si_stats *stats) {
-    struct si_sink sink = {output, stats};
+static inline bool si_import_source(FILE *source, FILE *output, struct si_stats *stats, uint32_t source_id) {
+    if (source_id < 2 || source_id > INT32_MAX) return false;
+    struct si_sink sink = {output, stats, source_id, 0};
     char line[DR_MAX_LINE + 1]; size_t length = 0, bytes = 0; int c;
     while ((c = fgetc(source)) != EOF) {
         if (++bytes > DR_MAX_BYTES || !c) return false;
@@ -40,5 +46,8 @@ static inline bool si_import(FILE *source, FILE *output, struct si_stats *stats)
     if (ferror(source)) return false;
     line[length] = 0;
     return si_consume(line, &sink) && !ferror(output);
+}
+static inline bool si_import(FILE *source, FILE *output, struct si_stats *stats) {
+    return si_import_source(source, output, stats, 2);
 }
 #endif

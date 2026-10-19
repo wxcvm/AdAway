@@ -1,5 +1,7 @@
 # AdAway UI single-batch handoff (2026-10-17)
 
+> Historical UI handoff. Current implementation is reviewed through Android PR #67 and Windows PR #19. See [current workflow review](ui-workflow-20261018.md) for implemented behavior and current evidence boundaries. The manual device, rotation, accessibility and multi-monitor checks below remain separate gates, not claims of completed acceptance.
+
 This is the unified Android UI branch. It intentionally incorporates the earlier settings-only PR #62 so UI integration can be reviewed in one pass. The Windows half is in `wxcvm/AdAway-Windows` PR #12.
 
 ## Android primary navigation

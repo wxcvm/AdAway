@@ -35,7 +35,6 @@ import org.adaway.db.entity.HostsSource;
 import org.adaway.model.error.HostErrorException;
 import org.adaway.model.git.GitHostsSource;
 import org.adaway.model.traffic.RuleSnapshotRepository;
-import org.adaway.model.traffic.TrafficCoreContract;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -48,8 +47,6 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
 
 import okhttp3.Cache;
 import okhttp3.OkHttpClient;
@@ -127,6 +124,7 @@ public class SourceModel {
     private final RuleSnapshotRepository ruleSnapshots = new RuleSnapshotRepository();
 
     public RuleSnapshotRepository.Snapshot getRuleSnapshot() {
+        if (this.ruleSnapshots.read().generation == 0) syncHostEntries();
         return this.ruleSnapshots.read();
     }
     /**
@@ -141,16 +139,19 @@ public class SourceModel {
      * @param context The application context.
      */
     public SourceModel(Context context) {
+        this(context, AppDatabase.getInstance(context));
+        SourceUpdateService.syncPreferences(context);
+    }
+
+    // Also permits isolated runtime verification with a private database.
+    SourceModel(Context context, AppDatabase database) {
         this.context = context;
-        AppDatabase database = AppDatabase.getInstance(this.context);
         this.database = database;
         this.hostsSourceDao = database.hostsSourceDao();
         this.hostListItemDao = database.hostsListItemDao();
         this.hostEntryDao = database.hostEntryDao();
         this.state = new MutableLiveData<>("");
-        this.updateAvailable = new MutableLiveData<>();
-        this.updateAvailable.setValue(false);
-        SourceUpdateService.syncPreferences(context);
+        this.updateAvailable = new MutableLiveData<>(false);
     }
 
     /**
@@ -420,28 +421,20 @@ public class SourceModel {
      * Synchronize hosts entries from current source states.
      */
     public void syncHostEntries() {
+        editRules(() -> {});
+    }
+
+    /** Commit a local edit and its derived index together, then publish after commit. */
+    public void editRules(Runnable edit) {
         synchronized (this.updateLock) {
             setState(R.string.status_sync_database);
-            Map<String, TrafficCoreContract.Action> rules = new HashMap<>();
-            Map<String, String> replacements = new HashMap<>();
             RuleSnapshotRepository.Snapshot[] prepared = new RuleSnapshotRepository.Snapshot[1];
-            // Validate inside the transaction; errors roll back the effective table too.
             this.database.runInTransaction(() -> {
-                this.hostEntryDao.sync();
-                try (Cursor cursor = this.hostEntryDao.getAllCursor()) {
-                    while (cursor.moveToNext()) {
-                        if (rules.size() >= RuleSnapshotRepository.MAX_RULES)
-                            throw new IllegalStateException("Effective rules exceed snapshot limit");
-                        String host = cursor.getString(0);
-                        boolean replace = cursor.getInt(1) == 2;
-                        rules.put(host, replace ? TrafficCoreContract.Action.REPLACE : TrafficCoreContract.Action.NXDOMAIN);
-                        if (replace) replacements.put(host, cursor.getString(2));
-                    }
-                }
-                prepared[0] = RuleSnapshotRepository.prepareEffective(
-                        this.ruleSnapshots.read().generation + 1, rules, replacements);
-                if (prepared[0] == null)
-                    throw new IllegalStateException("Invalid effective domain rules");
+                edit.run();
+                prepared[0] = org.adaway.model.source.PersistedRuleSnapshots.prepare(
+                        this.hostListItemDao, this.ruleSnapshots.read().generation + 1);
+                if (prepared[0] == null) throw new IllegalStateException("Invalid typed rules");
+                this.hostEntryDao.syncPrepared(prepared[0]);
             });
             if (!this.ruleSnapshots.publishPrepared(prepared[0]))
                 throw new IllegalStateException("Rule snapshot publication failed");

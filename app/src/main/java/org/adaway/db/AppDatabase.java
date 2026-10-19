@@ -27,6 +27,7 @@ import static org.adaway.db.Migrations.MIGRATION_4_5;
 import static org.adaway.db.Migrations.MIGRATION_5_6;
 import static org.adaway.db.Migrations.MIGRATION_6_7;
 import static org.adaway.db.Migrations.MIGRATION_7_8;
+import static org.adaway.db.Migrations.MIGRATION_8_9;
 import static org.adaway.db.entity.HostsSource.USER_SOURCE_ID;
 import static org.adaway.db.entity.HostsSource.USER_SOURCE_URL;
 
@@ -35,7 +36,7 @@ import static org.adaway.db.entity.HostsSource.USER_SOURCE_URL;
  *
  * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
  */
-@Database(entities = {HostsSource.class, HostListItem.class, HostEntry.class}, version = 8)
+@Database(entities = {HostsSource.class, HostListItem.class, HostEntry.class}, version = 9)
 @TypeConverters({ListTypeConverter.class, ZonedDateTimeConverter.class})
 public abstract class AppDatabase extends RoomDatabase {
     /**
@@ -71,7 +72,8 @@ public abstract class AppDatabase extends RoomDatabase {
                             MIGRATION_4_5,
                             MIGRATION_5_6,
                             MIGRATION_6_7,
-                            MIGRATION_7_8
+                            MIGRATION_7_8,
+                            MIGRATION_8_9
                     ).build();
                 }
             }

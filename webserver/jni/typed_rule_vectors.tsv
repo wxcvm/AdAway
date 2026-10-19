@@ -1,0 +1,65 @@
+# R case source allow redirects raw rule (order counts emitted aliases, not comments)
+# Q case host qtype qclass action source order scope address
+R	exact	2	0	1	0.0.0.0 EXACT.TEST. alias.test
+Q	exact	EXACT.TEST.	1	1	1	2	1	0	-
+Q	exact	alias.test	28	1	1	2	2	0	-
+Q	exact	sub.exact.test	1	1	0	0	0	0	-
+R	suffix	2	0	1	||suffix.test^
+R	suffix	3	0	1	@@||allow.suffix.test^
+Q	suffix	sub.suffix.test	1	1	1	2	1	1	-
+Q	suffix	suffix.test	28	1	1	2	1	1	-
+Q	suffix	badsuffix.test	1	1	0	0	0	0	-
+Q	suffix	sub.allow.suffix.test	1	1	0	3	1	1	-
+R	priority	2	0	1	||ads.test^
+R	priority	3	0	1	192.0.2.8 ads.test
+R	priority	4	0	1	@@||ads.test^
+Q	priority	ads.test	1	1	0	4	1	1	-
+R	user	2	0	1	@@||ads.test^
+R	user	1	0	1	0.0.0.0 ads.test
+R	user	1	0	1	192.0.2.9 ads.test
+Q	user	ads.test	1	1	4	1	2	0	192.0.2.9
+Q	user	ads.test	28	1	0	1	2	0	-
+R	allowuser	2	0	1	0.0.0.0 ads.test
+R	allowuser	1	0	1	0.0.0.0 ads.test
+R	allowuser	1	1	1	ads.test
+Q	allowuser	ads.test	1	1	0	1	2	0	-
+R	precision	2	0	1	192.0.2.5 *.exact.test
+R	precision	3	0	1	192.0.2.6 x.exact.test
+Q	precision	x.exact.test	1	1	4	3	1	0	192.0.2.6
+Q	precision	y.exact.test	1	1	4	2	1	2	192.0.2.5
+Q	precision	exact.test	1	1	0	0	0	0	-
+R	wildallow	2	0	1	0.0.0.0 x.wild.test
+R	wildallow	3	1	1	*.wild.test
+Q	wildallow	x.wild.test	1	1	0	3	1	2	-
+R	sources	4	0	1	192.0.2.4 redirect.test
+R	sources	2	0	1	192.0.2.2 redirect.test
+R	sources	2	0	1	192.0.2.3 redirect.test
+Q	sources	redirect.test	1	1	4	2	1	0	192.0.2.2
+R	ipv6	2	0	1	2001:db8::8 v6.test
+Q	ipv6	v6.test	28	1	4	2	1	0	2001:db8::8
+Q	ipv6	v6.test	1	1	0	2	1	0	-
+Q	ipv6	v6.test	65	1	0	2	1	0	-
+Q	ipv6	v6.test	28	3	0	2	1	0	-
+R	conditional	2	0	1	||conditional.test^$script
+R	conditional	2	0	1	||conditional.test^/path
+R	conditional	2	0	1	@@||conditional.test^$image
+Q	conditional	conditional.test	1	1	0	0	0	0	-
+R	parentpriority	2	0	1	@@||parent.test^
+R	parentpriority	3	0	1	0.0.0.0 a.parent.test
+Q	parentpriority	a.parent.test	1	1	0	2	1	1	-
+R	wilduser	1	1	1	*.parent.test
+R	wilduser	2	0	1	0.0.0.0 a.parent.test
+Q	wilduser	a.parent.test	1	1	0	1	1	2	-
+R	replaceblock	2	0	1	0.0.0.0 a.parent.test
+R	replaceblock	3	0	1	192.0.2.7 *.parent.test
+Q	replaceblock	a.parent.test	1	1	4	3	1	2	192.0.2.7
+R	userprecision	1	1	1	x.parent.test
+R	userprecision	1	0	1	||parent.test^
+Q	userprecision	x.parent.test	1	1	0	1	1	0	-
+Q	userprecision	y.parent.test	1	1	1	1	2	1	-
+R	mapped	2	0	1	::ffff:192.0.2.8 mapped.test
+R	mapped	2	0	1	::ffff:0.0.0.0 zero-mapped.test
+Q	mapped	mapped.test	1	1	4	2	1	0	192.0.2.8
+Q	mapped	mapped.test	28	1	0	2	1	0	-
+Q	mapped	zero-mapped.test	1	1	1	2	2	0	-
+Q	mapped	zero-mapped.test	28	1	1	2	2	0	-

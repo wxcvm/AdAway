@@ -71,32 +71,37 @@ public interface HostEntryDao {
      * atomic (either fully applied or not applied at all) and lets SQLite
      * commit it once instead of N+M times.
      */
+    @Query("SELECT h.* FROM hosts_lists h JOIN hosts_sources s ON h.source_id = s.id WHERE h.enabled = 1 AND s.enabled = 1 ORDER BY h.source_id, h.id LIMIT 500001")
+    List<HostListItem> getEnabledRules();
+
     @Transaction
     default void sync() {
+        org.adaway.model.traffic.RuleSnapshotRepository.Snapshot snapshot =
+                org.adaway.model.source.PersistedRuleSnapshots.prepare(getEnabledRules(), 1);
+        if (snapshot == null) throw new IllegalStateException("Invalid typed rules");
+        syncPrepared(snapshot);
+    }
+
+    default void syncPrepared(org.adaway.model.traffic.RuleSnapshotRepository.Snapshot snapshot) {
+        // Hosts can only express concrete names. Suffix/glob rules are evaluated for
+        // already known names; never enumerate or invent unknown subdomains.
+        java.util.Set<String> names = new java.util.TreeSet<>();
+        for (org.adaway.model.traffic.DomainRule rule : snapshot.records)
+            if (rule.scope != org.adaway.model.traffic.DomainRule.Scope.WILDCARD) names.add(rule.domain);
+        List<HostEntry> batch = new ArrayList<>(100);
         clear();
-        importBlocked();
-        List<HostListItem> redirectedHosts = getEnabledRedirectedHosts();
-        List<HostEntry> redirections = new ArrayList<>(redirectedHosts.size());
-        for (HostListItem redirectedHost : redirectedHosts) {
-            HostEntry entry = new HostEntry();
-            entry.setHost(redirectedHost.getHost());
-            entry.setType(REDIRECTED);
-            entry.setRedirection(redirectedHost.getRedirection());
-            redirections.add(entry);
+        for (String host : names) {
+            org.adaway.model.traffic.RuleSnapshotRepository.Resolution resolved = snapshot.resolve(host, 1, 1);
+            // Hosts replacements can carry either address family, independent of an A query.
+            String address = snapshot.replacementFor(host);
+            if (address == null && resolved.decision.action != org.adaway.model.traffic.TrafficCoreContract.Action.NXDOMAIN)
+                continue;
+            HostEntry entry = new HostEntry(); entry.setHost(host);
+            entry.setType(address == null ? ListType.BLOCKED : REDIRECTED); entry.setRedirection(address);
+            batch.add(entry);
+            if (batch.size() == 100) { redirectHosts(batch); batch.clear(); }
         }
-        redirectHosts(redirections);
-        // Shared contract: exception before ordinary replacement/block; user rules win last.
-        for (String allowedHost : getEnabledAllowedHosts()) allowHost(sqlPattern(allowedHost));
-        for (HostListItem userRule : getEnabledUserRules()) {
-            if (userRule.getType() == ListType.ALLOWED) {
-                allowHost(sqlPattern(userRule.getHost()));
-            } else {
-                HostEntry entry = new HostEntry();
-                entry.setHost(userRule.getHost()); entry.setType(userRule.getType());
-                entry.setRedirection(userRule.getRedirection());
-                redirectHosts(java.util.Collections.singletonList(entry));
-            }
-        }
+        if (!batch.isEmpty()) redirectHosts(batch);
     }
 
     static String sqlPattern(String host) {

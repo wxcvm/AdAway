@@ -9,6 +9,7 @@ import androidx.room.Query;
 import androidx.room.Update;
 
 import org.adaway.db.entity.HostListItem;
+import org.adaway.db.entity.RuleListRow;
 
 import java.util.List;
 import java.util.Optional;
@@ -40,8 +41,27 @@ public interface HostListItemDao {
     @Query("SELECT * FROM hosts_lists WHERE type = :type AND host LIKE :query AND ((:includeSources == 0 AND source_id == 1) || (:includeSources == 1)) GROUP BY host ORDER BY host ASC")
     PagingSource<Integer, HostListItem> loadList(int type, boolean includeSources, String query);
 
+    @Query("SELECT h.* FROM hosts_lists h JOIN hosts_sources s ON h.source_id = s.id WHERE h.enabled = 1 AND s.enabled = 1 ORDER BY h.source_id, h.id LIMIT 500001")
+    List<HostListItem> getEnabledRules();
+
     @Query("SELECT * FROM hosts_lists ORDER BY host ASC")
     List<HostListItem> getAll();
+
+    // Browser filters: 0 all, 1 enabled, 2 disabled, 3 personal. Count and page
+    // run in one read transaction. Do not GROUP BY host: source/scope identity matters.
+    @Query("SELECT h.*, s.label AS source_label, s.enabled AS source_enabled FROM hosts_lists h " +
+            "JOIN hosts_sources s ON s.id = h.source_id WHERE h.type = :type " +
+            "AND instr(lower(h.host), lower(:query)) > 0 " +
+            "AND (:filter = 0 OR (:filter = 1 AND h.enabled = 1 AND s.enabled = 1) " +
+            "OR (:filter = 2 AND (h.enabled = 0 OR s.enabled = 0)) OR (:filter = 3 AND h.source_id = 1)) " +
+            "ORDER BY h.host, h.source_id, h.match_scope, h.id DESC LIMIT :limit OFFSET :offset")
+    List<RuleListRow> browseRules(int type, String query, int filter, int limit, int offset);
+
+    @Query("SELECT COUNT(*) FROM hosts_lists h JOIN hosts_sources s ON s.id = h.source_id " +
+            "WHERE h.type = :type AND instr(lower(h.host), lower(:query)) > 0 " +
+            "AND (:filter = 0 OR (:filter = 1 AND h.enabled = 1 AND s.enabled = 1) " +
+            "OR (:filter = 2 AND (h.enabled = 0 OR s.enabled = 0)) OR (:filter = 3 AND h.source_id = 1))")
+    int countBrowserRules(int type, String query, int filter);
 
     @Query("SELECT * FROM hosts_lists WHERE type = :type ORDER BY host ASC LIMIT :limit")
     List<HostListItem> getListByType(int type, int limit);

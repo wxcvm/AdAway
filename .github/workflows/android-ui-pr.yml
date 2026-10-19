@@ -55,3 +55,38 @@ jobs:
           PY
       - name: Compile Compose UI
         run: ./gradlew :app:compileDebugKotlin --no-daemon --stacktrace
+
+  interaction:
+    name: Rule workflow UI and screenshots (API 35)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Enable disposable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test actual UI components without root or network actions
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed
+        with:
+          api-level: 35
+          arch: x86_64
+          disable-animations: true
+          script: |
+            ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.ui.compose.RuleWorkflowUiTest
+            adb pull /sdcard/Pictures/AdAwayUiReview ui-review
+      - name: Upload UI screenshots and interaction evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-rule-workflow-ui
+          path: |
+            ui-review/**
+            app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: warn

@@ -13,9 +13,9 @@
     <string name="compose_status_ad_blocking">Ad blocking</string>
     <string name="compose_status_active">Active</string>
     <string name="compose_status_not_applied">Not applied</string>
-    <string name="compose_hosts_blocked">Blocked</string>
-    <string name="compose_hosts_allowed">Allowed</string>
-    <string name="compose_hosts_redirected">Redirected</string>
+    <string name="compose_hosts_blocked">Block rules</string>
+    <string name="compose_hosts_allowed">Allow rules</string>
+    <string name="compose_hosts_redirected">Redirect rules</string>
     <string name="compose_web_server">Web server</string>
     <string name="compose_web_server_not_running">Not running</string>
     <string name="compose_web_server_loading">Running · fetching stats…</string>
@@ -23,7 +23,7 @@
     <string name="compose_actions">Actions</string>
     <string name="compose_sync_hosts">Synchronize hosts</string>
     <string name="compose_sync_hosts_running">Syncing…</string>
-    <string name="compose_sync_hosts_subtitle">Apply latest sources to hosts file</string>
+    <string name="compose_sync_hosts_subtitle">Apply known names to hosts; unknown subdomains are not expanded</string>
     <string name="compose_ws_settings">Web server settings</string>
     <string name="compose_ws_settings_subtitle">TLS, block images, statistics</string>
     <string name="compose_ws_control_title">Web server</string>
@@ -313,7 +313,7 @@
     <string name="compose_rules_view_hosts_copy">Copy</string>
     <string name="compose_rules_view_hosts_copied">Copied to the clipboard</string>
     <string name="compose_rules_cancel">Cancel</string>
-    <string name="compose_rules_add_failed">Not added: the rule may already exist, the domain may be invalid, or the database write failed</string>
+    <string name="compose_rules_add_failed">Could not save the rule. Check the domain and replacement address, then retry. Your input has been kept.</string>
     <string name="compose_rules_source_size">%1$d items</string>
     <string name="compose_rules_sources_empty">No subscriptions yet — add one to start blocking.</string>
     <string name="compose_stats_kpi_connections">Connections</string>
@@ -350,7 +350,7 @@
     <string name="compose_rules_source_type_file">Local file</string>
     <string name="compose_rules_pick_file">Choose a local rules file</string>
     <string name="compose_rules_pick_file_hint">hosts or rules text files; local files are read offline.</string>
-    <string name="compose_rules_add_source_failed">Could not add: invalid URL or the subscription already exists</string>
+    <string name="compose_rules_add_source_failed">Could not add the source. Check the link or file, existing sources and storage, then retry. Your input has been kept.</string>
     <string name="compose_settings_block_mode_adguard_hint">AdGuard DNS-level custom blocking IP may point blocked DNS domains at the local response server, but only if the version supports the option and the IP, standard ports, and certificate trust are verified. The presence of AdGuard or another VPN alone does not confirm cooperation. Never overlap transparent hijack with another active VPN.</string>
     <string name="compose_settings_block_mode_hijack">Hijack + filter</string>
     <string name="compose_settings_block_mode_hijack_hint">Hijack + filter (Root): redirects eligible local TCP connections on ports 80/443 to the built-in server. This does not cover all IPv4/IPv6, UDP, QUIC or traffic protected by other VPNs. HTTPS rewriting requires trusted CA and may fail with certificate pinning. Keep the mode off when another VPN owns the connection path.</string>
@@ -371,11 +371,13 @@
     <string name="compose_tun_diagnostic_test_relay">Test protected UDP relay</string>
     <string name="compose_tun_diagnostic_relay_ok">Protected UDP socket relay passed: test packets crossed TUN → loopback responder → TUN.</string>
     <string name="compose_tun_diagnostic_relay_failed">Local protected UDP relay test failed. Global routing and DNS were not modified.</string>
-    <string name="compose_tun_diagnostic_test_dns">Test underlying DNS (example.com)</string>
+    <string name="compose_tun_diagnostic_test_dns">Test IPv4 address DNS (example.com A)</string>
+    <string name="compose_tun_diagnostic_test_dns_aaaa">Test IPv6 address DNS (example.com AAAA)</string>
+    <string name="compose_tun_diagnostic_dns_result">%1$s · %2$s</string>
     <string name="compose_tun_diagnostic_dns_ok">Valid DNS NOERROR response received through the isolated TUN. This may be from a local rule or the underlying resolver; it does not prove device-wide filtering.</string>
     <string name="compose_tun_diagnostic_dns_nxdomain">Valid DNS NXDOMAIN response received. This may be a local block rule or a negative upstream response; no whole-device interception is implied.</string>
     <string name="compose_tun_diagnostic_dns_refused">Valid DNS REFUSED response received. This may be a local policy rejection or an upstream refusal; no whole-device interception is implied.</string>
-    <string name="compose_tun_diagnostic_dns_failed">DNS test failed or was blocked (strict Private DNS, no validated IPv4 resolver, or timeout). System DNS and default routes were unchanged.</string>
+    <string name="compose_tun_diagnostic_dns_failed">DNS test failed or was blocked (strict Private DNS, no usable resolver on a validated network, or timeout). System DNS and default routes were unchanged.</string>
     <string name="compose_tun_diagnostic_stop_requested">Stop requested; refresh to confirm the test interface closed.</string>
     <string name="compose_settings_hijack_paused_for_vpn">Another VPN is active. Our own TCP redirect is paused or awaiting watchdog cleanup. The local response listener does not prove AdGuard is forwarding blocked domains here.</string>
     <string name="compose_settings_hijack_owner_unknown">VPN ownership could not be verified; new transparent redirect rules will not be installed automatically.</string>
@@ -512,4 +514,60 @@
     <string name="compose_more_settings_desc">Blocking preferences, Web server, certificates, storage and appearance</string>
     <string name="compose_more_planned">Coming later · not enabled</string>
     <string name="compose_more_planned_desc">Global VPN/TUN interception, automatic AdGuard conflict resolution and route rollback are planned but not active. Open Network center to view their scope.</string>
+
+    <!-- Rule workflow and status feedback -->
+    <string name="compose_status_hosts_method">Hosts rules · known domain names</string>
+    <string name="compose_sync_complete">Enabled sources processed and Hosts applied.</string>
+    <string name="compose_sync_source_failed">Rule update could not finish. Check your connection and enabled sources, then retry.</string>
+    <string name="compose_sync_apply_failed">Rules were saved, but Hosts could not be applied. Check root access and the current status above.</string>
+    <string name="compose_sync_server_failed">Hosts applied, but the server rules could not be refreshed. Retry or check the server settings.</string>
+    <string name="compose_sync_retry">Retry sync</string>
+    <string name="compose_ws_toggle_failed">The server did not reach the requested state. Check the status and startup log before retrying.</string>
+    <string name="compose_rules_manage_sources">Manage sources (%1$d)</string>
+    <string name="compose_rules_source_rule_hint">This rule comes from a subscription. Manage its source, or add a personal allow rule to exempt this domain.</string>
+    <string name="compose_rules_manage_source">Manage source</string>
+    <string name="compose_rules_scope_exact">Exact name</string>
+    <string name="compose_rules_scope_suffix">Domain and subdomains</string>
+    <string name="compose_rules_scope_wildcard">Wildcard</string>
+    <string name="compose_rules_scope_legacy">Legacy match</string>
+    <string name="compose_rules_personal">Personal rule</string>
+    <string name="compose_rules_search_empty">No matching rules. Try another domain or clear the search.</string>
+    <string name="compose_rules_loading">Loading rules…</string>
+    <string name="compose_rules_loaded">Showing %1$d of %2$d rules. Search to narrow the results.</string>
+    <string name="compose_rules_source_help">Subscription rules follow their source. Disable a source to stop using its rules.</string>
+    <string name="compose_rules_clear_search">Clear search</string>
+
+    <string name="compose_rules_saved">Local rules saved and Hosts applied.</string>
+    <string name="compose_rules_save_failed">The change could not be saved. The previous rules are still in use. Check the input and try again.</string>
+
+    <string name="compose_rules_filter_all">All</string>
+    <string name="compose_rules_filter_enabled">Enabled</string>
+    <string name="compose_rules_filter_disabled">Disabled</string>
+    <string name="compose_rules_filter_personal">Personal</string>
+    <string name="compose_rules_previous_page">Previous</string>
+    <string name="compose_rules_next_page">Next</string>
+    <string name="compose_rules_page_number">%1$d / %2$d</string>
+    <string name="compose_rules_range">%1$d–%2$d of %3$d entries</string>
+    <string name="compose_rules_load_failed">Unable to load rules</string>
+    <string name="compose_rules_reload">Reload rules</string>
+    <string name="compose_rules_source_enabled">Enabled · %1$s</string>
+    <string name="compose_rules_source_disabled">Disabled · %1$s</string>
+    <string name="compose_rules_details">Rule details</string>
+    <string name="compose_rules_detail_domain">Domain</string>
+    <string name="compose_rules_detail_action">Action</string>
+    <string name="compose_rules_detail_scope">Match scope</string>
+    <string name="compose_rules_detail_address">Replacement address</string>
+    <string name="compose_rules_detail_source">Source</string>
+    <string name="compose_rules_detail_source_id">Source %1$d</string>
+    <string name="compose_rules_detail_state">Entry status</string>
+    <string name="compose_rules_copy_domain">Copy full domain</string>
+    <string name="compose_rules_details_close">Close</string>
+    <string name="compose_rules_remove_personal_title">Delete personal rule?</string>
+    <string name="compose_rules_remove_personal_effect">Remove personal rules for this name. Subscription rules remain and may determine its next action. This cannot be undone.</string>
+    <string name="compose_rules_remove_source_effect">Remove this source and its imported rules. Other sources and personal rules remain. This cannot be undone.</string>
+    <string name="compose_rules_remove_confirm">Confirm deletion</string>
+    <string name="compose_rules_removing">Deleting…</string>
+    <string name="compose_rules_remove_failed">Deletion could not be saved. The item was not removed. Retry or cancel.</string>
+    <string name="compose_rules_remove_retry">Retry deletion</string>
+    <string name="compose_rules_personal_write_hint">A personal rule for the same name is replaced. Wildcards are supported for allow and redirect rules.</string>
 </resources>

@@ -12,7 +12,19 @@ boolean keyStoreDefined = project.hasProperty('signingStoreLocation') &&
         project.hasProperty('signingKeyPassword')
 boolean progressPreview = project.findProperty('progressPreview')?.toString() == 'true'
 
+def typedRuleAssets = layout.buildDirectory.dir('generated/typedRuleAssets')
+def copyTypedRuleTestFixture = tasks.register('copyTypedRuleTestFixture', Sync) {
+    from "$rootDir/webserver/jni/typed_rule_vectors.tsv"
+    from "$rootDir/webserver/jni/diagnostic_dns_policy_vectors.tsv"
+    into typedRuleAssets
+}
+tasks.configureEach {
+    if (name == 'mergeDebugAndroidTestAssets') dependsOn copyTypedRuleTestFixture
+}
+
 android {
+    sourceSets.androidTest.assets.srcDirs += ["$projectDir/schemas"]
+    sourceSets.androidTest.assets.srcDir typedRuleAssets.get().asFile
     compileSdk 37
     ndkVersion '28.1.13356709'
     namespace 'org.adaway'
@@ -176,10 +188,13 @@ dependencies {
     implementation libs.androidx.lifecycle.runtime.compose
     implementation libs.androidx.lifecycle.process
     debugImplementation libs.androidx.compose.ui.tooling
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
 
     // Test related
     testImplementation libs.junit
     testImplementation libs.json
     androidTestImplementation libs.bundles.androidx.test
     androidTestImplementation libs.junit
+    androidTestImplementation platform(libs.androidx.compose.bom)
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
 }

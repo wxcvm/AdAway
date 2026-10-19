@@ -341,6 +341,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     var refreshKey by remember { mutableStateOf(0) }
     var tunRefreshKey by remember { mutableIntStateOf(0) }
     var tunStatus by remember { mutableStateOf("") }
+    var tunDnsBusy by remember { mutableStateOf(false) }
     val tunScope = rememberCoroutineScope()
     val diagnosticConsentLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -605,25 +606,44 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     ) {
                         Text(stringResource(R.string.compose_tun_diagnostic_test_relay))
                     }
-                    TextButton(
-                        enabled = diagnosticActive,
-                        onClick = {
-                            tunScope.launch {
-                                val rcode = withContext(Dispatchers.IO) {
-                                    org.adaway.model.traffic.DiagnosticTunProbe.dnsResponseCode()
+                    for (type in listOf(
+                        org.adaway.model.traffic.DiagnosticDnsCodec.TYPE_A,
+                        org.adaway.model.traffic.DiagnosticDnsCodec.TYPE_AAAA,
+                    )) {
+                        TextButton(
+                            enabled = diagnosticActive && !tunDnsBusy,
+                            onClick = {
+                                tunDnsBusy = true
+                                tunScope.launch {
+                                    try {
+                                        val rcode = withContext(Dispatchers.IO) {
+                                            org.adaway.model.traffic.DiagnosticTunProbe.dnsResponseCode(type)
+                                        }
+                                        val result = context.getString(
+                                            when (rcode) {
+                                                0 -> R.string.compose_tun_diagnostic_dns_ok
+                                                3 -> R.string.compose_tun_diagnostic_dns_nxdomain
+                                                5 -> R.string.compose_tun_diagnostic_dns_refused
+                                                else -> R.string.compose_tun_diagnostic_dns_failed
+                                            },
+                                        )
+                                        tunStatus = context.getString(
+                                            R.string.compose_tun_diagnostic_dns_result,
+                                            if (type == 1) "A" else "AAAA", result,
+                                        )
+                                        tunRefreshKey++
+                                    } finally {
+                                        tunDnsBusy = false
+                                    }
                                 }
-                                tunStatus = context.getString(
-                                    when (rcode) {
-                                        0 -> R.string.compose_tun_diagnostic_dns_ok
-                                        3 -> R.string.compose_tun_diagnostic_dns_nxdomain
-                                        5 -> R.string.compose_tun_diagnostic_dns_refused
-                                        else -> R.string.compose_tun_diagnostic_dns_failed
-                                    },
-                                )
-                                tunRefreshKey++
-                            }
-                        },
-                    ) { Text(stringResource(R.string.compose_tun_diagnostic_test_dns)) }
+                            },
+                        ) {
+                            Text(stringResource(
+                                if (type == 1) R.string.compose_tun_diagnostic_test_dns
+                                else R.string.compose_tun_diagnostic_test_dns_aaaa,
+                            ))
+                        }
+                    }
                     if (tunStatus.isNotBlank()) {
                         Text(tunStatus, style = MaterialTheme.typography.labelSmall)
                     }

@@ -84,8 +84,8 @@ public final class DnsPolicyWire {
         Question question = parse(query);
         if (question == null) return null;
 
-        TrafficCoreContract.Decision decision = snapshot.decide(
-                question.name, question.type, 1);
+        RuleSnapshotRepository.Resolution resolved = snapshot.resolve(question.name, question.type, 1);
+        TrafficCoreContract.Decision decision = resolved.decision;
         if (decision == null || decision.action == TrafficCoreContract.Action.PASS)
             return null;
 
@@ -102,7 +102,7 @@ public final class DnsPolicyWire {
                 address = new byte[question.type == 1 ? 4 : 16];
                 break;
             case REPLACE:
-                String value = snapshot.replacementFor(question.name);
+                String value = resolved.address;
                 if (value == null) return null;
                 address = InetAddresses.forString(value).getAddress();
                 if (address.length != (question.type == 1 ? 4 : 16))

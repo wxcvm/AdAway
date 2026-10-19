@@ -44,7 +44,7 @@ import timber.log.Timber;
  * Only routes 198.18.0.1/32 to this service. It echoes valid IPv4 UDP
  * packets to port 53535 and relays small packets addressed to port 53536
  * through a protected socket to a device-local UDP responder. UDP 53537
- * allows ONE fixed example.com A DNS question to the system-provided
+ * allows ONE fixed example.com A or AAAA DNS question to the system-provided
  * underlying network DNS resolver, only on an explicit user test.
  * No general DNS proxy or Internet forwarding is enabled.
  * All normal traffic retains its original system route.
