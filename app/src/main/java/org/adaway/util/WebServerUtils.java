@@ -124,14 +124,18 @@ public class WebServerUtils {
     private static String checkListenerSettingsLocked(Context context, ListenerSettings settings) {
         try {
             org.json.JSONObject report = listenerProbe(context, settings);
-            String details = settings.explicitPair
-                    ? "IPv4 HTTP：" + probeDescription(report.optInt("http4", -1)) + " / HTTPS：" + probeDescription(report.optInt("https4", -1))
-                        + "；IPv6 HTTP：" + probeDescription(report.optInt("http6", -1)) + " / HTTPS：" + probeDescription(report.optInt("https6", -1))
-                    : "HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS：" + probeDescription(report.getInt(PROBE_HTTPS));
+            String details = listenerProbeDescription(settings, report);
             return details + "。占用可能来自当前服务；应用时停止旧服务后复检。VPN："
                     + org.adaway.model.traffic.AndroidVpnObserver.read(context, false).name()
                     + "；Root 重定向：" + (org.adaway.model.root.HijackModel.isEnabled() ? "运行中" : "未检测到") + "。";
         } catch (Exception exception) { return "无法完成检测：" + exception.getMessage() + "。设置未改变。"; }
+    }
+
+    private static String listenerProbeDescription(ListenerSettings settings, org.json.JSONObject report) throws org.json.JSONException {
+        if (settings.explicitPair)
+            return "IPv4 HTTP：" + probeDescription(report.optInt("http4", -1)) + " / HTTPS：" + probeDescription(report.optInt("https4", -1))
+                    + "；IPv6 HTTP：" + probeDescription(report.optInt("http6", -1)) + " / HTTPS：" + probeDescription(report.optInt("https6", -1));
+        return "HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS：" + probeDescription(report.getInt(PROBE_HTTPS));
     }
 
     private static String probeDescription(int status) {
@@ -161,7 +165,8 @@ public class WebServerUtils {
     private static String applyListenerSettingsLocked(Context context, ListenerSettings settings) {
         try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so")); }
         catch (IOException exception) { return "未应用：" + exception.getMessage() + "。原服务与配置保持不变。"; }
-        if (BlockMode.current(context) == BlockMode.HIJACK && !settings.supportsRootRedirect())
+        if ((BlockMode.current(context) == BlockMode.HIJACK || org.adaway.model.root.HijackModel.isEnabled())
+                && !settings.supportsRootRedirect())
             return "未应用：Root 重定向需要 IPv4 回环监听。请在 IPv4 填写 127.0.0.1 或 0.0.0.0。";
         ListenerSettings previous = getListenerSettings(context);
         if (org.adaway.model.root.HijackModel.isEnabled()
@@ -174,7 +179,7 @@ public class WebServerUtils {
             org.json.JSONObject report = listenerProbe(context, settings);
             if (report.getInt("http") != 0 || report.getInt(PROBE_HTTPS) != 0
                     || (settings.explicitPair && (report.optInt("http6", -1) > 0 || report.optInt("https6", -1) > 0)))
-                throw new IOException("HTTP：" + probeDescription(report.getInt("http")) + "；HTTPS：" + probeDescription(report.getInt(PROBE_HTTPS)));
+                throw new IOException(listenerProbeDescription(settings, report));
             if (!saveListenerSettings(context, settings)) throw new IOException("配置保存失败");
             if (boot && !org.adaway.model.root.MagiskBootScript.install(context)) throw new IOException("开机配置写入失败");
             startWebServer(context);
