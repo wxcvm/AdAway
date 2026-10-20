@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,7 @@ internal fun ListenerSettingsCard() {
     var http by remember { mutableStateOf(WebServerUtils.getHttpPort(context).toString()) }
     var https by remember { mutableStateOf(WebServerUtils.getHttpsPort(context).toString()) }
     var busy by remember { mutableStateOf(false) }
+    var autoCreate by remember { mutableStateOf(WebServerUtils.isListenerAutoCreate(context)) }
     var createConfirmation by remember { mutableStateOf<ListenerSettings?>(null) }
     var message by remember { mutableStateOf("推荐仅本机访问；IPv4、IPv6 可同时监听，留空关闭对应协议。") }
     // Probe automatically only when root is already granted; opening settings must not prompt for root.
@@ -62,7 +64,7 @@ internal fun ListenerSettingsCard() {
         busy = true
         scope.launch {
             message = runCatching { withContext(Dispatchers.IO) {
-                if (apply) WebServerUtils.applyListenerSettings(context, settings, createMissing)
+                if (apply) WebServerUtils.applyListenerSettings(context, settings, createMissing, autoCreate)
                 else WebServerUtils.checkListenerSettings(context, settings)
             } }.getOrElse { "操作失败：${it.message ?: "请检查 Root 授权"}" }
             busy = false
@@ -71,7 +73,7 @@ internal fun ListenerSettingsCard() {
     createConfirmation?.let { candidate ->
         AlertDialog(onDismissRequest = { createConfirmation = null },
             title = { Text("创建缺失的本机地址？") },
-            text = { Text("IPv4：${candidate.ipv4.ifEmpty { "关闭" }}\nIPv6：${candidate.ipv6.ifEmpty { "关闭" }}\n\n仅在 lo 回环接口添加缺失的私有 IPv4 / IPv6 ULA 地址（/32 或 /128），需要 Root。已有地址直接复用，不修改物理网卡、默认网关或 DNS。地址不是公网 IPv6，也不与 IPv4 自动配对。\n\n成功后保存并启动监听；失败清理本次创建的地址。更换监听地址后清理旧的托管地址；开机恢复需启用开机脚本。") },
+            text = { Text("IPv4：${candidate.ipv4.ifEmpty { "关闭" }}\nIPv6：${candidate.ipv6.ifEmpty { "关闭" }}\n\n仅在 lo 回环接口添加缺失的私有 IPv4 / IPv6 ULA 地址（/32 或 /128），需要 Root。已有地址直接复用，不修改物理网卡、默认网关或 DNS。地址不是公网 IPv6，也不与 IPv4 自动配对。\n\n成功后保存并启动监听；失败清理本次创建的地址。更换监听地址后清理旧的托管地址；自动恢复由下方随启动创建选项控制，开机恢复还需启用开机脚本。") },
             confirmButton = { TextButton({ createConfirmation = null; act(true, true, candidate) }) { Text("创建并应用") } },
             dismissButton = { TextButton({ createConfirmation = null }) { Text("取消") } })
     }
@@ -110,6 +112,13 @@ internal fun ListenerSettingsCard() {
                 label = { Text("HTTP 端口") }, modifier = Modifier.weight(1f))
             OutlinedTextField(https, { https = it }, enabled = !busy, singleLine = true,
                 label = { Text("HTTPS 端口") }, modifier = Modifier.weight(1f))
+        }
+        Row {
+            Checkbox(checked = autoCreate, onCheckedChange = { autoCreate = it }, enabled = !busy)
+            Column {
+                Text("随服务器启动创建缺失地址", style = MaterialTheme.typography.bodyMedium)
+                Text("应用后生效，需要 Root；只创建所填私有地址，不修改网关或 DNS。开机启动需另行启用开机脚本。", style = MaterialTheme.typography.bodySmall)
+            }
         }
         Text(message, style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

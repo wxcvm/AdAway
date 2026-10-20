@@ -113,11 +113,21 @@ public class WebServerUtils {
                 .getStringSet("managed_listener_addresses", java.util.Collections.emptySet()));
     }
 
+    public static boolean isListenerAutoCreate(Context context) {
+        // Existing explicitly managed installations retain their startup recovery.
+        return context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                .getBoolean("listener_auto_create", !getManagedListenerAddresses(context).isEmpty());
+    }
+
     private static boolean saveListenerSettings(Context context, ListenerSettings settings, java.util.Set<String> managed) {
+        return saveListenerSettings(context, settings, managed, isListenerAutoCreate(context));
+    }
+
+    private static boolean saveListenerSettings(Context context, ListenerSettings settings, java.util.Set<String> managed, boolean autoCreate) {
         SharedPreferences.Editor editor = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE).edit()
                 .putString(PREF_BIND_IP, settings.address).putBoolean(PREF_BIND_ALL, settings.all)
                 .putInt(PREF_HTTP_PORT, settings.http).putInt(PREF_HTTPS_PORT, settings.https)
-                .putStringSet("managed_listener_addresses", managed);
+                .putStringSet("managed_listener_addresses", managed).putBoolean("listener_auto_create", autoCreate);
         if (settings.explicitPair) editor.putString("listen_ipv4", settings.ipv4).putString("listen_ipv6", settings.ipv6);
         else editor.remove("listen_ipv4").remove("listen_ipv6");
         boolean saved = editor.commit();
@@ -176,20 +186,25 @@ public class WebServerUtils {
         return applyListenerSettings(context, settings, false);
     }
 
-    /** Address creation is an explicit UI action; ordinary checks and saves never create aliases. */
+    /** Creation requires either the one-time action or the explicitly saved startup option. */
     public static String applyListenerSettings(Context context, ListenerSettings settings, boolean createMissing) {
+        return applyListenerSettings(context, settings, createMissing, isListenerAutoCreate(context));
+    }
+
+    public static String applyListenerSettings(Context context, ListenerSettings settings, boolean createMissing, boolean autoCreate) {
         LISTENER_LOCK.lock();
-        try { return applyListenerSettingsLocked(context, settings, createMissing); }
+        try { return applyListenerSettingsLocked(context, settings, createMissing || autoCreate, autoCreate); }
         finally { LISTENER_LOCK.unlock(); }
     }
 
-    private static String applyListenerSettingsLocked(Context context, ListenerSettings settings, boolean createMissing) {
+    private static String applyListenerSettingsLocked(Context context, ListenerSettings settings, boolean createMissing, boolean autoCreate) {
         try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so")); }
         catch (IOException exception) { return "未应用：" + exception.getMessage() + "。原服务与配置保持不变。"; }
         if ((BlockMode.current(context) == BlockMode.HIJACK || org.adaway.model.root.HijackModel.isEnabled())
                 && !settings.supportsRootRedirect())
             return "未应用：Root 重定向需要 IPv4 回环监听。请在 IPv4 填写 127.0.0.1 或 0.0.0.0。";
         ListenerSettings previous = getListenerSettings(context);
+        boolean previousAutoCreate = isListenerAutoCreate(context);
         if (org.adaway.model.root.HijackModel.isEnabled()
                 && (previous.http != settings.http || previous.https != settings.https))
             return "未应用：当前 Root 重定向仍指向原端口。请先停用 Root 重定向，再修改监听端口。";
@@ -213,7 +228,7 @@ public class WebServerUtils {
             if (report.getInt("http") != 0 || report.getInt(PROBE_HTTPS) != 0
                     || (settings.explicitPair && (report.optInt("http6", -1) > 0 || report.optInt("https6", -1) > 0)))
                 throw new IOException(listenerProbeDescription(settings, report));
-            if (!saveListenerSettings(context, settings, managed)) throw new IOException("配置保存失败");
+            if (!saveListenerSettings(context, settings, managed, autoCreate)) throw new IOException("配置保存失败");
             if (boot && !org.adaway.model.root.MagiskBootScript.install(context)) throw new IOException("开机配置写入失败");
             startWebServer(context);
             if (!listenerReachable(settings)) throw new IOException("新服务未就绪");
@@ -221,11 +236,11 @@ public class WebServerUtils {
                     + " / IPv6 " + (settings.ipv6.isEmpty() ? "关闭" : settings.ipv6);
             String cleanup = cleanupUnusedListenerAddresses(context, settings, managed);
             return "已应用：HTTP " + settings.http + " / HTTPS " + settings.https + "；监听 " + address + "。"
-                    + (addresses.added().isEmpty() ? "" : "已在 lo 创建本机地址；启动时恢复，开机恢复需启用开机脚本。") + cleanup;
+                    + (addresses.added().isEmpty() ? "" : "已在 lo 创建本机地址。") + (autoCreate ? "已启用随服务器启动创建缺失地址；开机启动仍需启用开机脚本。" : "随启动创建已关闭。") + cleanup;
         } catch (Exception exception) {
             String cleanup = addresses.rollback();
             previousManaged.addAll(addresses.added());
-            boolean ownershipSaved = saveListenerSettings(context, previous, previousManaged);
+            boolean ownershipSaved = saveListenerSettings(context, previous, previousManaged, previousAutoCreate);
             return restoreListenerSettings(context, previous, boot, running, exception.getMessage())
                     + (cleanup.isEmpty() ? "" : "地址清理未完成：" + cleanup)
                     + (ownershipSaved ? "" : "地址记录保存失败，请检查存储。" );
@@ -616,21 +631,37 @@ public static void startWebServer(Context context) {
             showToast(context, exception.getMessage());
             return;
         }
-        // Recreate only aliases previously created with the user's explicit action.
-        java.util.Set<String> owned = getManagedListenerAddresses(context);
         ListenerSettings selected = getListenerSettings(context);
-        String owned4 = "", owned6 = "";
-        for (String address : owned) if (ListenerAddressTransaction.isSelected(selected, address)) {
-            if (address.contains(":")) owned6 = address; else owned4 = address;
-        }
-        if (!owned4.isEmpty() || !owned6.isEmpty()) {
-            ListenerAddressTransaction restore = new ListenerAddressTransaction(new RootListenerAddresses());
-            try { restore.prepare(new ListenerSettings(owned4, owned6, selected.http, selected.https)); }
-            catch (IOException exception) {
-                showToast(context, "本机地址恢复失败：" + exception.getMessage() + " " + restore.rollback());
-                return;
+        ListenerAddressTransaction startupAddresses = new ListenerAddressTransaction(new RootListenerAddresses());
+        boolean startupReady = false;
+        try {
+            if (isListenerAutoCreate(context)) {
+                try {
+                    startupAddresses.prepare(selected);
+                    java.util.Set<String> managed = getManagedListenerAddresses(context);
+                    managed.addAll(startupAddresses.added());
+                    if (!saveListenerSettings(context, selected, managed)) throw new IOException("地址创建记录保存失败");
+                } catch (IOException exception) {
+                    showToast(context, "本机地址准备失败：" + exception.getMessage());
+                    return;
+                }
+            }
+            startupReady = launchPreparedWebServer(context, selected);
+        } finally {
+            if (!startupReady && !startupAddresses.added().isEmpty()) {
+                java.util.List<String> attempted = startupAddresses.added();
+                String cleanup = startupAddresses.rollback();
+                java.util.Set<String> managed = getManagedListenerAddresses(context);
+                managed.removeAll(attempted);
+                // Keep any failed rollback addresses visible for a later retry.
+                managed.addAll(startupAddresses.added());
+                if (!saveListenerSettings(context, selected, managed)) showToast(context, "地址清理记录保存失败");
+                if (!cleanup.isEmpty()) showToast(context, "启动失败，地址清理未完成：" + cleanup);
             }
         }
+    }
+
+    private static boolean launchPreparedWebServer(Context context, ListenerSettings selected) {
         Path resourcePath = getResourcePath(context);
         ensureStaticResources(context, resourcePath);
         applyBlockReplyConfig(context);
@@ -642,13 +673,13 @@ public static void startWebServer(Context context) {
         if (!binFile.exists()) {
             Timber.e("Webserver binary not found: %s", binFile.getAbsolutePath());
             showToast(context, "Webserver executable missing; please reinstall or check device compatibility.");
-            return;
+            return false;
         }
         
         if (!binFile.canRead()) {
             Timber.e("Webserver binary is not readable: %s", binFile.getAbsolutePath());
             showToast(context, "Webserver binary is not readable; check permissions.");
-            return;
+            return false;
         }
 
         // Kill any previous instance and wait for port 80/443 to be released.
@@ -692,14 +723,17 @@ public static void startWebServer(Context context) {
             exportBlockList(context);
         }
         String params = "--resources " + resourcePath.toAbsolutePath() +
-                debugFlag + proxyFlag + getListenerSettings(context).arguments();
+                debugFlag + proxyFlag + selected.arguments();
         boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
-        if (!started) {
+        boolean ready = started && listenerReachable(selected);
+        if (!ready) {
+            stopWebServer();
             Timber.e("Webserver failed to start; check logs in /data/local/tmp/webserver_start.log for details.");
             showToast(context, R.string.pref_webserver_start_failed);
         } else {
             Timber.i("Webserver started successfully");
         }
+        return ready;
     }
 
     public static void stopWebServer() {

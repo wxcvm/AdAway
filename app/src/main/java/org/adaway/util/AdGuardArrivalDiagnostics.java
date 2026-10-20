@@ -21,10 +21,15 @@ public final class AdGuardArrivalDiagnostics {
         lines.add("VPN 状态：" + org.adaway.model.traffic.AndroidVpnObserver.read(context, false).name() + "；不据此推断 VPN 属于 AdGuard。");
         RootListenerAddresses local = new RootListenerAddresses();
         lines.add(hasManagementReceipt() ? "管理端口回执已确认：当前 AdAway 支持请求到达检测。" : "未确认管理端口回执；服务未就绪、旧版本或路径受影响，不能判定请求被谁处理。");
-        for (String address : settings.probeAddresses()) lines.add(directResult(address, settings.http, local));
+        for (String address : settings.probeAddresses()) {
+            lines.add(directResult(address, settings.http, local));
+            lines.add("HTTPS [" + address + "]:" + settings.https + "（localhost）："
+                    + ListenerTlsCheck.check(address, settings.https, "localhost", local::exists).describe());
+        }
         addDomain(lines, "广告规则测试：", adblockDomain, settings, local);
         addDomain(lines, "Hosts 规则测试：", hostsDomain, settings, local);
-        lines.add("DNS 使用本应用的系统解析路径；无法仅凭 DNS 返回判断命中了哪条 AdGuard 规则。HTTPS 证书信任和其他应用路径未验证。未修改 AdGuard、网络或证书。");
+        lines.add("QUIC / HTTP/3：本版本未实现 UDP 服务，TCP/443 和 HTTPS 成功不能代表 QUIC 成功。");
+        lines.add("DNS 使用本应用的系统解析路径，规则类别以 AdGuard 日志为准。HTTPS 使用本应用的默认信任与名称校验；其他应用可能采用不同信任库或证书固定。未修改 AdGuard、网络或证书。");
         return String.join("\n", lines);
     }
 
@@ -56,7 +61,17 @@ public final class AdGuardArrivalDiagnostics {
 
     private static void addDomain(List<String> lines, String label, String domain, ListenerSettings settings, RootListenerAddresses local) {
         if (domain.trim().isEmpty()) return;
-        lines.add(label + ListenerArrivalCheck.domainResult(settings, domain, ListenerArrivalCheck::resolveSystem,
-                (ip, port) -> ListenerArrivalCheck.received(ip, port, domain), local::exists));
+        List<String> tls = new ArrayList<>();
+        String normalized = ListenerArrivalCheck.normalizeDomain(domain);
+        lines.add(label + ListenerArrivalCheck.domainResult(settings, normalized, ListenerArrivalCheck::resolveSystem,
+                (ip, port) -> {
+                    boolean received = false;
+                    try { received = ListenerArrivalCheck.received(ip, port, normalized); }
+                    catch (IOException ignored) { /* HTTPS is independent of the HTTP result. */ }
+                    tls.add("HTTPS " + normalized + " → [" + ip + "]:" + settings.https + "："
+                            + ListenerTlsCheck.check(ip, settings.https, normalized, local::exists).describe());
+                    return received;
+                }, local::exists));
+        lines.addAll(tls);
     }
 }

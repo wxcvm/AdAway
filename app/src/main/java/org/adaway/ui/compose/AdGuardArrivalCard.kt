@@ -28,10 +28,12 @@ internal fun AdGuardArrivalCard(enabled: Boolean) {
     var adblock by remember { mutableStateOf("ad.doubleclick.net") }
     var hosts by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf("按已应用的监听地址检查；不会保存草稿或更改 AdGuard。") }
+    var result by remember { mutableStateOf("按已应用的监听地址检查 HTTP、HTTPS 与 DNS；不会保存草稿或更改 AdGuard。") }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("AdGuard 请求到达检测", style = MaterialTheme.typography.titleSmall)
         Text("将 AdGuard 两类 DNS 拦截模式的自定义 IP 指向本机监听地址。可分别填写测试域名；预设域名不保证在你的规则中被拦截，命中类别以 AdGuard 过滤日志为准。",
+            style = MaterialTheme.typography.bodySmall)
+        Text("HTTPS 严格校验证书及名称，再确认加密回执。QUIC / HTTP/3 当前未实现；TCP/443 监听不代表 UDP/443 可用。",
             style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(adblock, { adblock = it.take(254) }, enabled = enabled && !running, singleLine = true,
             label = { Text("广告规则测试域名（可修改或留空）") }, modifier = Modifier.fillMaxWidth())
