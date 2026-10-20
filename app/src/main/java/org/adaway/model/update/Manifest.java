@@ -30,6 +30,7 @@ public class Manifest {
      */
     public final String downloadUrl;
     public final boolean updateAvailable;
+    public final boolean preview;
 
     /**
      * Constructor from a manifest.json content.
@@ -45,6 +46,7 @@ public class Manifest {
         this.changelog = manifestObject.optString("changelog", "");
         this.downloadUrl = manifestObject.optString("downloadUrl", "");
         this.updateAvailable = this.versionCode > currentVersionCode;
+        this.preview = false;
     }
 
     /**
@@ -57,10 +59,16 @@ public class Manifest {
      * @param updateAvailable Whether the release is newer than the running application.
      */
     public Manifest(String version, int versionCode, String changelog, String downloadUrl, boolean updateAvailable) {
+        this(version, versionCode, changelog, downloadUrl, updateAvailable, false);
+    }
+
+    public Manifest(String version, int versionCode, String changelog, String downloadUrl,
+                    boolean updateAvailable, boolean preview) {
         this.version = version;
         this.versionCode = versionCode;
         this.changelog = changelog;
         this.downloadUrl = downloadUrl;
         this.updateAvailable = updateAvailable;
+        this.preview = preview;
     }
 }

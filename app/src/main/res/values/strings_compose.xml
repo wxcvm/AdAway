@@ -324,7 +324,7 @@
     <string name="compose_settings_update_app_daily">Daily update check</string>
     <string name="compose_settings_update_app_daily_hint">Periodically check for app updates</string>
     <string name="compose_settings_update_beta">Include beta releases</string>
-    <string name="compose_settings_update_beta_hint">Also install beta versions</string>
+    <string name="compose_settings_update_beta_hint">Receive newer in-place preview updates from GitHub. Installation still requires confirmation; turning this off never downgrades the app.</string>
     <string name="compose_settings_update_hosts">Daily hosts update check</string>
     <string name="compose_settings_update_hosts_hint">Refresh hosts rules from sources</string>
     <string name="compose_settings_update_wifi">Updates on Wi-Fi only</string>
