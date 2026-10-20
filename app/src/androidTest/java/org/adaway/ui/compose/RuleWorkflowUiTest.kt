@@ -44,7 +44,7 @@ class RuleWorkflowUiTest {
         compose.onNodeWithText("地址不存在？创建并应用…").performScrollTo().performClick()
         compose.onNodeWithText("创建缺失的本机地址？").assertIsDisplayed()
         compose.onNodeWithText("仅在 lo 回环接口", substring = true).assertIsDisplayed()
-        saveScreenshot("listener-create-confirmation")
+        saveScreenshot("listener-create-confirmation", dialog = true)
         compose.onNodeWithText("取消", useUnmergedTree = true).performClick()
         compose.runOnIdle {
             assertEquals(previous.ipv6, org.adaway.util.WebServerUtils.getListenerSettings(compose.activity).ipv6)
