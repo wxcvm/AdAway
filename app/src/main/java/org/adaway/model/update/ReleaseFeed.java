@@ -12,6 +12,8 @@ final class ReleaseFeed {
     static final String STABLE = BASE + "android-latest/manifest.json";
     static final String PREVIEW = BASE + "android-preview/manifest.json";
     static final String API = "https://api.github.com/repos/wxcvm/AdAway/releases?per_page=100";
+    private static final String PREVIEW_TAG = "progress-android-\\d{8}\\.\\d++";
+    private static final String STABLE_TAG = "v?\\d++(?:\\.\\d++)++";
 
     interface Fetcher { String get(String url) throws IOException; }
 
@@ -32,19 +34,20 @@ final class ReleaseFeed {
         // alone cannot establish the versionCode of an installable Android APK.
         JSONArray releases = new JSONArray(fetcher.get(API));
         for (int i = 0; i < releases.length(); i++) {
-            JSONObject release = releases.optJSONObject(i);
-            if (release == null || release.optBoolean("draft")) continue;
-            boolean beta = release.optBoolean("prerelease");
-            if (beta && !includePreview) continue;
-            String tag = release.optString("tag_name");
-            if (!hasManifest(release.optJSONArray("assets"))) continue;
-            if (!(beta ? tag.matches("progress-android-[0-9]{8}\\.[0-9]+")
-                    : tag.matches("v?[0-9]+(?:\\.[0-9]+)+"))) continue;
-            Manifest candidate = read(BASE + tag + "/manifest.json", beta, tag);
-            best = newer(best, candidate);
+            best = newer(best, fromRelease(releases.optJSONObject(i), includePreview));
         }
         if (best == null) throw new IOException("No valid release manifest");
         return best;
+    }
+
+    private Manifest fromRelease(JSONObject release, boolean includePreview) {
+        if (release == null || release.optBoolean("draft")) return null;
+        boolean beta = release.optBoolean("prerelease");
+        if (beta && !includePreview) return null;
+        String tag = release.optString("tag_name");
+        if (!hasManifest(release.optJSONArray("assets")) || tag.length() > 128
+                || !tag.matches(beta ? PREVIEW_TAG : STABLE_TAG)) return null;
+        return read(BASE + tag + "/manifest.json", beta, tag);
     }
 
     private static boolean hasManifest(JSONArray assets) {
@@ -77,11 +80,12 @@ final class ReleaseFeed {
         if (expectedTag != null && !expectedTag.equals(tag)) return null;
         String apk = preview ? "AdAway-preview-arm64.apk" : "ADBlock-latest.apk";
         String url = BASE + tag + "/" + apk;
-        if (preview && (!tag.matches("progress-android-[0-9]{8}\\.[0-9]+")
+        if (tag.length() > 128) return null;
+        if (preview && (!tag.matches(PREVIEW_TAG)
                 || !"preview".equals(json.optString("channel"))
                 || !"com.wxcvm.Adaway".equals(json.optString("packageName"))
                 || !url.equals(json.optString("downloadUrl")))) return null;
-        if (!preview && !tag.matches("v?[0-9]+(?:\\.[0-9]+)+")) return null;
+        if (!preview && !tag.matches(STABLE_TAG)) return null;
         return new Manifest(version, code, json.optString("changelog"), url, code > currentCode, preview);
     }
 }

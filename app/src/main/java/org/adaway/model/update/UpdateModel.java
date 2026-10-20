@@ -41,6 +41,7 @@ public class UpdateModel {
     // registered receiver cannot be trusted to survive process termination.
     private static final String UPDATE_DOWNLOAD_PREFS = "update_download_state";
     private static final String PENDING_DOWNLOAD_ID = "pending_download_id";
+    private static final String PENDING_PREVIEW = "pending_preview";
     private static final String EXPECTED_APK_VERSION_CODE = "expected_apk_version_code";
 
     static long expectedDownloadedVersionCode(Context context) {
@@ -51,7 +52,7 @@ public class UpdateModel {
     static boolean pendingDownloadAllowed(Context context, long id) {
         android.content.SharedPreferences prefs = context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE);
         return prefs.getLong(PENDING_DOWNLOAD_ID, -1) == id
-                && (!prefs.getBoolean("pending_preview", false) || PreferenceHelper.getIncludeBetaReleases(context));
+                && (!prefs.getBoolean(PENDING_PREVIEW, false) || PreferenceHelper.getIncludeBetaReleases(context));
     }
 
     public enum DownloadState { NONE, DOWNLOADING, READY_TO_INSTALL, FAILED }
@@ -96,7 +97,7 @@ public class UpdateModel {
     public static void clearPendingDownload(Context context) {
         context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
                 .edit().remove(PENDING_DOWNLOAD_ID)
-                .remove(EXPECTED_APK_VERSION_CODE).remove("pending_preview").apply();
+                .remove(EXPECTED_APK_VERSION_CODE).remove(PENDING_PREVIEW).apply();
     }
 
     private final Context context;
@@ -216,7 +217,7 @@ public class UpdateModel {
             this.manifest.postValue(this.cachedManifest);
             return this.cachedManifest;
         }
-        Manifest manifest = downloadManifest(previewChannel);
+        Manifest selected = downloadManifest(previewChannel);
         if (previewChannel != PreferenceHelper.getIncludeBetaReleases(this.context)) {
             this.cachedManifest = null;
             this.manifest.postValue(null);
@@ -225,15 +226,15 @@ public class UpdateModel {
         }
         this.cachedPreviewChannel = previewChannel;
         this.lastCheckAt = System.currentTimeMillis();
-        if (manifest != null) {
-            this.cachedManifest = manifest;
+        if (selected != null) {
+            this.cachedManifest = selected;
             this.lastError = null;
-            this.manifest.postValue(manifest);
+            this.manifest.postValue(selected);
         } else if (this.cachedManifest == null) {
             // Keep the previous result (if any) instead of clearing the UI.
             this.lastError = this.lastError == null ? "unreachable" : this.lastError;
         }
-        return manifest;
+        return selected;
     }
 
     private OkHttpClient buildHttpClient() {
@@ -306,7 +307,7 @@ public class UpdateModel {
                 .edit()
                 .putLong(PENDING_DOWNLOAD_ID, downloadId)
                 .putLong(EXPECTED_APK_VERSION_CODE, manifest.versionCode)
-                .putBoolean("pending_preview", manifest.preview)
+                .putBoolean(PENDING_PREVIEW, manifest.preview)
                 .apply();
         // Register new broadcast receiver
         this.receiver = new ApkDownloadReceiver(downloadId);
