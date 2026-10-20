@@ -55,6 +55,8 @@
         viewer) and crashing the app back to the home screen.
     -->
     <queries>
+        <package android:name="com.adguard.android" />
+        <package android:name="com.adguard.android.lite" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />

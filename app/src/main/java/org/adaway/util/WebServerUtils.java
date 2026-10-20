@@ -131,6 +131,12 @@ public class WebServerUtils {
         finally { LISTENER_LOCK.unlock(); }
     }
 
+    public static String checkArrivalDiagnostics(Context context, String adblockDomain, String hostsDomain) {
+        LISTENER_LOCK.lock();
+        try { return AdGuardArrivalDiagnostics.check(context, adblockDomain, hostsDomain); }
+        finally { LISTENER_LOCK.unlock(); }
+    }
+
     private static String checkListenerSettingsLocked(Context context, ListenerSettings settings) {
         try {
             org.json.JSONObject report = listenerProbe(context, settings);

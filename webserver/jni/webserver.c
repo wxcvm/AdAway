@@ -67,6 +67,7 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 #include "mongoose/mongoose.h"
+#include "listener_arrival_probe.h"
 
 #define THIS_FILE "WebServer"
 /*
@@ -3881,6 +3882,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev != MG_EV_HTTP_MSG) return;
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
+    if (ap_reply(c, hm)) return;
 
     /* Keep-alive: the idle timer must measure IDLE time, not the age of the
      * connection. Without this refresh every connection was drained exactly

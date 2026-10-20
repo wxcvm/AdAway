@@ -116,5 +116,6 @@ internal fun ListenerSettingsCard() {
             OutlinedButton({ act(false) }, enabled = !busy) { Text("检测冲突") }
             Button({ act(true) }, enabled = !busy) { Text(if (busy) "正在处理…" else "应用并重启") }
         }
+        AdGuardArrivalCard(enabled = !busy)
     }
 }
