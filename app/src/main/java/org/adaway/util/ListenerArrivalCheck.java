@@ -100,26 +100,30 @@ public final class ListenerArrivalCheck {
     public static boolean received(String address, int port, String host) throws IOException {
         if (!ListenerSettings.isLiteral(address)) throw new IOException("拒绝非字面 IP 连接");
         String requestHost = host.equals("localhost") ? host : normalizeDomain(host);
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(InetAddress.getByName(address), port), 800);
+            return exchange(socket, requestHost);
+        }
+    }
+
+    static boolean exchange(Socket socket, String requestHost) throws IOException {
         byte[] random = new byte[16]; RANDOM.nextBytes(random);
         StringBuilder token = new StringBuilder(32);
         for (byte value : random) token.append(String.format(Locale.ROOT, "%02x", value & 255));
         String nonce = token.toString();
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(InetAddress.getByName(address), port), 800);
-            socket.getOutputStream().write(("GET /adaway-listener-probe/" + nonce + " HTTP/1.1\r\nHost: " + requestHost + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-            ByteArrayOutputStream response = new ByteArrayOutputStream();
-            byte[] buffer = new byte[512];
-            while (response.size() < 4096) {
-                long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
-                if (remaining <= 0) return false;
-                socket.setSoTimeout((int)Math.max(1, remaining));
-                int count = socket.getInputStream().read(buffer, 0, Math.min(buffer.length, 4096 - response.size()));
-                if (count < 0) break;
-                response.write(buffer, 0, count);
-                if (validReceipt(new String(response.toByteArray(), StandardCharsets.US_ASCII), nonce)) return true;
-            }
-            return false;
+        socket.getOutputStream().write(("GET /adaway-listener-probe/" + nonce + " HTTP/1.1\r\nHost: " + requestHost + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+        ByteArrayOutputStream response = new ByteArrayOutputStream();
+        byte[] buffer = new byte[512];
+        while (response.size() < 4096) {
+            long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+            if (remaining <= 0) return false;
+            socket.setSoTimeout((int)Math.max(1, remaining));
+            int count = socket.getInputStream().read(buffer, 0, Math.min(buffer.length, 4096 - response.size()));
+            if (count < 0) break;
+            response.write(buffer, 0, count);
+            if (validReceipt(new String(response.toByteArray(), StandardCharsets.US_ASCII), nonce)) return true;
         }
+        return false;
     }
 }

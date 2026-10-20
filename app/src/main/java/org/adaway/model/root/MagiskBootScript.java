@@ -115,7 +115,9 @@ public final class MagiskBootScript {
                 WebServerUtils.STATS_PORT, proxyFilter);
         java.util.Set<String> managed = WebServerUtils.getManagedListenerAddresses(context);
         org.adaway.util.ListenerSettings listeners = WebServerUtils.getListenerSettings(context);
-        managed.removeIf(address -> !org.adaway.util.ListenerAddressTransaction.isSelected(listeners, address));
+        if (WebServerUtils.isListenerAutoCreate(context)) {
+            managed.removeIf(address -> !org.adaway.util.ListenerAddressTransaction.isSelected(listeners, address));
+        } else managed.clear();
         script = script.replace("  # Restore managed listener addresses here.\n",
                 org.adaway.util.RootListenerAddresses.bootCommands(managed));
         // base64 keeps the shell command free of any quoting/escaping of paths.

@@ -32,6 +32,19 @@ import org.junit.Test
 class RuleWorkflowUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun startupAddressCreationIsAnUnsavedExplicitOption() {
+        val previous = org.adaway.util.WebServerUtils.isListenerAutoCreate(compose.activity)
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                Surface { Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) { ListenerSettingsCard() } }
+            }
+        }
+        compose.onNodeWithText("随服务器启动创建缺失地址").performScrollTo().assertIsDisplayed()
+        compose.onNode(isToggleable()).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(previous, org.adaway.util.WebServerUtils.isListenerAutoCreate(compose.activity)) }
+        saveScreenshot("listener-startup-option-draft")
+    }
+
     @Test fun creatingListenerAddressesRequiresConfirmationAndCancelKeepsSettings() {
         val previous = org.adaway.util.WebServerUtils.getListenerSettings(compose.activity)
         val managed = org.adaway.util.WebServerUtils.getManagedListenerAddresses(compose.activity)

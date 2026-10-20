@@ -18,6 +18,22 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ListenerSettingsDeviceTest {
+    @Test public void startupCreationPreferencePreservesLegacyOwnershipAndExplicitDisable() {
+        Context application = ApplicationProvider.getApplicationContext();
+        android.content.SharedPreferences prefs = application.getSharedPreferences("listener-startup-fixture", Context.MODE_PRIVATE);
+        Context isolated = new android.content.ContextWrapper(application) {
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) { return prefs; }
+        };
+        try {
+            assertTrue(prefs.edit().clear().commit());
+            assertFalse(org.adaway.util.WebServerUtils.isListenerAutoCreate(isolated));
+            assertTrue(prefs.edit().putStringSet("managed_listener_addresses", java.util.Collections.singleton("fd6b:2a91:84f0::73")).commit());
+            assertTrue(org.adaway.util.WebServerUtils.isListenerAutoCreate(isolated));
+            assertTrue(prefs.edit().putBoolean("listener_auto_create", false).commit());
+            assertFalse(org.adaway.util.WebServerUtils.isListenerAutoCreate(isolated));
+            assertTrue(org.adaway.util.WebServerUtils.getManagedListenerAddresses(isolated).contains("fd6b:2a91:84f0::73"));
+        } finally { assertTrue(prefs.edit().clear().commit()); }
+    }
     @Test public void actualBundledReceiptHandlerAndJavaClientAgreeForBothFamilies() throws Exception {
         Context context = ApplicationProvider.getApplicationContext();
         for (String ip : new String[]{"127.0.0.1", "::1"}) {
