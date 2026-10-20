@@ -104,6 +104,7 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
     }
 
     private void verifyAndInstall(Context context, long id) {
+        if (!UpdateModel.pendingDownloadAllowed(context, id)) return;
         DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
         if (downloadManager == null) {
             Timber.w("DownloadManager missing while verifying APK update");
@@ -132,7 +133,9 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
         int problem = verify(context, apkUri);
         Handler main = new Handler(Looper.getMainLooper());
         if (problem == 0) {
-            main.post(() -> installApk(context, apkUri));
+            main.post(() -> {
+                if (UpdateModel.pendingDownloadAllowed(context, id)) installApk(context, apkUri);
+            });
         } else {
             String reason = context.getString(problem);
             Timber.w("Refusing downloaded update: %s.", reason);

@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   preview:
+    concurrency:
+      group: android-preview-publication
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -155,6 +158,7 @@ jobs:
           cat docs/listener-settings.md docs/listener-lifecycle.md > release-assets/IMPLEMENTATION-STATUS.md
           printf '%s\n' "$GITHUB_SHA" > release-assets/SOURCE-COMMIT.txt
           printf '%s\n' "Preview signature: same signing certificate as current published Android stable APK." > release-assets/SIGNING-POLICY.txt
+          python3 tools/prepare-preview-feed.py
           (cd release-assets && sha256sum * > SHA256SUMS.txt)
 
       - name: Publish signed, in-place inspection prerelease
@@ -182,6 +186,7 @@ jobs:
           Source revision, identity, signature, status and checksums attached.
           NOTES
           cat docs/listener-lifecycle.md >> "$RUNNER_TEMP/preview-notes.md"
+          cat docs/preview-updates.md >> "$RUNNER_TEMP/preview-notes.md"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             gh release create "$PREVIEW_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" \
               --verify-tag --prerelease --latest=false \
@@ -193,3 +198,4 @@ jobs:
               --title "AdAway Android signed preview $PREVIEW_TAG" \
               --notes-file "$RUNNER_TEMP/preview-notes.md"
           fi
+          python3 tools/publish-preview-channel.py

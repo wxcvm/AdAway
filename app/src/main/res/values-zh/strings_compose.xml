@@ -325,7 +325,7 @@
     <string name="compose_settings_update_app_daily">每日检查更新</string>
     <string name="compose_settings_update_app_daily_hint">定期检查应用更新</string>
     <string name="compose_settings_update_beta">包含测试版</string>
-    <string name="compose_settings_update_beta_hint">同时安装测试版本</string>
+    <string name="compose_settings_update_beta_hint">接收 GitHub 中更新的覆盖安装预览版；安装仍需确认。关闭后只检查稳定版，不会降级。</string>
     <string name="compose_settings_update_hosts">每日检查规则更新</string>
     <string name="compose_settings_update_hosts_hint">从规则源刷新 hosts 规则</string>
     <string name="compose_settings_update_wifi">仅 Wi-Fi 更新</string>

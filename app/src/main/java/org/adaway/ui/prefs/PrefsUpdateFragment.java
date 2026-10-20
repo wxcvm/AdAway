@@ -24,7 +24,6 @@ import org.adaway.model.source.SourceUpdateService;
 import org.adaway.model.update.ApkUpdateService;
 import org.adaway.model.update.UpdateStore;
 
-import static org.adaway.model.update.UpdateStore.ADAWAY;
 import static org.adaway.ui.prefs.PrefsActivity.PREFERENCE_NOT_FOUND;
 import static org.adaway.util.Constants.PREFS_NAME;
 
@@ -93,7 +92,7 @@ public class PrefsUpdateFragment extends PreferenceFragmentCompat {
         UpdateStore store = application.getUpdateModel().getStore();
         Preference includeBetaReleasesPref = findPreference(getString(R.string.pref_update_include_beta_releases_key));
         assert includeBetaReleasesPref != null : PREFERENCE_NOT_FOUND;
-        includeBetaReleasesPref.setEnabled(store == ADAWAY);
+        includeBetaReleasesPref.setEnabled(store != UpdateStore.F_DROID);
     }
 
     private void bindHostsUpdatePrefAction() {

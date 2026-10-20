@@ -20,6 +20,8 @@ on:
       - 'app/src/test/java/org/adaway/util/*Listener*.java'
       - 'app/src/main/java/org/adaway/model/root/MagiskBootScript.java'
       - 'tools/test-managed-listener-emulator.sh'
+      - 'app/src/main/java/org/adaway/model/update/**'
+      - 'app/src/test/java/org/adaway/model/update/**'
       - 'app/build.gradle'
       - 'webserver/**'
       - 'tcpdump/**'
@@ -91,6 +93,8 @@ jobs:
           cache: gradle
       - name: Run traffic mode regression tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
+      - name: Test preview publication without network writes
+        run: python3 tools/test-preview-channel.py
       - name: Test actual native loader and concurrent immutable publication
         run: |
           python3 tools/verify_webserver_apk_test.py
