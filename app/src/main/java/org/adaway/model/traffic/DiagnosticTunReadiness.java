@@ -16,7 +16,8 @@ final class DiagnosticTunReadiness {
         boolean hasFour = false, hasSix = false;
         for (android.net.RouteInfo route : link.getRoutes()) {
             if (route.isDefaultRoute()) return false;
-            if (route.getType() != android.net.RouteInfo.RTN_UNICAST) continue;
+            if (android.os.Build.VERSION.SDK_INT >= 33
+                    && route.getType() != android.net.RouteInfo.RTN_UNICAST) continue;
             hasFour |= four.equals(route.getDestination());
             hasSix |= six.equals(route.getDestination());
         }
