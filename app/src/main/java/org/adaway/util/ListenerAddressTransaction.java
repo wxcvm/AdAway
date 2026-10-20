@@ -19,6 +19,16 @@ public final class ListenerAddressTransaction {
 
     public ListenerAddressTransaction(Backend backend) { this.backend = backend; }
 
+    /** The boot script is often written BEFORE the first successful address creation. */
+    public static java.util.Set<String> startupAliases(ListenerSettings settings, boolean autoCreate) {
+        java.util.Set<String> aliases = new java.util.TreeSet<>();
+        if (autoCreate) for (String address : new String[]{settings.ipv4, settings.ipv6}) {
+            // All of 127/8 already routes locally; never add a redundant loopback alias.
+            if (canCreate(address) && !address.startsWith("127.")) aliases.add(address);
+        }
+        return aliases;
+    }
+
     public static boolean isSelected(ListenerSettings settings, String address) {
         try {
             InetAddress candidate = InetAddress.getByName(address);

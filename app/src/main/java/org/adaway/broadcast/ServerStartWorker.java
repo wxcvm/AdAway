@@ -78,7 +78,7 @@ public class ServerStartWorker extends Worker {
             Timber.w("ServerStartWorker: root not ready within probe window.");
             return false;
         }
-        WebServerUtils.startWebServer(context);
+        WebServerUtils.ensureWebServer(context);
         sleep(START_VERIFY_MS);
         return WebServerUtils.isWebServerRunning();
     }

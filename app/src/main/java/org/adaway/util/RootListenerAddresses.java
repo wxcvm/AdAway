@@ -55,7 +55,7 @@ public final class RootListenerAddresses implements ListenerAddressTransaction.B
             script.append("  if ! /system/bin/ip ").append(ipv6 ? "-6" : "-4")
                     .append(" address show to ").append(address).append(ipv6 ? "/128" : "/32")
                     .append(" | grep -q '").append(ipv6 ? "inet6 " : "inet ").append("'; then\n    ")
-                    .append(command("add", address)).append(" || exit 1\n  fi\n");
+                    .append(command("add", address)).append(" >> \"$LOG\" 2>&1 || { echo 'Listener address preparation failed' >> \"$LOG\"; exit 1; }\n  fi\n");
         }
         return script.toString();
     }

@@ -176,7 +176,7 @@ public class BootReceiver extends BroadcastReceiver {
         long deadline = System.currentTimeMillis() + IMMEDIATE_BUDGET_MS;
         while (System.currentTimeMillis() < deadline) {
             if (org.adaway.model.root.ShellUtils.isRootAvailable()) {
-                org.adaway.util.WebServerUtils.startWebServer(appContext);
+                org.adaway.util.WebServerUtils.ensureWebServer(appContext);
                 Timber.i("BootReceiver: immediate start dispatched.");
                 /* Confirm it really came up: "dispatched" is not "running"
                    (the port can be taken, the CA missing). */
