@@ -16,6 +16,10 @@ on:
       - 'app/src/main/java/org/adaway/model/rules/**'
       - 'app/src/main/java/org/adaway/ui/compose/StatsViewModel.kt'
       - 'app/src/main/java/org/adaway/util/WebServerUtils.java'
+      - 'app/src/main/java/org/adaway/util/*Listener*.java'
+      - 'app/src/test/java/org/adaway/util/*Listener*.java'
+      - 'app/src/main/java/org/adaway/model/root/MagiskBootScript.java'
+      - 'tools/test-managed-listener-emulator.sh'
       - 'app/build.gradle'
       - 'webserver/**'
       - 'tcpdump/**'
@@ -64,7 +68,7 @@ jobs:
           api-level: ${{ matrix.api }}
           arch: x86_64
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.model.source.SourceLoaderRoomTest,org.adaway.model.source.RuleBrowserRoomTest,org.adaway.model.traffic.DiagnosticIpv6TransportDeviceTest,org.adaway.model.traffic.ListenerSettingsDeviceTest
+          script: bash tools/test-managed-listener-emulator.sh
       - name: Upload Room and isolated IPv6 socket evidence
         if: always()
         uses: actions/upload-artifact@v4

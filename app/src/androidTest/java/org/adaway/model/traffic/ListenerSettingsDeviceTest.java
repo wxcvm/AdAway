@@ -18,6 +18,22 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ListenerSettingsDeviceTest {
+    @Test public void createdLoopbackAliasIsVisibleAndCanBindBothResponsePorts() throws Exception {
+        String alias = "fd6b:2a91:84f0::73";
+        assertTrue(new org.adaway.util.RootListenerAddresses().exists(alias));
+        try (ServerSocket first = new ServerSocket(0, 1, InetAddress.getByName(alias));
+             ServerSocket second = new ServerSocket(0, 1, InetAddress.getByName(alias))) {
+            int http = first.getLocalPort(), https = second.getLocalPort();
+            first.close(); second.close();
+            Process process = probe("--listen-ipv4", "-", "--listen-ipv6", alias,
+                    "--http-port", "" + http, "--https-port", "" + https);
+            assertTrue(process.waitFor(10, TimeUnit.SECONDS));
+            String output = new String(com.google.common.io.ByteStreams.toByteArray(process.getInputStream()), StandardCharsets.UTF_8).trim();
+            assertEquals(output, 0, process.exitValue());
+            assertEquals(output, 0, new JSONObject(output).getInt("http6"));
+            assertEquals(output, 0, new JSONObject(output).getInt("https6"));
+        }
+    }
     @Test public void savedLegacyAddressAndExplicitPairRebuildWithDifferentSemantics() {
         Context application = ApplicationProvider.getApplicationContext();
         android.content.SharedPreferences prefs = application.getSharedPreferences("listener-migration-fixture", Context.MODE_PRIVATE);

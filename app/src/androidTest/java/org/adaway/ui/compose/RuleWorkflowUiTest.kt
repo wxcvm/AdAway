@@ -32,6 +32,26 @@ import org.junit.Test
 class RuleWorkflowUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun creatingListenerAddressesRequiresConfirmationAndCancelKeepsSettings() {
+        val previous = org.adaway.util.WebServerUtils.getListenerSettings(compose.activity)
+        val managed = org.adaway.util.WebServerUtils.getManagedListenerAddresses(compose.activity)
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                Surface { Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) { ListenerSettingsCard() } }
+            }
+        }
+        compose.onNodeWithText("IPv6 监听地址").performTextReplacement("fd6b:2a91:84f0::73")
+        compose.onNodeWithText("地址不存在？创建并应用…").performScrollTo().performClick()
+        compose.onNodeWithText("创建缺失的本机地址？").assertIsDisplayed()
+        compose.onNodeWithText("仅在 lo 回环接口", substring = true).assertIsDisplayed()
+        saveScreenshot("listener-create-confirmation", dialog = true)
+        compose.onNodeWithText("取消", useUnmergedTree = true).performClick()
+        compose.runOnIdle {
+            assertEquals(previous.ipv6, org.adaway.util.WebServerUtils.getListenerSettings(compose.activity).ipv6)
+            assertEquals(managed, org.adaway.util.WebServerUtils.getManagedListenerAddresses(compose.activity))
+        }
+    }
+
     @Test fun listenerDraftDoesNotSaveOrRestartBeforeApplyAndRejectsHostnames() {
         val previous = org.adaway.util.WebServerUtils.getHttpPort(compose.activity)
         compose.setContent {
