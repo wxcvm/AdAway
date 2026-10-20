@@ -43,9 +43,7 @@ public final class ListenerArrivalCheck {
         catch (java.util.concurrent.RejectedExecutionException exception) { throw new IOException("上次系统 DNS 查询仍未结束，请稍后重试", exception); }
         try {
             InetAddress[] addresses = pending.get(2, TimeUnit.SECONDS);
-            List<String> result = new ArrayList<>();
-            for (InetAddress address : addresses) if (result.size() < 16) result.add(address.getHostAddress());
-            return result.toArray(new String[0]);
+            return java.util.Arrays.stream(addresses).limit(16).map(InetAddress::getHostAddress).toArray(String[]::new);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt(); throw new IOException("检测已取消", exception);
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException exception) {
@@ -72,16 +70,18 @@ public final class ListenerArrivalCheck {
             for (int index = 0; index < Math.min(answers.length, 16); index++) {
                 String address = answers[index];
                 if (!ListenerSettings.isLiteral(address)) continue;
-                if (!matches(settings, address) || !local.contains(address)) detail.add(address + "：未指向当前本机监听，未连接");
-                else {
-                    boolean received;
-                    try { received = prover.received(address, settings.http); }
-                    catch (IOException exception) { received = false; }
-                    detail.add(address + (received ? "：DNS 已指向，HTTP 请求已到达 AdAway" : "：DNS 已指向，但未收到 AdAway 回执"));
-                }
+                detail.add(answerResult(settings, address, prover, local));
             }
             return String.join("；", detail);
         } catch (IOException exception) { return "检测未完成：" + exception.getMessage(); }
+    }
+
+    private static String answerResult(ListenerSettings settings, String address, Prover prover, LocalAddresses local) throws IOException {
+        if (!matches(settings, address) || !local.contains(address)) return address + "：未指向当前本机监听，未连接";
+        boolean received;
+        try { received = prover.received(address, settings.http); }
+        catch (IOException exception) { received = false; }
+        return address + (received ? "：DNS 已指向，HTTP 请求已到达 AdAway" : "：DNS 已指向，但未收到 AdAway 回执");
     }
 
     public static boolean validReceipt(String response, String nonce) {
@@ -94,7 +94,12 @@ public final class ListenerArrivalCheck {
     }
 
     public static boolean received(String address, int port) throws IOException {
+        return received(address, port, "localhost");
+    }
+
+    public static boolean received(String address, int port, String host) throws IOException {
         if (!ListenerSettings.isLiteral(address)) throw new IOException("拒绝非字面 IP 连接");
+        String requestHost = host.equals("localhost") ? host : normalizeDomain(host);
         byte[] random = new byte[16]; RANDOM.nextBytes(random);
         StringBuilder token = new StringBuilder(32);
         for (byte value : random) token.append(String.format(Locale.ROOT, "%02x", value & 255));
@@ -102,8 +107,9 @@ public final class ListenerArrivalCheck {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         try (Socket socket = new Socket()) {
             socket.connect(new InetSocketAddress(InetAddress.getByName(address), port), 800);
-            socket.getOutputStream().write(("GET /adaway-listener-probe/" + nonce + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
-            ByteArrayOutputStream response = new ByteArrayOutputStream(); byte[] buffer = new byte[512];
+            socket.getOutputStream().write(("GET /adaway-listener-probe/" + nonce + " HTTP/1.1\r\nHost: " + requestHost + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            ByteArrayOutputStream response = new ByteArrayOutputStream();
+            byte[] buffer = new byte[512];
             while (response.size() < 4096) {
                 long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
                 if (remaining <= 0) return false;

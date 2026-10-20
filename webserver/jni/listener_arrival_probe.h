@@ -19,7 +19,7 @@ static inline int ap_nonce(struct mg_str uri,char out[33]) {
     }
     out[32]=0; return 1;
 }
-static inline int ap_reply(struct mg_connection *connection,struct mg_http_message *message) {
+static inline int ap_reply(struct mg_connection *connection,const struct mg_http_message *message) {
     char nonce[33]; int match=ap_nonce(message->uri,nonce);
     if (!match) return 0;
     if (match<0) mg_http_reply(connection,400,"Cache-Control: no-store\r\n","invalid probe");

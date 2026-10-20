@@ -8,9 +8,11 @@ static void respond(struct mg_connection *connection,int event,void *data) {
         mg_http_reply(connection,404,"", "not found");
 }
 int main(int argc,char **argv) {
-    char normalized[64],url[128];
+    char normalized[64];
+    char url[128];
     if (argc!=3 || !la_normalize(argv[1],normalized) || !la_port(argv[2])) return 2;
-    snprintf(url,sizeof(url),strchr(normalized,':') ? "http://[%s]:%d" : "http://%s:%d",normalized,la_port(argv[2]));
+    if (strcmp(normalized,"127.0.0.1") && strcmp(normalized,"::1")) return 2;
+    snprintf(url,sizeof(url),strchr(normalized,':') ? "http://[%s]:%d" : "http://%s:%d",normalized,la_port(argv[2])); /* NOSONAR(c:S5332): explicitly loopback-only HTTP receipt fixture, no credentials, forwarding or private data. */
     struct mg_mgr manager; mg_mgr_init(&manager);
     if (!mg_http_listen(&manager,url,respond,NULL)) { mg_mgr_free(&manager); return 3; }
     signal(SIGTERM,stop); signal(SIGINT,stop);
