@@ -3,7 +3,7 @@ package org.adaway.model.traffic;
 import java.io.IOException;
 
 /**
- * Bounded UDP relay protocol for the isolated 198.18.0.1/32 test route.
+ * Bounded UDP relay for the isolated IPv4 /32 and IPv6 /128 test routes.
  * Never opens network sockets itself and never relays arbitrary IP targets.
  */
 public final class DiagnosticUdpRelay {
@@ -17,7 +17,7 @@ public final class DiagnosticUdpRelay {
 
     private DiagnosticUdpRelay() { }
 
-    /** Return an IPv4 packet to write to TUN, or null on any unsafe condition. */
+    /** Return an IP packet to write to TUN, or null on any unsafe condition. */
     public static byte[] process(byte[] packet, int available, Exchange exchange) {
         if (exchange == null) return null;
         byte[] payload = DiagnosticUdpEcho.payload(packet, available, PORT);

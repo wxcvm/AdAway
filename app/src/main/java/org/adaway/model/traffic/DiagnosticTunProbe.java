@@ -56,13 +56,16 @@ public final class DiagnosticTunProbe {
         return dnsResponseCode() == 0;
     }
 
-    public static boolean relayRoundTrip() {
-        if (!DiagnosticVpnService.isActive()) return false;
+    public static boolean relayRoundTrip() { return relayRoundTrip(false); }
+
+    public static boolean relayRoundTrip(boolean ipv6) {
+        long session = DiagnosticVpnService.getSessionId();
+        if (session == 0) return false;
         byte[] nonce = new byte[16];
         RANDOM.nextBytes(nonce);
         try (DatagramSocket socket = new DatagramSocket()) {
             socket.setSoTimeout(2000);
-            InetAddress addr = InetAddress.getByName(DiagnosticTunPlan.DIAGNOSTIC_TARGET);
+            InetAddress addr = InetAddress.getByName(ipv6 ? DiagnosticTunPlan.IPV6_TARGET : DiagnosticTunPlan.DIAGNOSTIC_TARGET);
             socket.send(new DatagramPacket(nonce, nonce.length,
                     addr, DiagnosticUdpRelay.PORT));
             byte[] response = new byte[64];
@@ -70,7 +73,8 @@ public final class DiagnosticTunProbe {
             socket.receive(reply);
             byte[] expected = nonce.clone();
             expected[0] ^= 0x5a;
-            return reply.getLength() == expected.length
+            return DiagnosticVpnService.getSessionId() == session
+                    && reply.getLength() == expected.length
                     && reply.getPort() == DiagnosticUdpRelay.PORT
                     && addr.equals(reply.getAddress())
                     && Arrays.equals(expected, Arrays.copyOf(response, expected.length));

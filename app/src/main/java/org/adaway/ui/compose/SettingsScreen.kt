@@ -135,6 +135,15 @@ private fun UpdateSwitchRow(
         )
     }
 }
+@Composable
+internal fun DiagnosticRelayActions(active: Boolean, busy: Boolean, onProbe: (Boolean) -> Unit) {
+    Column {
+        for (ipv6 in listOf(false, true)) TextButton(enabled = active && !busy, onClick = { onProbe(ipv6) }) {
+            Text(stringResource(R.string.compose_tun_diagnostic_test_relay_family, if (ipv6) "IPv6" else "IPv4"))
+        }
+    }
+}
+
 private const val PREFS_GENERAL = "compose_general"
 
 /** Whether stats should track uid. Default true. */
@@ -341,6 +350,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     var refreshKey by remember { mutableStateOf(0) }
     var tunRefreshKey by remember { mutableIntStateOf(0) }
     var tunStatus by remember { mutableStateOf("") }
+    var tunRelayBusy by remember { mutableStateOf(false) }
     var tunDnsBusy by remember { mutableStateOf(false) }
     val tunScope = rememberCoroutineScope()
     val diagnosticConsentLauncher = rememberLauncherForActivityResult(
@@ -589,22 +599,21 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     ) {
                         Text(stringResource(R.string.compose_tun_diagnostic_test_echo))
                     }
-                    TextButton(
-                        enabled = diagnosticActive,
-                        onClick = {
-                            tunScope.launch {
+                    DiagnosticRelayActions(diagnosticActive, tunRelayBusy) { ipv6 ->
+                        tunRelayBusy = true
+                        tunScope.launch {
+                            try {
                                 val ok = withContext(Dispatchers.IO) {
-                                    org.adaway.model.traffic.DiagnosticTunProbe.relayRoundTrip()
+                                    org.adaway.model.traffic.DiagnosticTunProbe.relayRoundTrip(ipv6)
                                 }
                                 tunStatus = context.getString(
-                                    if (ok) R.string.compose_tun_diagnostic_relay_ok
-                                    else R.string.compose_tun_diagnostic_relay_failed,
+                                    if (ok) R.string.compose_tun_diagnostic_relay_family_ok
+                                    else R.string.compose_tun_diagnostic_relay_family_failed,
+                                    if (ipv6) "IPv6" else "IPv4",
                                 )
                                 tunRefreshKey++
-                            }
-                        },
-                    ) {
-                        Text(stringResource(R.string.compose_tun_diagnostic_test_relay))
+                            } finally { tunRelayBusy = false }
+                        }
                     }
                     for (type in listOf(
                         org.adaway.model.traffic.DiagnosticDnsCodec.TYPE_A,

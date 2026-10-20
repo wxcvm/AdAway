@@ -2,7 +2,11 @@
 
 状态：M1 决策和 Root 冲突防护已实现并通过 CI；Android VpnService 全路由与 Windows TUN/WFP 尚未接入。Windows 已迁移至独立仓库 wxcvm/AdAway-Windows，开发见其 PR #1。本 PR 不安装新的网络驱动，也不修改第三方设置。
 
-## 当前实现进度（2026-10-12）
+## 隔离双栈阶段（2026-10-20）
+
+专用 TUN 增加 2001:2::1/128，接口为 2001:2::2/128，与原 IPv4 /32 并列且仅允许本应用；严格 IPv6 UDP 校验后转至受保护的 ::1 本机端点。窗口／设置入口与测试恢复范围见 [双栈转发说明](dual-stack-transport.md)。没有设置默认路由；更早的候选库与宿主机 PoC 结果不能代替本阶段实际平台测试。
+
+## 历史实现进度（2026-10-12）
 
 - Android 端加入 `TrafficModePolicy`、`AndroidVpnObserver`：分别判断建议模式与只读 VPN 信号，不将 AdGuard 安装误判为已确认接管。
 - Root `HijackModel.enable` 在安装规则前检查 VPN。检测到外部 VPN 时撤销本产品自己的重定向链并保留监听服务器；VPN 状态未知时不安装新的重定向。

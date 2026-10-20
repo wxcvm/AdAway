@@ -19,11 +19,23 @@ public final class DiagnosticLoopbackUdpServer implements Closeable {
     private final DatagramSocket socket;
     private final Thread worker;
     private volatile boolean closed;
+    private final boolean respond;
+    private final java.util.concurrent.CountDownLatch received = new java.util.concurrent.CountDownLatch(1);
 
     public DiagnosticLoopbackUdpServer() throws IOException {
-        InetAddress loopback = InetAddress.getByName("127.0.0.1");
+        this(false);
+    }
+
+    public DiagnosticLoopbackUdpServer(boolean ipv6) throws IOException {
+        this(ipv6, true);
+    }
+
+    DiagnosticLoopbackUdpServer(boolean ipv6, boolean respond) throws IOException {
+        this.respond = respond;
+        InetAddress loopback = InetAddress.getByName(ipv6 ? "::1" : "127.0.0.1");
         socket = new DatagramSocket(new InetSocketAddress(loopback, 0));
-        socket.setSoTimeout(500);
+        try { socket.setSoTimeout(500); }
+        catch (SocketException failure) { socket.close(); throw failure; }
         worker = new Thread(this::serve, "diagnostic-udp-loopback");
         worker.setDaemon(true);
         worker.start();
@@ -40,6 +52,8 @@ public final class DiagnosticLoopbackUdpServer implements Closeable {
                 DatagramPacket received = new DatagramPacket(bytes, bytes.length);
                 socket.receive(received);
                 if (!allowed(received)) continue;
+                this.received.countDown();
+                if (!respond) continue;
                 byte[] reply = new byte[received.getLength()];
                 System.arraycopy(bytes, 0, reply, 0, reply.length);
                 reply[0] ^= 0x5a;
@@ -65,5 +79,14 @@ public final class DiagnosticLoopbackUdpServer implements Closeable {
     public void close() {
         closed = true;
         socket.close();
+    }
+
+    public boolean awaitStopped(long milliseconds) throws InterruptedException {
+        if (milliseconds > 0) worker.join(milliseconds);
+        return !worker.isAlive();
+    }
+
+    boolean awaitRequest(long milliseconds) throws InterruptedException {
+        return received.await(milliseconds, java.util.concurrent.TimeUnit.MILLISECONDS);
     }
 }
