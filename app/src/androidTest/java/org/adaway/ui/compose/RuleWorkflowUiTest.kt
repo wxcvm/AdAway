@@ -52,6 +52,20 @@ class RuleWorkflowUiTest {
         }
     }
 
+    @Test fun arrivalCheckDomainsCanBeCustomizedWithoutStartingDetection() {
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) {
+                Surface { Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) { AdGuardArrivalCard(enabled = true) } }
+            }
+        }
+        compose.onNodeWithText("广告规则测试域名（可修改或留空）").performTextReplacement("ads.custom.example")
+        compose.onNodeWithText("Hosts 规则测试域名（可选）").performTextReplacement("hosts.custom.example")
+        compose.onNodeWithText("ads.custom.example").assertExists()
+        compose.onNodeWithText("hosts.custom.example").assertExists()
+        compose.onNodeWithText("检测 DNS 与请求到达").performScrollTo().assertIsEnabled()
+        saveScreenshot("listener-arrival-drafts")
+    }
+
     @Test fun listenerDraftDoesNotSaveOrRestartBeforeApplyAndRejectsHostnames() {
         val previous = org.adaway.util.WebServerUtils.getHttpPort(compose.activity)
         compose.setContent {

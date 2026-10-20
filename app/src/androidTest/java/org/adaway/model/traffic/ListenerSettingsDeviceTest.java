@@ -18,6 +18,23 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ListenerSettingsDeviceTest {
+    @Test public void actualBundledReceiptHandlerAndJavaClientAgreeForBothFamilies() throws Exception {
+        Context context = ApplicationProvider.getApplicationContext();
+        for (String ip : new String[]{"127.0.0.1", "::1"}) {
+            int port;
+            try (ServerSocket reservation = new ServerSocket(0, 1, InetAddress.getByName(ip))) { port = reservation.getLocalPort(); }
+            Process process = new ProcessBuilder(context.getApplicationInfo().nativeLibraryDir + "/liblistener_arrival_probe.so", ip, "" + port).redirectErrorStream(true).start();
+            try {
+                boolean received = false;
+                for (int attempt = 0; attempt < 20 && !received; attempt++) {
+                    assertTrue("Receipt fixture exited", process.isAlive());
+                    try { received = org.adaway.util.ListenerArrivalCheck.received(ip, port); }
+                    catch (java.io.IOException ignored) { Thread.sleep(50); }
+                }
+                assertTrue("Actual native handler did not return a fresh receipt for " + ip, received);
+            } finally { process.destroy(); assertTrue(process.waitFor(5, TimeUnit.SECONDS)); }
+        }
+    }
     @Test public void createdLoopbackAliasIsVisibleAndCanBindBothResponsePorts() throws Exception {
         String alias = "fd6b:2a91:84f0::73";
         assertTrue(new org.adaway.util.RootListenerAddresses().exists(alias));
