@@ -59,7 +59,7 @@ public final class DiagnosticTunProbe {
     public static boolean relayRoundTrip() { return relayRoundTrip(false); }
 
     public static boolean relayRoundTrip(boolean ipv6) {
-        long session = DiagnosticVpnService.getSessionId();
+        long session = DiagnosticVpnService.getReadySessionId();
         if (session == 0) return false;
         byte[] nonce = new byte[16];
         RANDOM.nextBytes(nonce);
@@ -73,7 +73,7 @@ public final class DiagnosticTunProbe {
             socket.receive(reply);
             byte[] expected = nonce.clone();
             expected[0] ^= 0x5a;
-            return DiagnosticVpnService.getSessionId() == session
+            return DiagnosticVpnService.getReadySessionId() == session
                     && reply.getLength() == expected.length
                     && reply.getPort() == DiagnosticUdpRelay.PORT
                     && addr.equals(reply.getAddress())

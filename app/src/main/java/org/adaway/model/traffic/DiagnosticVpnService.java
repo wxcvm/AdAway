@@ -83,6 +83,13 @@ public final class DiagnosticVpnService extends VpnService {
         return service == null || service.stopped ? 0 : service.sessionId;
     }
 
+    public static long getReadySessionId() {
+        DiagnosticVpnService service = RUNNING.get();
+        if (service == null || service.stopped || !DiagnosticTunReadiness.ready(
+                service.getSystemService(android.net.ConnectivityManager.class))) return 0;
+        return service == RUNNING.get() && !service.stopped ? service.sessionId : 0;
+    }
+
     public static long getPacketCount() {
         DiagnosticVpnService service = RUNNING.get();
         return service == null ? 0 : service.packetCount.get();

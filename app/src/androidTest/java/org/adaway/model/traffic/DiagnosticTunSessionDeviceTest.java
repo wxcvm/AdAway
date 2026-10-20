@@ -27,6 +27,9 @@ public class DiagnosticTunSessionDeviceTest {
                 && route.getDestination().getPrefixLength()==prefix);
     }
     private static void assertScopedNetwork(ConnectivityManager manager) throws Exception {
+        long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!DiagnosticTunReadiness.ready(manager) && System.nanoTime()<deadline) Thread.sleep(25);
+        assertTrue("Scoped routes were not published",DiagnosticTunReadiness.ready(manager));
         boolean found=false;
         for (Network network:manager.getAllNetworks()) {
             NetworkCapabilities caps=manager.getNetworkCapabilities(network);
@@ -55,6 +58,7 @@ public class DiagnosticTunSessionDeviceTest {
                 DiagnosticVpnService.start(app);active(true);
                 long generation=DiagnosticVpnService.getSessionId();assertTrue(generation>previous);previous=generation;
                 assertScopedNetwork(manager);
+                assertEquals(generation,DiagnosticVpnService.getReadySessionId());
                 Thread.sleep(225);assertTrue("Actual IPv4 TUN relay failed",DiagnosticTunProbe.relayRoundTrip(false));
                 Thread.sleep(225);assertTrue("Actual IPv6 TUN relay failed",DiagnosticTunProbe.relayRoundTrip(true));
                 assertTrue(DiagnosticVpnService.getPacketCount()>=2);
