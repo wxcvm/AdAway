@@ -113,6 +113,11 @@ public final class MagiskBootScript {
         String resourceDir = WebServerUtils.getResourcePath(context).toAbsolutePath().toString();
         String script = buildScript(nativeLibDir, resourceDir, WebServerUtils.getListenerSettings(context),
                 WebServerUtils.STATS_PORT, proxyFilter);
+        java.util.Set<String> managed = WebServerUtils.getManagedListenerAddresses(context);
+        org.adaway.util.ListenerSettings listeners = WebServerUtils.getListenerSettings(context);
+        managed.removeIf(address -> !org.adaway.util.ListenerAddressTransaction.isSelected(listeners, address));
+        script = script.replace("  # Restore managed listener addresses here.\n",
+                org.adaway.util.RootListenerAddresses.bootCommands(managed));
         // base64 keeps the shell command free of any quoting/escaping of paths.
         String encoded = Base64.encodeToString(script.getBytes(StandardCharsets.UTF_8),
                 Base64.NO_WRAP);
@@ -329,6 +334,7 @@ public final class MagiskBootScript {
                 + "    fi\n"
                 + "  fi\n"
                 + "  echo \"$(date) boot start\" >> \"$LOG\"\n"
+                + "  # Restore managed listener addresses here.\n"
                 + "  LD_LIBRARY_PATH=\"$APP_LIB\" \"$BIN\" --resources \"$RES\""
                 + settings.arguments().replace("--stats-port 8686", "--stats-port " + statsPort)
                 + (proxyFilter ? " --proxy-filter" : "")
