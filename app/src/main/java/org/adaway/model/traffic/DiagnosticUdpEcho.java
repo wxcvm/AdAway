@@ -3,10 +3,10 @@ package org.adaway.model.traffic;
 import java.util.Arrays;
 
 /**
- * Strict, test-only IPv4/UDP packet codec.
+ * Strict, test-only IPv4/IPv6 UDP packet codec.
  *
  * The only accepted endpoints are diagnostic source 198.18.0.2 and
- * destination 198.18.0.1. No arbitrary host, default route or packet
+ * destination 198.18.0.1, or IPv6 2001:2::2 to 2001:2::1. No arbitrary host, default route or packet
  * forwarding is possible through this parser.
  */
 public final class DiagnosticUdpEcho {
@@ -74,12 +74,14 @@ public final class DiagnosticUdpEcho {
 
     /** Copy the payload of a packet addressed to an explicitly allowed port. */
     public static byte[] payload(byte[] packet, int available, int port) {
+        if (ipv6(packet, available)) return DiagnosticUdp6.payload(packet, available, port);
         int hdr = validatedHeader(packet, available, port);
         if (hdr < 0) return null;
         return Arrays.copyOfRange(packet, hdr + UDP_HEADER, available);
     }
 
     public static int sourcePort(byte[] packet, int available, int port) {
+        if (ipv6(packet, available)) return DiagnosticUdp6.sourcePort(packet, available, port);
         int hdr = validatedHeader(packet, available, port);
         return hdr < 0 ? -1 : u16(packet, hdr);
     }
@@ -96,6 +98,7 @@ public final class DiagnosticUdpEcho {
      */
     public static byte[] replyWithPayload(byte[] packet, int available,
                                           int allowedPort, byte[] response) {
+        if (ipv6(packet, available)) return DiagnosticUdp6.reply(packet, available, allowedPort, response);
         int hdr = validatedHeader(packet, available, allowedPort);
         if (hdr < 0 || response == null
                 || response.length > MAX_PACKET - hdr - UDP_HEADER) return null;
@@ -121,5 +124,9 @@ public final class DiagnosticUdpEcho {
                 + sum16(out, hdr, udpLen));
         put16(out, hdr + 6, udpChecksum == 0 ? 0xffff : udpChecksum);
         return out;
+    }
+
+    static boolean ipv6(byte[] bytes, int length) {
+        return bytes != null && length > 0 && bytes.length > 0 && (bytes[0] & 0xf0) == 0x60;
     }
 }

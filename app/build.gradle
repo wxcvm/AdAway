@@ -29,6 +29,8 @@ android {
     ndkVersion '28.1.13356709'
     namespace 'org.adaway'
 
+    sourceSets.androidTest.assets.srcDir('src/test/resources/transport')
+
     defaultConfig {
         applicationId 'com.wxcvm.Adaway'
         if (progressPreview) applicationIdSuffix '.preview'

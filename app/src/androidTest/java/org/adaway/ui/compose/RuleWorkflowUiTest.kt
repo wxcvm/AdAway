@@ -349,6 +349,26 @@ class RuleWorkflowUiTest {
         saveScreenshot("rule-editor-dark-large-text-error")
     }
 
+    @Test fun dualStackRelayActionsRequireActiveSessionAndDisableWhileBusy() {
+        val active = androidx.compose.runtime.mutableStateOf(false)
+        val busy = androidx.compose.runtime.mutableStateOf(false)
+        val probes = mutableListOf<Boolean>()
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { DiagnosticRelayActions(active.value, busy.value) { probes.add(it) } }
+        }
+        val four = compose.activity.getString(R.string.compose_tun_diagnostic_test_relay_family, "IPv4")
+        val six = compose.activity.getString(R.string.compose_tun_diagnostic_test_relay_family, "IPv6")
+        compose.onNodeWithText(four).assertIsNotEnabled()
+        compose.onNodeWithText(six).assertIsNotEnabled()
+        compose.runOnIdle { assertTrue(probes.isEmpty()); active.value = true }
+        compose.onNodeWithText(four).performClick()
+        compose.onNodeWithText(six).performClick()
+        compose.runOnIdle { assertEquals(listOf(false, true), probes); busy.value = true }
+        compose.onNodeWithText(four).assertIsNotEnabled()
+        compose.onNodeWithText(six).assertIsNotEnabled()
+        saveScreenshot("dual-stack-relay-actions")
+    }
+
     private fun overviewScreenshot(dark: Boolean, scale: Float, name: String) {
         compose.setContent {
             val density = LocalDensity.current.density
