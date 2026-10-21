@@ -393,6 +393,7 @@ private fun startPolling() {
     fun startRealtime() {
         if (wsJob?.isActive == true) return
         wsJob = viewModelScope.launch {
+            val connectionJob = kotlinx.coroutines.currentCoroutineContext()[Job]!!
             val client = okhttp3.OkHttpClient.Builder()
                 .proxy(java.net.Proxy.NO_PROXY)
                 .pingInterval(15, java.util.concurrent.TimeUnit.SECONDS)
@@ -412,7 +413,8 @@ private fun startPolling() {
                         try {
                             val parsed = ServerStats.fromJson(org.json.JSONObject(text)) ?: return
                             viewModelScope.launch {
-                                if (wsJob?.isActive == true) {
+                                if (wsJob === connectionJob && connectionJob.isActive &&
+                                    shouldReplaceStats(_serverStats.value?.snapshotTs, statsUpdatedAt.value, parsed.snapshotTs, false)) {
                                     _serverStats.value = parsed
                                     statsUpdatedAt.value = System.currentTimeMillis()
                                     statsError.value = null
@@ -486,10 +488,13 @@ private fun startPolling() {
                     fromSnapshot = stats != null
                 }
                 if (stats != null) {
-                    _serverStats.value = stats
-                    statsUpdatedAt.value = if (fromSnapshot) stats.snapshotTs * 1000 else System.currentTimeMillis()
+                    val replace = shouldReplaceStats(_serverStats.value?.snapshotTs, statsUpdatedAt.value, stats.snapshotTs, fromSnapshot)
+                    if (replace) {
+                        _serverStats.value = stats
+                        statsUpdatedAt.value = if (fromSnapshot) stats.snapshotTs * 1000 else System.currentTimeMillis()
+                    }
                     // "snapshot" 会让状态栏显示“最后一次更新 xx:xx（可能已过期）”
-                    statsError.value = if (fromSnapshot) "snapshot" else null
+                    statsError.value = if (fromSnapshot) { if (replace) "snapshot" else "unreachable" } else null
                 } else {
                     statsError.value = "unreachable"
                 }
