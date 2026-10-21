@@ -4,10 +4,9 @@ package org.adaway.ui.compose
  * 统计页面：ADBlock 的核心数据展示。
  *
  * 图表组成（均可通过设置页开关控制）：
- *  - LifetimeCard    累计统计（请求/拦截/连接/证书，重启不丢失）
  *  - DonutChart      环形图（按类型展示拦截占比，中心显示总数）
  *  - BlockRateCard   拦截率环（拦截/请求百分比）
- *  - TrafficTrendCard 趋势图（24h/7d/30d/永久，line/area/bars 三种样式）
+ *  - TrafficTrendCard 趋势图（24h/7d/30d，line/area/bars 三种样式）
  *  - ActiveAppsCard  活跃应用（per-app 连接/请求/拦截统计）
  *  - RecentCertsCard 最近签发的 SNI 证书列表
  *  - ServerDetailsCard 服务器详情（uptime/类型计数）
@@ -107,6 +106,7 @@ internal fun buildCategories(stats: ServerStats): List<BlockCategory> {
         BlockCategory(stringResource(R.string.compose_stats_type_crypto), stats.blockedCrypto, Color(0xFFBBDEFB)),
         BlockCategory(stringResource(R.string.compose_stats_type_clickbait), stats.blockedClickbait, Color(0xFFFFCCBC)),
         BlockCategory(stringResource(R.string.compose_stats_type_other), stats.blockedOther, Color(0xFF795548)),
+        BlockCategory(stringResource(R.string.compose_stats_type_mechanism), stats.uncategorizedBlocked, theme.outline),
     ).filter { it.count > 0 }
 }
 
@@ -117,10 +117,10 @@ internal fun buildCategories(stats: ServerStats): List<BlockCategory> {
  *
  * 页面布局自上而下：
  *  1. hosts 列表总量卡（拦截/放行/重定向数量）
- *  2. 累计统计卡（LifetimeCard，重启不丢失）
+ *  2. Web 响应服务器概览计数（部分运行期机制不持久化）
  *  3. 拦截率环（BlockRateCard）
  *  4. 分类环形图（DonutChart，中心显示拦截总数）
- *  5. 趋势图（TrafficTrendCard，24h/7d/30d/永久 + 三样式）
+ *  5. 趋势图（TrafficTrendCard，24h/7d/30d + 三样式）
  *  6. 活跃应用（ActiveAppsCard）
  *  7. 最近签发证书（RecentCertsCard）
  *  8. 服务器详情（ServerDetailsCard）
@@ -144,7 +144,6 @@ fun StatisticsScreen(
     val context = androidx.compose.ui.platform.LocalContext.current
 
     // ── 读取设置页的图表开关（键值见 SettingsScreen.kt）──
-    val showLifetime = isChartEnabled(context, "chart_lifetime")
     val showRate = isChartEnabled(context, "chart_rate")
     val showDonut = isChartEnabled(context, "chart_donut")
     val showTrend = isChartEnabled(context, "chart_trend")
@@ -311,10 +310,8 @@ fun StatisticsScreen(
                 }
             }
 
-            // Lifetime totals
-            if (showLifetime && serverStats != null) {
-                LifetimeCard(serverStats!!)
-            }
+            // The primary card already displays the same persisted totals.
+            // Keep the legacy setting readable without rendering duplicate numbers.
 
             // Block rate ring
             if (showRate && serverStats != null && serverStats!!.totalRequests > 0) {
@@ -351,24 +348,6 @@ fun StatisticsScreen(
                 ServerDetailsCard(serverStats!!)
             }
         }
-    }
-}
-
-@Composable
-private fun CountLabel(label: String, value: Int) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            String.format(Locale.US, "%,d", value),
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-            ),
-        )
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
@@ -911,7 +890,7 @@ private fun TopHostsCard(blocked: List<BlockedHost>) {
 
 @Composable
 internal fun appNameForUid(uid: Int): String {
-    if (uid <= 0) return stringResource(R.string.compose_stats_app_unknown, uid)
+    if (uid < 0) return stringResource(R.string.compose_logs_unknown_app)
     val context = androidx.compose.ui.platform.LocalContext.current
     val name = remember(uid) {
         try {
@@ -932,67 +911,11 @@ internal fun appNameForUid(uid: Int): String {
 
 @Composable
 /**
- * 累计统计卡：请求/拦截/连接/证书四个自 webserver 启动以来
- * 的累计计数（持久化于 stats.dat，重启不丢失）。
- */
-private fun LifetimeCard(stats: ServerStats) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                stringResource(R.string.compose_stats_lifetime_title),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                stringResource(R.string.compose_stats_lifetime_hint),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                CountLabel(stringResource(R.string.compose_stats_lifetime_requests), stats.totalRequests)
-                CountLabel(stringResource(R.string.compose_stats_lifetime_blocked), stats.totalBlocked)
-                CountLabel(stringResource(R.string.compose_stats_lifetime_connections), stats.totalConnections)
-                CountLabel(stringResource(R.string.compose_stats_lifetime_certs), stats.sniCertsIssued)
-            }
-        }
-    }
-}
-
-@Composable
-private fun CountLabel(label: String, value: Long) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            String.format(Locale.US, "%,d", value),
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-            ),
-        )
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-/**
- * 趋势图（AdGuard Home 风格）：支持 4 个时间范围与 3 种样式。
+ * 趋势图（AdGuard Home 风格）：支持 3 个时间范围与 3 种样式。
  *
  * 时间范围（mode）：
  *  0 = 24h（hourly 桶）  1 = 7d（daily 取最近 7 天）
- *  2 = 30d（daily 全部） 3 = 永久（所有历史数据）
+ *  2 = 30d（有界 daily 桶）；旧永久偏好映射到这个真实可用范围。
  *
  * 样式（style，取自偏好 chart_style）：
  *  0 = 折线（平滑 Catmull-Rom 曲线 + 渐变面积）
@@ -1001,29 +924,22 @@ private fun CountLabel(label: String, value: Long) {
  * 绘制细节：网格线 + Y 轴刻度 + 图例 + 三条数据系列
  * （请求=primary、拦截=error、连接=tertiary，连接线可开关）。
  */
-private fun TrafficTrendCard(
+internal fun TrafficTrendCard(
     hourly: List<HistPoint>,
     daily: List<HistPoint>,
     showConnections: Boolean,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     // 范围与样式均从偏好恢复（用户上次选择不丢失）
-    var mode by remember { mutableIntStateOf(chartRange(context)) }  // 0=24h 1=7d 2=30d 3=all
+    var mode by remember { mutableIntStateOf(chartRange(context)) }  // 0=24h 1=7d 2=30d
     var style by remember { mutableIntStateOf(chartStyle(context)) } // 0=line 1=area 2=bars
     fun setMode(m: Int) { mode = m; setChartRange(context, m) }
     fun setStyle(s: Int) { style = s; setChartStyle(context, s) }
     val data = when (mode) {
         0 -> hourly
         1 -> daily.takeLast(7)
-        2 -> daily
-        /*
-         * 永久：以前是 hourly + daily 直接拼接，但两个系列的时间刻度不同（小时 vs 天），
-         * 拼出来的时间戳不是递增的 —— X 轴日期因此出现"两头对称、来回跳"的假象。
-         * 长周期视图用日粒度即可（刻度均匀）；日数据不足两个点时退回小时序列。
-         */
-        else -> if (daily.size >= 2) daily else hourly
+        else -> daily.takeLast(30)
     }
-    if (data.isEmpty()) return
 
     val maxReq = (data.maxOfOrNull { it.requests } ?: 0L).coerceAtLeast(1L)
     val maxBlocked = (data.maxOfOrNull { it.blocked } ?: 0L).coerceAtLeast(1L)
@@ -1042,7 +958,7 @@ private fun TrafficTrendCard(
         ),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // A weighted title and four chips on the same Row overflowed on
+            // A weighted title and range chips on the same Row overflowed on
             // narrow devices and with large accessibility font scales.
             Text(
                 stringResource(R.string.compose_stats_history_title),
@@ -1062,8 +978,6 @@ private fun TrafficTrendCard(
                     label = { Text(stringResource(R.string.compose_stats_range_7d)) })
                 FilterChip(selected = mode == 2, onClick = { setMode(2) },
                     label = { Text(stringResource(R.string.compose_stats_range_30d)) })
-                FilterChip(selected = mode == 3, onClick = { setMode(3) },
-                    label = { Text(stringResource(R.string.compose_stats_range_all)) })
             }
             Row(
                 modifier = Modifier
@@ -1080,6 +994,10 @@ private fun TrafficTrendCard(
                     label = { Text(stringResource(R.string.compose_stats_style_bars)) })
             }
             Spacer(Modifier.height(12.dp))
+
+            if (data.isEmpty()) Text(stringResource(R.string.compose_stats_history_empty),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             // 触摸交互：点击图表显示最近数据点的具体数值（tooltip）
             var selectedIndex by remember { mutableIntStateOf(-1) }
@@ -1316,8 +1234,7 @@ private fun TrafficTrendCard(
                         when (mode) {
                             0 -> R.string.compose_stats_history_window
                             1 -> R.string.compose_stats_7d_window
-                            2 -> R.string.compose_stats_daily_window
-                            else -> R.string.compose_stats_range_all
+                            else -> R.string.compose_stats_daily_window
                         },
                     ),
                     style = MaterialTheme.typography.labelSmall,
@@ -1448,42 +1365,6 @@ private fun LegendDot(color: androidx.compose.ui.graphics.Color, label: String) 
     }
 }
 
-/** 查询日志的动作名（0 = 代理到真实服务器，1 = 拦截，2 = 放行）。 */
-@Composable
-private fun queryActionLabel(action: Int): String = when (action) {
-    1 -> stringResource(R.string.compose_stats_recent_action_blocked)
-    2 -> stringResource(R.string.compose_stats_recent_action_allowed)
-    else -> stringResource(R.string.compose_stats_recent_action_proxied)
-}
-
-/** 命中的策略类型（与服务端 LT_* 顺序一致），未知则返回空串。 */
-@Composable
-private fun queryTypeLabel(type: Int): String = when (type) {
-    0 -> stringResource(R.string.compose_stats_type_images)
-    1 -> stringResource(R.string.compose_stats_type_scripts)
-    2 -> stringResource(R.string.compose_stats_type_styles)
-    3 -> stringResource(R.string.compose_stats_type_fonts)
-    4 -> stringResource(R.string.compose_stats_type_media)
-    5 -> stringResource(R.string.compose_stats_type_other)
-    6 -> stringResource(R.string.compose_stats_type_api)
-    7 -> stringResource(R.string.compose_stats_type_telemetry)
-    8 -> stringResource(R.string.compose_stats_type_config)
-    9 -> stringResource(R.string.compose_stats_type_ws)
-    else -> ""
-}
-
-/** 该类型当前的处理方式：占位 / 204 / 放行。 */
-@Composable
-private fun queryModeLabel(mode: Int): String = when (mode) {
-    1 -> stringResource(R.string.compose_stats_mode_204)
-    2 -> stringResource(R.string.compose_stats_mode_allowed)
-    else -> stringResource(R.string.compose_stats_mode_placeholder)
-}
-
-private fun queryTimeText(ts: Long): String =
-    if (ts <= 0L) "--:--:--"
-    else java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(java.util.Date(ts * 1000L))
-
 /**
  * 最近请求卡（服务器查询日志环形缓冲）：按时间倒序显示"谁请求了什么、
  * 被怎么处理"，用来回答"为什么这个请求被拦截"。数据来自
@@ -1535,13 +1416,7 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>, onOpenLogs: () -> U
             )
             Spacer(Modifier.height(8.dp))
             shown.forEach { entry ->
-                // 结果列直接给出"怎么拦的"：拦截 · 脚本 · 204
-                val typeText = queryTypeLabel(entry.type)
-                val modeText = queryModeLabel(entry.mode)
-                val detail = if (typeText.isEmpty()) modeText else "$typeText · $modeText"
-                val actionText = if (entry.action == 1 || entry.action == 2)
-                    queryActionLabel(entry.action) + " · " + detail
-                else queryActionLabel(entry.action)
+                val actionText = queryActionSummary(entry)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1549,7 +1424,7 @@ private fun RecentRequestsCard(entries: List<QueryLogEntry>, onOpenLogs: () -> U
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        queryTimeText(entry.ts),
+                        queryLogTime(entry.ts, false),
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

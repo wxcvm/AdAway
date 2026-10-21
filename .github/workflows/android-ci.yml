@@ -31,6 +31,8 @@ jobs:
       # 刻意不加 -Werror：警告要看得见，但不该用无关警告把构建弄红；结论由测试退出码给出。
       - name: Native rule-normalisation tests
         run: |
+          cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/request_host_test.c -o "$RUNNER_TEMP/request-host-test"
+          "$RUNNER_TEMP/request-host-test"
           cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/rule_norm_test" webserver/jni/rule_norm_test.c
           "$RUNNER_TEMP/rule_norm_test"
           cc -std=c11 -Wall -Wextra -o "$RUNNER_TEMP/pin_window_test" webserver/jni/pin_window_test.c

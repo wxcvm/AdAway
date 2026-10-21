@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "request_host.h"
 #undef assert
 #define assert(condition) do { if (!(condition)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition); exit(1); } } while (0)
 #ifdef _WIN32
@@ -20,7 +21,8 @@ typedef unsigned int uid_t;
 #define QLOG_JSON_MAX 49152
 static int s_last_type = -1, s_last_mode;
 static void req_host_of(struct mg_http_message *hm, char *out, size_t cap) {
-    snprintf(out, cap, "%.*s", (int)hm->uri.len, hm->uri.buf);
+    struct mg_str *header = hm ? mg_http_get_header(hm, "Host") : NULL;
+    (void)request_host_parse(header ? header->buf : NULL, header ? header->len : 0, out, cap);
 }
 static void json_safe_copy(char *out, size_t cap, const char *host) {
     snprintf(out, cap, "%s", host); /* The fixture only generates DNS labels. */
@@ -55,7 +57,9 @@ static void add(unsigned number) {
     struct mg_http_message hm;
     memset(&hm, 0, sizeof(hm));
     snprintf(host, sizeof(host), "request-%u.example.test", number);
-    hm.uri = mg_str(host);
+    hm.uri = mg_str("/query-log-fixture.gif");
+    hm.headers[0].name = mg_str("Host");
+    hm.headers[0].value = mg_str(host);
     qlog_add((uid_t)-1, QLOG_BLOCK, &hm);
 }
 static void newest_is(unsigned number) {
@@ -251,9 +255,29 @@ static void invalid_clock(const char *directory) {
     assert(remove(path) == 0);
 }
 
+static void host_authorities(void) {
+    qlog_clear();
+    const char *requests[] = {
+        "GET /private?credential=secret HTTP/1.0\r\nHost: [::1]:8443\r\n\r\n",
+        "GET /private/secret HTTP/1.0\r\n\r\n"
+    };
+    const char *expected[] = {"::1", "(unknown host)"};
+    for (size_t i = 0; i < sizeof(requests)/sizeof(requests[0]); i++) {
+        struct mg_http_message request;
+        assert(mg_http_parse(requests[i], strlen(requests[i]), &request) > 0);
+        qlog_add((uid_t)-1, QLOG_BLOCK, &request);
+        struct mg_str body = reply("offset=0&limit=1", 200);
+        char *observed = mg_json_get_str(body, "$.entries[0].host");
+        assert(observed && !strcmp(observed, expected[i]));
+        assert(!strstr(observed, "private") && !strstr(observed, "secret"));
+        free(observed);
+    }
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2); /* Existing disposable directory supplied by the test runner. */
     mg_log_set(MG_LL_NONE);
+    host_authorities();
     persistence(argv[1]);
     pages();
     page_boundaries();

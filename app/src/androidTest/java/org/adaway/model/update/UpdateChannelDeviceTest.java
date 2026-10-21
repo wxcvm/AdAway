@@ -22,7 +22,7 @@ public class UpdateChannelDeviceTest {
         };
         AtomicInteger requests=new AtomicInteger();
         try {
-            assertTrue(prefs.edit().clear().putBoolean("updateCheckAppDaily",false).commit());
+            assertTrue(prefs.edit().clear().putBoolean("updateCheckAppDaily",false).putBoolean("automaticAppUpdate",false).commit());
             String preview=new JSONObject().put("version","6.7.6-preview.21").put("versionCode",2000000000)
                     .put("channel","preview").put("packageName","com.wxcvm.Adaway")
                     .put("tag","progress-android-20261020.5")
@@ -40,7 +40,8 @@ public class UpdateChannelDeviceTest {
             assertTrue(prefs.edit().putBoolean("includeBetaReleases",true).commit());
             assertTrue(model.checkForUpdate(false).preview);
             assertTrue(model.checkForUpdate(false).updateAvailable);
-            assertTrue(prefs.edit().putLong("pending_download_id",42).putBoolean("pending_preview",true).commit());
+            assertTrue(prefs.edit().putLong("pending_download_id",42).putLong("expected_apk_version_code",2000000000)
+                    .putBoolean("pending_preview",true).commit());
             assertTrue(UpdateModel.pendingDownloadAllowed(isolated,42));
             assertTrue(prefs.edit().putBoolean("includeBetaReleases",false).commit());
             assertFalse(UpdateModel.pendingDownloadAllowed(isolated,42));

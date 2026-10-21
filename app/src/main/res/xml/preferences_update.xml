@@ -10,6 +10,11 @@
 
     <PreferenceCategory app:title="@string/pref_update_app_category">
         <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="automaticAppUpdate"
+            app:title="@string/compose_settings_update_automatic"
+            app:summary="@string/compose_settings_update_automatic_hint" />
+        <SwitchPreferenceCompat
             app:defaultValue="@bool/pref_update_check_app_startup_def"
             app:key="@string/pref_update_check_app_startup_key"
             app:title="@string/pref_update_check_app_startup" />

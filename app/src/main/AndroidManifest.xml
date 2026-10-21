@@ -212,6 +212,13 @@
             </intent-filter>
         </receiver>
         <receiver
+            android:name=".model.update.ApkDownloadReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
+        <receiver
             android:name=".broadcast.UpdateReceiver"
             android:exported="false">
             <intent-filter>

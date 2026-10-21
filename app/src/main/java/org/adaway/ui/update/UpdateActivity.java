@@ -77,6 +77,9 @@ public class UpdateActivity extends AppCompatActivity {
     private void showUpdate(Manifest manifest) {
         this.binding.headerTextView.setText(R.string.update_update_available_header);
         this.binding.updateButton.setVisibility(VISIBLE);
+        org.adaway.model.update.UpdateModel model = ((org.adaway.AdAwayApplication) getApplication()).getUpdateModel();
+        if (model.getPendingDownloadState() == org.adaway.model.update.UpdateModel.DownloadState.READY_TO_INSTALL)
+            this.binding.updateButton.setText(R.string.compose_update_install_retry);
         this.binding.changelogTextView.setText(manifest.changelog);
     }
 

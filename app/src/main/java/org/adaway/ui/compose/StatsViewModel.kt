@@ -49,6 +49,7 @@ data class AppStat(
      * sits far above it.
      */
     val tps: Int = 0,
+    val hasMeasuredRate: Boolean = false,
     /**
      * What this uid is actually hitting (server-side, up to three hosts with
      * counts) - the missing half of "there is a storm": which host it hammers.
@@ -64,7 +65,7 @@ data class AppStat(
      * otherwise the average since start (older servers had no tps field).
      */
     fun ratePerSecond(uptimeSeconds: Long): Long =
-        if (tps > 0) tps.toLong() else requestsPerSecond(uptimeSeconds)
+        if (hasMeasuredRate || tps > 0) tps.coerceAtLeast(0).toLong() else requestsPerSecond(uptimeSeconds)
 
     /** Whether this app is retrying fast enough to be worth showing as a storm. */
     fun isStorming(uptimeSeconds: Long): Boolean = ratePerSecond(uptimeSeconds) >= STORM_TPS
@@ -175,8 +176,11 @@ data class ServerStats(
     val queryLog: List<QueryLogEntry> = emptyList(),
     val history: List<HistPoint> = emptyList(),
     val daily: List<HistPoint> = emptyList(),
+    val reportedTotalBlocked: Long? = null,
 ) {
-    val totalBlocked: Long
+    val totalBlocked: Long get() = reportedTotalBlocked ?: categorizedBlocked
+    val uncategorizedBlocked: Long get() = (totalBlocked - categorizedBlocked).coerceAtLeast(0)
+    val categorizedBlocked: Long
         get() = blockedImages + blockedScripts + blockedStyles + blockedFonts +
             blockedMedia + blockedApi + blockedTelemetry + blockedHeartbeat +
             blockedConfig + blockedWsSse + blockedOther +
@@ -217,6 +221,7 @@ data class ServerStats(
                         tlsFail = o.optLong("tls_fail", 0),
                         pinRefused = o.optBoolean("pin_refused", false),
                         tps = o.optInt("tps", 0),
+                        hasMeasuredRate = o.has("tps"),
                         hosts = parseAppHosts(o),
                     )
                 }
@@ -262,7 +267,7 @@ data class ServerStats(
                     )
                 }
             }
-            return ServerStats(
+            val parsed = ServerStats(
                 snapshotTs = json.optLong("snapshot_ts", 0),
                 uptimeSeconds = json.optLong("uptime_seconds", 0),
                 uptimeDays = json.optDouble("uptime_days", 0.0),
@@ -296,7 +301,18 @@ data class ServerStats(
                 queryLog = queryLog,
                 history = history,
                 daily = daily,
+                reportedTotalBlocked = if (json.has("total_blocked")) json.optLong("total_blocked", -1) else null,
             )
+            var classified = 0L
+            for (count in listOf(parsed.blockedImages, parsed.blockedScripts, parsed.blockedStyles,
+                parsed.blockedFonts, parsed.blockedMedia, parsed.blockedApi, parsed.blockedTelemetry,
+                parsed.blockedHeartbeat, parsed.blockedConfig, parsed.blockedWsSse, parsed.blockedOther,
+                parsed.blockedCrypto, parsed.blockedClickbait)) {
+                if (count < 0 || count > Long.MAX_VALUE - classified) return null
+                classified += count
+            }
+            if (parsed.reportedTotalBlocked != null && parsed.reportedTotalBlocked < parsed.categorizedBlocked) return null
+            return parsed
         }
     }
 }
@@ -329,6 +345,7 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     // 统计获取状态：更新时间戳与错误标记（供 UI 状态横幅展示）
     val statsUpdatedAt = MutableStateFlow<Long>(0L)
     val statsError = MutableStateFlow<String?>(null)
+    internal val queryLogBrowser = QueryLogBrowser(viewModelScope, ::loadQueryLogPage)
 
     private var pollingJob: Job? = null
     private var statsRefreshJob: Job? = null
@@ -359,6 +376,9 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
         startPolling()
         // 若用户在设置页启用了实时推送，则自动连接 WebSocket
         val app = getApplication<org.adaway.AdAwayApplication>()
+        if (org.adaway.helper.PreferenceHelper.getUpdateCheckAppStartup(app)) {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { app.getUpdateModel().checkForUpdate(false) }
+        }
         if (org.adaway.ui.compose.isRealtimeEnabled(app)) {
             startRealtime()
         }

@@ -40,6 +40,7 @@ public class UpdateViewModel extends AdwareViewModel {
         super(application);
         this.updateModel = ((AdAwayApplication) application).getUpdateModel();
         this.downloadProgress = new MutableLiveData<>();
+        NETWORK_IO.execute(this.updateModel::checkForUpdate);
     }
 
     public LiveData<Manifest> getAppManifest() {
@@ -47,8 +48,12 @@ public class UpdateViewModel extends AdwareViewModel {
     }
 
     public void update() {
+        if (this.updateModel.getPendingDownloadState() == UpdateModel.DownloadState.READY_TO_INSTALL) {
+            this.updateModel.retryInstallDownloadedUpdate();
+            return;
+        }
         long downloadId = this.updateModel.update();
-        NETWORK_IO.execute(() -> trackProgress(downloadId));
+        if (downloadId >= 0) NETWORK_IO.execute(() -> trackProgress(downloadId));
     }
 
     public MutableLiveData<DownloadStatus> getDownloadProgress() {

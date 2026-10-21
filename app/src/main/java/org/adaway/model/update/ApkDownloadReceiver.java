@@ -36,7 +36,11 @@ import timber.log.Timber;
  * @author Bruce BUJON (bruce.bujon(at)gmail(dot)com)
  */
 public class ApkDownloadReceiver extends BroadcastReceiver {
+    private static final java.util.concurrent.atomic.AtomicBoolean VERIFYING = new java.util.concurrent.atomic.AtomicBoolean();
     private final long downloadId;
+
+    /** Manifest receiver survives a download outliving the app process. */
+    public ApkDownloadReceiver() { this.downloadId = -1; }
 
     public ApkDownloadReceiver(long downloadId) {
         this.downloadId = downloadId;
@@ -44,66 +48,30 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        //Fetching the download id received with the broadcast
         long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1);
-        //Checking if the received broadcast is for our enqueued download by matching download id
-        if (this.downloadId != id ||
-                !DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction())) {
-            return;
-        }
-        // An exported receiver cannot trust the broadcast alone: even if a
-        // third party knows the id, it cannot fake DownloadManager state.
-        DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
-        if (downloadManager == null) return;
-        int status;
-        try (android.database.Cursor cursor = downloadManager.query(
-                new DownloadManager.Query().setFilterById(id))) {
-            if (cursor == null || !cursor.moveToFirst()) return;
-            int column = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
-            if (column < 0) return;
-            status = cursor.getInt(column);
-        } catch (Exception exception) {
-            Timber.w(exception, "Cannot verify DownloadManager completion broadcast");
-            return;
-        }
-        if (status != DownloadManager.STATUS_SUCCESSFUL
-                && status != DownloadManager.STATUS_FAILED) {
-            // Do not unregister on an early/spoofed completion intent.
-            return;
-        }
-        // One-shot receiver: unregister before the slow verification below so
-        // the app keeps no registered receiver around (UpdateModel tolerates
-        // the second unregister attempt).
-        try {
-            context.unregisterReceiver(this);
-        } catch (IllegalArgumentException ignored) {
-            // already unregistered
-        }
-        if (status == DownloadManager.STATUS_FAILED) {
-            Toast.makeText(context,
-                    context.getString(R.string.compose_update_download_failed),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-        Context appContext = context.getApplicationContext();
-        // onReceive runs on the main thread and has ~10 s before the system
-        // considers the receiver unresponsive. Verifying an update means
-        // copying a multi-megabyte APK through the ContentResolver and parsing
-        // it, so it must not happen here - only the install dialog is posted
-        // back to the main thread.
-        Thread worker = new Thread(() -> verifyAndInstall(appContext, id), "apk-update-verify");
-        worker.start();
+        if (!DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction()) || id < 0
+                || (this.downloadId >= 0 && this.downloadId != id)
+                || !UpdateModel.pendingDownloadAllowed(context, id)) return;
+        // WorkManager keeps verification alive after this receiver returns. The
+        // worker independently checks DownloadManager state, package and signer.
+        ApkInstallWorker.enqueue(context, id);
     }
 
     /** User-triggered fallback, not a silent or privileged install. */
     public static void resumeInstall(Context context, long id) {
         if (id < 0) return;
         Context app = context.getApplicationContext();
-        new Thread(() -> new ApkDownloadReceiver(id).verifyAndInstall(app, id),
+        new Thread(() -> new ApkDownloadReceiver(id).verifyAndInstall(app, id, true),
                 "apk-update-foreground-retry").start();
     }
 
-    private void verifyAndInstall(Context context, long id) {
+    void verifyAndInstall(Context context, long id, boolean interactive) {
+        if (!VERIFYING.compareAndSet(false, true)) return;
+        try { verifyDownload(context, id, interactive); }
+        finally { VERIFYING.set(false); }
+    }
+
+    private void verifyDownload(Context context, long id, boolean interactive) {
         if (!UpdateModel.pendingDownloadAllowed(context, id)) return;
         DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
         if (downloadManager == null) {
@@ -130,11 +98,29 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
             Timber.w("Failed to download id: %s.", id);
             return;
         }
-        int problem = verify(context, apkUri);
+        final File copy;
+        try { copy = File.createTempFile("downloaded-update-" + id + "-", ".apk", context.getCacheDir()); }
+        catch (java.io.IOException exception) { Timber.w(exception, "Cannot stage downloaded APK"); return; }
+        int problem = verify(context, apkUri, copy);
         Handler main = new Handler(Looper.getMainLooper());
         if (problem == 0) {
             main.post(() -> {
-                if (UpdateModel.pendingDownloadAllowed(context, id)) installApk(context, apkUri);
+                if (!UpdateModel.pendingDownloadAllowed(context, id)) {
+                    discard(copy); return;
+                }
+                boolean foreground = androidx.lifecycle.ProcessLifecycleOwner.get().getLifecycle()
+                        .getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED);
+                if (interactive || foreground) {
+                    UpdateModel.clearVerifiedCopiesExcept(context, id, copy);
+                    Uri verified = androidx.core.content.FileProvider.getUriForFile(context,
+                            context.getPackageName() + ".fileprovider", copy);
+                    installApk(context, verified);
+                } else {
+                    // The foreground continuation verifies again. Do not retain
+                    // a multi-megabyte cache copy only to show a notification.
+                    discard(copy);
+                    org.adaway.helper.NotificationHelper.showUpdateApplicationNotification(context);
+                }
             });
         } else {
             String reason = context.getString(problem);
@@ -143,6 +129,10 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
                     context.getString(R.string.update_verify_failed, reason),
                     Toast.LENGTH_LONG).show());
         }
+    }
+
+    private static void discard(File copy) {
+        if (copy.exists() && !copy.delete()) Timber.w("Cannot discard staged APK update");
     }
 
     private void installApk(Context context, Uri apkUri) {
@@ -165,23 +155,26 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
      * @return {@code 0} when the archive can be installed, otherwise the string
      * resource id explaining why it was rejected.
      */
-    private int verify(Context context, Uri apkUri) {
-        File copy = new File(context.getCacheDir(), "downloaded-update.apk");
-        try (InputStream input = context.getContentResolver().openInputStream(apkUri);
-             FileOutputStream output = new FileOutputStream(copy)) {
-            if (input == null) {
+    private int verify(Context context, Uri apkUri, File copy) {
+        boolean keep = false;
+        try {
+            try (InputStream input = context.getContentResolver().openInputStream(apkUri);
+                 FileOutputStream output = new FileOutputStream(copy)) {
+                if (input == null) {
+                    return R.string.update_verify_unreadable;
+                }
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                long copied = 0;
+                while ((read = input.read(buffer)) > 0) {
+                    copied += read;
+                    if (copied > 64L * 1024 * 1024) return R.string.update_verify_unreadable;
+                    output.write(buffer, 0, read);
+                }
+            } catch (Exception exception) {
+                Timber.w(exception, "Failed to read the downloaded APK.");
                 return R.string.update_verify_unreadable;
             }
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = input.read(buffer)) > 0) {
-                output.write(buffer, 0, read);
-            }
-        } catch (Exception exception) {
-            Timber.w(exception, "Failed to read the downloaded APK.");
-            return R.string.update_verify_unreadable;
-        }
-        try {
             PackageManager packageManager = context.getPackageManager();
             PackageInfo archive = packageManager.getPackageArchiveInfo(copy.getAbsolutePath(), GET_SIGNING_CERTIFICATES);
             if (archive == null) {
@@ -209,6 +202,7 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
             if (archiveSigner == null || !archiveSigner.equals(signerDigest(current))) {
                 return R.string.update_verify_signature;
             }
+            keep = true;
             return 0;
         } catch (Exception exception) {
             Timber.w(exception, "Failed to verify the downloaded APK.");
@@ -219,7 +213,7 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
              * 不能忽略 delete() 的返回值：清理失败时要留下痕迹，否则缓存里会一直留着
              * 上次下载的 APK（占用空间，也可能让下一次校验看到过期文件）。
              */
-            if (!copy.delete()) {
+            if (!keep && copy.exists() && !copy.delete()) {
                 android.util.Log.w("ApkDownloadReceiver", "Failed to delete cached update APK: " + copy);
             }
         }
@@ -228,7 +222,7 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
     private static String signerDigest(PackageInfo packageInfo) {
         try {
             Signature[] signatures = packageInfo.signingInfo.getApkContentsSigners();
-            if (signatures.length == 0) {
+            if (signatures.length != 1) {
                 return null;
             }
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

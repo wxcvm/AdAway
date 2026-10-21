@@ -142,6 +142,12 @@ public final class PreferenceHelper {
         );
     }
 
+    /** Download discovered updates automatically; installation uses Android confirmation. */
+    public static boolean getAutomaticAppUpdate(Context context) {
+        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean("automaticAppUpdate", true);
+    }
+
     public static boolean getUpdateCheckHostsDaily(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(
                 Constants.PREFS_NAME,

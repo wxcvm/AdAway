@@ -1,17 +1,14 @@
 package org.adaway.model.update;
 
-import static android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE;
 import static org.adaway.model.update.UpdateStore.getApkStore;
 
 import android.app.DownloadManager;
 import android.content.Context;
 import android.database.Cursor;
-import android.content.IntentFilter;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 
-import androidx.core.content.ContextCompat;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 
@@ -51,7 +48,8 @@ public class UpdateModel {
 
     static boolean pendingDownloadAllowed(Context context, long id) {
         android.content.SharedPreferences prefs = context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE);
-        return prefs.getLong(PENDING_DOWNLOAD_ID, -1) == id
+        return id >= 0 && prefs.getLong(PENDING_DOWNLOAD_ID, -1) == id
+                && prefs.getLong(EXPECTED_APK_VERSION_CODE, -1) > 0
                 && (!prefs.getBoolean(PENDING_PREVIEW, false) || PreferenceHelper.getIncludeBetaReleases(context));
     }
 
@@ -60,7 +58,11 @@ public class UpdateModel {
     public DownloadState getPendingDownloadState() {
         long id = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
                 .getLong(PENDING_DOWNLOAD_ID, -1);
-        if (id < 0) return DownloadState.NONE;
+        if (id < 0 || !pendingDownloadAllowed(this.context, id)) return DownloadState.NONE;
+        return this.downloads.state(id);
+    }
+
+    private DownloadState inspectDownload(long id) {
         DownloadManager dm = this.context.getSystemService(DownloadManager.class);
         if (dm == null) return DownloadState.FAILED;
         try (Cursor cursor = dm.query(new DownloadManager.Query().setFilterById(id))) {
@@ -95,9 +97,22 @@ public class UpdateModel {
     }
 
     public static void clearPendingDownload(Context context) {
-        context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-                .edit().remove(PENDING_DOWNLOAD_ID)
+        android.content.SharedPreferences prefs = context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE);
+        clearVerifiedCopies(context, prefs.getLong(PENDING_DOWNLOAD_ID, -1));
+        prefs.edit().remove(PENDING_DOWNLOAD_ID)
                 .remove(EXPECTED_APK_VERSION_CODE).remove(PENDING_PREVIEW).apply();
+    }
+
+    private static void clearVerifiedCopies(Context context, long id) {
+        clearVerifiedCopiesExcept(context, id, null);
+    }
+
+    static void clearVerifiedCopiesExcept(Context context, long id, java.io.File keep) {
+        if (id < 0) return;
+        java.io.File[] copies = context.getCacheDir().listFiles((dir, name) ->
+                name.startsWith("downloaded-update-" + id + "-") && name.endsWith(".apk"));
+        if (copies != null) for (java.io.File copy : copies)
+            if (!copy.equals(keep) && !copy.delete()) Timber.w("Cannot remove completed update cache file");
     }
 
     private final Context context;
@@ -105,7 +120,13 @@ public class UpdateModel {
     private final OkHttpClient client;
     private final ReleaseFeed.Fetcher feedFetcher;
     private final MutableLiveData<Manifest> manifest;
-    private ApkDownloadReceiver receiver;
+    interface DownloadBackend {
+        DownloadState state(long id);
+        long enqueue(Manifest selected);
+        void cancel(long id);
+    }
+    private final DownloadBackend downloads;
+    private final boolean systemDownloads;
     private Manifest cachedManifest;
     private long lastCheckAt;
     private boolean cachedPreviewChannel;
@@ -121,12 +142,30 @@ public class UpdateModel {
     }
 
     UpdateModel(Context context, ReleaseFeed.Fetcher feedFetcher) {
+        this(context, feedFetcher, null);
+    }
+
+    UpdateModel(Context context, ReleaseFeed.Fetcher feedFetcher, DownloadBackend downloads) {
         this.context = context;
         this.versionInfo = VersionInfo.get(context);
         this.manifest = new MutableLiveData<>();
         this.client = buildHttpClient();
         this.feedFetcher = feedFetcher == null ? this::fetchFeed : feedFetcher;
+        this.systemDownloads = downloads == null;
+        this.downloads = downloads == null ? new DownloadBackend() {
+            @Override public DownloadState state(long id) { return inspectDownload(id); }
+            @Override public long enqueue(Manifest selected) { return download(selected); }
+            @Override public void cancel(long id) {
+                DownloadManager manager = context.getSystemService(DownloadManager.class);
+                if (manager != null) manager.remove(id);
+            }
+        } : downloads;
         ApkUpdateService.syncPreferences(context);
+        if (downloads == null && getPendingDownloadState() == DownloadState.READY_TO_INSTALL) {
+            long id = context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+                    .getLong(PENDING_DOWNLOAD_ID, -1);
+            ApkInstallWorker.enqueue(context, id);
+        }
     }
 
     /**
@@ -215,6 +254,7 @@ public class UpdateModel {
                 && this.cachedManifest != null
                 && System.currentTimeMillis() - this.lastCheckAt < CHECK_CACHE_DELAY) {
             this.manifest.postValue(this.cachedManifest);
+            prepareAutomaticUpdate(this.cachedManifest);
             return this.cachedManifest;
         }
         Manifest selected = downloadManifest(previewChannel);
@@ -230,6 +270,7 @@ public class UpdateModel {
             this.cachedManifest = selected;
             this.lastError = null;
             this.manifest.postValue(selected);
+            prepareAutomaticUpdate(selected);
         } else if (this.cachedManifest == null) {
             // Keep the previous result (if any) instead of clearing the UI.
             this.lastError = this.lastError == null ? "unreachable" : this.lastError;
@@ -278,48 +319,48 @@ public class UpdateModel {
      *
      * @return The download identifier ({@code -1} if download was not started).
      */
-    public long update() {
-        // Check manifest
-        Manifest manifest = this.manifest.getValue();
-        if (manifest == null) {
-            manifest = this.cachedManifest;
+    public synchronized long update() {
+        // LiveData.postValue may still hold an earlier channel/version on the main thread.
+        Manifest selected = this.cachedManifest != null ? this.cachedManifest : this.manifest.getValue();
+        if (selected == null || !selected.updateAvailable || selected.versionCode <= this.versionInfo.code
+                || (selected.preview && !PreferenceHelper.getIncludeBetaReleases(this.context))) return -1;
+        android.content.SharedPreferences prefs = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE);
+        long previousId = prefs.getLong(PENDING_DOWNLOAD_ID, -1);
+        long previousVersion = prefs.getLong(EXPECTED_APK_VERSION_CODE, -1);
+        if (previousId >= 0 && previousVersion == selected.versionCode && pendingDownloadAllowed(this.context, previousId)) {
+            DownloadState state = this.downloads.state(previousId);
+            if (state == DownloadState.DOWNLOADING || state == DownloadState.READY_TO_INSTALL) return previousId;
         }
-        if (manifest == null || !manifest.updateAvailable
-                || (manifest.preview && !PreferenceHelper.getIncludeBetaReleases(this.context))) {
+        long id = this.downloads.enqueue(selected);
+        if (id < 0) return -1;
+        // Persist before accepting a completion event, including after process death.
+        if (!prefs.edit().putLong(PENDING_DOWNLOAD_ID, id)
+                .putLong(EXPECTED_APK_VERSION_CODE, selected.versionCode)
+                .putBoolean(PENDING_PREVIEW, selected.preview).commit()) {
+            this.downloads.cancel(id);
             return -1;
         }
-        // Drop the previous one-shot receiver. It unregisters itself as soon as
-        // its own download finished, so unregistering it again is expected to
-        // fail with IllegalArgumentException.
-        if (this.receiver != null) {
-            try {
-                this.context.unregisterReceiver(this.receiver);
-            } catch (IllegalArgumentException ignored) {
-                // already unregistered by the receiver itself
-            }
-            this.receiver = null;
+        if (previousId >= 0 && previousId != id) {
+            this.downloads.cancel(previousId);
+            clearVerifiedCopies(this.context, previousId);
         }
-        // Queue download
-        long downloadId = download(manifest);
-        // Save the id before waiting for a process-scoped callback: users must
-        // be able to open the installer after a download outlives this process.
-        this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putLong(PENDING_DOWNLOAD_ID, downloadId)
-                .putLong(EXPECTED_APK_VERSION_CODE, manifest.versionCode)
-                .putBoolean(PENDING_PREVIEW, manifest.preview)
-                .apply();
-        // Register new broadcast receiver
-        this.receiver = new ApkDownloadReceiver(downloadId);
-        // DownloadManager's completion may be broadcast by the privileged
-        // DownloadsProvider UID rather than system UID. Android's receiver
-        // guidance requires EXPORTED for such system-owned senders. The
-        // receiver checks the exact id and DownloadManager terminal state,
-        // then cryptographically verifies the APK before any install intent.
-        ContextCompat.registerReceiver(this.context, this.receiver,
-                new IntentFilter(ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED);
-        // Return download identifier
-        return downloadId;
+        // Also covers an immediate completion racing the preference commit.
+        if (this.systemDownloads && this.downloads.state(id) == DownloadState.READY_TO_INSTALL)
+            ApkInstallWorker.enqueue(this.context, id);
+        return id;
+    }
+
+    private void prepareAutomaticUpdate(Manifest selected) {
+        if (!PreferenceHelper.getAutomaticAppUpdate(this.context) || !selected.updateAvailable) return;
+        android.content.SharedPreferences prefs = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE);
+        // Failed downloads require an explicit retry; polling must not loop downloads forever.
+        if (prefs.getLong(EXPECTED_APK_VERSION_CODE, -1) == selected.versionCode &&
+                getPendingDownloadState() == DownloadState.FAILED) return;
+        try {
+            update();
+        } catch (RuntimeException exception) {
+            Timber.w(exception, "Automatic update download could not be queued");
+        }
     }
 
     private long download(Manifest manifest) {
@@ -334,6 +375,7 @@ public class UpdateModel {
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDescription(this.context.getString(R.string.update_notification_description));
         DownloadManager downloadManager = this.context.getSystemService(DownloadManager.class);
+        if (downloadManager == null) return -1;
         return downloadManager.enqueue(request);
     }
 
