@@ -595,9 +595,30 @@ private fun startPolling() {
     fun loadSources(onResult: (List<org.adaway.db.entity.HostsSource>) -> Unit) {
         viewModelScope.launch {
             val sources = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                database.hostsSourceDao().getAll()
+                try {
+                    migrateSourceNames()
+                    database.hostsSourceDao().getAll()
+                } catch (failure: Exception) {
+                    Timber.w("Source list unavailable (%s)", failure.javaClass.simpleName)
+                    null
+                }
             }
-            onResult(sources)
+            if (sources != null) onResult(sources)
+        }
+    }
+
+    /** One-time local label repair; later user choices such as "raw" stay verbatim. */
+    private fun migrateSourceNames() = synchronized(org.adaway.model.source.SourcePresentation::class.java) {
+        val preferences = getApplication<Application>().getSharedPreferences("source-presentation", android.content.Context.MODE_PRIVATE)
+        if (!preferences.getBoolean("legacy-labels-repaired", false)) {
+            database.runInTransaction {
+                val dao = database.hostsSourceDao()
+                for (source in dao.getAll()) if (source.id != 1) {
+                    val label = org.adaway.model.source.SourcePresentation.legacyName(source.label, source.url)
+                    if (label != source.label) dao.rename(source.id, label)
+                }
+            }
+            check(preferences.edit().putBoolean("legacy-labels-repaired", true).commit())
         }
     }
 
@@ -806,6 +827,7 @@ private fun startPolling() {
         viewModelScope.launch {
             val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
+                    migrateSourceNames()
                     val normalized = url.trim()
                     if (label != null && (label.trim().length > 80 || label.any { it.isISOControl() })) {
                         return@withContext false
@@ -838,6 +860,7 @@ private fun startPolling() {
             val name = label.trim()
             val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
+                    migrateSourceNames()
                     name.isNotEmpty() && name.length <= 80 && name.none { it.isISOControl() } &&
                         database.hostsSourceDao().rename(id, name) == 1
                 } catch (failure: Exception) {

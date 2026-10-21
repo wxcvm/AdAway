@@ -34,8 +34,9 @@ class RuleWorkflowUiTest {
 
     @Test fun sourceCardsRepairRawNamesAndHideCredentials() {
         val source = org.adaway.db.entity.HostsSource().apply {
-            id = 2; label = "raw"
+            id = 2
             url = "https://user:password@raw.githubusercontent.com/owner/rules/main/hosts?token=secret"
+            label = org.adaway.model.source.SourcePresentation.legacyName("raw", url)
         }
         var inspected = false
         compose.setContent {

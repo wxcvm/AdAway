@@ -5,12 +5,13 @@ import static org.junit.Assert.*;
 
 public class SourcePresentationTest {
     @Test public void repairsRawLabelsWithRepositoryAndFile() {
-        assertEquals("owner/list · hosts", SourcePresentation.name("raw",
+        assertEquals("owner/list · hosts", SourcePresentation.legacyName("raw",
                 "https://raw.githubusercontent.com/owner/list/main/hosts?token=secret#private"));
         assertEquals("owner/list · hosts", SourcePresentation.name("",
                 "https://github.com/owner/list/raw/refs/heads/main/hosts"));
         assertEquals("My rules", SourcePresentation.name("My rules", "https://example.test/hosts"));
-        assertEquals("example.test · hosts", SourcePresentation.name("example", "https://example.test/hosts"));
+        assertEquals("example.test · hosts", SourcePresentation.legacyName("example", "https://example.test/hosts"));
+        assertEquals("raw", SourcePresentation.name("raw", "https://raw.githubusercontent.com/owner/list/main/hosts"));
     }
     @Test public void presentationNeverIncludesUserInfoQueryOrFragment() {
         String address = "https://user:password@example.test:8443/hosts?token=secret#private";

@@ -26,7 +26,10 @@ static void json_safe_copy(char *out, size_t cap, const char *host) {
     snprintf(out, cap, "%s", host); /* The fixture only generates DNS labels. */
 }
 static FILE *open_atomic_write(const char *path, char *tmp, size_t cap) {
-    snprintf(tmp, cap, "%s.tmp", path);
+    size_t length = strlen(path);
+    if (length > cap || cap - length < 5) return NULL;
+    memcpy(tmp, path, length);
+    memcpy(tmp + length, ".tmp", 5);
     return fopen(tmp, "wb");
 }
 static void finish_atomic_write(FILE *fp, const char *path, const char *tmp) {
@@ -131,6 +134,9 @@ static void pages(void) {
     reply("anchor=18446744073709551616", 400);
     reply("generation=invalid&anchor=600", 400);
     reply("anchor=600", 400);
+    snprintf(query, sizeof(query), "offset=0&generation=%s&anchor=999999999999999999999999999", generation);
+    reply(query, 400);
+    snprintf(query, sizeof(query), "offset=300&limit=300&generation=%s&anchor=600", generation);
     for (unsigned i = 621; i <= 10100; i++) add(i);
     /* The original newest row still exists, but the requested tail was overwritten. */
     reply(query, 409);

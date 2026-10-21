@@ -10,14 +10,12 @@ public final class SourcePresentation {
 
     public static String name(String label, String address) {
         String saved = label == null ? "" : label.trim();
+        if (!saved.isEmpty()) return saved;
         try {
             URI uri = URI.create(address);
             String host = uri.getHost();
             if (host == null) return saved.isEmpty() ? "Local rules" : saved;
             String lower = host.toLowerCase(Locale.ROOT);
-            boolean generated = saved.isEmpty() || saved.equalsIgnoreCase(lower.split("\\.")[0])
-                    || Arrays.asList("raw", "www", "github", "gitlab").contains(saved.toLowerCase(Locale.ROOT));
-            if (!generated) return saved;
             String[] path = uri.getPath() == null ? new String[0] : uri.getPath().split("/");
             if ((lower.equals("raw.githubusercontent.com") || lower.equals("github.com")) && path.length >= 3) {
                 String file = path[path.length - 1];
@@ -28,6 +26,19 @@ public final class SourcePresentation {
         } catch (IllegalArgumentException invalid) {
             return saved.isEmpty() ? "Rules source" : saved;
         }
+    }
+
+    /** Used once for labels produced by older host-prefix defaults. New explicit names are preserved. */
+    public static String legacyName(String label, String address) {
+        String saved = label == null ? "" : label.trim();
+        try {
+            String host = URI.create(address).getHost();
+            if (host != null && (saved.equalsIgnoreCase(host.split("\\.")[0]) ||
+                    Arrays.asList("raw", "www", "github", "gitlab").contains(saved.toLowerCase(Locale.ROOT)))) {
+                return name(null, address);
+            }
+        } catch (IllegalArgumentException invalid) { /* Retain an existing local name. */ }
+        return name(saved, address);
     }
 
     public static String address(String address) {
