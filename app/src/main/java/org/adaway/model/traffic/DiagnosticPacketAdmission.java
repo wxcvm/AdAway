@@ -22,4 +22,6 @@ public final class DiagnosticPacketAdmission {
     public String counts() {
         return "accepted=" + accepted + ", unsupported=" + unsupported + ", limited=" + limited;
     }
+
+    public long unsupported() { return unsupported; }
 }

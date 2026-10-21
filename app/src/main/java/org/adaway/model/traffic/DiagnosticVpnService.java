@@ -113,6 +113,11 @@ public final class DiagnosticVpnService extends VpnService {
                 + (service.pump == null ? 0 : service.pump.dropped());
     }
 
+    static long unsupportedPacketCount() {
+        DiagnosticVpnService service = RUNNING.get();
+        return service == null ? 0 : service.admission.unsupported();
+    }
+
     public static long getDnsDiagnosticCount() {
         DiagnosticVpnService service = RUNNING.get();
         return service == null ? 0 : service.dnsDiagnosticCount.get();

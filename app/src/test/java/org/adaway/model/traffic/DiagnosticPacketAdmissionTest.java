@@ -49,4 +49,27 @@ public class DiagnosticPacketAdmissionTest {
         assertTrue(admission.allow(ipv6, ipv6.length, 1201));
         assertEquals("accepted=2, unsupported=1, limited=1", admission.counts());
     }
+
+    @Test public void fixedDnsAAndAaaaStillEnterWithoutBroadeningTheQuestionWhitelist() {
+        DiagnosticPacketAdmission admission = new DiagnosticPacketAdmission();
+        byte[] bad = dnsPacket(DiagnosticDnsCodec.TYPE_A); bad[41] = 'x';
+        assertFalse(admission.allow(bad, bad.length, 1000));
+        byte[] a = dnsPacket(DiagnosticDnsCodec.TYPE_A), aaaa = dnsPacket(DiagnosticDnsCodec.TYPE_AAAA);
+        assertTrue(admission.allow(a, a.length, 1001));
+        assertTrue(admission.allow(aaaa, aaaa.length, 1201));
+    }
+
+    private static byte[] dnsPacket(int type) {
+        byte[] query = DiagnosticDnsCodec.query(123, type);
+        byte[] packet = new byte[28 + query.length];
+        packet[0]=0x45;packet[2]=(byte)(packet.length>>>8);packet[3]=(byte)packet.length;
+        packet[8]=64;packet[9]=17;
+        packet[12]=(byte)198;packet[13]=18;packet[15]=2;
+        packet[16]=(byte)198;packet[17]=18;packet[19]=1;
+        packet[20]=0x12;packet[21]=0x34;
+        packet[22]=(byte)(DiagnosticDnsCodec.PORT>>>8);packet[23]=(byte)DiagnosticDnsCodec.PORT;
+        packet[24]=(byte)((query.length+8)>>>8);packet[25]=(byte)(query.length+8);
+        System.arraycopy(query,0,packet,28,query.length);
+        return DiagnosticPacketFixture.checksum(packet);
+    }
 }

@@ -16,6 +16,18 @@ import static org.junit.Assert.*;
 /** Only the disposable CI emulator grants VPN consent; never runs on a user phone. */
 @RunWith(AndroidJUnit4.class)
 public class DiagnosticTunSessionDeviceTest {
+    private static void unsupportedPacketPrecedesValidProbe() throws Exception {
+        long before = DiagnosticVpnService.unsupportedPacketCount();
+        try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
+            byte[] body = {1};
+            socket.send(new java.net.DatagramPacket(body, body.length,
+                    InetAddress.getByName(DiagnosticTunPlan.IPV6_TARGET), 53538));
+        }
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(1);
+        while (DiagnosticVpnService.unsupportedPacketCount() == before && System.nanoTime() < deadline)
+            Thread.sleep(5);
+        assertTrue("Unsupported datagram did not reach TUN", DiagnosticVpnService.unsupportedPacketCount() > before);
+    }
     private static void active(boolean expected) throws Exception {
         long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(8);
         while (DiagnosticVpnService.isActive()!=expected && System.nanoTime()<deadline) Thread.sleep(25);
@@ -59,7 +71,8 @@ public class DiagnosticTunSessionDeviceTest {
                 long generation=DiagnosticVpnService.getSessionId();assertTrue(generation>previous);previous=generation;
                 assertScopedNetwork(manager);
                 assertEquals(generation,DiagnosticVpnService.getReadySessionId());
-                Thread.sleep(225);boolean ipv4=DiagnosticTunProbe.relayRoundTrip(false);
+                Thread.sleep(225);unsupportedPacketPrecedesValidProbe();
+                boolean ipv4=DiagnosticTunProbe.relayRoundTrip(false);
                 assertTrue("IPv4 cycle="+cycle+" "+DiagnosticVpnService.diagnosticState(),ipv4);
                 Thread.sleep(225);boolean ipv6=DiagnosticTunProbe.relayRoundTrip(true);
                 assertTrue("IPv6 cycle="+cycle+" "+DiagnosticVpnService.diagnosticState(),ipv6);
