@@ -111,15 +111,8 @@ public final class MagiskBootScript {
         }
         String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
         String resourceDir = WebServerUtils.getResourcePath(context).toAbsolutePath().toString();
-        String script = buildScript(nativeLibDir, resourceDir, WebServerUtils.getListenerSettings(context),
-                WebServerUtils.STATS_PORT, proxyFilter);
-        java.util.Set<String> managed = WebServerUtils.getManagedListenerAddresses(context);
-        org.adaway.util.ListenerSettings listeners = WebServerUtils.getListenerSettings(context);
-        if (WebServerUtils.isListenerAutoCreate(context)) {
-            managed.removeIf(address -> !org.adaway.util.ListenerAddressTransaction.isSelected(listeners, address));
-        } else managed.clear();
-        script = script.replace("  # Restore managed listener addresses here.\n",
-                org.adaway.util.RootListenerAddresses.bootCommands(managed));
+        String script = buildStartupScript(nativeLibDir, resourceDir, WebServerUtils.getListenerSettings(context),
+                WebServerUtils.STATS_PORT, proxyFilter, WebServerUtils.isListenerAutoCreate(context));
         // base64 keeps the shell command free of any quoting/escaping of paths.
         String encoded = Base64.encodeToString(script.getBytes(StandardCharsets.UTF_8),
                 Base64.NO_WRAP);
@@ -232,6 +225,15 @@ public final class MagiskBootScript {
      * @param proxyFilter  add {@code --proxy-filter} (hijack mode only).
      * @return The script content.
      */
+    static String buildStartupScript(String nativeLibDir, String resourceDir,
+                                    org.adaway.util.ListenerSettings settings, int statsPort,
+                                    boolean proxyFilter, boolean autoCreate) {
+        String commands = org.adaway.util.RootListenerAddresses.bootCommands(
+                org.adaway.util.ListenerAddressTransaction.startupAliases(settings, autoCreate));
+        return buildScript(nativeLibDir, resourceDir, settings, statsPort, proxyFilter)
+                .replace("  # Restore managed listener addresses here.\n", commands);
+    }
+
     static String buildScript(String nativeLibDir, String resourceDir,
                               boolean bindAll, int httpPort, int httpsPort,
                               int statsPort, boolean proxyFilter) {

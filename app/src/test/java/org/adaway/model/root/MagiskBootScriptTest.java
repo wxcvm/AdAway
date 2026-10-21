@@ -20,6 +20,17 @@ import java.util.List;
  * unfiltered). Both are asserted here.</p>
  */
 public class MagiskBootScriptTest {
+    @Test public void firstBootRestoresSelectedUlaBeforeLaunchingWithoutPriorOwnership() {
+        org.adaway.util.ListenerSettings settings = new org.adaway.util.ListenerSettings(
+                "127.0.0.2", "fd6b:2a91:84f0::2", 80, 443);
+        String script = MagiskBootScript.buildStartupScript("/lib", "/resources", settings, 8686, false, true);
+        String create = "/system/bin/ip -6 address add fd6b:2a91:84f0::2/128 dev lo nodad";
+        assertTrue(script.contains(create));
+        assertTrue(script.indexOf(create) < script.indexOf("LD_LIBRARY_PATH=\"$APP_LIB\" \"$BIN\""));
+        assertFalse(script.contains("address add 127.0.0.2"));
+        String disabled = MagiskBootScript.buildStartupScript("/lib", "/resources", settings, 8686, false, false);
+        assertFalse(disabled.contains("address add"));
+    }
 
     @Test public void customAddressSurvivesBootWithoutShellExpansion() {
         String pair = MagiskBootScript.buildScript("/lib", "/resources",

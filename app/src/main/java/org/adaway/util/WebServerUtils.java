@@ -271,18 +271,12 @@ public class WebServerUtils {
     }
 
     private static boolean listenerReachable(ListenerSettings settings) {
-        for (int attempt = 0; attempt < 5; attempt++) {
-            try {
-                for (String address : settings.probeAddresses()) {
-                    if (!portsReachable(address, settings.http, settings.https)) throw new IOException("监听未就绪");
-                }
-                return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
-            } catch (IOException exception) {
-                try { Thread.sleep(200); }
-                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return false; }
+        return ListenerStartupWait.await(() -> {
+            for (String address : settings.probeAddresses()) {
+                if (!portsReachable(address, settings.http, settings.https)) return false;
             }
-        }
-        return false;
+            return isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
+        }, 15_000);
     }
 
     private static boolean portsReachable(String address, int http, int https) {
@@ -617,6 +611,16 @@ public class WebServerUtils {
      * 注意：所有 Toast 必须通过 showToast() 切到主线程，
      * 否则在后台线程调用会抛 CalledFromWrongThreadException。
      */
+    /** Boot fallbacks may run together; recheck under the same lock before replacing a live server. */
+    public static void ensureWebServer(Context context) {
+        LISTENER_LOCK.lock();
+        try {
+            if (isBundledExecutableRunning(WEB_SERVER_EXECUTABLE)
+                    && listenerReachable(getListenerSettings(context))) return;
+            startWebServerLocked(context);
+        } finally { LISTENER_LOCK.unlock(); }
+    }
+
 public static void startWebServer(Context context) {
         LISTENER_LOCK.lock();
         try { startWebServerLocked(context); }

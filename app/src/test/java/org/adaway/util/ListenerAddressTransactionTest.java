@@ -7,6 +7,16 @@ import java.util.Set;
 import static org.junit.Assert.*;
 
 public class ListenerAddressTransactionTest {
+    @org.junit.Test public void bootRestoresSelectedPrivateAddressBeforeAnyPreviousOwnershipRecord() {
+        ListenerSettings settings = new ListenerSettings("127.0.0.2", "fd6b:2a91:84f0::2", 80, 443);
+        org.junit.Assert.assertEquals(java.util.Collections.singleton("fd6b:2a91:84f0::2"),
+                ListenerAddressTransaction.startupAliases(settings, true));
+        org.junit.Assert.assertTrue(ListenerAddressTransaction.startupAliases(settings, false).isEmpty());
+        org.junit.Assert.assertTrue(ListenerAddressTransaction.startupAliases(
+                new ListenerSettings("0.0.0.0", "::", 80, 443), true).isEmpty());
+        org.junit.Assert.assertTrue(ListenerAddressTransaction.startupAliases(
+                new ListenerSettings("8.8.8.8", "2001:db8::1", 80, 443), true).isEmpty());
+    }
     private static final class Fake implements ListenerAddressTransaction.Backend {
         final Set<String> addresses = new HashSet<>();
         String failAdd = "", failRemove = "";
