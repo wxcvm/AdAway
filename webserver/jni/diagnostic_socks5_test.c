@@ -8,7 +8,13 @@ static size_t decode(const char *text,uint8_t *bytes,size_t cap) {
     return n;
 }
 int main(int argc,char **argv) {
-    assert(argc==2);FILE *input=fopen(argv[1],"r");assert(input);
+    assert(argc==2);FILE *input=NULL;
+#ifdef _MSC_VER
+    assert(fopen_s(&input,argv[1],"r")==0);
+#else
+    input=fopen(argv[1],"r");
+#endif
+    assert(input);
     char line[4096];unsigned count=0;uint8_t token[16];
     for(unsigned i=0;i<16;i++)token[i]=(uint8_t)i;
     while(fgets(line,sizeof(line),input)) {

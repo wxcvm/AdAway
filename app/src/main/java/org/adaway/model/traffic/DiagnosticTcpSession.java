@@ -24,14 +24,21 @@ public final class DiagnosticTcpSession implements AutoCloseable {
     @FunctionalInterface public interface Protector { boolean protect(Socket socket); }
     public static final class Result {
         public final Status status;
-        public final int family, opened, closed, protectedSockets, stage;
+        public final int family;
+        public final int opened;
+        public final int closed;
+        public final int protectedSockets;
+        public final int stage;
         public final long elapsedMs;
         public final boolean cleanup;
-        Result(Status status, int family, int opened, int closed, int protectedSockets, long elapsedMs, boolean cleanup, int stage) {
-            this.status=status;this.family=family;this.opened=opened;this.closed=closed;
-            this.protectedSockets=protectedSockets;this.elapsedMs=elapsedMs;this.cleanup=cleanup;this.stage=stage;
+        Result(Status status, DiagnosticTcpSession session, long elapsedMs, boolean cleanup) {
+            this.status=status;this.family=session.ipv6?6:4;this.opened=session.resources.opened;this.closed=session.resources.closed;
+            this.protectedSockets=session.protectedSockets.get();this.elapsedMs=elapsedMs;this.cleanup=cleanup;this.stage=session.stage;
         }
-        static Result unavailable(boolean ipv6) { return new Result(Status.UNAVAILABLE,ipv6?6:4,0,0,0,0,true,0); }
+        private Result(boolean ipv6) {
+            status=Status.UNAVAILABLE;family=ipv6?6:4;opened=0;closed=0;protectedSockets=0;elapsedMs=0;cleanup=true;stage=0;
+        }
+        static Result unavailable(boolean ipv6) { return new Result(ipv6); }
         @Override public String toString() { return status+" stage="+stage+" sockets="+closed+"/"+opened+" protected="+protectedSockets; }
     }
     private final boolean ipv6;
@@ -43,18 +50,20 @@ public final class DiagnosticTcpSession implements AutoCloseable {
     private final CountDownLatch backendReady = new CountDownLatch(1);
     private final AtomicReference<Status> serverFailure = new AtomicReference<>();
     private final byte[] token = new byte[16];
+    private final SecureRandom random = new SecureRandom();
     private volatile boolean stopped;
     private final java.util.concurrent.atomic.AtomicInteger protectedSockets = new java.util.concurrent.atomic.AtomicInteger();
     private final java.util.concurrent.atomic.AtomicBoolean started = new java.util.concurrent.atomic.AtomicBoolean();
     private long deadline;
     private int stage;
-    private Thread proxyThread, backendThread;
+    private Thread proxyThread;
+    private Thread backendThread;
 
     public DiagnosticTcpSession(boolean ipv6, Protector protector) { this(ipv6,protector,1200,Fault.NONE); }
     DiagnosticTcpSession(boolean ipv6, Protector protector, int budgetMs, Fault fault) {
         if (protector==null || budgetMs<1 || budgetMs>1200 || fault==null) throw new IllegalArgumentException("Invalid TCP diagnostic");
         this.ipv6=ipv6;this.protector=protector;this.budgetMs=budgetMs;this.fault=fault;
-        new SecureRandom().nextBytes(token);
+        random.nextBytes(token);
     }
     private int remaining() throws SocketTimeoutException {
         long left=deadline-System.nanoTime();
@@ -76,7 +85,9 @@ public final class DiagnosticTcpSession implements AutoCloseable {
         socket.connect(new InetSocketAddress(address,port),remaining());return socket;
     }
     private byte[] read(Socket socket, int size) throws IOException {
-        byte[] bytes=new byte[size];int at=0;InputStream input=socket.getInputStream();
+        byte[] bytes=new byte[size];
+        int at=0;
+        InputStream input=socket.getInputStream();
         while (at<size) {
             socket.setSoTimeout(remaining());int count=input.read(bytes,at,Math.min(7,size-at));
             if (count<0) throw new java.io.EOFException("Incomplete TCP diagnostic frame");
@@ -85,7 +96,8 @@ public final class DiagnosticTcpSession implements AutoCloseable {
         return bytes;
     }
     private byte[] untilEof(Socket socket) throws IOException {
-        ByteArrayOutputStream body=new ByteArrayOutputStream();byte[] buffer=new byte[7];
+        ByteArrayOutputStream body=new ByteArrayOutputStream();
+        byte[] buffer=new byte[7];
         for (;;) {
             socket.setSoTimeout(remaining());int count=socket.getInputStream().read(buffer);
             if (count<0) return body.toByteArray();
@@ -121,7 +133,8 @@ public final class DiagnosticTcpSession implements AutoCloseable {
         int tail=header[3]==1?6:18;
         byte[] bytes=Arrays.copyOf(header,4+tail);System.arraycopy(read(client,tail),0,bytes,4,tail);
         int code=DiagnosticSocks5.requestCode(bytes,ipv6);
-        if (code!=0) write(client,DiagnosticSocks5.reply(code,ipv6,0));return code==0;
+        if (code!=0) write(client,DiagnosticSocks5.reply(code,ipv6,0));
+        return code==0;
     }
     private void serveProxy(ServerSocket listener, InetAddress address, int backendPort) {
         Socket client=null;
@@ -147,7 +160,10 @@ public final class DiagnosticTcpSession implements AutoCloseable {
             client.setTcpNoDelay(true);
             if (!client.getInetAddress().isLoopbackAddress()) throw new ProtocolFailure();
             byte[] bytes=untilEof(client);backendReady.countDown();
-            if (fault==Fault.SILENT) { halt.await(remaining(),TimeUnit.MILLISECONDS);return; }
+            if (fault==Fault.SILENT) {
+                if (!halt.await(remaining(),TimeUnit.MILLISECONDS)) throw new SocketTimeoutException("Silent backend deadline");
+                return;
+            }
             if (bytes.length==0) throw new ProtocolFailure();
             bytes[0]^=0x5a;
             if (fault==Fault.STALE) bytes[0]^=1;
@@ -160,15 +176,18 @@ public final class DiagnosticTcpSession implements AutoCloseable {
     private Status classify(Exception failure) {
         if (stopped) return Status.CANCELLED;
         if (failure instanceof SocketTimeoutException || System.nanoTime()>=deadline) return Status.TIMEOUT;
-        if (failure instanceof ProtocolFailure) return Status.REJECTED;
-        Status status=serverFailure.get();return status==null?Status.FAILED:status;
+        Status status=serverFailure.get();
+        if (status!=null) return status;
+        return failure instanceof ProtocolFailure?Status.REJECTED:Status.FAILED;
     }
     public Result run() {
         if (!started.compareAndSet(false,true)) return Result.unavailable(ipv6);
-        long started=System.nanoTime();deadline=started+TimeUnit.MILLISECONDS.toNanos(budgetMs);Status status=Status.FAILED;
+        long startedAt=System.nanoTime();deadline=startedAt+TimeUnit.MILLISECONDS.toNanos(budgetMs);
+        Status status=Status.FAILED;
         try {
             InetAddress address=InetAddress.getByName(ipv6?"::1":"127.0.0.1");
-            ServerSocket backend=listen(address),proxy=listen(address);
+            ServerSocket backend=listen(address);
+            ServerSocket proxy=listen(address);
             backendThread=new Thread(()->serveBackend(backend),"diagnostic-tcp-backend");
             proxyThread=new Thread(()->serveProxy(proxy,address,backend.getLocalPort()),"diagnostic-tcp-proxy");
             backendThread.setDaemon(true);proxyThread.setDaemon(true);backendThread.start();proxyThread.start();
@@ -177,8 +196,7 @@ public final class DiagnosticTcpSession implements AutoCloseable {
         finally { close(); }
         boolean cleanup=awaitStopped();
         if (!cleanup) status=Status.CLEANUP_FAILED;
-        return new Result(status,ipv6?6:4,resources.opened,resources.closed,protectedSockets.get(),
-                TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started),cleanup,stage);
+        return new Result(status,this,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-startedAt),cleanup);
     }
     private void exchange(InetAddress address, int port) throws IOException {
         Socket client=connect(address,port,false);
@@ -197,7 +215,7 @@ public final class DiagnosticTcpSession implements AutoCloseable {
         if (DiagnosticSocks5.replyCode(read(client,ipv6?22:10),ipv6)!=0) throw new ProtocolFailure();
         stage=4;
         byte[] bytes=new byte[fault==Fault.OVERSIZE?DiagnosticSocks5.LIMIT+1:DiagnosticSocks5.LIMIT];
-        new SecureRandom().nextBytes(bytes);write(client,bytes);client.shutdownOutput();
+        random.nextBytes(bytes);write(client,bytes);client.shutdownOutput();
         stage=5;
         byte[] expected=bytes.clone();expected[0]^=0x5a;
         byte[] received=untilEof(client);
@@ -220,8 +238,10 @@ public final class DiagnosticTcpSession implements AutoCloseable {
     private static final class ProtocolFailure extends IOException { private static final long serialVersionUID=1;ProtocolFailure(){}ProtocolFailure(String text){super(text);} }
     private static final class Resources implements AutoCloseable {
         private final Set<Closeable> owned=new HashSet<>();
-        private boolean stopped,failed;
-        private int opened,closed;
+        private boolean stopped;
+        private boolean failed;
+        private int opened;
+        private int closed;
         synchronized <T extends Closeable> T add(T socket) throws IOException {
             opened++;
             if (stopped) { dispose(socket);throw new IOException("TCP diagnostic stopped"); }
@@ -230,7 +250,11 @@ public final class DiagnosticTcpSession implements AutoCloseable {
         private void dispose(Closeable socket) {
             try { socket.close();closed++; } catch (IOException failure) { failed=true; }
         }
-        @Override public synchronized void close() { stopped=true;for(Closeable socket:owned)dispose(socket);owned.clear(); }
+        @Override public synchronized void close() {
+            stopped=true;
+            for(Closeable socket:owned) dispose(socket);
+            owned.clear();
+        }
         synchronized boolean cleanup() { return !failed && opened==closed && owned.isEmpty(); }
     }
 }
