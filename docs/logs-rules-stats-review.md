@@ -33,3 +33,9 @@ MSVC `/W4 /WX` test compilation, persistence cases 0/1/400/500/4096/7000/10000/
 inserts, overwrite and reset invalidation, and invalid numeric parameters.
 Source presentation passed two JVM tests. CI adds sanitizer tests, JVM parsing
 tests, Room duplicate/rename checks and actual Compose interaction screenshots.
+
+Follow-up tests also cover empty/end-of-history pages, minimum/maximum supported
+limits, and block/allow/proxy action, UID, policy type and mode after a disk save
+and reload. DeepSeek Flash supplied initial test scenarios; review corrected its
+boolean API assumption and discarded a duplicate wrapped-ring test with an
+incorrect post-load assertion. Local strict compilation and execution passed.

@@ -145,11 +145,75 @@ static void pages(void) {
     qlog_clear();
     reply(query, 409);
 }
+/* Boundary metadata uses the actual Mongoose boolean API; disk round trips
+ * exercise the same compact record layout used by the production server. */
+static void page_boundaries(void) {
+    qlog_clear();
+    struct mg_str body = reply("offset=0&limit=1", 200);
+    assert(mg_json_get_long(body, "$.returned", -1) == 0);
+    bool more = true;
+    assert(mg_json_get_bool(body, "$.hasMore", &more) && !more);
+    for (unsigned i = 1; i <= 5; i++) add(i);
+    body = reply("offset=5&limit=10", 200);
+    assert(mg_json_get_long(body, "$.returned", -1) == 0);
+    assert(mg_json_get_long(body, "$.nextOffset", -1) == 5);
+    assert(mg_json_get_bool(body, "$.hasMore", &more) && !more);
+    char query[200];
+    snprintf(query, sizeof(query), "offset=5&limit=10&generation=%s&anchor=5", s_qlog_generation);
+    body = reply(query, 200);
+    assert(mg_json_get_long(body, "$.returned", -1) == 0);
+    reply("offset=6&limit=1", 409);
+    body = reply("offset=0&limit=1", 200);
+    assert(mg_json_get_long(body, "$.returned", -1) == 1);
+    assert(mg_json_get_bool(body, "$.hasMore", &more) && more);
+    body = reply("offset=0&limit=1000", 200);
+    assert(mg_json_get_long(body, "$.returned", -1) == 5);
+    assert(mg_json_get_bool(body, "$.hasMore", &more) && !more);
+}
+
+static void metadata(const char *directory) {
+    qlog_clear();
+    struct mg_http_message request;
+    memset(&request, 0, sizeof(request));
+    request.uri = mg_str("metadata.example.test");
+    s_last_type = 3;
+    s_last_mode = 2;
+    qlog_add((uid_t)-1, QLOG_BLOCK, &request);
+    qlog_add((uid_t)42, QLOG_ALLOW, &request);
+    qlog_add((uid_t)7, QLOG_PROXY, &request);
+    s_last_type = -1;
+    s_last_mode = 0;
+    qlog_add((uid_t)9, QLOG_BLOCK, &request);
+    qlog_save(directory);
+    qlog_clear();
+    qlog_load(directory);
+    struct mg_str body = reply("offset=0&limit=10", 200);
+    assert(mg_json_get_long(body, "$.returned", -1) == 4);
+    assert(mg_json_get_long(body, "$.entries[3].action", -1) == QLOG_BLOCK);
+    assert(mg_json_get_long(body, "$.entries[3].type", 99) == 3);
+    assert(mg_json_get_long(body, "$.entries[3].mode", 99) == 2);
+    assert(mg_json_get_long(body, "$.entries[3].uid", 99) == -1);
+    assert(mg_json_get_long(body, "$.entries[2].action", -1) == QLOG_ALLOW);
+    assert(mg_json_get_long(body, "$.entries[2].uid", 99) == 42);
+    assert(mg_json_get_long(body, "$.entries[2].type", 99) == -1);
+    assert(mg_json_get_long(body, "$.entries[2].mode", 99) == 0);
+    assert(mg_json_get_long(body, "$.entries[1].action", -1) == QLOG_PROXY);
+    assert(mg_json_get_long(body, "$.entries[1].uid", 99) == 7);
+    assert(mg_json_get_long(body, "$.entries[1].type", 99) == -1);
+    assert(mg_json_get_long(body, "$.entries[1].mode", 99) == 0);
+    assert(mg_json_get_long(body, "$.entries[0].type", 99) == -1);
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/query_log.dat", directory);
+    assert(remove(path) == 0);
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2); /* Existing disposable directory supplied by the test runner. */
     mg_log_set(MG_LL_NONE);
     persistence(argv[1]);
     pages();
-    puts("PASS: production query log persistence, rollback, bounded pages, stable cursor, invalidation and parameters");
+    page_boundaries();
+    metadata(argv[1]);
+    puts("PASS: production query log persistence, rollback, bounded pages, stable cursor, invalidation, parameters, page boundaries and metadata round trips");
     return 0;
 }
