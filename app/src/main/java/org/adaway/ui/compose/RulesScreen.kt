@@ -173,7 +173,11 @@ fun RulesScreen(
     // Rule search (a list of thousands without one was unusable).
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
-    var showSources by rememberSaveable { mutableStateOf(false) }
+    var showSources by rememberSaveable { mutableStateOf(true) }
+    var sourceNameInput by remember { mutableStateOf("") }
+    var inspectedSource by remember { mutableStateOf<org.adaway.db.entity.HostsSource?>(null) }
+    var renameBusy by remember { mutableStateOf(false) }
+    var renameFailed by remember { mutableStateOf(false) }
     var inspectedRule by remember { mutableStateOf<RuleListRow?>(null) }
     var refreshVersion by remember { mutableIntStateOf(0) }
     var sourceSaving by remember { mutableStateOf(false) }
@@ -190,11 +194,12 @@ fun RulesScreen(
         viewModel.loadSources { sources = it }
     }
 
-    LaunchedEffect(selectedTab, searchQuery, browseFilter, requestedPage, refreshVersion, syncing) {
+    LaunchedEffect(selectedTab, searchQuery, browseFilter, requestedPage, refreshVersion, syncing, showSources) {
         val request = ++browseRequest
         ruleSearchLoading = true
         browseFailed = false
         reloadSources()
+        if (showSources) { ruleSearchLoading = false; return@LaunchedEffect }
         try {
             val query = searchQuery.trim()
             if (query.isNotEmpty()) kotlinx.coroutines.delay(250)
@@ -243,6 +248,8 @@ fun RulesScreen(
                 .padding(padding)
                 .fillMaxSize(),
         ) {
+            RulesWorkspaceSelector(showSources, { showSources = it }, onOpenExempt, onOpenOverrides)
+            if (!showSources) {
             TabRow(selectedTabIndex = selectedTab) {
                 tabs.forEachIndexed { index, tab ->
                     Tab(
@@ -250,29 +257,6 @@ fun RulesScreen(
                         onClick = { selectedTab = index; requestedPage = 0 },
                         text = { Text(stringResource(tab.labelRes), maxLines = 1) },
                     )
-                }
-            }
-
-            // Related rule tools share one horizontally scrollable line.
-            // Keep both existing working routes, but reclaim space for rows.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = { showSources = !showSources; if (showSources) scope.launch { listState.scrollToItem(0) } }) {
-                    Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.compose_rules_manage_sources, sources.size))
-                }
-                TextButton(onClick = onOpenExempt) {
-                    Text(stringResource(R.string.compose_exempt_entry))
-                }
-                TextButton(onClick = onOpenOverrides) {
-                    Text(stringResource(R.string.compose_settings_rule_override))
                 }
             }
 
@@ -334,14 +318,15 @@ fun RulesScreen(
                 }
             }
 
+            }
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 20.dp),
             ) {
-                if (showSources || sources.isEmpty()) {
+                if (showSources) {
                     item(key = "sources") {
-                        SourcesCard(
+                        SourcesWorkspace(
                             sources = sources,
                             enabled = !syncing,
                             onToggle = { source, checked ->
@@ -351,6 +336,7 @@ fun RulesScreen(
                                 }
                             },
                             onAddClick = { showAddDialog = true },
+                            onInspect = { inspectedSource = it; renameFailed = false },
                             onDelete = { deleteSourceHint = it; deletePersonalRule = null; removalFailed = false },
                         )
                     }
@@ -362,24 +348,24 @@ fun RulesScreen(
                         }
                     }
                 }
-                if (browseFailed) {
+                if (!showSources && browseFailed) {
                     item(key = "load-error") {
                         TextButton(onClick = { refreshVersion++ }, modifier = Modifier.fillMaxWidth()) {
                             Text(stringResource(R.string.compose_rules_reload))
                         }
                     }
                 }
-                if (rules.isEmpty() && !ruleSearchLoading && !browseFailed) {
+                if (!showSources && rules.isEmpty() && !ruleSearchLoading && !browseFailed) {
                     item(key = "empty") {
                         EmptyRulesPlaceholder(if (searchQuery.isNotBlank() || browseFilter != 0) R.string.compose_rules_search_empty else tabs[selectedTab].emptyRes)
                     }
                 }
-                if (!ruleSearchLoading && !browseFailed) {
+                if (!showSources && !ruleSearchLoading && !browseFailed) {
                     items(rules, key = { it.item.id }) { row ->
                         val item = row.item
                         RuleRow(
                             item = item,
-                            sourceLabel = row.sourceLabel,
+                            sourceLabel = org.adaway.model.source.SourcePresentation.name(row.sourceLabel, row.sourceUrl.orEmpty()),
                             active = row.isActive,
                             enabled = !syncing,
                             onInspect = { inspectedRule = row },
@@ -396,7 +382,7 @@ fun RulesScreen(
                     }
                 }
             }
-            if (browserPage.pageCount > 1 && !browseFailed) {
+            if (!showSources && browserPage.pageCount > 1 && !browseFailed) {
                 RuleBrowserPager(browserPage.index, browserPage.pageCount, ruleSearchLoading) { requestedPage = it }
             }
 
@@ -414,6 +400,7 @@ fun RulesScreen(
                     onTypeChange = { sourceIsFile = it; sourceAddFailed = false },
                     onUrlChange = { urlInput = it; sourceAddFailed = false },
                     onPickFile = { filePicker.launch(arrayOf("*/*")) },
+                    name = sourceNameInput, onNameChange = { sourceNameInput = it },
                 )
             },
             confirmButton = {
@@ -422,7 +409,7 @@ fun RulesScreen(
                     enabled = ready && !sourceSaving,
                     onClick = {
                         val url = if (sourceIsFile) pickedFileUri else urlInput
-                        val label = if (sourceIsFile) pickedFileName else null
+                        val label = sourceNameInput.trim().ifBlank { if (sourceIsFile) pickedFileName else "" }.ifBlank { null }
                         sourceSaving = true
                         sourceAddFailed = false
                         viewModel.addSource(url, label) { ok ->
@@ -430,6 +417,7 @@ fun RulesScreen(
                             if (ok) {
                                 showAddDialog = false
                                 showSources = true
+                                sourceNameInput = ""
                                 urlInput = ""
                                 pickedFileUri = ""
                                 pickedFileName = ""
@@ -454,6 +442,18 @@ fun RulesScreen(
                 }
             },
         )
+    }
+
+    inspectedSource?.let { source ->
+        SourceDetailsDialog(source, renameBusy, renameFailed, { inspectedSource = null }, { name ->
+            renameBusy = true
+            renameFailed = false
+            viewModel.renameSource(source.id, name) { ok ->
+                renameBusy = false
+                if (ok) { inspectedSource = null; reloadSources(); refreshVersion++ }
+                else renameFailed = true
+            }
+        })
     }
 
     // ── 添加用户规则对话框 ──
@@ -612,101 +612,6 @@ fun RulesScreen(
                 }
             },
         )
-    }
-}
-
-@Composable
-/**
- * 规则订阅源卡：列出所有 hosts 订阅源（名称/条数/启用开关），
- * 提供“添加订阅源”按钮。空列表时仍显示以便添加首个订阅。
- */
-private fun SourcesCard(
-    enabled: Boolean,
-    sources: List<org.adaway.db.entity.HostsSource>,
-    onToggle: (org.adaway.db.entity.HostsSource, Boolean) -> Unit,
-    onAddClick: () -> Unit,
-    onDelete: (org.adaway.db.entity.HostsSource) -> Unit,
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Outlined.Link,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    stringResource(R.string.compose_rules_sources),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(enabled = enabled, onClick = onAddClick) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.compose_rules_add_source))
-                }
-            }
-            Text(stringResource(R.string.compose_rules_source_help),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(12.dp))
-            if (sources.isEmpty()) {
-                Text(
-                    stringResource(R.string.compose_rules_sources_empty),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                sources.forEach { source ->
-                    androidx.compose.runtime.key(source.id) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                source.label,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                stringResource(R.string.compose_rules_source_size, source.size),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = source.isEnabled(),
-                            enabled = enabled,
-                            onCheckedChange = { checked -> onToggle(source, checked) },
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        // 删除订阅源（确认对话框在 RulesScreen 弹出）
-                        IconButton(enabled = enabled, onClick = { onDelete(source) }) {
-                            Icon(
-                                Icons.Outlined.Delete,
-                                contentDescription = stringResource(R.string.compose_rules_delete_source),
-                                tint = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

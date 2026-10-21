@@ -30,6 +30,17 @@ public class RuleBrowserRoomTest {
         }
     }
     @After public void close() { db.close(); }
+    @Test public void renameIsVisibleWithoutDownloadAndDuplicateInsertFailsClearly() {
+        insert("named.test", 2, 0, true);
+        assertEquals(1, db.hostsSourceDao().rename(2, "Readable name"));
+        RuleListRow row = db.hostsListItemDao().browseRules(0, "named", 0, 300, 0).get(0);
+        assertEquals("Readable name", row.sourceLabel);
+        assertEquals("https://example.test/2", row.sourceUrl);
+        HostsSource duplicate = new HostsSource(); duplicate.setLabel("Duplicate");
+        duplicate.setUrl("https://example.test/2");
+        assertEquals(-1L, db.hostsSourceDao().insert(duplicate));
+        assertEquals(0, db.hostsSourceDao().rename(1, "Do not rename personal rules"));
+    }
     private void insert(String host, int sourceId, int scope, boolean enabled) {
         HostListItem rule = new HostListItem(); rule.setHost(host); rule.setSourceId(sourceId);
         rule.setType(ListType.BLOCKED); rule.setMatchScope(scope); rule.setEnabled(enabled);

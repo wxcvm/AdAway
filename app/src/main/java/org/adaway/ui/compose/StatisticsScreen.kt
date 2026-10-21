@@ -212,6 +212,7 @@ fun StatisticsScreen(
                                     stringResource(R.string.compose_stats_status_ok, statsTime)
                                 statsTime != null ->
                                     stringResource(R.string.compose_stats_status_stale, statsTime)
+                                statsErr == "snapshot" -> stringResource(R.string.compose_stats_snapshot_unknown)
                                 else -> stringResource(R.string.compose_stats_status_waiting)
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -221,7 +222,9 @@ fun StatisticsScreen(
                 }
             }
 
-            // ── 优先呈现实时服务指标，然后显示本地 hosts 规则数 ──（参考 AdGuard Home：数值 + 迷你趋势线）──
+            Text(stringResource(R.string.compose_stats_scope), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Server counters and local rule counts describe different things.
             if (serverStats != null) {
                 KpiCardRow(stats = serverStats!!)
             } else {

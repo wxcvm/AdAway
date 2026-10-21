@@ -142,6 +142,7 @@ private fun parseHistArray(json: JSONObject, key: String): List<HistPoint> {
  * Snapshot of the native web server statistics (from /internal-stats).
  */
 data class ServerStats(
+    val snapshotTs: Long = 0,
     val uptimeSeconds: Long = 0,
     val uptimeDays: Double = 0.0,
     val totalRequests: Long = 0,
@@ -199,7 +200,8 @@ data class ServerStats(
         }
 
         fun fromJson(json: JSONObject?): ServerStats? {
-            if (json == null) return null
+            if (json == null || !json.has("uptime_seconds") || !json.has("total_requests") ||
+                json.optLong("uptime_seconds", -1) < 0 || json.optLong("total_requests", -1) < 0) return null
             val apps = mutableListOf<AppStat>()
             val appsArray = json.optJSONArray("apps")
             if (appsArray != null) {
@@ -261,6 +263,7 @@ data class ServerStats(
                 }
             }
             return ServerStats(
+                snapshotTs = json.optLong("snapshot_ts", 0),
                 uptimeSeconds = json.optLong("uptime_seconds", 0),
                 uptimeDays = json.optDouble("uptime_days", 0.0),
                 totalRequests = json.optLong("total_requests", 0),
@@ -328,6 +331,7 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     val statsError = MutableStateFlow<String?>(null)
 
     private var pollingJob: Job? = null
+    private var statsRefreshJob: Job? = null
     private val lifecycleObserver = object : androidx.lifecycle.LifecycleEventObserver {
         override fun onStateChanged(
             source: androidx.lifecycle.LifecycleOwner,
@@ -341,6 +345,7 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
                     pollingJob?.cancel()
+                    statsRefreshJob?.cancel()
                     wsJob?.cancel()
                     wsJob = null
                 }
@@ -388,7 +393,9 @@ private fun startPolling() {
     fun startRealtime() {
         if (wsJob?.isActive == true) return
         wsJob = viewModelScope.launch {
+            val connectionJob = kotlinx.coroutines.currentCoroutineContext()[Job]!!
             val client = okhttp3.OkHttpClient.Builder()
+                .proxy(java.net.Proxy.NO_PROXY)
                 .pingInterval(15, java.util.concurrent.TimeUnit.SECONDS)
                 .build()
             val request = okhttp3.Request.Builder()
@@ -404,21 +411,28 @@ private fun startPolling() {
                     }
                     override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
                         try {
-                            _serverStats.value = ServerStats.fromJson(org.json.JSONObject(text))
+                            val parsed = ServerStats.fromJson(org.json.JSONObject(text)) ?: return
+                            viewModelScope.launch {
+                                if (wsJob === connectionJob && connectionJob.isActive &&
+                                    shouldReplaceStats(_serverStats.value?.snapshotTs, statsUpdatedAt.value, parsed.snapshotTs, false)) {
+                                    _serverStats.value = parsed
+                                    statsUpdatedAt.value = System.currentTimeMillis()
+                                    statsError.value = null
+                                }
+                            }
                         } catch (e: Exception) {
                             Timber.w(e, "Bad WS payload")
                         }
                     }
 
                     override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
-                        startPolling()
+                        // Polling already runs while visible; closing a background socket must not restart it.
                     }
                     override fun onFailure(
                         webSocket: okhttp3.WebSocket,
                         t: Throwable,
                         response: okhttp3.Response?,
                     ) {
-                        startPolling()
                         Timber.w(t, "WebSocket failed — falling back to polling")
                     }
                 })
@@ -446,8 +460,9 @@ private fun startPolling() {
      * 获取 JSON 快照，解析为 ServerStats 数据类后推送到
      * serverStats StateFlow，驱动统计页/概览页重组。
      */
-fun refreshServerStats() {
-        viewModelScope.launch {
+    fun refreshServerStats() {
+        if (statsRefreshJob?.isActive == true) return
+        statsRefreshJob = viewModelScope.launch {
             try {
                 val context = getApplication<Application>()
                 // OkHttp request must not run on the main dispatcher
@@ -473,17 +488,20 @@ fun refreshServerStats() {
                     fromSnapshot = stats != null
                 }
                 if (stats != null) {
-                    _serverStats.value = stats
-                    statsUpdatedAt.value = System.currentTimeMillis()
+                    val replace = shouldReplaceStats(_serverStats.value?.snapshotTs, statsUpdatedAt.value, stats.snapshotTs, fromSnapshot)
+                    if (replace) {
+                        _serverStats.value = stats
+                        statsUpdatedAt.value = if (fromSnapshot) stats.snapshotTs * 1000 else System.currentTimeMillis()
+                    }
                     // "snapshot" 会让状态栏显示“最后一次更新 xx:xx（可能已过期）”
-                    statsError.value = if (fromSnapshot) "snapshot" else null
+                    statsError.value = if (fromSnapshot) { if (replace) "snapshot" else "unreachable" } else null
                 } else {
-                    _serverStats.value = null
                     statsError.value = "unreachable"
                 }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 Timber.w(e, "Failed to refresh server stats")
-                _serverStats.value = null
                 statsError.value = "error"
             }
         }
@@ -491,46 +509,12 @@ fun refreshServerStats() {
 
     
 
-    /**
-     * 分页读取服务端的明细日志（最多 10000 条）。
-     *
-     * <p>offset 从"最新"往回数，所以翻页期间新请求到达不会让已翻过的内容漂移；
-     * 取数走 /internal-qlog（服务端专为分页新增），与 /internal-stats 同一取数栈。</p>
-     *
-     * @param offset   跳过最新的多少条。
-     * @param limit    本次最多取多少条。
-     * @param onResult 该页条目 + 服务端总数。
-     */
-    fun loadQueryLogPage(offset: Int, limit: Int, onResult: (List<QueryLogEntry>, Int) -> Unit) {
-        viewModelScope.launch {
-            val result = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                try {
-                    val json = org.adaway.util.WebServerStats.getQueryLogPage(offset, limit)
-                    val total = json?.optInt("total", 0) ?: 0
-                    val arr = json?.optJSONArray("entries")
-                    val out = ArrayList<QueryLogEntry>(arr?.length() ?: 0)
-                    if (arr != null) {
-                        for (i in 0 until arr.length()) {
-                            val o = arr.optJSONObject(i) ?: continue
-                            out += QueryLogEntry(
-                                ts = o.optLong("ts", 0),
-                                uid = o.optInt("uid", -1),
-                                action = o.optInt("action", 0),
-                                type = o.optInt("type", -1),
-                                mode = o.optInt("mode", 0),
-                                host = o.optString("host", ""),
-                            )
-                        }
-                    }
-                    out to total
-                } catch (e: Exception) {
-                    Timber.w(e, "Failed to load a query log page")
-                    emptyList<QueryLogEntry>() to 0
-                }
-            }
-            onResult(result.first, result.second)
+    /** Cursor pins the original history; expired generations fail without clearing the UI. */
+    suspend fun loadQueryLogPage(offset: Int, limit: Int, cursor: QueryLogCursor?): QueryLogPage =
+        withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val json = org.adaway.util.WebServerStats.getQueryLogPage(offset, limit, cursor?.generation, cursor?.anchor)
+            QueryLogPage.parse(json, offset, cursor)
         }
-    }
 
     /**
      * Load user-defined rule entries (source_id == 1: manual whitelist,
@@ -616,9 +600,30 @@ fun refreshServerStats() {
     fun loadSources(onResult: (List<org.adaway.db.entity.HostsSource>) -> Unit) {
         viewModelScope.launch {
             val sources = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                database.hostsSourceDao().getAll()
+                try {
+                    migrateSourceNames()
+                    database.hostsSourceDao().getAll()
+                } catch (failure: Exception) {
+                    Timber.w("Source list unavailable (%s)", failure.javaClass.simpleName)
+                    null
+                }
             }
-            onResult(sources)
+            if (sources != null) onResult(sources)
+        }
+    }
+
+    /** One-time local label repair; later user choices such as "raw" stay verbatim. */
+    private fun migrateSourceNames() = synchronized(org.adaway.model.source.SourcePresentation::class.java) {
+        val preferences = getApplication<Application>().getSharedPreferences("source-presentation", android.content.Context.MODE_PRIVATE)
+        if (!preferences.getBoolean("legacy-labels-repaired", false)) {
+            database.runInTransaction {
+                val dao = database.hostsSourceDao()
+                for (source in dao.getAll()) if (source.id != 1) {
+                    val label = org.adaway.model.source.SourcePresentation.legacyName(source.label, source.url)
+                    if (label != source.label) dao.rename(source.id, label)
+                }
+            }
+            check(preferences.edit().putBoolean("legacy-labels-repaired", true).commit())
         }
     }
 
@@ -827,7 +832,11 @@ fun refreshServerStats() {
         viewModelScope.launch {
             val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
                 try {
+                    migrateSourceNames()
                     val normalized = url.trim()
+                    if (label != null && (label.trim().length > 80 || label.any { it.isISOControl() })) {
+                        return@withContext false
+                    }
                     if (!org.adaway.db.entity.HostsSource.isValidUrl(normalized)) {
                         Timber.w("Rejected hosts source: unsupported URL format")
                         return@withContext false
@@ -838,8 +847,7 @@ fun refreshServerStats() {
                     source.setLabel(
                         label?.takeIf { it.isNotBlank() } ?: deriveSourceLabel(normalized),
                     )
-                    dao.insert(source)
-                    true
+                    dao.insert(source) > 0
                 } catch (e: Exception) {
                     // 唯一索引冲突（源已存在）等：返回 false 由界面提示
                     Timber.w("Failed to add source (%s)", e.javaClass.simpleName)
@@ -850,13 +858,22 @@ fun refreshServerStats() {
         }
     }
 
-    /** Best-effort human label for a subscription URL (host of the URL). */
-    private fun deriveSourceLabel(url: String): String {
-        return try {
-            val u = java.net.URI(url)
-            u.host?.substringBefore('.') ?: url.take(24)
-        } catch (e: Exception) {
-            url.take(24)
+    private fun deriveSourceLabel(url: String) = org.adaway.model.source.SourcePresentation.name(null, url)
+
+    fun renameSource(id: Int, label: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val name = label.trim()
+            val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    migrateSourceNames()
+                    name.isNotEmpty() && name.length <= 80 && name.none { it.isISOControl() } &&
+                        database.hostsSourceDao().rename(id, name) == 1
+                } catch (failure: Exception) {
+                    Timber.w("Source rename failed (%s)", failure.javaClass.simpleName)
+                    false
+                }
+            }
+            onDone(ok)
         }
     }
 

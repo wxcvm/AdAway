@@ -2695,154 +2695,7 @@ static void top_host_add(const char *host) {
     s_top_hosts[min].count = 1;
 }
 
-enum { QLOG_PROXY = 0, QLOG_BLOCK = 1, QLOG_ALLOW = 2 };
-struct qlog_entry {
-    uint64_t ts;          /* epoch seconds */
-    uint32_t uid;         /* 0xFFFFFFFF when unknown */
-    uint16_t rtype;       /* blocked_* category hint (0 = unknown) */
-    uint8_t  action;      /* QLOG_* */
-    uint8_t  pad;
-    char     host[192];
-};
-static struct qlog_entry s_qlog[QLOG_MAX];
-static uint32_t s_qlog_pos;    /* next slot to write */
-static uint32_t s_qlog_count;  /* valid entries (<= QLOG_MAX) */
-/* Compaction buffer for persistence: only the newest QLOG_PERSIST_MAX entries
-   are written, laid out from slot 0 so the loader rebuilds a contiguous ring. */
-static struct qlog_entry s_qlog_persist[QLOG_PERSIST_MAX];
-
-static void qlog_clear(void) {
-    s_qlog_pos = 0;
-    s_qlog_count = 0;
-    memset(s_qlog, 0, sizeof(s_qlog));
-}
-
-static void qlog_add(uid_t uid, int action, struct mg_http_message *hm) {
-    struct qlog_entry *e = &s_qlog[s_qlog_pos % QLOG_MAX];
-    memset(e, 0, sizeof(*e));
-    e->ts = (uint64_t) time(NULL);
-    e->uid = (uid == (uid_t) -1) ? 0xFFFFFFFFu : (uint32_t) uid;
-    e->action = (uint8_t) action;
-    /* "Why and how": a blocked row carries the policy type that matched and the
-       mode that type is configured with (0xFFFF = nothing matched). */
-    if (action == QLOG_BLOCK) {
-        e->rtype = (uint16_t) (s_last_type < 0 ? 0xFFFF : s_last_type);
-        e->pad = (uint8_t) s_last_mode;
-    } else {
-        e->rtype = 0xFFFF;
-        e->pad = 0;
-    }
-    req_host_of(hm, e->host, sizeof(e->host));
-    s_qlog_pos = (s_qlog_pos + 1) % QLOG_MAX;
-    if (s_qlog_count < QLOG_MAX) s_qlog_count++;
-}
-
-/* Newest first, bounded (QLOG_RENDER_MAX entries / QLOG_JSON_MAX bytes). */
-static void qlog_render(char *out, size_t cap) {
-    size_t off = 0;
-    if (out == NULL || cap == 0) return;
-    out[0] = '\0';
-    uint32_t total = s_qlog_count < QLOG_RENDER_MAX ? s_qlog_count : QLOG_RENDER_MAX;
-    for (uint32_t k = 0; k < total; k++) {
-        uint32_t idx = (s_qlog_pos + QLOG_MAX - 1 - k) % QLOG_MAX;
-        struct qlog_entry *e = &s_qlog[idx];
-        char host[400];
-        int n;
-        if (e->ts == 0) continue;
-        json_safe_copy(host, sizeof(host), e->host);
-        n = snprintf(out + off, cap - off,
-                     "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"type\":%d,"
-                     "\"mode\":%d,\"host\":\"%s\"}",
-                     off ? "," : "", (unsigned long long) e->ts,
-                     (e->uid == 0xFFFFFFFFu) ? -1 : (int) e->uid,
-                     (int) e->action,
-                     (e->rtype == 0xFFFF) ? -1 : (int) e->rtype,
-                     (int) e->pad, host);
-        if (n <= 0 || off + (size_t) n >= cap) { out[off] = '\0'; break; }
-        off += (size_t) n;
-    }
-}
-
-/*
- * One page of the query log, newest first: offset skips the newest entries and
- * limit bounds how many are rendered, so /internal-qlog can walk the whole ring
- * without ever building one huge document.
- */
-static void qlog_render_page(uint32_t offset, uint32_t limit, char *out, size_t cap) {
-    size_t off = 0;
-    if (out == NULL || cap == 0) return;
-    out[0] = '\0';
-    uint32_t total = s_qlog_count < QLOG_MAX ? s_qlog_count : QLOG_MAX;
-    for (uint32_t k = offset; k < offset + limit && k < total; k++) {
-        uint32_t idx = (s_qlog_pos + QLOG_MAX - 1 - k) % QLOG_MAX;
-        struct qlog_entry *e = &s_qlog[idx];
-        char host[400];
-        int n;
-        if (e->ts == 0) continue;
-        json_safe_copy(host, sizeof(host), e->host);
-        n = snprintf(out + off, cap - off,
-                     "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"type\":%d,"
-                     "\"mode\":%d,\"host\":\"%s\"}",
-                     off ? "," : "", (unsigned long long) e->ts,
-                     (e->uid == 0xFFFFFFFFu) ? -1 : (int) e->uid,
-                     (int) e->action,
-                     (e->rtype == 0xFFFF) ? -1 : (int) e->rtype,
-                     (int) e->pad, host);
-        if (n <= 0 || off + (size_t) n >= cap) { out[off] = '\0'; break; }
-        off += (size_t) n;
-    }
-}
-
-#define QLOG_MAGIC 0x514C4F47u   /* "QLOG" */
-static void qlog_save(const char *resource_dir) {
-    char path[PATH_MAX];
-    if (resource_dir == NULL || resource_dir[0] == '\0') return;
-    snprintf(path, sizeof(path), "%s/query_log.dat", resource_dir);
-    /* 原子写：写 <path>.tmp，成功后 rename —— 读端永远不会看到写了一半的查询日志。 */
-    char atomic_tmp[PATH_MAX];
-    FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
-    if (fp == NULL) return;
-    /*
-     * The ring holds QLOG_MAX (10k, ~2 MB) so the app can page through the
-     * history, but flushing all of it on every save would write ~2 MB to flash
-     * each time. Persist only the newest QLOG_PERSIST_MAX entries, compacted
-     * from slot 0; the loader stores pos=0 and derives count from the header,
-     * so it rebuilds a full contiguous ring.
-     */
-    uint32_t total = s_qlog_count < QLOG_MAX ? s_qlog_count : QLOG_MAX;
-    uint32_t persist = total < QLOG_PERSIST_MAX ? total : QLOG_PERSIST_MAX;
-    for (uint32_t k = 0; k < persist; k++) {
-        uint32_t idx = (s_qlog_pos + total - persist + k) % QLOG_MAX;
-        s_qlog_persist[k] = s_qlog[idx];
-    }
-    uint32_t zero = 0;
-    uint32_t magic = QLOG_MAGIC;
-    fwrite(&magic, sizeof(magic), 1, fp);
-    fwrite(&zero, sizeof(zero), 1, fp);      /* pos: the file starts at slot 0 */
-    fwrite(&persist, sizeof(persist), 1, fp);
-    fwrite(s_qlog_persist, sizeof(s_qlog_persist[0]), persist, fp);
-    finish_atomic_write(fp, path, atomic_tmp);
-}
-
-static void qlog_load(const char *resource_dir) {
-    char path[PATH_MAX];
-    if (resource_dir == NULL || resource_dir[0] == '\0') return;
-    snprintf(path, sizeof(path), "%s/query_log.dat", resource_dir);
-    FILE *fp = fopen(path, "rb");
-    if (fp == NULL) return;
-    uint32_t magic = 0, pos = 0, count = 0;
-    if (fread(&magic, sizeof(magic), 1, fp) == 1 && magic == QLOG_MAGIC &&
-        fread(&pos, sizeof(pos), 1, fp) == 1 &&
-        fread(&count, sizeof(count), 1, fp) == 1 &&
-        count <= QLOG_MAX && pos < QLOG_MAX) {
-        size_t got = fread(s_qlog, sizeof(s_qlog[0]), count, fp);
-        if (got == count) {
-            s_qlog_pos = pos ? pos : (uint32_t) (count % QLOG_MAX);
-            s_qlog_count = count;
-        }
-    }
-    fclose(fp);
-}
+#include "query_log_store.inc"
 
 /* WebSocket push subscribers: connections that upgraded to /internal-ws.
    Registered on MG_EV_WS_OPEN, removed on MG_EV_CLOSE; broadcast after
@@ -3025,7 +2878,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
        ("%.*s", mg_ws_send, fwrite) would happily use - clamp it to the buffer. */
     {
         int n = snprintf(out, out_sz,
-        "{\"uptime_seconds\":%llu,"
+        "{\"snapshot_ts\":%llu,\"uptime_seconds\":%llu,"
         "\"uptime_days\":%.1f,"
         "\"total_requests\":%llu,"
         "\"total_connections\":%llu,"
@@ -3060,7 +2913,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         "\"top_blocked\":[%s],"
         "\"daily\":[%s],"
         "\"query_log\":[%s]}",
-        (unsigned long long)uptime,
+        (unsigned long long)time(NULL), (unsigned long long)uptime,
         (double)uptime / 86400.0,
         (unsigned long long)req,
         (unsigned long long)s_stats.total_connections,
@@ -4366,28 +4219,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
 
     if (mg_match(hm->uri, mg_str("/internal-qlog"), NULL)) {
-        char var[16];
-        uint32_t offset = 0;
-        uint32_t limit = 200;
-        var[0] = '\0';
-        if (mg_http_get_var(&hm->query, "offset", var, sizeof(var)) > 0) {
-            long v = strtol(var, NULL, 10);
-            if (v > 0) offset = (uint32_t) v;
-        }
-        var[0] = '\0';
-        if (mg_http_get_var(&hm->query, "limit", var, sizeof(var)) > 0) {
-            long v = strtol(var, NULL, 10);
-            if (v > 0) limit = (uint32_t) v;
-        }
-        if (limit > 1000) limit = 1000;
-        static char page[QLOG_JSON_MAX];
-        qlog_render_page(offset, limit, page, sizeof(page));
-        mg_http_reply(c, 200,
-                      "Content-Type: application/json\r\nCache-Control: no-store\r\n"
-                      "Access-Control-Allow-Origin: *\r\n",
-                      "{\"offset\":%u,\"limit\":%u,\"total\":%u,\"entries\":[%s]}",
-                      (unsigned) offset, (unsigned) limit,
-                      (unsigned) s_qlog_count, page);
+        qlog_reply(c, hm);
         return;
     }
 

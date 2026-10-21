@@ -24,7 +24,10 @@ import static androidx.room.OnConflictStrategy.IGNORE;
 @Dao
 public interface HostsSourceDao {
     @Insert(onConflict = IGNORE)
-    void insert(HostsSource source);
+    long insert(HostsSource source);
+
+    @Query("UPDATE hosts_sources SET label = :label WHERE id = :id AND id != 1")
+    int rename(int id, String label);
 
     @Update
     void update(HostsSource source);

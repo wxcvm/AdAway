@@ -49,7 +49,7 @@ public interface HostListItemDao {
 
     // Browser filters: 0 all, 1 enabled, 2 disabled, 3 personal. Count and page
     // run in one read transaction. Do not GROUP BY host: source/scope identity matters.
-    @Query("SELECT h.*, s.label AS source_label, s.enabled AS source_enabled FROM hosts_lists h " +
+    @Query("SELECT h.*, s.label AS source_label, s.url AS source_url, s.enabled AS source_enabled FROM hosts_lists h " +
             "JOIN hosts_sources s ON s.id = h.source_id WHERE h.type = :type " +
             "AND instr(lower(h.host), lower(:query)) > 0 " +
             "AND (:filter = 0 OR (:filter = 1 AND h.enabled = 1 AND s.enabled = 1) " +

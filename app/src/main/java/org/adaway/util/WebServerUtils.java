@@ -414,7 +414,7 @@ public class WebServerUtils {
     @androidx.annotation.Nullable
     public static org.json.JSONObject readStatsSnapshot(Context context) {
         java.io.File file = getResourcePath(context).resolve("stats.json").toFile();
-        if (!file.isFile() || file.length() == 0) return null;
+        if (!file.isFile() || file.length() == 0 || file.length() > 2 * 1024 * 1024) return null;
         try (java.io.InputStream in = new java.io.FileInputStream(file)) {
             byte[] buffer = new byte[(int) file.length()];
             int read = 0;
@@ -423,7 +423,9 @@ public class WebServerUtils {
                 if (n <= 0) break;
                 read += n;
             }
-            return new org.json.JSONObject(new String(buffer, 0, read, "UTF-8"));
+            org.json.JSONObject snapshot = new org.json.JSONObject(new String(buffer, 0, read, "UTF-8"));
+            if (snapshot.optLong("snapshot_ts", 0) <= 0) snapshot.put("snapshot_ts", file.lastModified() / 1000);
+            return snapshot;
         } catch (Exception exception) {
             Timber.w(exception, "Failed to read the statistics snapshot");
             return null;

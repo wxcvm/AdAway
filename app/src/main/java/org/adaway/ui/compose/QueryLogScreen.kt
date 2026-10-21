@@ -21,6 +21,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -52,195 +57,91 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * 请求日志二级页面。
- *
- * 把服务器查询日志（/internal-stats 的 query_log[]）完整列出来，最新在最上，
- * 每条记录给出：时间 · 结果（拦截/放行/代理）· 命中策略类型 · 处理方式 · 来源应用 · 主机名。
- * 可按结果过滤。
- *
- * 入口：统计页「最近请求」卡片的“查看全部”。
- *
- * 说明：服务端在 /internal-stats 里导出最新 400 条（QLOG_RENDER_MAX），
- * 环形缓冲本身保留 4096 条并落盘到 query_log.dat。右上角可把当前筛选结果
- * 导出成 CSV 分享出去（旧版只发 24 条，这一页因此看起来“没几条”）。
- */
+/** Server request logs use one immutable cursor while browsing history. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val stats by viewModel.serverStats.collectAsStateWithLifecycle()
-    val entries = stats?.queryLog.orEmpty()
     var filter by remember { mutableIntStateOf(FILTER_ALL) }
+    var page by remember { mutableStateOf<QueryLogPage?>(null) }
+    var loaded by remember { mutableStateOf<List<QueryLogEntry>>(emptyList()) }
+    var busy by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+    var browsingOlder by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    fun fetch(older: Boolean) {
+        if (busy) return
+        busy = true
+        if (older) browsingOlder = true
+        scope.launch {
+            try {
+                val next = viewModel.loadQueryLogPage(if (older) page?.nextOffset ?: 0 else 0,
+                    300, if (older) page?.cursor else null)
+                loaded = if (older) loaded + next.entries else next.entries
+                page = next
+                failed = false
+                if (!older) browsingOlder = false
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                failed = true
+            } finally { busy = false }
+        }
+    }
+    LaunchedEffect(stats?.totalRequests) { if (!browsingOlder) fetch(false) }
+    val entries = if (page == null) stats?.queryLog.orEmpty() else loaded
     val shown = if (filter == FILTER_ALL) entries else entries.filter { it.action == filter }
-
-    /*
-     * /internal-stats 只带最新 400 条（保持状态体积不变）；更早的明细由服务端的
-     * /internal-qlog 分页取回（服务端保留最近 10000 条）。offset 从"最新"往回数，
-     * 因此翻页期间新请求到达不会让已翻过的内容漂移；起点取 entries.size，既不重复
-     * 也已经把最新那 400 条算进去了。
-     */
-    var older by remember { mutableStateOf<List<QueryLogEntry>>(emptyList()) }
-    var olderTotal by remember { mutableIntStateOf(0) }
-    var loadingOlder by remember { mutableStateOf(false) }
-    var olderHasMore by remember { mutableStateOf(true) }
-    val shownOlder = if (filter == FILTER_ALL) older else older.filter { it.action == filter }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.compose_logs_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.compose_back),
-                        )
-                    }
-                },
-                actions = {
-                    /* Share the current list as CSV. There was no way to get the
-                       log off the phone at all - the Windows dashboard has an
-                       export, the app had nothing. */
-                    IconButton(
-                        /* 导出当前筛选下的两段：最新一页 + 用户已经加载出来的历史 */
-                        onClick = { shareQueryLogCsv(context, shown + shownOlder) },
-                        enabled = shown.isNotEmpty() || shownOlder.isNotEmpty(),
-                    ) {
-                        Icon(
-                            Icons.Outlined.Share,
-                            contentDescription = stringResource(R.string.compose_logs_export),
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize(),
-        ) {
-            /* Scroll the filters on narrow screens and with large system fonts.
-             * Keeping every chip in a fixed Row clipped the last choices. */
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = filter == FILTER_ALL,
-                    onClick = { filter = FILTER_ALL },
-                    label = { Text(stringResource(R.string.compose_logs_filter_all)) },
-                )
-                FilterChip(
-                    selected = filter == ACTION_BLOCK,
-                    onClick = { filter = ACTION_BLOCK },
-                    label = { Text(stringResource(R.string.compose_stats_recent_action_blocked)) },
-                )
-                FilterChip(
-                    selected = filter == ACTION_ALLOW,
-                    onClick = { filter = ACTION_ALLOW },
-                    label = { Text(stringResource(R.string.compose_stats_recent_action_allowed)) },
-                )
-                FilterChip(
-                    selected = filter == ACTION_PROXY,
-                    onClick = { filter = ACTION_PROXY },
-                    label = { Text(stringResource(R.string.compose_stats_recent_action_proxied)) },
-                )
-            }
-            /* Always show the loaded record count; do not suggest that a filter
-             * includes records which haven't been downloaded yet. */
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stringResource(R.string.compose_logs_hint),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = "${shown.size + shownOlder.size} / ${if (olderTotal > 0) olderTotal else entries.size}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            /* 空状态要看两段：只判断 shown 会在最新一页没有命中筛选时把已加载的历史整段藏起来 */
-            // A filter may have no matches in the newest batch but many in
-            // older batches. Keep pagination reachable even in empty state.
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-            ) {
-                if (shown.isEmpty() && shownOlder.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 36.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                stringResource(R.string.compose_logs_empty),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+    Scaffold(topBar = {
+        TopAppBar(title = { Text(stringResource(R.string.compose_logs_title)) },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.compose_back)) } },
+            actions = {
+                IconButton(enabled = !busy, onClick = { fetch(false) }) { Icon(Icons.Outlined.Refresh,
+                    contentDescription = stringResource(R.string.compose_logs_refresh)) }
+                IconButton(enabled = shown.isNotEmpty(), onClick = { shareQueryLogCsv(context, shown) }) {
+                    Icon(Icons.Outlined.Share, contentDescription = stringResource(R.string.compose_logs_export))
                 }
-                items(shown) { entry -> QueryLogRow(entry) }
-                items(shownOlder) { entry -> QueryLogRow(entry) }
-                // Never hide the load-more action just because the current
-                // filtered subset is empty. Suppress it at the true end.
-                if (olderHasMore && (olderTotal == 0 || entries.size + older.size < olderTotal)) {
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                        ) {
-                            androidx.compose.material3.TextButton(
-                                enabled = !loadingOlder,
-                                onClick = {
-                                    loadingOlder = true
-                                    viewModel.loadQueryLogPage(
-                                        offset = entries.size + older.size,
-                                        limit = 300,
-                                    ) { page, total ->
-                                        val combined = older + page
-                                        older = combined
-                                        olderTotal = total
-                                        olderHasMore = page.isNotEmpty() &&
-                                            (total == 0 || entries.size + combined.size < total)
-                                        loadingOlder = false
-                                    }
-                                },
-                            ) {
-                                Text(
-                                    stringResource(
-                                        R.string.compose_logs_load_more,
-                                        entries.size + older.size,
-                                        if (olderTotal > 0) olderTotal else entries.size,
-                                    ),
-                                )
-                            }
-                        }
-                    }
+            }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow))
+    }) { padding ->
+        QueryLogContent(shown, entries.size, page?.total, filter, busy, failed,
+            page == null || page?.hasMore == true, { filter = it },
+            { fetch(page != null) }, { fetch(false) }, Modifier.padding(padding))
+    }
+}
+
+@Composable
+internal fun QueryLogContent(
+    shown: List<QueryLogEntry>, loaded: Int, total: Int?, filter: Int, busy: Boolean,
+    failed: Boolean, hasMore: Boolean, onFilter: (Int) -> Unit, onMore: () -> Unit,
+    onRefresh: () -> Unit, modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxSize()) {
+        Text(stringResource(R.string.compose_logs_scope), modifier = Modifier.padding(16.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for ((value, label) in listOf(FILTER_ALL to R.string.compose_logs_filter_all,
+                ACTION_BLOCK to R.string.compose_stats_recent_action_blocked,
+                ACTION_ALLOW to R.string.compose_stats_recent_action_allowed,
+                ACTION_PROXY to R.string.compose_stats_recent_action_proxied)) {
+                FilterChip(selected = filter == value, onClick = { onFilter(value) }, label = { Text(stringResource(label)) })
+            }
+        }
+        Text(stringResource(R.string.compose_logs_loaded_count, shown.size, loaded, total ?: loaded),
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.labelSmall)
+        if (failed) {
+            Text(stringResource(R.string.compose_logs_read_failed), Modifier.padding(horizontal = 16.dp),
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            TextButton(enabled = !busy, onClick = onRefresh) { Text(stringResource(R.string.compose_logs_refresh)) }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+            if (shown.isEmpty()) item { Text(stringResource(R.string.compose_logs_empty), Modifier.padding(vertical = 24.dp)) }
+            items(shown) { entry -> QueryLogRow(entry) }
+            if (hasMore && !failed) item {
+                TextButton(enabled = !busy, onClick = onMore, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(if (busy) R.string.compose_rules_loading else R.string.compose_logs_more))
                 }
             }
         }
