@@ -21,7 +21,7 @@ typedef unsigned int uid_t;
 #define QLOG_JSON_MAX 49152
 static int s_last_type = -1, s_last_mode;
 static void req_host_of(struct mg_http_message *hm, char *out, size_t cap) {
-    struct mg_str *header = hm ? mg_http_get_header(hm, "Host") : NULL;
+    const struct mg_str *header = hm ? mg_http_get_header(hm, "Host") : NULL;
     (void)request_host_parse(header ? header->buf : NULL, header ? header->len : 0, out, cap);
 }
 static void json_safe_copy(char *out, size_t cap, const char *host) {
@@ -258,10 +258,11 @@ static void invalid_clock(const char *directory) {
 static void host_authorities(void) {
     qlog_clear();
     const char *requests[] = {
-        "GET /private?credential=secret HTTP/1.0\r\nHost: [::1]:8443\r\n\r\n",
+        "GET /private?credential=secret HTTP/1.0\r\nHost: [2001:db8::1]:8443\r\n\r\n",
         "GET /private/secret HTTP/1.0\r\n\r\n"
     };
-    const char *expected[] = {"::1", "(unknown host)"};
+    /* Documentation-only authority parsed in memory; no network request. */
+    const char *expected[] = {"2001:db8::1", "(unknown host)"};
     for (size_t i = 0; i < sizeof(requests)/sizeof(requests[0]); i++) {
         struct mg_http_message request;
         assert(mg_http_parse(requests[i], strlen(requests[i]), &request) > 0);

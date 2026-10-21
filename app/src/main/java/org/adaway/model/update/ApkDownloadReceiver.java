@@ -73,61 +73,65 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
 
     private void verifyDownload(Context context, long id, boolean interactive) {
         if (!UpdateModel.pendingDownloadAllowed(context, id)) return;
-        DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
-        if (downloadManager == null) {
-            Timber.w("DownloadManager missing while verifying APK update");
-            return;
-        }
-        try (android.database.Cursor cursor = downloadManager.query(
-                new DownloadManager.Query().setFilterById(id))) {
-            if (cursor == null || !cursor.moveToFirst()) {
-                Timber.w("APK download %s not found", id);
-                return;
-            }
-            int index = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
-            if (index < 0 || cursor.getInt(index) != DownloadManager.STATUS_SUCCESSFUL) {
-                Timber.w("APK download %s is not complete", id);
-                return;
-            }
-        } catch (Exception exception) {
-            Timber.w(exception, "Unable to inspect downloaded update");
-            return;
-        }
-        Uri apkUri = downloadManager.getUriForDownloadedFile(id);
-        if (apkUri == null) {
-            Timber.w("Failed to download id: %s.", id);
-            return;
-        }
+        Uri apkUri = completedDownloadUri(context, id);
+        if (apkUri == null) return;
         final File copy;
         try { copy = File.createTempFile("downloaded-update-" + id + "-", ".apk", context.getCacheDir()); }
         catch (java.io.IOException exception) { Timber.w(exception, "Cannot stage downloaded APK"); return; }
         int problem = verify(context, apkUri, copy);
         Handler main = new Handler(Looper.getMainLooper());
         if (problem == 0) {
-            main.post(() -> {
-                if (!UpdateModel.pendingDownloadAllowed(context, id)) {
-                    discard(copy); return;
-                }
-                boolean foreground = androidx.lifecycle.ProcessLifecycleOwner.get().getLifecycle()
-                        .getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED);
-                if (interactive || foreground) {
-                    UpdateModel.clearVerifiedCopiesExcept(context, id, copy);
-                    Uri verified = androidx.core.content.FileProvider.getUriForFile(context,
-                            context.getPackageName() + ".fileprovider", copy);
-                    installApk(context, verified);
-                } else {
-                    // The foreground continuation verifies again. Do not retain
-                    // a multi-megabyte cache copy only to show a notification.
-                    discard(copy);
-                    org.adaway.helper.NotificationHelper.showUpdateApplicationNotification(context);
-                }
-            });
+            main.post(() -> continueVerifiedUpdate(context, id, copy, interactive));
         } else {
             String reason = context.getString(problem);
             Timber.w("Refusing downloaded update: %s.", reason);
             main.post(() -> Toast.makeText(context,
                     context.getString(R.string.update_verify_failed, reason),
                     Toast.LENGTH_LONG).show());
+        }
+    }
+
+    /** The broadcast is a wake-up hint; provider-owned state is authoritative. */
+    private static Uri completedDownloadUri(Context context, long id) {
+        DownloadManager downloadManager = context.getSystemService(DownloadManager.class);
+        if (downloadManager == null) {
+            Timber.w("DownloadManager missing while verifying APK update");
+            return null;
+        }
+        try (android.database.Cursor cursor = downloadManager.query(
+                new DownloadManager.Query().setFilterById(id))) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                Timber.w("APK download %s not found", id);
+                return null;
+            }
+            int index = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (index < 0 || cursor.getInt(index) != DownloadManager.STATUS_SUCCESSFUL) {
+                Timber.w("APK download %s is not complete", id);
+                return null;
+            }
+            return downloadManager.getUriForDownloadedFile(id);
+        } catch (Exception exception) {
+            Timber.w(exception, "Unable to inspect downloaded update");
+            return null;
+        }
+    }
+
+    private void continueVerifiedUpdate(Context context, long id, File copy, boolean interactive) {
+        if (!UpdateModel.pendingDownloadAllowed(context, id)) {
+            discard(copy);
+            return;
+        }
+        boolean foreground = androidx.lifecycle.ProcessLifecycleOwner.get().getLifecycle()
+                .getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED);
+        if (interactive || foreground) {
+            UpdateModel.clearVerifiedCopiesExcept(context, id, copy);
+            Uri verified = androidx.core.content.FileProvider.getUriForFile(context,
+                    context.getPackageName() + ".fileprovider", copy);
+            installApk(context, verified);
+        } else {
+            // Foreground continuation verifies again; notifications need no cached APK.
+            discard(copy);
+            org.adaway.helper.NotificationHelper.showUpdateApplicationNotification(context);
         }
     }
 
@@ -158,23 +162,37 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
     private int verify(Context context, Uri apkUri, File copy) {
         boolean keep = false;
         try {
-            try (InputStream input = context.getContentResolver().openInputStream(apkUri);
-                 FileOutputStream output = new FileOutputStream(copy)) {
-                if (input == null) {
-                    return R.string.update_verify_unreadable;
-                }
-                byte[] buffer = new byte[64 * 1024];
-                int read;
-                long copied = 0;
-                while ((read = input.read(buffer)) > 0) {
-                    copied += read;
-                    if (copied > 64L * 1024 * 1024) return R.string.update_verify_unreadable;
-                    output.write(buffer, 0, read);
-                }
-            } catch (Exception exception) {
-                Timber.w(exception, "Failed to read the downloaded APK.");
-                return R.string.update_verify_unreadable;
+            int problem = copyArchive(context, apkUri, copy);
+            if (problem != 0) return problem;
+            problem = verifyArchive(context, copy);
+            keep = problem == 0;
+            return problem;
+        } finally {
+            if (!keep) discard(copy);
+        }
+    }
+
+    private static int copyArchive(Context context, Uri apkUri, File copy) {
+        try (InputStream input = context.getContentResolver().openInputStream(apkUri);
+             FileOutputStream output = new FileOutputStream(copy)) {
+            if (input == null) return R.string.update_verify_unreadable;
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            long copied = 0;
+            while ((read = input.read(buffer)) > 0) {
+                copied += read;
+                if (copied > 64L * 1024 * 1024) return R.string.update_verify_unreadable;
+                output.write(buffer, 0, read);
             }
+            return 0;
+        } catch (Exception exception) {
+            Timber.w(exception, "Failed to read the downloaded APK.");
+            return R.string.update_verify_unreadable;
+        }
+    }
+
+    private static int verifyArchive(Context context, File copy) {
+        try {
             PackageManager packageManager = context.getPackageManager();
             PackageInfo archive = packageManager.getPackageArchiveInfo(copy.getAbsolutePath(), GET_SIGNING_CERTIFICATES);
             if (archive == null) {
@@ -202,20 +220,10 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
             if (archiveSigner == null || !archiveSigner.equals(signerDigest(current))) {
                 return R.string.update_verify_signature;
             }
-            keep = true;
             return 0;
         } catch (Exception exception) {
             Timber.w(exception, "Failed to verify the downloaded APK.");
             return R.string.update_verify_unparsable;
-        } finally {
-            //noinspection ResultOfMethodCallIgnored
-            /*
-             * 不能忽略 delete() 的返回值：清理失败时要留下痕迹，否则缓存里会一直留着
-             * 上次下载的 APK（占用空间，也可能让下一次校验看到过期文件）。
-             */
-            if (!keep && copy.exists() && !copy.delete()) {
-                android.util.Log.w("ApkDownloadReceiver", "Failed to delete cached update APK: " + copy);
-            }
         }
     }
 

@@ -91,23 +91,25 @@ internal class QueryLogBrowser(
         lastRefreshAt = nanoTime()
         job?.cancel()
         mutable.value = before.copy(busy = true, failed = false)
-        job = scope.launch {
-            try {
-                val page = load(if (older) before.page!!.nextOffset else 0, 300,
-                    if (older) before.page!!.cursor else null)
-                if (token == revision) {
-                    mutable.value = mutable.value.copy(
-                        entries = if (older) before.entries + page.entries else page.entries,
-                        page = page, busy = false, failed = false,
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                if (token == revision) mutable.value = mutable.value.copy(busy = false, failed = true)
-            } finally {
-                if (token == revision) mutable.value = mutable.value.copy(busy = false)
+        job = scope.launch { readPage(before, older, token) }
+    }
+
+    private suspend fun readPage(before: QueryLogBrowserState, older: Boolean, token: Long) {
+        try {
+            val page = load(if (older) before.page!!.nextOffset else 0, 300,
+                if (older) before.page!!.cursor else null)
+            if (token == revision) {
+                mutable.value = mutable.value.copy(
+                    entries = if (older) before.entries + page.entries else page.entries,
+                    page = page, busy = false, failed = false,
+                )
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            if (token == revision) mutable.value = mutable.value.copy(busy = false, failed = true)
+        } finally {
+            if (token == revision) mutable.value = mutable.value.copy(busy = false)
         }
     }
 }

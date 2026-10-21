@@ -13,20 +13,23 @@ static void bad(const char *header, size_t length) {
     CHECK(!strcmp(out,"(unknown host)"));
 }
 int main(void) {
+    /* RFC 5737/3849 documentation addresses: parsing only, never contacted. */
     good("example.test","example.test");
     good("Example.TEST.:8443","Example.TEST.");
-    good("127.0.0.1:80","127.0.0.1");
-    good("[::1]","::1");
-    good("[::1]:443","::1");
-    good("[fd6b:2a91:84f0::2]:8443","fd6b:2a91:84f0::2");
-    good(" [::ffff:127.0.0.1]:80\t","::ffff:127.0.0.1");
+    good("192.0.2.1:80","192.0.2.1");
+    good("[2001:db8::1]","2001:db8::1");
+    good("[2001:db8::1]:443","2001:db8::1");
+    good("[2001:db8:1::2]:8443","2001:db8:1::2");
+    good(" [::ffff:192.0.2.1]:80\t","::ffff:192.0.2.1");
     good("xn--fsqu00a.test:65535","xn--fsqu00a.test");
     good("例子.test:8080","例子.test");
-    const char *invalid[]={"","::1","[::1","[::1]suffix","[::1]:","[::1]:bad","example.test:",
+    good("é例😀.test:443","é例😀.test");
+    const char *invalid[]={"","2001:db8::1","[2001:db8::1","[2001:db8::1]suffix","[2001:db8::1]:","[2001:db8::1]:bad","example.test:",
         "example.test:0","example.test:65536","example.test:80:90","[example.test]",
         "user:password@example.test","https://example.test/private?token=secret","example.test/path",
         "example.test?token=secret","example.test#private","example.test\\secret","exa mple.test",
-        "example.test\r\nsecret","example.test\xff","\xc0\xaf.test","\xed\xa0\x80.test","bad\xc2\x85.test"};
+        "example.test\r\nsecret","example.test\xff","\xc0\xaf.test","\xed\xa0\x80.test","bad\xc2\x85.test",
+        "\xe4\xbe","\xe4\x41\x80.test","\xf0\x80\x80\x80.test","\xf4\x90\x80\x80.test","bad\x7f.test"};
     for(size_t i=0;i<sizeof(invalid)/sizeof(invalid[0]);i++) bad(invalid[i],strlen(invalid[i]));
     bad(NULL,0);
     const char embedded[]="example.test\0hidden"; bad(embedded,sizeof(embedded)-1);

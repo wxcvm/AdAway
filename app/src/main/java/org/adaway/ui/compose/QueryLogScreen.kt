@@ -95,15 +95,7 @@ internal fun QueryLogContent(
                 OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(),
                     label = { Text(stringResource(R.string.compose_logs_search)) }, singleLine = true,
                     supportingText = { Text(stringResource(R.string.compose_logs_search_scope)) })
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for ((value, label) in listOf(FILTER_ALL to R.string.compose_logs_filter_all,
-                        ACTION_BLOCK to R.string.compose_stats_recent_action_blocked,
-                        ACTION_ALLOW to R.string.compose_logs_local_exemption,
-                        ACTION_PROXY to R.string.compose_stats_recent_action_proxied)) {
-                        FilterChip(selected = filter == value, onClick = { onFilter(value) }, label = { Text(stringResource(label)) })
-                    }
-                }
+                QueryLogFilters(filter, onFilter)
                 if (uid != null) InputChip(selected = true, onClick = { onUid(null) },
                     label = { Text(stringResource(R.string.compose_logs_uid_filter, uid)) })
                 Text(stringResource(R.string.compose_logs_loaded_count, shown.size, loaded, total ?: loaded),
@@ -130,6 +122,19 @@ internal fun QueryLogContent(
     selected?.let { entry -> QueryLogDetailsDialog(entry, { selected = null }, {
         onUid(entry.uid); selected = null
     }) }
+}
+
+@Composable
+private fun QueryLogFilters(filter: Int, onFilter: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((value, label) in listOf(FILTER_ALL to R.string.compose_logs_filter_all,
+            ACTION_BLOCK to R.string.compose_stats_recent_action_blocked,
+            ACTION_ALLOW to R.string.compose_logs_local_exemption,
+            ACTION_PROXY to R.string.compose_stats_recent_action_proxied)) {
+            FilterChip(selected = filter == value, onClick = { onFilter(value) }, label = { Text(stringResource(label)) })
+        }
+    }
 }
 
 private const val ACTION_PROXY = 0

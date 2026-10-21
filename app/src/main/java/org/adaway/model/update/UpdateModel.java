@@ -111,8 +111,13 @@ public class UpdateModel {
         if (id < 0) return;
         java.io.File[] copies = context.getCacheDir().listFiles((dir, name) ->
                 name.startsWith("downloaded-update-" + id + "-") && name.endsWith(".apk"));
-        if (copies != null) for (java.io.File copy : copies)
-            if (!copy.equals(keep) && !copy.delete()) Timber.w("Cannot remove completed update cache file");
+        if (copies != null) {
+            for (java.io.File copy : copies) {
+                if (!copy.equals(keep) && !copy.delete()) {
+                    Timber.w("Cannot remove completed update cache file");
+                }
+            }
+        }
     }
 
     private final Context context;

@@ -20,27 +20,32 @@ data class QueryLogPage(
             require(array.length() <= 1000 && json.getInt("returned") == array.length() &&
                 next == offset + array.length() && next <= total)
             val entries = (0 until array.length()).map { index ->
-                val row = array.getJSONObject(index)
-                QueryLogEntry(row.getLong("ts"), row.optInt("uid", -1), row.getInt("action"),
-                    row.optInt("type", -1), row.optInt("mode", 0), row.getString("host")).also {
-                    // The persisted record reserves unsigned type/mode codes.
-                    // Unknown legacy codes are displayable, never guessed as a policy.
-                    require(it.ts >= 0 && it.uid >= -1 && it.action in 0..2 &&
-                        it.type in -1..65534 && it.mode in 0..255)
-                    require(it.host.isNotEmpty() && it.host.toByteArray(Charsets.UTF_8).size <= 191 &&
-                        it.host.none { c -> c < ' ' || c in '\u007f'..'\u009f' })
-                    var index = 0
-                    while (index < it.host.length) {
-                        val character = it.host[index++]
-                        if (character.isHighSurrogate()) {
-                            require(index < it.host.length && it.host[index++].isLowSurrogate())
-                        } else require(!character.isLowSurrogate())
-                    }
-                }
+                parseEntry(array.getJSONObject(index))
             }
             val more = json.getBoolean("hasMore")
             require(more == (next < total) && (!more || entries.isNotEmpty()))
             return QueryLogPage(entries, total, next, more, cursor)
+        }
+
+        private fun parseEntry(row: JSONObject): QueryLogEntry =
+            QueryLogEntry(row.getLong("ts"), row.optInt("uid", -1), row.getInt("action"),
+                row.optInt("type", -1), row.optInt("mode", 0), row.getString("host")).also {
+                // Unknown persisted policy codes remain inspectable, never guessed.
+                require(it.ts >= 0 && it.uid >= -1 && it.action in 0..2 &&
+                    it.type in -1..65534 && it.mode in 0..255)
+                require(it.host.isNotEmpty() && it.host.toByteArray(Charsets.UTF_8).size <= 191 &&
+                    it.host.none { c -> c < ' ' || c in '\u007f'..'\u009f' })
+                validateSurrogates(it.host)
+            }
+
+        private fun validateSurrogates(host: String) {
+            var index = 0
+            while (index < host.length) {
+                val character = host[index++]
+                if (character.isHighSurrogate()) {
+                    require(index < host.length && host[index++].isLowSurrogate())
+                } else require(!character.isLowSurrogate())
+            }
         }
     }
 }
