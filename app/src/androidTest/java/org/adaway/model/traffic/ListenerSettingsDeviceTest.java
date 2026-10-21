@@ -18,6 +18,24 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ListenerSettingsDeviceTest {
+    @Test public void delayedColdStartWaitsForRealBothFamilyListeners() throws Exception {
+        for (String ip : new String[]{"127.0.0.1", "::1"}) {
+            InetAddress address = InetAddress.getByName(ip);
+            try (ServerSocket listener = new ServerSocket()) {
+                long start = android.os.SystemClock.elapsedRealtime();
+                assertTrue("Cold listener timed out for " + ip, org.adaway.util.ListenerStartupWait.await(() -> {
+                    if (android.os.SystemClock.elapsedRealtime() - start < 1300) return false;
+                    try {
+                        if (!listener.isBound()) listener.bind(new java.net.InetSocketAddress(address, 0));
+                        try (java.net.Socket client = new java.net.Socket()) {
+                            client.connect(new java.net.InetSocketAddress(address, listener.getLocalPort()), 100);
+                            return true;
+                        }
+                    } catch (java.io.IOException error) { return false; }
+                }, 3500));
+            }
+        }
+    }
     @Test public void startupCreationPreferencePreservesLegacyOwnershipAndExplicitDisable() {
         Context application = ApplicationProvider.getApplicationContext();
         android.content.SharedPreferences prefs = application.getSharedPreferences("listener-startup-fixture", Context.MODE_PRIVATE);

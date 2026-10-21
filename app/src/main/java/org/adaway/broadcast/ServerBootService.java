@@ -64,6 +64,7 @@ public class ServerBootService extends Service {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private volatile boolean finished;
+    private boolean started;
     private long deadline;
 
     /**
@@ -99,7 +100,9 @@ public class ServerBootService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        deadline = System.currentTimeMillis() + BUDGET_MS;
+        if (started) return START_NOT_STICKY;
+        started = true;
+        deadline = android.os.SystemClock.elapsedRealtime() + BUDGET_MS;
         handler.post(poll);
         // Bounded work: a restarted copy would just repeat an attempt that is
         // already covered by the receiver's WorkManager fallback.
@@ -114,6 +117,7 @@ public class ServerBootService extends Service {
 
     @Override
     public void onDestroy() {
+        finished = true;
         handler.removeCallbacks(poll);
         super.onDestroy();
     }
@@ -128,26 +132,27 @@ public class ServerBootService extends Service {
             if (finished) {
                 return;
             }
-            if (WebServerUtils.isWebServerReachable(ServerBootService.this)) {
-                finish("前台服务已确认服务器运行", true);
-                return;
-            }
-            if (System.currentTimeMillis() > deadline) {
+            if (android.os.SystemClock.elapsedRealtime() > deadline) {
                 finish("前台服务超时：root 未就绪或启动失败（详见开机脚本日志/后台任务）", false);
                 return;
             }
             new Thread(() -> {
                 try {
+                    // Socket I/O belongs here, never on the main-thread Handler callback.
+                    if (WebServerUtils.isWebServerReachable(ServerBootService.this)) {
+                        handler.post(() -> finish("前台服务已确认服务器运行", true));
+                        return;
+                    }
                     if (ShellUtils.isRootAvailable()) {
                         Timber.i("boot service: root is ready, starting the web server");
-                        WebServerUtils.startWebServer(getApplicationContext());
+                        WebServerUtils.ensureWebServer(getApplicationContext());
                     } else {
                         Timber.d("boot service: root not ready yet, retrying");
                     }
                 } catch (Throwable throwable) {
                     Timber.w(throwable, "boot service: start attempt failed");
                 }
-                handler.postDelayed(poll, POLL_MS);
+                if (!finished) handler.postDelayed(poll, POLL_MS);
             }, "adblock-boot-service").start();
         }
     };

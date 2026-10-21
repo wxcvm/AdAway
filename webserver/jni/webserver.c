@@ -4696,14 +4696,20 @@ int main(int argc, char *argv[]) {
      */
     bool ipv6_ok = true;
     if (http_url6[0] && !mg_http_listen(&mgr, http_url6, fn, &s)) {
+        if (s.listener_pair.explicit_pair) {
+            LOG_FATAL("Requested HTTP IPv6 listener failed (%s); check the local address and port. Server stopped.", http_url6);
+            mg_mgr_free(&mgr); return EXIT_FAILURE;
+        }
         LOG_WARN("HTTP IPv6 bind failed (%s) — continuing with IPv4 only.", http_url6);
         ipv6_ok = false;
-        if (s.listener_pair.explicit_pair) { mg_mgr_free(&mgr); return EXIT_FAILURE; }
     }
     if (https_url6[0] && !mg_http_listen(&mgr, https_url6, fn, &s)) {
+        if (s.listener_pair.explicit_pair) {
+            LOG_FATAL("Requested HTTPS IPv6 listener failed (%s); check the local address and port. Server stopped.", https_url6);
+            mg_mgr_free(&mgr); return EXIT_FAILURE;
+        }
         LOG_WARN("HTTPS IPv6 bind failed (%s) — continuing with IPv4 only.", https_url6);
         ipv6_ok = false;
-        if (s.listener_pair.explicit_pair) { mg_mgr_free(&mgr); return EXIT_FAILURE; }
     }
 
     load_block_cfg(s.resource_dir);
