@@ -14,6 +14,8 @@ Windows 网络中心提供“测试双栈转发与恢复”。用户点击后才
 
 读取 TUN 的报文先进行固定地址、端口及内容校验，再消耗 200 ms 诊断预算。不支持的控制报文、损坏报文和无效 DNS 问题直接丢弃，不能挤掉有效探测；合法探测的限流和工作队列上限保持不变。失败诊断只记录 session、计数和本机传输异常，不记录报文载荷、订阅 URL 或用户访问域名。
 
+停止的验收同时要求描述符关闭和系统VPN网络记录撤销。ConnectivityService异步发布移除；仅见底层默认网络保持原值，不能证明专用VPN已移除。下一轮启动前必须在有界等待内确认系统没有VPN记录，冲突检查继续拒绝未知或其他VPN，不能放宽所有权检查来绕过此时序。
+
 库选择：复用平台 DatagramSocket / VpnService.protect 与 Winsock / BCrypt；本阶段没有新增加通用用户态 TCP/IP 栈或驱动依赖。
 
 参考：[Android VpnService.Builder](https://developer.android.com/reference/android/net/VpnService.Builder)、[IPv6 benchmark prefix](https://www.rfc-editor.org/rfc/rfc8219.html)、[IPv6 UDP checksum](https://www.rfc-editor.org/rfc/rfc8200.html)、[Winsock 非阻塞 I/O](https://learn.microsoft.com/en-us/windows/win32/winsock/nonblocking-i-o-2)。

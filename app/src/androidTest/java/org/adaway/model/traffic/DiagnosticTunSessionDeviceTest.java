@@ -33,6 +33,16 @@ public class DiagnosticTunSessionDeviceTest {
         while (DiagnosticVpnService.isActive()!=expected && System.nanoTime()<deadline) Thread.sleep(25);
         assertEquals("Diagnostic service did not reach requested state",expected,DiagnosticVpnService.isActive());
     }
+    private static void assertSystemVpnReleased(Context app) throws Exception {
+        // Closing the descriptor precedes ConnectivityService's asynchronous network removal.
+        // The underlying default network never changed for our host routes, so equality with
+        // getActiveNetwork() alone cannot prove that stop completed.
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (AndroidVpnObserver.read(app, false) != TrafficModePolicy.VpnOwner.NONE
+                && System.nanoTime() < deadline) Thread.sleep(10);
+        assertEquals("Stopped VPN network still registered", TrafficModePolicy.VpnOwner.NONE,
+                AndroidVpnObserver.read(app, false));
+    }
     private static boolean hasRoute(LinkProperties link,String address,int prefix) throws Exception {
         InetAddress target=InetAddress.getByName(address);
         return link.getRoutes().stream().anyMatch(route->route.getDestination().getAddress().equals(target)
@@ -78,7 +88,10 @@ public class DiagnosticTunSessionDeviceTest {
                 assertTrue("IPv6 cycle="+cycle+" "+DiagnosticVpnService.diagnosticState(),ipv6);
                 assertTrue(DiagnosticVpnService.getPacketCount()>=2);
                 assertEquals("Both family responses must be counted",2,DiagnosticVpnService.getRelayCount());
-            } finally { DiagnosticVpnService.stop(app);active(false); }
+            } finally {
+                DiagnosticVpnService.stop(app);active(false);
+                assertSystemVpnReleased(app);
+            }
             long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while (!underlying.equals(manager.getActiveNetwork()) && System.nanoTime()<deadline) Thread.sleep(25);
             assertEquals(underlying,manager.getActiveNetwork());
