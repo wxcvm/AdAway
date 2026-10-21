@@ -20,6 +20,7 @@ public class DiagnosticTcpSessionTest {
                 int code;
                 if(parts[0].equals("greeting"))code=DiagnosticSocks5.greetingCode(packet);
                 else if(parts[0].equals("auth"))code=DiagnosticSocks5.authenticationCode(packet,token);
+                else if(parts[0].startsWith("reply"))code=DiagnosticSocks5.replyCode(packet,parts[0].equals("reply6"));
                 else code=DiagnosticSocks5.requestCode(packet,parts[0].equals("connect6"));
                 assertEquals(line,Integer.parseInt(parts[2]),code);count++;
             }

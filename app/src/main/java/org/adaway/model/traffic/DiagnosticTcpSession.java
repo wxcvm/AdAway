@@ -117,11 +117,11 @@ public final class DiagnosticTcpSession implements AutoCloseable {
     }
     private boolean request(Socket client) throws IOException {
         byte[] header=read(client,4);
-        if (header[3]!=1 && header[3]!=4) { write(client,DiagnosticSocks5.reply(8));return false; }
+        if (header[3]!=1 && header[3]!=4) { write(client,DiagnosticSocks5.reply(8,ipv6,0));return false; }
         int tail=header[3]==1?6:18;
         byte[] bytes=Arrays.copyOf(header,4+tail);System.arraycopy(read(client,tail),0,bytes,4,tail);
         int code=DiagnosticSocks5.requestCode(bytes,ipv6);
-        if (code!=0) write(client,DiagnosticSocks5.reply(code));return code==0;
+        if (code!=0) write(client,DiagnosticSocks5.reply(code,ipv6,0));return code==0;
     }
     private void serveProxy(ServerSocket listener, InetAddress address, int backendPort) {
         Socket client=null;
@@ -132,7 +132,7 @@ public final class DiagnosticTcpSession implements AutoCloseable {
                 serverFailure.compareAndSet(null,Status.REJECTED);return;
             }
             Socket upstream=connect(address,backendPort,true);
-            write(client,DiagnosticSocks5.reply(0));
+            write(client,DiagnosticSocks5.reply(0,ipv6,upstream.getLocalPort()));
             byte[] body=untilEof(client);
             if (body.length==0) throw new ProtocolFailure();
             write(upstream,body);upstream.shutdownOutput();
@@ -194,7 +194,7 @@ public final class DiagnosticTcpSession implements AutoCloseable {
         byte[] request=DiagnosticSocks5.request(ipv6);
         if (fault==Fault.BAD_TARGET) request[request.length-1]^=1;
         write(client,request);
-        if (!Arrays.equals(read(client,10),DiagnosticSocks5.reply(0))) throw new ProtocolFailure();
+        if (DiagnosticSocks5.replyCode(read(client,ipv6?22:10),ipv6)!=0) throw new ProtocolFailure();
         stage=4;
         byte[] bytes=new byte[fault==Fault.OVERSIZE?DiagnosticSocks5.LIMIT+1:DiagnosticSocks5.LIMIT];
         new SecureRandom().nextBytes(bytes);write(client,bytes);client.shutdownOutput();

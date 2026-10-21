@@ -27,7 +27,7 @@ fi
 adb shell appops set com.wxcvm.Adaway ACTIVATE_VPN allow
 ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 \
   -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 \
-  -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.model.source.SourceLoaderRoomTest,org.adaway.model.source.RuleBrowserRoomTest,org.adaway.model.traffic.DiagnosticIpv6TransportDeviceTest,org.adaway.model.traffic.ListenerSettingsDeviceTest,org.adaway.util.ListenerTlsDeviceTest,org.adaway.model.update.UpdateChannelDeviceTest,org.adaway.model.traffic.DiagnosticDualStackDeviceTest,org.adaway.model.traffic.DiagnosticTunSessionDeviceTest
+  -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.model.source.SourceLoaderRoomTest,org.adaway.model.source.RuleBrowserRoomTest,org.adaway.model.traffic.DiagnosticIpv6TransportDeviceTest,org.adaway.model.traffic.ListenerSettingsDeviceTest,org.adaway.util.ListenerTlsDeviceTest,org.adaway.model.update.UpdateChannelDeviceTest,org.adaway.model.traffic.DiagnosticDualStackDeviceTest,org.adaway.model.traffic.DiagnosticTunSessionDeviceTest,org.adaway.model.traffic.DiagnosticTcpDeviceTest
 cleanup
 trap - EXIT
 if adb shell "ip -6 address show to $alias/128 dev lo" | grep -q 'inet6 '; then

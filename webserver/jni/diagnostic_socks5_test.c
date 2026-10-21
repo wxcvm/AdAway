@@ -18,6 +18,7 @@ int main(int argc,char **argv) {
         uint8_t packet[512];size_t size=decode(hex,packet,sizeof(packet));unsigned actual;
         if(strcmp(line,"greeting")==0)actual=ds_greeting(packet,size);
         else if(strcmp(line,"auth")==0)actual=ds_auth(packet,size,token);
+        else if(strncmp(line,"reply",5)==0)actual=ds_reply_code(packet,size,strcmp(line,"reply6")==0?6u:4u);
         else actual=ds_connect(packet,size,strcmp(line,"connect6")==0?6u:4u);
         assert(actual==(unsigned)strtoul(answer,NULL,10));count++;
     }

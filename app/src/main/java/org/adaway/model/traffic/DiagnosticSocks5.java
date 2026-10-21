@@ -32,5 +32,15 @@ public final class DiagnosticSocks5 {
         if (bytes[3]!=1 && bytes[3]!=4) return 8;
         return Arrays.equals(bytes,request(ipv6)) ? 0 : 2;
     }
-    public static byte[] reply(int code) { return new byte[]{5,(byte)code,0,1,127,0,0,1,0,0}; }
+    public static byte[] reply(int code, boolean ipv6, int port) {
+        byte[] out=new byte[ipv6?22:10];out[0]=5;out[1]=(byte)code;out[3]=(byte)(ipv6?4:1);
+        if(ipv6)out[19]=1;else{out[4]=127;out[7]=1;}
+        out[out.length-2]=(byte)(port>>>8);out[out.length-1]=(byte)port;return out;
+    }
+    public static int replyCode(byte[] bytes, boolean ipv6) {
+        if(bytes==null || bytes.length!=(ipv6?22:10) || bytes[0]!=5 || bytes[2]!=0)return 1;
+        if(bytes[1]!=0)return bytes[1]&255;
+        int port=((bytes[bytes.length-2]&255)<<8)|(bytes[bytes.length-1]&255);
+        return port>0 && Arrays.equals(bytes,reply(0,ipv6,port))?0:1;
+    }
 }

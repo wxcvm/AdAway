@@ -18,6 +18,13 @@ for family in (4,6):
     for at,value,answer in ((0,4,1),(1,2,7),(1,3,7),(2,1,1),(3,3,8),(4,8,2),(len(p)-1,0,2)):
         q=bytearray(p);q[at]=value;add(kind,q,answer)
     add(kind,p[:-1],2);add(kind,p+b'\0',2)
+    reply=bytearray([5,0,0,1 if family==4 else 4])+bytearray(4 if family==4 else 16)+bytearray((32123).to_bytes(2,'big'))
+    if family==4: reply[4]=127;reply[7]=1
+    else: reply[19]=1
+    add(f'reply{family}',reply,0)
+    for at,value in ((0,4),(2,1),(4,8)):
+        q=reply.copy();q[at]=value;add(f'reply{family}',q,1)
+    q=reply.copy();q[-2:]=b'\0\0';add(f'reply{family}',q,1)
 out=root/'app/src/test/resources/tcp/socks5_vectors.tsv';out.parent.mkdir(parents=True,exist_ok=True)
 out.write_text('# kind\tframe hex\tRFC result code\n'+'\n'.join('\t'.join(r) for r in rows)+'\n',encoding='ascii')
 print(f'{len(rows)} SOCKS5 vectors generated')

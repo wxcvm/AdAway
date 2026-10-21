@@ -31,4 +31,15 @@ static inline unsigned ds_connect(const uint8_t *p,size_t n,unsigned family) {
     uint8_t expected[22];size_t wanted=ds_request(family,expected);
     return n==wanted && memcmp(p,expected,n)==0?0u:2u;
 }
+static inline size_t ds_reply(unsigned family,unsigned code,unsigned port,uint8_t out[22]) {
+    size_t n=family==6?22u:10u;memset(out,0,22);out[0]=5;out[1]=(uint8_t)code;out[3]=(uint8_t)(family==6?4:1);
+    if(family==6)out[19]=1;else{out[4]=127;out[7]=1;}
+    out[n-2]=(uint8_t)(port>>8);out[n-1]=(uint8_t)port;return n;
+}
+static inline unsigned ds_reply_code(const uint8_t *p,size_t n,unsigned family) {
+    if(!p || n!=(family==6?22u:10u) || p[0]!=5 || p[2]!=0)return 1;
+    if(p[1])return p[1];
+    unsigned port=((unsigned)p[n-2]<<8)|p[n-1];uint8_t expected[22];ds_reply(family,0,port,expected);
+    return port && memcmp(p,expected,n)==0?0u:1u;
+}
 #endif

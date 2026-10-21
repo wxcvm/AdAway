@@ -8,6 +8,8 @@ on:
       - 'app/src/test/java/org/adaway/model/traffic/**'
       - 'app/src/test/resources/transport/**'
       - 'tools/transport-vectors.py'
+      - 'app/src/test/resources/tcp/**'
+      - 'tools/tcp-vectors.py'
       - 'app/src/main/java/org/adaway/model/source/**'
       - 'app/src/test/java/org/adaway/model/source/**'
       - 'app/src/androidTest/java/org/adaway/model/source/**'
@@ -106,6 +108,12 @@ jobs:
           "$RUNNER_TEMP/transport-packets" app/src/test/resources/transport/packet_vectors.tsv
           cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/diagnostic_udp_packet_test.c -o "$RUNNER_TEMP/transport-packets-asan"
           "$RUNNER_TEMP/transport-packets-asan" app/src/test/resources/transport/packet_vectors.tsv
+          python3 tools/tcp-vectors.py
+          git diff --exit-code -- app/src/test/resources/tcp/socks5_vectors.tsv
+          cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/diagnostic_socks5_test.c -o "$RUNNER_TEMP/tcp-contract"
+          "$RUNNER_TEMP/tcp-contract" app/src/test/resources/tcp/socks5_vectors.tsv
+          cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/diagnostic_socks5_test.c -o "$RUNNER_TEMP/tcp-contract-asan"
+          "$RUNNER_TEMP/tcp-contract-asan" app/src/test/resources/tcp/socks5_vectors.tsv
           cc -std=c11 -O2 -D_GNU_SOURCE -DMG_ENABLE_IPV6=1 -DMG_IPV6_V6ONLY=1 -DMG_TLS=0 webserver/jni/listener_mongoose_test.c webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/listener-mongoose"
           "$RUNNER_TEMP/listener-mongoose"
           cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/listener_pair_test.c -o "$RUNNER_TEMP/listener-pair"

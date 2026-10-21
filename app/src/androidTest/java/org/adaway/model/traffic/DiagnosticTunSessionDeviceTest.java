@@ -88,6 +88,12 @@ public class DiagnosticTunSessionDeviceTest {
                 assertTrue("IPv6 cycle="+cycle+" "+DiagnosticVpnService.diagnosticState(),ipv6);
                 assertTrue(DiagnosticVpnService.getPacketCount()>=2);
                 assertEquals("Both family responses must be counted",2,DiagnosticVpnService.getRelayCount());
+                for(boolean family:new boolean[]{false,true}) {
+                    DiagnosticTcpSession.Result tcp=DiagnosticVpnService.probeTcp(family);
+                    assertEquals(tcp.toString(),DiagnosticTcpSession.Status.OK,tcp.status);
+                    assertEquals(1,tcp.protectedSockets);assertEquals(6,tcp.opened);
+                    assertTrue(tcp.cleanup);assertEquals(tcp.opened,tcp.closed);
+                }
             } finally {
                 DiagnosticVpnService.stop(app);active(false);
                 assertSystemVpnReleased(app);
