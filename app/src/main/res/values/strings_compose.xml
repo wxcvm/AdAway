@@ -573,4 +573,14 @@
     <string name="compose_tun_diagnostic_test_relay_family">Test %1$s protected UDP relay</string>
     <string name="compose_tun_diagnostic_relay_family_ok">%1$s protected UDP relay passed</string>
     <string name="compose_tun_diagnostic_relay_family_failed">%1$s relay failed or the diagnostic session stopped</string>
+    <string name="compose_tcp_description">Loopback TCP/SOCKS5 backend diagnostic. Checks authentication, protected connections, half-close replies and cleanup. TCP packets from TUN are not handled yet.</string>
+    <string name="compose_tcp_test">Test %1$s TCP/SOCKS5 backend</string>
+    <string name="compose_tcp_result">%1$s TCP: %2$s · %3$d ms · sockets closed %4$d/%5$d · protected %6$d · stage %7$d</string>
+    <string name="compose_tcp_ok">Passed</string>
+    <string name="compose_tcp_cancelled">Cancelled</string>
+    <string name="compose_tcp_timeout">Timed out</string>
+    <string name="compose_tcp_rejected">Rejected response or protocol</string>
+    <string name="compose_tcp_cleanup_failed">Cleanup failed</string>
+    <string name="compose_tcp_unavailable">Session not ready or busy</string>
+    <string name="compose_tcp_failed">Connection or protection failed</string>
 </resources>

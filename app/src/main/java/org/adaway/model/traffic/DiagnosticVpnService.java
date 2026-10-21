@@ -69,6 +69,7 @@ public final class DiagnosticVpnService extends VpnService {
             android.os.Process.myUid(), SystemClock::elapsedRealtime);
     private static final AtomicReference<DiagnosticVpnService> RUNNING = new AtomicReference<>();
     private DiagnosticLocalRelay localRelay;
+    private final AtomicReference<DiagnosticTcpSession> tcpSession = new AtomicReference<>();
     private final DiagnosticPacketAdmission admission = new DiagnosticPacketAdmission();
     private final AtomicLong relayCount = new AtomicLong();
     private final AtomicLong dnsDiagnosticCount = new AtomicLong();
@@ -81,6 +82,21 @@ public final class DiagnosticVpnService extends VpnService {
     public static long getSessionId() {
         DiagnosticVpnService service = RUNNING.get();
         return service == null || service.stopped ? 0 : service.sessionId;
+    }
+
+    /** Explicit UI-only loopback TCP diagnostic; it does not feed TCP packets into TUN. */
+    public static DiagnosticTcpSession.Result probeTcp(boolean ipv6) {
+        DiagnosticVpnService service=RUNNING.get();
+        if(service==null || getReadySessionId()!=service.sessionId) return DiagnosticTcpSession.Result.unavailable(ipv6);
+        DiagnosticTcpSession session=new DiagnosticTcpSession(ipv6,service::protect);
+        if(!service.tcpSession.compareAndSet(null,session)) { session.close();return DiagnosticTcpSession.Result.unavailable(ipv6); }
+        try {
+            if(service.stopped || RUNNING.get()!=service) return DiagnosticTcpSession.Result.unavailable(ipv6);
+            DiagnosticTcpSession.Result result=session.run();
+            if(result.status==DiagnosticTcpSession.Status.OK && getReadySessionId()!=service.sessionId)
+                return new DiagnosticTcpSession.Result(DiagnosticTcpSession.Status.CANCELLED,result);
+            return result;
+        } finally { session.close();service.tcpSession.compareAndSet(session,null); }
     }
 
     public static long getReadySessionId() {
@@ -289,6 +305,8 @@ public final class DiagnosticVpnService extends VpnService {
     }
 
     private void cancelTransports() {
+        DiagnosticTcpSession tcp=tcpSession.getAndSet(null);
+        if(tcp!=null)tcp.close();
         sockets.close();
         if (localRelay != null) localRelay.close();
     }

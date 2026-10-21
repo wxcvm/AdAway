@@ -573,4 +573,14 @@
     <string name="compose_tun_diagnostic_test_relay_family">测试 %1$s 受保护 UDP 转发</string>
     <string name="compose_tun_diagnostic_relay_family_ok">%1$s 受保护 UDP 转发通过</string>
     <string name="compose_tun_diagnostic_relay_family_failed">%1$s 转发失败或测试会话已停止</string>
+    <string name="compose_tcp_description">TCP／SOCKS5 本机后端诊断：验证会话凭据、受保护连接、半关闭回包与清理。尚未处理 TUN 中的 TCP 报文。</string>
+    <string name="compose_tcp_test">测试 %1$s TCP／SOCKS5 后端</string>
+    <string name="compose_tcp_result">%1$s TCP：%2$s · %3$d ms · 套接字已关闭 %4$d/%5$d · 已保护 %6$d · 阶段 %7$d</string>
+    <string name="compose_tcp_ok">通过</string>
+    <string name="compose_tcp_cancelled">已取消</string>
+    <string name="compose_tcp_timeout">超时</string>
+    <string name="compose_tcp_rejected">响应或协议被拒绝</string>
+    <string name="compose_tcp_cleanup_failed">清理失败</string>
+    <string name="compose_tcp_unavailable">会话未就绪或忙碌</string>
+    <string name="compose_tcp_failed">连接或保护失败</string>
 </resources>

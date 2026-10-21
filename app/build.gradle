@@ -30,6 +30,7 @@ android {
     namespace 'org.adaway'
 
     sourceSets.androidTest.assets.srcDir('src/test/resources/transport')
+    sourceSets.androidTest.assets.srcDir('src/test/resources/tcp')
 
     defaultConfig {
         applicationId 'com.wxcvm.Adaway'

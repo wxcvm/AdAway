@@ -144,6 +144,16 @@ internal fun DiagnosticRelayActions(active: Boolean, busy: Boolean, onProbe: (Bo
     }
 }
 
+@Composable
+internal fun DiagnosticTcpActions(active: Boolean, busy: Boolean, onProbe: (Boolean) -> Unit) {
+    Column {
+        Text(stringResource(R.string.compose_tcp_description), style = MaterialTheme.typography.bodySmall)
+        for (ipv6 in listOf(false, true)) TextButton(enabled = active && !busy, onClick = { onProbe(ipv6) }) {
+            Text(stringResource(R.string.compose_tcp_test, if (ipv6) "IPv6" else "IPv4"))
+        }
+    }
+}
+
 private const val PREFS_GENERAL = "compose_general"
 
 /** Whether stats should track uid. Default true. */
@@ -351,6 +361,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     var tunRefreshKey by remember { mutableIntStateOf(0) }
     var tunStatus by remember { mutableStateOf("") }
     var tunRelayBusy by remember { mutableStateOf(false) }
+    var tunTcpBusy by remember { mutableStateOf(false) }
     var tunDnsBusy by remember { mutableStateOf(false) }
     val tunScope = rememberCoroutineScope()
     val diagnosticConsentLauncher = rememberLauncherForActivityResult(
@@ -580,6 +591,28 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                         ) { Text(stringResource(R.string.compose_tun_diagnostic_stop)) }
                         TextButton(onClick = { tunRefreshKey++ }) {
                             Text(stringResource(R.string.compose_settings_hijack_refresh_status))
+                        }
+                    }
+                    DiagnosticTcpActions(diagnosticActive, tunTcpBusy) { ipv6 ->
+                        tunTcpBusy = true
+                        tunScope.launch {
+                            try {
+                                val result = withContext(Dispatchers.IO) {
+                                    org.adaway.model.traffic.DiagnosticVpnService.probeTcp(ipv6)
+                                }
+                                val status = when (result.status) {
+                                    org.adaway.model.traffic.DiagnosticTcpSession.Status.OK -> R.string.compose_tcp_ok
+                                    org.adaway.model.traffic.DiagnosticTcpSession.Status.CANCELLED -> R.string.compose_tcp_cancelled
+                                    org.adaway.model.traffic.DiagnosticTcpSession.Status.TIMEOUT -> R.string.compose_tcp_timeout
+                                    org.adaway.model.traffic.DiagnosticTcpSession.Status.REJECTED -> R.string.compose_tcp_rejected
+                                    org.adaway.model.traffic.DiagnosticTcpSession.Status.CLEANUP_FAILED -> R.string.compose_tcp_cleanup_failed
+                                    org.adaway.model.traffic.DiagnosticTcpSession.Status.UNAVAILABLE -> R.string.compose_tcp_unavailable
+                                    else -> R.string.compose_tcp_failed
+                                }
+                                tunStatus = context.getString(R.string.compose_tcp_result, if (ipv6) "IPv6" else "IPv4",
+                                    context.getString(status), result.elapsedMs, result.closed, result.opened, result.protectedSockets, result.stage)
+                                tunRefreshKey++
+                            } finally { tunTcpBusy = false }
                         }
                     }
                     TextButton(
