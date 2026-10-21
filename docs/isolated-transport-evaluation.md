@@ -1,4 +1,6 @@
-# M2 preparation: isolated userspace transport evaluation
+# Historical fixed-commit userspace transport evaluation
+
+This describes the old b1ce1e6 Linux/NDK harness, not current upstream or the latest app. For current TCP backend integration and remaining boundaries see [tcp-backend.md](tcp-backend.md). The old PR dependency and missing-platform statements below are historical.
 
 Depends on draft Android M1 PR #46. This is an evaluation harness, not an
 Android capture implementation or a selected production dependency. It does
