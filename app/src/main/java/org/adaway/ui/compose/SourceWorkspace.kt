@@ -37,6 +37,7 @@ internal fun RulesWorkspaceSelector(sources: Boolean, onSelect: (Boolean) -> Uni
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 internal fun SourcesWorkspace(sources: List<HostsSource>, enabled: Boolean,
     onToggle: (HostsSource, Boolean) -> Unit, onAddClick: () -> Unit,
     onDelete: (HostsSource) -> Unit, onInspect: (HostsSource) -> Unit) {
@@ -63,9 +64,13 @@ internal fun SourcesWorkspace(sources: List<HostsSource>, enabled: Boolean,
                     Text(if (source.localModificationDate == null) stringResource(R.string.compose_rules_source_not_imported)
                         else stringResource(R.string.compose_rules_source_size, source.size),
                         style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { onInspect(source) }) { Text(stringResource(R.string.compose_rules_source_details)) }
-                        TextButton(enabled = enabled, onClick = { onDelete(source) }) { Text(stringResource(R.string.compose_rules_delete_source)) }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedButton(onClick = { onInspect(source) }) {
+                            Text(stringResource(R.string.compose_rules_source_details), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                        }
+                        TextButton(enabled = enabled, onClick = { onDelete(source) }) {
+                            Text(stringResource(R.string.compose_rules_delete_source), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }

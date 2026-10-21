@@ -52,6 +52,28 @@ class RuleWorkflowUiTest {
         saveScreenshot("source-workspace-readable-name")
     }
 
+    @Test fun sourceActionsRemainAccessibleOnNarrowLargeText() {
+        val source = org.adaway.db.entity.HostsSource().apply {
+            id = 2; label = "Example rules"; url = "https://example.test/hosts"
+        }
+        var inspected = 0
+        var deleted = 0
+        compose.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, 1.6f)) {
+                AdAwayTheme(dynamicColor = false) { Surface {
+                    Column(Modifier.widthIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                        SourcesWorkspace(listOf(source), true, { _, _ -> }, {}, { deleted++ }, { inspected++ })
+                    }
+                } }
+            }
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_details)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_delete_source)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1, inspected); assertEquals(1, deleted) }
+        saveScreenshot("source-actions-narrow-large-text")
+    }
+
     @Test fun failedRenameRetainsInputAndIsRetryable() {
         val source = org.adaway.db.entity.HostsSource().apply {
             id = 2; label = "raw"; url = "https://raw.githubusercontent.com/owner/rules/main/hosts"
