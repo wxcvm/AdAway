@@ -51,7 +51,7 @@ internal fun RuleDetailsDialog(
                             RuleDetailField(R.string.compose_rules_detail_address, item.redirection, monospace = true)
                         }
                         val label = if (item.sourceId == 1) stringResource(R.string.compose_rules_personal)
-                            else row.sourceLabel.orEmpty().ifBlank {
+                            else org.adaway.model.source.SourcePresentation.name(row.sourceLabel, row.sourceUrl.orEmpty()).ifBlank {
                                 stringResource(R.string.compose_rules_detail_source_id, item.sourceId)
                             }
                         RuleDetailField(R.string.compose_rules_detail_source, label)

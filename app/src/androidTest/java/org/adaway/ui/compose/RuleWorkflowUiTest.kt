@@ -32,6 +32,58 @@ import org.junit.Test
 class RuleWorkflowUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun sourceCardsRepairRawNamesAndHideCredentials() {
+        val source = org.adaway.db.entity.HostsSource().apply {
+            id = 2; label = "raw"
+            url = "https://user:password@raw.githubusercontent.com/owner/rules/main/hosts?token=secret"
+        }
+        var inspected = false
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { Surface {
+                SourcesWorkspace(listOf(source), true, { _, _ -> }, {}, {}, { inspected = true })
+            } }
+        }
+        compose.onNodeWithText("owner/rules · hosts").assertIsDisplayed()
+        compose.onNodeWithText("password", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("token=", substring = true).assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_details)).performClick()
+        compose.runOnIdle { assertTrue(inspected) }
+        saveScreenshot("source-workspace-readable-name")
+    }
+
+    @Test fun failedRenameRetainsInputAndIsRetryable() {
+        val source = org.adaway.db.entity.HostsSource().apply {
+            id = 2; label = "raw"; url = "https://raw.githubusercontent.com/owner/rules/main/hosts"
+        }
+        val failed = androidx.compose.runtime.mutableStateOf(false)
+        var attempts = 0
+        compose.setContent { AdAwayTheme(dynamicColor = false) {
+            SourceDetailsDialog(source, false, failed.value, {}, { attempts++; failed.value = true })
+        } }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_name)).performTextReplacement("My rules")
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_save_name)).performClick()
+        compose.onNodeWithText("My rules").assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_rename_failed)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_rules_source_save_name)).performClick()
+        compose.runOnIdle { assertEquals(2, attempts) }
+        saveScreenshot("source-rename-failed-input-retained", dialog = true)
+    }
+
+    @Test fun emptyLogFilterStillAllowsHistoryAndReadFailureAllowsRefresh() {
+        val failed = androidx.compose.runtime.mutableStateOf(false)
+        var older = 0
+        var refreshed = 0
+        compose.setContent { AdAwayTheme(dynamicColor = false) { Surface {
+            QueryLogContent(emptyList(), 300, 600, 1, false, failed.value, true, {}, { older++ }, { refreshed++ })
+        } } }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_more)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1, older); failed.value = true }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_read_failed)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_refresh)).performClick()
+        compose.runOnIdle { assertEquals(1, refreshed) }
+        saveScreenshot("logs-page-failure-refresh")
+    }
+
     @Test fun startupAddressCreationIsAnUnsavedExplicitOption() {
         val previous = org.adaway.util.WebServerUtils.isListenerAutoCreate(compose.activity)
         compose.setContent {

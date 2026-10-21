@@ -69,10 +69,10 @@ jobs:
       - name: Stats field contract guard
         run: |
           set -euo pipefail
-          code_keys=$( { grep -oE '\\"[a-z][a-z0-9_]{2,40}\\"[[:space:]]*:' webserver/jni/webserver.c | sed -E 's/.*\\"([a-z0-9_]+)\\".*/\1/'
-                         grep -oE '(^|[^\\])"[a-z][a-z0-9_]{2,40}"[[:space:]]*:' webserver/jni/webserver.c | sed -E 's/.*"([a-z0-9_]+)".*/\1/' ; } | sort -u)
+          code_keys=$( { grep -h -oE '\\"[a-z][a-z0-9_]{2,40}\\"[[:space:]]*:' webserver/jni/webserver.c webserver/jni/query_log_store.inc | sed -E 's/.*\\"([a-z0-9_]+)\\".*/\1/'
+                         grep -h -oE '(^|[^\\])"[a-z][a-z0-9_]{2,40}"[[:space:]]*:' webserver/jni/webserver.c webserver/jni/query_log_store.inc | sed -E 's/.*"([a-z0-9_]+)".*/\1/' ; } | sort -u)
           doc_keys=$(sed -n '/^## 2\./,/^## 3\./p' docs/windows-core-contract.md \
-                      | grep -oE '`[a-z][a-z0-9_]{2,40}`' | tr -d '`' | sort -u)
+                      | grep -h -oE '`[a-z][a-z0-9_]{2,40}`' | tr -d '`' | sort -u)
           echo "代码输出的字段（$(echo "$code_keys" | wc -l) 个）"; echo "$code_keys"
           echo "契约记录的字段（$(echo "$doc_keys" | wc -l) 个）"; echo "$doc_keys"
           if ! diff -u <(echo "$doc_keys") <(echo "$code_keys"); then

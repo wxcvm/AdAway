@@ -46,6 +46,17 @@ public final class WebServerStats {
         return getJson("/internal-qlog?offset=" + off + "&limit=" + lim);
     }
 
+    @Nullable
+    public static JSONObject getQueryLogPage(int offset, int limit, String generation, String anchor) {
+        String cursor = "";
+        if (generation != null) {
+            if (!generation.matches("[0-9a-f]{32}") || anchor == null || !anchor.matches("[0-9]{1,20}"))
+                throw new IllegalArgumentException("Invalid query log cursor");
+            cursor = "&generation=" + generation + "&anchor=" + anchor;
+        }
+        return getJson("/internal-qlog?offset=" + Math.max(0, offset) + "&limit=" + Math.min(1000, Math.max(1, limit)) + cursor);
+    }
+
     /**
      * 按路径取 JSON：nc 子进程（保留 v4-mapped socket 的真实 uid）优先，OkHttp 兜底。
      * getStats()/getQueryLogPage() 都走这里，保证两者取数栈完全一致。

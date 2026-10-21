@@ -168,6 +168,8 @@ public class HostsSource {
 
         if (id != that.id) return false;
         if (enabled != that.enabled) return false;
+        if (allowEnabled != that.allowEnabled || redirectEnabled != that.redirectEnabled || size != that.size) return false;
+        if (!Objects.equals(label, that.label) || !Objects.equals(entityTag, that.entityTag)) return false;
         if (!url.equals(that.url)) return false;
         if (!Objects.equals(localModificationDate, that.localModificationDate))
             return false;
@@ -178,6 +180,11 @@ public class HostsSource {
     @Override
     public int hashCode() {
         int result = id;
+        result = 31 * result + Objects.hashCode(label);
+        result = 31 * result + Objects.hashCode(entityTag);
+        result = 31 * result + size;
+        result = 31 * result + (allowEnabled ? 1 : 0);
+        result = 31 * result + (redirectEnabled ? 1 : 0);
         result = 31 * result + url.hashCode();
         result = 31 * result + (enabled ? 1 : 0);
         result = 31 * result + (localModificationDate != null ? localModificationDate.hashCode() : 0);

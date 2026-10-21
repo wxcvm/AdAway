@@ -83,6 +83,10 @@ Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `tr
 - `sni_cache_hits`
 - `sni_certs_issued`
 - `sni_hit_rate`
+- `anchor`
+- `generation`
+- `returned`
+- `snapshot_ts`
 - `stats`
 - `tls_fail`
 - `tls_failures`

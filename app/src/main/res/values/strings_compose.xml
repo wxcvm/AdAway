@@ -583,4 +583,21 @@
     <string name="compose_tcp_cleanup_failed">Cleanup failed</string>
     <string name="compose_tcp_unavailable">Session not ready or busy</string>
     <string name="compose_tcp_failed">Connection or protection failed</string>
+    <string name="compose_logs_refresh">Refresh logs</string>
+    <string name="compose_logs_scope">Web server request logs, not all DNS queries. Live memory keeps up to 10,000 entries; restart restores up to 4,096. History stays fixed while paging; refresh to see new requests.</string>
+    <string name="compose_logs_loaded_count">Showing %1$d · loaded %2$d / %3$d available</string>
+    <string name="compose_logs_read_failed">Details could not be read or the history expired. Existing rows are retained; refresh to retry. Summary rows may contain only the latest 400 entries.</string>
+    <string name="compose_logs_more">Load older requests</string>
+    <string name="compose_rules_browser">Rule details</string>
+    <string name="compose_rules_tools">More rule tools</string>
+    <string name="compose_rules_sources_overview">%1$d enabled / %2$d sources</string>
+    <string name="compose_rules_source_details">Details and name</string>
+    <string name="compose_rules_source_not_imported">Not imported yet · update sources to fetch rules</string>
+    <string name="compose_rules_source_name">Source name</string>
+    <string name="compose_rules_source_name_optional">Name (optional; derived from address)</string>
+    <string name="compose_rules_source_rename_hint">Changing the name updates this device only. It does not change the subscription address or download rules. Query parameters and credentials are hidden here.</string>
+    <string name="compose_rules_source_rename_failed">Could not save the name. Your input is retained; try again.</string>
+    <string name="compose_rules_source_save_name">Save name</string>
+    <string name="compose_stats_scope">These counters describe requests received by the Web response server. Hosts or DNS blocks that do not reach this server are not counted.</string>
+    <string name="compose_stats_snapshot_unknown">Saved snapshot · timestamp unavailable</string>
 </resources>

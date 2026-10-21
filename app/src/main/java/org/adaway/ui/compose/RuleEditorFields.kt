@@ -20,6 +20,7 @@ import org.adaway.db.entity.ListType
 internal fun SourceEditorFields(
     fileSource: Boolean, url: String, fileName: String, busy: Boolean, failed: Boolean,
     onTypeChange: (Boolean) -> Unit, onUrlChange: (String) -> Unit, onPickFile: () -> Unit,
+    name: String = "", onNameChange: (String) -> Unit = {},
 ) {
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -44,6 +45,8 @@ internal fun SourceEditorFields(
         }
         if (failed) Text(stringResource(R.string.compose_rules_add_source_failed),
             color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(value = name, onValueChange = onNameChange, enabled = !busy, singleLine = true,
+            label = { Text(stringResource(R.string.compose_rules_source_name_optional)) }, modifier = Modifier.fillMaxWidth())
     }
 }
 
