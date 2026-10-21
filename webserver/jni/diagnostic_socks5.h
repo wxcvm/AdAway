@@ -10,7 +10,7 @@ static inline size_t ds_request(unsigned family,uint8_t out[22]) {
     memset(out,0,22);out[0]=5;out[1]=1;out[3]=(uint8_t)(family==6?4:1);
     if(family==6){out[4]=0x20;out[5]=1;out[7]=2;out[19]=1;}
     else{out[4]=198;out[5]=18;out[7]=1;}
-    out[n-2]=(uint8_t)(DS_PORT>>8);out[n-1]=(uint8_t)DS_PORT;return n;
+    out[n-2]=(uint8_t)(DS_PORT>>8);out[n-1]=(uint8_t)(DS_PORT & 255u);return n;
 }
 static inline unsigned ds_greeting(const uint8_t *p,size_t n) {
     return p && n==3 && p[0]==5 && p[1]==1 && p[2]==2?0u:255u;

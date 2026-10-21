@@ -94,8 +94,7 @@ public final class DiagnosticVpnService extends VpnService {
             if(service.stopped || RUNNING.get()!=service) return DiagnosticTcpSession.Result.unavailable(ipv6);
             DiagnosticTcpSession.Result result=session.run();
             if(result.status==DiagnosticTcpSession.Status.OK && getReadySessionId()!=service.sessionId)
-                return new DiagnosticTcpSession.Result(DiagnosticTcpSession.Status.CANCELLED,result.family,result.opened,
-                        result.closed,result.protectedSockets,result.elapsedMs,result.cleanup,result.stage);
+                return new DiagnosticTcpSession.Result(DiagnosticTcpSession.Status.CANCELLED,result);
             return result;
         } finally { session.close();service.tcpSession.compareAndSet(session,null); }
     }

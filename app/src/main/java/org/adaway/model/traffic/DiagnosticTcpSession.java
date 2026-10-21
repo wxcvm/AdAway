@@ -38,6 +38,10 @@ public final class DiagnosticTcpSession implements AutoCloseable {
         private Result(boolean ipv6) {
             status=Status.UNAVAILABLE;family=ipv6?6:4;opened=0;closed=0;protectedSockets=0;elapsedMs=0;cleanup=true;stage=0;
         }
+        Result(Status status, Result previous) {
+            this.status=status;family=previous.family;opened=previous.opened;closed=previous.closed;
+            protectedSockets=previous.protectedSockets;elapsedMs=previous.elapsedMs;cleanup=previous.cleanup;stage=previous.stage;
+        }
         static Result unavailable(boolean ipv6) { return new Result(ipv6); }
         @Override public String toString() { return status+" stage="+stage+" sockets="+closed+"/"+opened+" protected="+protectedSockets; }
     }
