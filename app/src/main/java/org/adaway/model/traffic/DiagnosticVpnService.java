@@ -69,7 +69,7 @@ public final class DiagnosticVpnService extends VpnService {
             android.os.Process.myUid(), SystemClock::elapsedRealtime);
     private static final AtomicReference<DiagnosticVpnService> RUNNING = new AtomicReference<>();
     private DiagnosticLocalRelay localRelay;
-    private volatile long lastRelayAtMs = -200L;
+    private final DiagnosticPacketAdmission admission = new DiagnosticPacketAdmission();
     private final AtomicLong relayCount = new AtomicLong();
     private final AtomicLong dnsDiagnosticCount = new AtomicLong();
 
@@ -103,6 +103,14 @@ public final class DiagnosticVpnService extends VpnService {
     public static long getRelayCount() {
         DiagnosticVpnService service = RUNNING.get();
         return service == null ? 0 : service.relayCount.get();
+    }
+
+    static String diagnosticState() {
+        DiagnosticVpnService service = RUNNING.get();
+        return service == null ? "session=none" : "session=" + service.sessionId
+                + ", packets=" + service.packetCount.get() + ", replies=" + service.relayCount.get()
+                + ", " + service.admission.counts() + ", dropped="
+                + (service.pump == null ? 0 : service.pump.dropped());
     }
 
     public static long getDnsDiagnosticCount() {
@@ -210,7 +218,7 @@ public final class DiagnosticVpnService extends VpnService {
     private void writeResponse(byte[] response) throws IOException {
         if (stopped) return;
         writerOutput.write(response);
-        int header = (response[0] & 15) * 4;
+        int header = DiagnosticUdpEcho.ipv6(response, response.length) ? 40 : (response[0] & 15) * 4;
         int port = ((response[header] & 255) << 8) | (response[header + 1] & 255);
         if (port == DiagnosticUdpEcho.PORT) echoCount.incrementAndGet();
         else if (port == DiagnosticUdpRelay.PORT) relayCount.incrementAndGet();
@@ -246,15 +254,18 @@ public final class DiagnosticVpnService extends VpnService {
         packetCount.incrementAndGet();
         byte[] response = DiagnosticUdpEcho.reply(packet, length);
         if (response != null) { pump.respond(response); return; }
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastRelayAtMs < 200) return;
-        lastRelayAtMs = now;
-        pump.submit(packet, length);
+        if (admission.allow(packet, length, SystemClock.elapsedRealtime())) pump.submit(packet, length);
     }
 
     private byte[] processSlowPacket(byte[] packet) {
         byte[] response = DiagnosticUdpRelay.process(packet, packet.length,
-                payload -> localRelay.exchange(DiagnosticUdpEcho.ipv6(packet, packet.length), payload));
+                payload -> {
+                    try { return localRelay.exchange(DiagnosticUdpEcho.ipv6(packet, packet.length), payload); }
+                    catch (IOException exception) {
+                        Timber.w(exception, "Diagnostic local exchange failed: %s", diagnosticState());
+                        throw exception;
+                    }
+                });
         if (response != null || stopped) return response;
         return DiagnosticDnsRelay.process(packet, packet.length, dnsPermits,
                 android.os.Process.myUid(), question -> {

@@ -79,6 +79,8 @@ public final class DiagnosticTunProbe {
                     && addr.equals(reply.getAddress())
                     && Arrays.equals(expected, Arrays.copyOf(response, expected.length));
         } catch (IOException | RuntimeException exception) {
+            timber.log.Timber.w(exception, "Diagnostic relay failed (IPv6=%s): %s",
+                    ipv6, DiagnosticVpnService.diagnosticState());
             return false;
         }
     }

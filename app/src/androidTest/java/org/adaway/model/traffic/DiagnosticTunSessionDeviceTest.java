@@ -53,15 +53,18 @@ public class DiagnosticTunSessionDeviceTest {
         LinkProperties before=manager.getLinkProperties(underlying);assertNotNull(before);
         assertNull("CI did not grant consent to this disposable emulator",VpnService.prepare(app));
         long previous=0;
-        for (int cycle=0;cycle<3;cycle++) {
+        for (int cycle=0;cycle<6;cycle++) {
             try {
                 DiagnosticVpnService.start(app);active(true);
                 long generation=DiagnosticVpnService.getSessionId();assertTrue(generation>previous);previous=generation;
                 assertScopedNetwork(manager);
                 assertEquals(generation,DiagnosticVpnService.getReadySessionId());
-                Thread.sleep(225);assertTrue("Actual IPv4 TUN relay failed",DiagnosticTunProbe.relayRoundTrip(false));
-                Thread.sleep(225);assertTrue("Actual IPv6 TUN relay failed",DiagnosticTunProbe.relayRoundTrip(true));
+                Thread.sleep(225);boolean ipv4=DiagnosticTunProbe.relayRoundTrip(false);
+                assertTrue("IPv4 cycle="+cycle+" "+DiagnosticVpnService.diagnosticState(),ipv4);
+                Thread.sleep(225);boolean ipv6=DiagnosticTunProbe.relayRoundTrip(true);
+                assertTrue("IPv6 cycle="+cycle+" "+DiagnosticVpnService.diagnosticState(),ipv6);
                 assertTrue(DiagnosticVpnService.getPacketCount()>=2);
+                assertEquals("Both family responses must be counted",2,DiagnosticVpnService.getRelayCount());
             } finally { DiagnosticVpnService.stop(app);active(false); }
             long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while (!underlying.equals(manager.getActiveNetwork()) && System.nanoTime()<deadline) Thread.sleep(25);
