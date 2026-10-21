@@ -107,10 +107,12 @@ public final class DiagnosticVpnService extends VpnService {
 
     static String diagnosticState() {
         DiagnosticVpnService service = RUNNING.get();
-        return service == null ? "session=none" : "session=" + service.sessionId
+        if (service == null) return "session=none";
+        long dropped = service.pump == null ? 0 : service.pump.dropped();
+        return "session=" + service.sessionId
                 + ", packets=" + service.packetCount.get() + ", replies=" + service.relayCount.get()
                 + ", " + service.admission.counts() + ", dropped="
-                + (service.pump == null ? 0 : service.pump.dropped());
+                + dropped;
     }
 
     static long unsupportedPacketCount() {

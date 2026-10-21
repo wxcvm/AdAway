@@ -12,7 +12,8 @@ final class DiagnosticTunReadiness {
     private DiagnosticTunReadiness() { }
     private static boolean scoped(LinkProperties link) {
         if (link == null) return false;
-        boolean hasFour = false, hasSix = false;
+        boolean hasFour = false;
+        boolean hasSix = false;
         for (android.net.RouteInfo route : link.getRoutes()) {
             if (route.isDefaultRoute()) return false;
             if (android.os.Build.VERSION.SDK_INT >= 33
