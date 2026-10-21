@@ -39,7 +39,16 @@ static void finish_atomic_write(FILE *fp, const char *path, const char *tmp) {
 #endif
     assert(rename(tmp, path) == 0);
 }
+static bool test_clock_enabled;
+static time_t test_clock_value;
+static time_t query_log_test_time(time_t *output) {
+    time_t value = test_clock_enabled ? test_clock_value : time(NULL);
+    if (output) *output = value;
+    return value;
+}
+#define time query_log_test_time
 #include "query_log_store.inc"
+#undef time
 
 static void add(unsigned number) {
     char host[192];
@@ -207,6 +216,41 @@ static void metadata(const char *directory) {
     assert(remove(path) == 0);
 }
 
+static void invalid_clock(const char *directory) {
+    qlog_clear();
+    test_clock_enabled = true;
+    test_clock_value = 0;
+    add(1);
+    assert(s_qlog_count == 0 && s_qlog_sequence == 0);
+    test_clock_value = 1;
+    for (unsigned i = 1; i <= QLOG_MAX; i++) add(i);
+    uint32_t position = s_qlog_pos;
+    uint64_t sequence = s_qlog_sequence;
+    struct qlog_entry previous = s_qlog[position];
+    for (unsigned i = 0; i < 2; i++) {
+        test_clock_value = i == 0 ? 0 : (time_t)-1;
+        add(QLOG_MAX + 1);
+        assert(s_qlog_count == QLOG_MAX && s_qlog_pos == position && s_qlog_sequence == sequence);
+        assert(memcmp(&previous, &s_qlog[position], sizeof(previous)) == 0);
+    }
+    qlog_save(directory);
+    qlog_clear();
+    qlog_load(directory);
+    assert(s_qlog_count == QLOG_PERSIST_MAX);
+    newest_is(QLOG_MAX);
+    test_clock_value = 2;
+    add(QLOG_MAX + 2);
+    newest_is(QLOG_MAX + 2);
+    bool more = false;
+    struct mg_str body = reply("offset=0&limit=1", 200);
+    assert(mg_json_get_long(body, "$.returned", -1) == 1);
+    assert(mg_json_get_bool(body, "$.hasMore", &more) && more);
+    test_clock_enabled = false;
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/query_log.dat", directory);
+    assert(remove(path) == 0);
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2); /* Existing disposable directory supplied by the test runner. */
     mg_log_set(MG_LL_NONE);
@@ -214,6 +258,7 @@ int main(int argc, char **argv) {
     pages();
     page_boundaries();
     metadata(argv[1]);
+    invalid_clock(argv[1]);
     puts("PASS: production query log persistence, rollback, bounded pages, stable cursor, invalidation, parameters, page boundaries and metadata round trips");
     return 0;
 }

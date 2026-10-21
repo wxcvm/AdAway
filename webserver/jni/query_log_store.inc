@@ -26,9 +26,14 @@ static void qlog_clear(void) {
 }
 
 static void qlog_add(uid_t uid, int action, struct mg_http_message *hm) {
+    time_t observed = time(NULL);
+    /* Zero timestamps are the legacy empty-slot sentinel. Do not publish a
+       counted but unreadable row, or poison a previously valid disk snapshot,
+       while a cold-boot clock is unset or the clock read fails. */
+    if (observed <= 0) return;
     struct qlog_entry *e = &s_qlog[s_qlog_pos % QLOG_MAX];
     memset(e, 0, sizeof(*e));
-    e->ts = (uint64_t) time(NULL);
+    e->ts = (uint64_t) observed;
     e->uid = (uid == (uid_t) -1) ? 0xFFFFFFFFu : (uint32_t) uid;
     e->action = (uint8_t) action;
     /* "Why and how": a blocked row carries the policy type that matched and the

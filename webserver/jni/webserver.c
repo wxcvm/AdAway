@@ -2781,6 +2781,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
     }
 
     for (int i = 0; i < s_app_count && off < (int)sizeof(apps_json) - 400; i++) {
+        int app_start = off;
         int n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
             "%s{\"uid\":%d,\"connections\":%llu,\"requests\":%llu,"
             "\"blocked\":%llu,\"tls_hosts\":%llu,\"tls_ok\":%llu,\"tls_fail\":%llu,"
@@ -2794,20 +2795,30 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
             (unsigned long long)s_apps[i].tls_ok,
             (unsigned long long)s_apps[i].tls_fail,
             (unsigned)s_apps[i].tps);
-        if (n > 0) off += n;
+        if (n <= 0 || (size_t)n >= sizeof(apps_json) - (size_t)off) goto app_row_full;
+        off += n;
         for (int h = 0; h < APP_HOSTS_MAX; h++) {
             if (s_apps[i].top_hosts[h][0] == '\0') break;
+            char app_host_safe[128];
+            json_safe_copy(app_host_safe, sizeof(app_host_safe), s_apps[i].top_hosts[h]);
             int hn = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
                 "%s{\"h\":\"%s\",\"n\":%u}",
                 h ? "," : "",
-                s_apps[i].top_hosts[h],
+                app_host_safe,
                 (unsigned)s_apps[i].top_host_counts[h]);
-            if (hn > 0) off += hn;
+            if (hn <= 0 || (size_t)hn >= sizeof(apps_json) - (size_t)off) goto app_row_full;
+            off += hn;
         }
         n = snprintf(apps_json + off, sizeof(apps_json) - (size_t)off,
             "],\"pin_refused\":%s}",
             pin_uid_bypassed(s_apps[i].uid) ? "true" : "false");
-        if (n > 0) off += n;
+        if (n <= 0 || (size_t)n >= sizeof(apps_json) - (size_t)off) goto app_row_full;
+        off += n;
+        continue;
+app_row_full:
+        apps_json[app_start] = '\0';
+        off = app_start;
+        break;
     }
     /* static: a few KB that must never sit on the event-loop stack */
     static char qlog_json[QLOG_JSON_MAX];
@@ -2835,7 +2846,7 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
             w = snprintf(top_json + toff, sizeof(top_json) - (size_t) toff,
                          "%s{\"host\":\"%s\",\"count\":%lu}",
                          toff ? "," : "", safe, (unsigned long) sorted[i].count);
-            if (w <= 0 || toff + w >= (int) sizeof(top_json)) break;
+            if (w <= 0 || (size_t)w >= sizeof(top_json) - (size_t)toff) { top_json[toff] = '\0'; break; }
             toff += w;
         }
     }
@@ -2851,7 +2862,8 @@ static int build_stats_json(struct settings *s, char *out, size_t out_sz) {
         int n = snprintf(tls_json + off, sizeof(tls_json) - (size_t)off,
             "%s{\"uid\":%d,\"host\":\"%s\"}",
             off ? "," : "", (int)r->uid, host_safe);
-        if (n > 0) off += n;
+        if (n <= 0 || (size_t)n >= sizeof(tls_json) - (size_t)off) { tls_json[off] = '\0'; break; }
+        off += n;
     }
     char hist_json[4096] = "";
     buckets_to_json(hist_json, sizeof(hist_json),
