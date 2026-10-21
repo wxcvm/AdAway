@@ -100,7 +100,9 @@ jobs:
       - name: Run traffic mode regression tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --max-workers=2 -Pandroid.injected.build.abi=arm64-v8a
       - name: Test preview publication without network writes
-        run: python3 tools/test-preview-channel.py
+        run: |
+          python3 tools/test-preview-channel.py
+          python3 tools/test-artifact-cleanup.py
       - name: Test actual native loader and concurrent immutable publication
         run: |
           python3 tools/verify_webserver_apk_test.py
