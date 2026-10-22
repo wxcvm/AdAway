@@ -166,7 +166,8 @@ internal fun queryLogFamily(family: Int): String = when (family) {
 @Composable
 private fun QueryLogClassification(family: Int?, onFamily: (Int?) -> Unit, type: Int?, onType: (Int?) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (value in listOf(null, 4, 6, 0)) FilterChip(selected = family == value, onClick = { onFamily(value) },
+        for (value in listOf(null, 4, 6, 0)) FilterChip(modifier = Modifier.testTag("query-family-${value ?: "all"}"),
+            selected = family == value, onClick = { onFamily(value) },
             label = { Text(if (value == null) stringResource(R.string.compose_logs_family_all) else queryLogFamily(value)) })
     }
     var expanded by remember { mutableStateOf(false) }

@@ -121,13 +121,14 @@ class RuleWorkflowUiTest {
                 (type.value == null || type.value == it.type) }, 3, 3, -1, false, false, false, {}, {}, {},
                 family = family.value, onFamily = { family.value = it }, type = type.value, onType = { type.value = it })
         } } }
-        compose.onNode(hasText("IPv6") and hasClickAction()).performScrollTo().performClick()
+        compose.onNodeWithTag("query-family-6").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(6, family.value) }
         compose.onNodeWithText("v4-image.example").assertDoesNotExist()
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_type_all)).performScrollTo().performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.compose_stats_type_scripts)).performClick()
         compose.runOnIdle { assertEquals(1, type.value) }
-        compose.onNodeWithText("v6-script.example").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("query-log-list").performScrollToNode(hasText("v6-script.example"))
+        compose.onNodeWithText("v6-script.example").assertIsDisplayed()
         saveScreenshot("logs-ipv6-script-classification")
     }
 
@@ -166,14 +167,17 @@ class RuleWorkflowUiTest {
         compose.runOnIdle { assertTrue(!live.value) }
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_search)).performScrollTo().performTextInput("BLOCKED")
         compose.onNodeWithText("other.example").assertDoesNotExist()
-        compose.onNodeWithText("blocked.example").performScrollTo().performClick()
+        compose.onNodeWithTag("query-log-list").performScrollToNode(hasText("blocked.example"))
+        compose.onNodeWithText("blocked.example").performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_details)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_only_app)).assertDoesNotExist()
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_details_scope)).performScrollTo().assertIsDisplayed()
         saveScreenshot("logs-workbench-narrow-details", dialog = true)
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_close)).performClick()
+        compose.onNodeWithTag("query-log-list").performScrollToIndex(0)
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_search)).performScrollTo().performTextReplacement("absent")
-        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_no_match)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("query-log-list").performScrollToNode(hasText(compose.activity.getString(R.string.compose_logs_no_match)))
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_no_match)).assertIsDisplayed()
         saveScreenshot("logs-workbench-filter-empty")
     }
 
