@@ -105,7 +105,7 @@ public final class WebServerNet {
         int statusEnd = response.indexOf("\r\n");
         if (headerEnd < 0 || statusEnd < 0) return null;
         String status = response.substring(0, statusEnd);
-        if (!status.matches("HTTP/1\\.[01] 2[0-9]{2}( .*)?")) return null;
+        if (!status.matches("HTTP/1\\.[01] 2\\d{2}( .*)?")) return null;
         return response.substring(headerEnd + 4);
     }
 }

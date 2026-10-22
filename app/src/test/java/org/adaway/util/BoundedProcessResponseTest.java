@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
@@ -59,7 +60,7 @@ public class BoundedProcessResponseTest {
     public static class PipeFixture {
         public static void main(String[] args) throws Exception {
             while (System.in.read() != -1) { /* Wait for the request's EOF. */ }
-            if (args[0].equals("stall")) Thread.sleep(30_000);
+            if (args[0].equals("stall")) new CountDownLatch(1).await(30, TimeUnit.SECONDS);
             else if (args[0].equals("large")) {
                 System.out.write(new byte[2 * 1024 * 1024]);
             } else {

@@ -19,6 +19,7 @@ import timber.log.Timber;
  *     累积读取，避免截断导致 JSON 解析失败。
  */
 public final class WebServerStats {
+    private static final String SYSTEM_NC = "/system/bin/nc";
 
     private WebServerStats() {}
 
@@ -96,12 +97,12 @@ public final class WebServerStats {
         // 9 组合：3 种 nc 二进制 x 3 种宿主（::1 / v4-mapped / v4）
         String[][] attempts = {
             {"/system/bin/toybox", "nc", "::1"},
-            {"/system/bin/nc", null, "::1"},
+            {SYSTEM_NC, null, "::1"},
             {"nc", null, "::1"},
             {"/system/bin/toybox", "nc", "::ffff:127.0.0.1"},
             {"/system/bin/toybox", "nc", "127.0.0.1"},
-            {"/system/bin/nc", null, "::ffff:127.0.0.1"},
-            {"/system/bin/nc", null, "127.0.0.1"},
+            {SYSTEM_NC, null, "::ffff:127.0.0.1"},
+            {SYSTEM_NC, null, "127.0.0.1"},
             {"nc", null, "::ffff:127.0.0.1"},
             {"nc", null, "127.0.0.1"},
         };
@@ -110,13 +111,8 @@ public final class WebServerStats {
             long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()) - 1000;
             if (remaining <= 0) break;
             String response = transport.nc(a[0], a[1], a[2], port, request, Math.min(1000, remaining));
-            String json = WebServerNet.bodyFromResponse(response);
-            if (json == null) continue;
-            try {
-                return new JSONObject(json);
-            } catch (Exception e) {
-                Timber.w(e, "Failed to parse nc response from %s (%s)", a[2], path);
-            }
+            JSONObject parsed = parseNcResponse(response, a[2], path);
+            if (parsed != null) return parsed;
         }
         // Direct HTTP shares the same deadline; a stuck nc cannot prevent fallback forever.
         try {
@@ -130,5 +126,17 @@ public final class WebServerStats {
             Timber.w(e, "Failed to fetch %s (OkHttp)", path);
         }
         return null;
+    }
+
+    @Nullable
+    private static JSONObject parseNcResponse(String response, String host, String path) {
+        String json = WebServerNet.bodyFromResponse(response);
+        if (json == null) return null;
+        try {
+            return new JSONObject(json);
+        } catch (Exception error) {
+            Timber.w(error, "Failed to parse nc response from %s (%s)", host, path);
+            return null;
+        }
     }
 }

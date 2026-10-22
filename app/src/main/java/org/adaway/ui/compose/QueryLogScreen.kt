@@ -303,25 +303,7 @@ private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
             /* 同时给可读名与机器用的编码，两个受众都不吃亏 */
             out.write("time,result,type_code,type_name,mode_code,mode_name,uid,host,ip_family\n")
             entries.forEach { entry ->
-                val time = if (entry.ts in 1..Long.MAX_VALUE / 1000) timeFmt.format(Date(entry.ts * 1000L)) else ""
-                val result = when (entry.action) {
-                    ACTION_BLOCK -> "blocked"
-                    ACTION_ALLOW -> "local_exemption"
-                    else -> "forwarding_started"
-                }
-                out.write(
-                    listOf(
-                        time,
-                        result,
-                        if (entry.type >= 0) entry.type.toString() else "",
-                        csvTypeName(entry.type),
-                        entry.mode.toString(),
-                        csvModeName(entry.mode),
-                        if (entry.uid >= 0) entry.uid.toString() else "",
-                        entry.host,
-                        if (entry.family == 4 || entry.family == 6) "IPv${entry.family}" else "unknown",
-                    ).joinToString(",") { csvField(it) } + "\n",
-                )
+                out.write(queryLogCsvRow(entry, timeFmt))
             }
         }
         val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -345,6 +327,19 @@ private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
             Toast.LENGTH_LONG,
         ).show()
     }
+}
+
+private fun queryLogCsvRow(entry: QueryLogEntry, formatter: SimpleDateFormat): String {
+    val time = if (entry.ts in 1..Long.MAX_VALUE / 1000) formatter.format(Date(entry.ts * 1000L)) else ""
+    val result = when (entry.action) {
+        ACTION_BLOCK -> "blocked"
+        ACTION_ALLOW -> "local_exemption"
+        else -> "forwarding_started"
+    }
+    return listOf(time, result, if (entry.type >= 0) entry.type.toString() else "", csvTypeName(entry.type),
+        entry.mode.toString(), csvModeName(entry.mode), if (entry.uid >= 0) entry.uid.toString() else "", entry.host,
+        if (entry.family == 4 || entry.family == 6) "IPv${entry.family}" else "unknown")
+        .joinToString(",") { csvField(it) } + "\n"
 }
 
 /** CSV 里引号、逗号和换行都要转义，否则主机名带逗号就会错列。 */

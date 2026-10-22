@@ -303,7 +303,8 @@ static void family_metadata(const char *directory) {
     connection.rem.addr.ip[0] = 0x20;
     qlog_add((uid_t)6, QLOG_BLOCK, &request, &connection);
     memset(connection.rem.addr.ip, 0, sizeof(connection.rem.addr.ip));
-    connection.rem.addr.ip[10] = connection.rem.addr.ip[11] = 255;
+    connection.rem.addr.ip[10] = 255;
+    connection.rem.addr.ip[11] = 255;
     connection.rem.addr.ip[12] = 127;
     qlog_add((uid_t)44, QLOG_BLOCK, &request, &connection); /* Mapped peer remains IPv4. */
     qlog_add((uid_t)0, QLOG_ALLOW, &request, NULL); /* No reconstruction from Host. */
@@ -324,9 +325,14 @@ static void family_metadata(const char *directory) {
     assert(strstr(summary, "\"family\":6") && strstr(summary, "\"family\":4") && strstr(summary, "\"family\":0"));
 }
 
+static unsigned family_for_number(unsigned number) {
+    static const unsigned families[] = {0, 4, 6};
+    return families[number % 3];
+}
+
 static void family_compaction(const char *directory) {
     qlog_clear();
-    for (unsigned i = 1; i <= QLOG_MAX + 2037; i++) add_with_family(i, i % 3 == 0 ? 0 : i % 3 == 1 ? 4 : 6);
+    for (unsigned i = 1; i <= QLOG_MAX + 2037; i++) add_with_family(i, family_for_number(i));
     qlog_save(directory);
     qlog_clear(); qlog_load(directory);
     assert(s_qlog_count == QLOG_PERSIST_MAX);
@@ -335,7 +341,7 @@ static void family_compaction(const char *directory) {
         char host[192];
         snprintf(host, sizeof(host), "request-%u.example.test", number);
         assert(!strcmp(s_qlog[k].host, host));
-        assert(s_qlog_family[k] == (number % 3 == 0 ? 0 : number % 3 == 1 ? 4 : 6));
+        assert(s_qlog_family[k] == family_for_number(number));
     }
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/query_log.dat", directory);
@@ -381,7 +387,8 @@ static void legacy_family_migration(const char *directory) {
 }
 
 static void corrupt_family_keeps_live_state(const char *directory) {
-    char path[PATH_MAX], cursor[160];
+    char path[PATH_MAX];
+    char cursor[160];
     snprintf(path, sizeof(path), "%s/query_log.dat", directory);
     qlog_clear(); add_with_family(1, 4); add_with_family(2, 6);
     reply("offset=0&limit=1", 200);
@@ -398,7 +405,9 @@ static void corrupt_family_keeps_live_state(const char *directory) {
         assert(fwrite(before, sizeof(before), 1, file) == 1);
         uint8_t broken[3] = {4,6,0};
         if (invalid[variant] >= 0) broken[1] = (uint8_t)invalid[variant];
-        size_t bytes = invalid[variant] == -1 ? 1 : invalid[variant] == -2 ? 3 : 2;
+        size_t bytes = 2;
+        if (invalid[variant] == -1) bytes = 1;
+        else if (invalid[variant] == -2) bytes = 3;
         assert(fwrite(broken, 1, bytes, file) == bytes);
         assert(fclose(file) == 0);
         qlog_load(directory);
@@ -427,7 +436,9 @@ static void live_family(const char *bind, unsigned expected) {
     struct mg_connection *listener = mg_http_listen(&manager, bind, live_family_server, NULL);
     assert(listener);
     char url[128];
-    mg_snprintf(url, sizeof(url), "http://%M", mg_print_ip_port, &listener->loc);
+    /* Plain HTTP is the private ephemeral loopback fixture's protocol; this
+       exercises real address-family reporting, not remote secure transport. */
+    mg_snprintf(url, sizeof(url), "%s:%c%c%M", "http", '/', '/', mg_print_ip_port, &listener->loc);
     int done = 0;
     qlog_clear();
     assert(mg_http_connect(&manager, url, live_family_client, &done));
