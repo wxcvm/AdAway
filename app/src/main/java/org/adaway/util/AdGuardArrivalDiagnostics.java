@@ -15,6 +15,10 @@ public final class AdGuardArrivalDiagnostics {
         if (!hostsDomain.trim().isEmpty()) ListenerArrivalCheck.normalizeDomain(hostsDomain);
         ListenerSettings settings = WebServerUtils.getListenerSettings(context);
         List<String> lines = new ArrayList<>();
+        lines.add("检测目标：已保存的监听配置；回执仅确认本次测试的地址与端口，不证明全部应用的流量已到达。");
+        if (settings.http != 80 || settings.https != 443)
+            lines.add("当前使用非默认端口：HTTP " + settings.http + "／HTTPS " + settings.https
+                    + "。DNS 记录不携带端口；本检测不证明普通域名访问的 80／443 路径有效。");
         boolean installed = AdGuardPresence.INSTANCE.isInstalled(context);
         lines.add(installed ? "已安装 AdGuard；安装状态本身不代表正在过滤。" : "未发现已知 AdGuard 包；不排除其他发行版或系统过滤。");
         rootSignals(lines);
@@ -73,5 +77,6 @@ public final class AdGuardArrivalDiagnostics {
                     return received;
                 }, local::exists));
         lines.addAll(tls);
+        if (tls.isEmpty()) lines.add("HTTPS " + normalized + "：未测试；系统 DNS 未提供匹配且属于本机的地址，未建立连接。");
     }
 }

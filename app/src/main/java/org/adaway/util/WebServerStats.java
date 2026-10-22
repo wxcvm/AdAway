@@ -1,6 +1,7 @@
 package org.adaway.util;
 
 import androidx.annotation.Nullable;
+import java.util.concurrent.TimeUnit;
 import org.json.JSONObject;
 import timber.log.Timber;
 
@@ -63,24 +64,51 @@ public final class WebServerStats {
      */
     @Nullable
     private static JSONObject getJson(String path) {
+        return getJson(path, WebServerUtils.getStatsHttpPort());
+    }
+
+    @Nullable
+    static JSONObject getJson(String path, int port) {
+        return getJson(path, port, new LocalTransport() {
+            @Override public String nc(String executable, String applet, String host, int port, String request, long timeoutMs) {
+                return WebServerNet.ncRequest(executable, applet, host, port, request, timeoutMs);
+            }
+            @Override public String http(int port, String target, long timeoutMs) {
+                return WebServerNet.httpGetFirst(WebServerNet.newLocalClient(), WebServerNet.HTTP_HOSTS, port, target, timeoutMs);
+            }
+        });
+    }
+
+    interface LocalTransport {
+        String nc(String executable, String applet, String host, int port, String request, long timeoutMs);
+        String http(int port, String path, long timeoutMs);
+    }
+
+    @Nullable
+    static JSONObject getJson(String path, int port, LocalTransport transport) {
+        // One total deadline, not nine independent four-second waits. Reserve
+        // the final second for the existing direct HTTP fallback.
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
         String request = "GET " + path + " HTTP/1.1\r\n" +
                 "Host: adaway\r\n" +
                 "Connection: close\r\n\r\n";
         // 9 组合：3 种 nc 二进制 x 3 种宿主（::1 / v4-mapped / v4）
         String[][] attempts = {
             {"/system/bin/toybox", "nc", "::1"},
-            {"/system/bin/nc", "::1"},
-            {"nc", "::1"},
+            {"/system/bin/nc", null, "::1"},
+            {"nc", null, "::1"},
             {"/system/bin/toybox", "nc", "::ffff:127.0.0.1"},
             {"/system/bin/toybox", "nc", "127.0.0.1"},
-            {"/system/bin/nc", "::ffff:127.0.0.1"},
-            {"/system/bin/nc", "127.0.0.1"},
-            {"nc", "::ffff:127.0.0.1"},
-            {"nc", "127.0.0.1"},
+            {"/system/bin/nc", null, "::ffff:127.0.0.1"},
+            {"/system/bin/nc", null, "127.0.0.1"},
+            {"nc", null, "::ffff:127.0.0.1"},
+            {"nc", null, "127.0.0.1"},
         };
         for (String[] a : attempts) {
-            String response = WebServerNet.ncRequest(
-                    a[0], a[1], a[2], WebServerUtils.getStatsHttpPort(), request);
+            if (Thread.currentThread().isInterrupted()) return null;
+            long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()) - 1000;
+            if (remaining <= 0) break;
+            String response = transport.nc(a[0], a[1], a[2], port, request, Math.min(1000, remaining));
             String json = WebServerNet.bodyFromResponse(response);
             if (json == null) continue;
             try {
@@ -89,13 +117,11 @@ public final class WebServerStats {
                 Timber.w(e, "Failed to parse nc response from %s (%s)", a[2], path);
             }
         }
-        // 终极兜底：OkHttp 双栈直连（与探活同栈，进程存活则必可达）
+        // Direct HTTP shares the same deadline; a stuck nc cannot prevent fallback forever.
         try {
-            String body = WebServerNet.httpGetFirst(
-                    WebServerNet.newLocalClient(),
-                    WebServerNet.HTTP_HOSTS,
-                    WebServerUtils.getStatsHttpPort(),
-                    path);
+            long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+            if (remaining <= 0 || Thread.currentThread().isInterrupted()) return null;
+            String body = transport.http(port, path, remaining);
             if (body != null) {
                 return new JSONObject(body);
             }

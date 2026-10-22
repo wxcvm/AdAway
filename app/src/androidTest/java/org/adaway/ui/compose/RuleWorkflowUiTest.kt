@@ -12,6 +12,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -92,6 +93,23 @@ class RuleWorkflowUiTest {
         saveScreenshot("source-rename-failed-input-retained", dialog = true)
     }
 
+    @Test fun logProgrammaticScrollKeepsLiveAndDragPinsWithResumeVisible() {
+        val live = androidx.compose.runtime.mutableStateOf(true)
+        val rows = (1..40).map { QueryLogEntry(ts = it.toLong(), host = "request$it.example") }
+        compose.setContent { AdAwayTheme(dynamicColor = false) { Surface {
+            QueryLogContent(rows, rows.size, rows.size, -1, false, false, false,
+                {}, {}, {}, live = live.value, onLive = { live.value = it })
+        } } }
+        compose.onNodeWithTag("query-log-list").performScrollToIndex(15)
+        compose.runOnIdle { assertTrue("Layout/programmatic scrolling is not a request to pause", live.value) }
+        compose.onNodeWithTag("query-log-list").performTouchInput { swipeUp() }
+        compose.waitForIdle()
+        compose.runOnIdle { assertTrue("Dragging history must pin it", !live.value) }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_resume)).assertIsDisplayed().performClick()
+        compose.runOnIdle { assertTrue(live.value) }
+        saveScreenshot("logs-history-resume-remains-visible")
+    }
+
     @Test fun emptyLogFilterStillAllowsHistoryAndReadFailureAllowsRefresh() {
         val failed = androidx.compose.runtime.mutableStateOf(false)
         var older = 0
@@ -149,6 +167,35 @@ class RuleWorkflowUiTest {
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_only_app)).performClick()
         compose.runOnIdle { assertTrue(filtered) }
         saveScreenshot("logs-local-exemption-details", dialog = true)
+    }
+
+    @Test fun connectionOnlyTrafficIsVisibleInTheActualBarChart() {
+        val prefs = compose.activity.getSharedPreferences("compose_general", android.content.Context.MODE_PRIVATE)
+        val before = prefs.all
+        try {
+            check(prefs.edit().putInt("chart_range", 0).putInt("chart_style", CHART_STYLE_BARS).commit())
+            var connectionColor = 0
+            compose.setContent { AdAwayTheme(dynamicColor = false) { Surface {
+                connectionColor = MaterialTheme.colorScheme.tertiary.toArgb()
+                TrafficTrendCard(listOf(HistPoint(ts = 1234, connections = 100)), emptyList(), true)
+            } } }
+            // Inspect only the production Canvas, not its legend. Previously
+            // connections affected the scale but no connection bar was drawn.
+            val bitmap = compose.onNodeWithTag("traffic-trend-chart").captureToImage().asAndroidBitmap()
+            var painted = 0
+            for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
+                if (bitmap.getPixel(x, y) == connectionColor) painted++
+            }
+            assertTrue("Connection series must paint a visible bar, got $painted pixels", painted > bitmap.width)
+            saveScreenshot("statistics-connection-only-bars")
+        } finally {
+            val edit = prefs.edit()
+            for (key in listOf("chart_range", "chart_style")) {
+                val old = before[key]
+                if (old is Int) edit.putInt(key, old) else edit.remove(key)
+            }
+            check(edit.commit())
+        }
     }
 
     @Test fun legacyAllTimeTrendMapsToAvailableWindowAndEmptyWindowCanBeChanged() {

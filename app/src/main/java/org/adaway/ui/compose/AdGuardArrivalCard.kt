@@ -28,7 +28,7 @@ internal fun AdGuardArrivalCard(enabled: Boolean) {
     var adblock by remember { mutableStateOf("ad.doubleclick.net") }
     var hosts by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf("按已应用的监听地址检查 HTTP、HTTPS 与 DNS；不会保存草稿或更改 AdGuard。") }
+    var result by remember { mutableStateOf("按已保存的监听地址与端口检查 HTTP、HTTPS 与系统 DNS；回执确认本次检测路径，不代表所有应用。不会保存草稿或更改 AdGuard。") }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("AdGuard 请求到达检测", style = MaterialTheme.typography.titleSmall)
         Text("将 AdGuard 两类 DNS 拦截模式的自定义 IP 指向本机监听地址。可分别填写测试域名；预设域名不保证在你的规则中被拦截，命中类别以 AdGuard 过滤日志为准。",

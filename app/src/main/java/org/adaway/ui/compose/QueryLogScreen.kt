@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -21,6 +22,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,9 +40,9 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val browser = viewModel.queryLogBrowser
     val state by browser.state.collectAsStateWithLifecycle()
-    val updatedAt by viewModel.statsUpdatedAt.collectAsStateWithLifecycle()
+    val refreshTick by viewModel.statsRefreshTick.collectAsStateWithLifecycle()
     // Reuse the existing statistics poll. No second timer or background reader.
-    LaunchedEffect(updatedAt) { browser.refreshIfLive() }
+    LaunchedEffect(refreshTick) { browser.refreshIfLive() }
     val shown = remember(state.entries, state.filter, state.query, state.uid) { state.shown }
     Scaffold(topBar = {
         TopAppBar(title = { Text(stringResource(R.string.compose_logs_title)) },
@@ -74,24 +76,31 @@ internal fun QueryLogContent(
 ) {
     var selected by remember { mutableStateOf<QueryLogEntry?>(null) }
     val listState = rememberLazyListState()
-    LaunchedEffect(live, listState.isScrollInProgress) {
-        if (live == true && listState.isScrollInProgress) onLive(false)
+    val dragging by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(live) {
+        if (live == true) listState.scrollToItem(0)
     }
-    LazyColumn(modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 24.dp),
+    LaunchedEffect(live, dragging) {
+        if (live == true && dragging) onLive(false)
+    }
+    Column(modifier.fillMaxSize()) {
+        // Keep Resume reachable while inspecting older records, below the header.
+        if (live != null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(stringResource(if (live) R.string.compose_logs_live else R.string.compose_logs_paused),
+                Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary)
+            TextButton(onClick = { onLive(!live) }) {
+                Text(stringResource(if (live) R.string.compose_logs_pause else R.string.compose_logs_resume))
+            }
+        }
+    LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("query-log-list"), state = listState, contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.compose_logs_scope),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (live != null) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(if (live) R.string.compose_logs_live else R.string.compose_logs_paused),
-                        Modifier.weight(1f), style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary)
-                    TextButton(onClick = { onLive(!live) }) {
-                        Text(stringResource(if (live) R.string.compose_logs_pause else R.string.compose_logs_resume))
-                    }
-                }
                 OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(),
                     label = { Text(stringResource(R.string.compose_logs_search)) }, singleLine = true,
                     supportingText = { Text(stringResource(R.string.compose_logs_search_scope)) })
@@ -118,6 +127,7 @@ internal fun QueryLogContent(
                 Text(stringResource(if (busy) R.string.compose_rules_loading else R.string.compose_logs_more))
             }
         }
+    }
     }
     selected?.let { entry -> QueryLogDetailsDialog(entry, { selected = null }, {
         onUid(entry.uid); selected = null

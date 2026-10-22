@@ -2,8 +2,6 @@ package org.adaway.util;
 
 import androidx.annotation.Nullable;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.util.concurrent.TimeUnit;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -24,6 +22,9 @@ import timber.log.Timber;
  */
 public final class WebServerNet {
 
+    // Supports bounded 1,000-row history pages and the native 96 KiB statistics document.
+    static final int MAX_RESPONSE_BYTES = 1024 * 1024;
+
     private WebServerNet() {}
 
     /** OkHttp 探测宿主优先级：IPv6 loopback 优先。 */
@@ -35,18 +36,31 @@ public final class WebServerNet {
                 .proxy(java.net.Proxy.NO_PROXY)
                 .connectTimeout(3, TimeUnit.SECONDS)
                 .readTimeout(3, TimeUnit.SECONDS)
+                .callTimeout(3, TimeUnit.SECONDS)
                 .build();
     }
 
     /** 依次尝试多个本地地址（IPv6 优先），返回首个成功响应体；全部失败返回 null。 */
     @Nullable
     static String httpGetFirst(OkHttpClient client, String[] hosts, int port, String path) {
-        for (String host : hosts) {
-            try (Response r = client.newCall(
+        return httpGetFirst(client, hosts, port, path, 6000);
+    }
+
+    @Nullable
+    static String httpGetFirst(OkHttpClient client, String[] hosts, int port, String path, long timeoutMs) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        for (int index = 0; index < hosts.length; index++) {
+            String host = hosts[index];
+            long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+            if (remaining <= 0 || Thread.currentThread().isInterrupted()) return null;
+            // Leave each later address a share of the remaining budget.
+            long hostBudget = Math.max(1, remaining / (hosts.length - index));
+            OkHttpClient bounded = client.newBuilder().callTimeout(Math.min(3000, hostBudget), TimeUnit.MILLISECONDS).build();
+            try (Response r = bounded.newCall(
                     new Request.Builder().url("http://" + host + ":" + port + path).build()
             ).execute()) {
                 if (r.isSuccessful() && r.body() != null) {
-                    return r.body().string();
+                    return BoundedProcessResponse.read(r.body().byteStream(), MAX_RESPONSE_BYTES);
                 }
             } catch (IOException ignored) {
             }
@@ -60,37 +74,17 @@ public final class WebServerNet {
      */
     @Nullable
     static String ncRequest(String cmd0, String cmd1, String host, int port, String request) {
+        return ncRequest(cmd0, cmd1, host, port, request, 4000);
+    }
+
+    @Nullable
+    static String ncRequest(String cmd0, String cmd1, String host, int port, String request, long timeoutMs) {
         try {
-            Process process = new ProcessBuilder(
-                    cmd0, cmd1, "-w", "3",
-                    host, String.valueOf(port))
+            if (Thread.currentThread().isInterrupted() || timeoutMs <= 0) return null;
+            Process process = new ProcessBuilder(BoundedProcessResponse.ncCommand(cmd0, cmd1, host, port))
                     .redirectErrorStream(false)
                     .start();
-            Thread errDrain = new Thread(() -> {
-                try (InputStream es = process.getErrorStream()) {
-                    byte[] eb = new byte[1024];
-                    while (es.read(eb) != -1) { /* discard */ }
-                } catch (IOException ignored) { }
-            });
-            errDrain.setDaemon(true);
-            errDrain.start();
-            OutputStream out = process.getOutputStream();
-            out.write(request.getBytes("UTF-8"));
-            out.close();
-            InputStream in = process.getInputStream();
-            java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int n;
-            while ((n = in.read(buf)) > 0) body.write(buf, 0, n);
-            in.close();
-            if (!process.waitFor(4000, TimeUnit.MILLISECONDS)) {
-                process.destroy();
-                return null;
-            }
-            try { errDrain.join(500); } catch (InterruptedException ignored) {
-            /* 恢复中断标志：吞掉 InterruptedException 会让上层的取消/退出逻辑失效（Sonar java:S2142）。 */
-            Thread.currentThread().interrupt(); }
-            return body.toString("UTF-8");
+            return BoundedProcessResponse.exchange(process, request, timeoutMs, MAX_RESPONSE_BYTES);
         } catch (Exception e) {
             /* 外层 catch 也会接到 InterruptedException（in.read / process.waitFor 都可能抛），
                吞掉它会让上层的取消/退出逻辑失效（Sonar java:S2142）。这里只恢复中断标志，
@@ -108,6 +102,10 @@ public final class WebServerNet {
     static String bodyFromResponse(@Nullable String response) {
         if (response == null) return null;
         int headerEnd = response.indexOf("\r\n\r\n");
-        return headerEnd >= 0 ? response.substring(headerEnd + 4) : response;
+        int statusEnd = response.indexOf("\r\n");
+        if (headerEnd < 0 || statusEnd < 0) return null;
+        String status = response.substring(0, statusEnd);
+        if (!status.matches("HTTP/1\\.[01] 2[0-9]{2}( .*)?")) return null;
+        return response.substring(headerEnd + 4);
     }
 }

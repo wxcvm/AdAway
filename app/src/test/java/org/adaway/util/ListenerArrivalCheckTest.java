@@ -44,6 +44,13 @@ public class ListenerArrivalCheckTest {
             assertThrows(domain, IllegalArgumentException.class, () -> ListenerArrivalCheck.normalizeDomain(domain));
     }
 
+    @Test public void customPortReceiptNamesThePortActuallyTested() {
+        String result = ListenerArrivalCheck.domainResult(new ListenerSettings("127.0.0.2", "::1", 28080, 28443),
+                "ads.example.com", domain -> new String[]{"127.0.0.2"},
+                (address, port) -> { assertEquals(28080, port); return true; }, address -> true);
+        assertTrue(result.contains("HTTP 端口 28080"));
+    }
+
     @Test public void actualSocketExchangeRequiresFreshMatchingReceipt() throws Exception {
         try (ServerSocket server = new ServerSocket(0,1,InetAddress.getByName("127.0.0.1"))) {
             Thread responder = new Thread(() -> {

@@ -5,7 +5,10 @@ search, action and application filters across navigation, pins cursors while
 browsing, and keeps previous records on read/expiry errors. Search filters only
 loaded records. Browsing, scrolling and inspection pause live updates. Live
 updates reuse existing statistics refreshes with a ten-second throttle instead
-of adding another polling timer. Late or cancelled responses cannot replace a
+of adding another polling timer. Poll completion wakes the log reader even when
+statistics fail or only an unchanged disk snapshot is available. Only actual
+dragging pins the log; layout/programmatic scrolls do not. Resume remains visible
+while browsing history and returns to the latest page. Late or cancelled responses cannot replace a
 newer or paused page.
 
 The screen has domain search, action filters, pause/resume, request details and
@@ -28,6 +31,19 @@ runtime mechanism counters reset on restart; this is not an all-device lifetime
 blocking total. The repeated-host fast-204 option is documented as changing the
 response, not replaying a complete cached decision. Root Hosts IPv6 records are
 distinct from enabling an IPv6 listener or VPN capture.
+
+Statistics/log reads preserve IPv6-first ordering and fall back to IPv4 and
+direct HTTP when an nc binary or address fails. The entire read has a four-second
+budget and a bounded response, including child-process pipe reads. Live HTTP
+observations are ordered against concurrent pushes by publication revision,
+not wall-clock time, so clock correction does not freeze statistics. Disk
+fallback remains stale data. The bar chart includes its connection series.
+
+DNS arrival diagnostics show the exact HTTP port tested. DNS records do not
+specify ports: a receipt from a configured nondefault port does not prove the
+ordinary 80/443 domain path. Unmatched/nonlocal DNS answers are never contacted;
+domain HTTPS is explicitly marked untested when there is no eligible address.
+System resolution observes this application's view, not every app's private DNS.
 
 Automatic application downloads are enabled by default and can be disabled.
 The startup and daily checks use the selected channel. The model persists the
