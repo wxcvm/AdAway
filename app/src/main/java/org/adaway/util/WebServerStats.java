@@ -33,8 +33,9 @@ public final class WebServerStats {
     /**
      * 分页读取服务端的明细日志。
      *
-     * <p>服务端保留最近 10000 条（QLOG_MAX），offset 从"最新"往回数，所以翻页期间
-     * 新请求到达不会让已翻过的页内容漂移。单页上限 1000 条（服务端会夹紧）。</p>
+     * <p>服务端保留最近 10000 条（QLOG_MAX），offset 从"最新"往回数；连续浏览
+     * 必须使用下面带 generation/anchor 的重载固定历史，否则新请求会移动 offset。
+     * 单页最多 1000 条，实际返回还受既有 JSON 字节预算约束。</p>
      *
      * @param offset 跳过最新的多少条。
      * @param limit  本次最多取多少条。

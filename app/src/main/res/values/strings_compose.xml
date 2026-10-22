@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="compose_logs_family_all">All connections</string>
+    <string name="compose_logs_family_unknown">IP family unknown</string>
+    <string name="compose_logs_type_all">All response types</string>
+    <string name="compose_logs_type_structure">Page structure / general policy</string>
+    <string name="compose_logs_type_unknown">Type unknown / not recorded</string>
+    <string name="compose_logs_classification_scope">Connection family and response classification apply to loaded HTTP records. They do not identify DNS A/AAAA records or a subscription rule source. Older records remain unknown.</string>
     <!-- New Compose UI strings (default: English) -->
 
     <!-- Navigation -->

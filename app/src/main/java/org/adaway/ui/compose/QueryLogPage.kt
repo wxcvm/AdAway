@@ -29,10 +29,12 @@ data class QueryLogPage(
 
         private fun parseEntry(row: JSONObject): QueryLogEntry =
             QueryLogEntry(row.getLong("ts"), row.optInt("uid", -1), row.getInt("action"),
-                row.optInt("type", -1), row.optInt("mode", 0), row.getString("host")).also {
+                row.optInt("type", -1), row.optInt("mode", 0), row.getString("host"),
+                if (row.has("family")) row.getInt("family") else 0).also {
                 // Unknown persisted policy codes remain inspectable, never guessed.
                 require(it.ts >= 0 && it.uid >= -1 && it.action in 0..2 &&
                     it.type in -1..65534 && it.mode in 0..255)
+                require(it.family == 0 || it.family == 4 || it.family == 6)
                 require(it.host.isNotEmpty() && it.host.toByteArray(Charsets.UTF_8).size <= 191 &&
                     it.host.none { c -> c < ' ' || c in '\u007f'..'\u009f' })
                 validateSurrogates(it.host)

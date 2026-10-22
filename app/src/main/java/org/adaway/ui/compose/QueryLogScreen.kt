@@ -43,7 +43,7 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
     val refreshTick by viewModel.statsRefreshTick.collectAsStateWithLifecycle()
     // Reuse the existing statistics poll. No second timer or background reader.
     LaunchedEffect(refreshTick) { browser.refreshIfLive() }
-    val shown = remember(state.entries, state.filter, state.query, state.uid) { state.shown }
+    val shown = remember(state.entries, state.filter, state.query, state.uid, state.family, state.type) { state.shown }
     Scaffold(topBar = {
         TopAppBar(title = { Text(stringResource(R.string.compose_logs_title)) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack,
@@ -61,6 +61,7 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
             browser::more, browser::refresh, Modifier.padding(padding),
             query = state.query, onQuery = browser::setQuery, live = state.live,
             onLive = browser::setLive, uid = state.uid, onUid = browser::setUid,
+            family = state.family, onFamily = browser::setFamily, type = state.type, onType = browser::setType,
             onInspect = { browser.setLive(false) })
     }
 }
@@ -73,6 +74,8 @@ internal fun QueryLogContent(
     query: String = "", onQuery: (String) -> Unit = {}, live: Boolean? = null,
     onLive: (Boolean) -> Unit = {}, uid: Int? = null, onUid: (Int?) -> Unit = {},
     onInspect: () -> Unit = {},
+    family: Int? = null, onFamily: (Int?) -> Unit = {},
+    type: Int? = null, onType: (Int?) -> Unit = {},
 ) {
     var selected by remember { mutableStateOf<QueryLogEntry?>(null) }
     val listState = rememberLazyListState()
@@ -105,6 +108,7 @@ internal fun QueryLogContent(
                     label = { Text(stringResource(R.string.compose_logs_search)) }, singleLine = true,
                     supportingText = { Text(stringResource(R.string.compose_logs_search_scope)) })
                 QueryLogFilters(filter, onFilter)
+                QueryLogClassification(family, onFamily, type, onType)
                 if (uid != null) InputChip(selected = true, onClick = { onUid(null) },
                     label = { Text(stringResource(R.string.compose_logs_uid_filter, uid)) })
                 Text(stringResource(R.string.compose_logs_loaded_count, shown.size, loaded, total ?: loaded),
@@ -153,6 +157,33 @@ private const val ACTION_ALLOW = 2
 private const val FILTER_ALL = -1
 
 @Composable
+internal fun queryLogFamily(family: Int): String = when (family) {
+    4 -> "IPv4"
+    6 -> "IPv6"
+    else -> stringResource(R.string.compose_logs_family_unknown)
+}
+
+@Composable
+private fun QueryLogClassification(family: Int?, onFamily: (Int?) -> Unit, type: Int?, onType: (Int?) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (value in listOf(null, 4, 6, 0)) FilterChip(selected = family == value, onClick = { onFamily(value) },
+            label = { Text(if (value == null) stringResource(R.string.compose_logs_family_all) else queryLogFamily(value)) })
+    }
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton(onClick = { expanded = true }) {
+            Text(if (type == null) stringResource(R.string.compose_logs_type_all) else queryLogType(type))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text(stringResource(R.string.compose_logs_type_all)) }, onClick = { onType(null); expanded = false })
+            for (value in -1..9) DropdownMenuItem(text = { Text(queryLogType(value)) }, onClick = { onType(value); expanded = false })
+        }
+    }
+    Text(stringResource(R.string.compose_logs_classification_scope), style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
 private fun QueryLogRow(entry: QueryLogEntry, onClick: () -> Unit) {
     val actionColor = when (entry.action) {
         ACTION_BLOCK -> MaterialTheme.colorScheme.error
@@ -165,6 +196,8 @@ private fun QueryLogRow(entry: QueryLogEntry, onClick: () -> Unit) {
             Text(entry.host.ifEmpty { "-" }, style = MaterialTheme.typography.titleSmall,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(queryActionSummary(entry), style = MaterialTheme.typography.labelMedium, color = actionColor)
+            Text(queryLogFamily(entry.family), style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(appNameForUid(entry.uid), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -187,6 +220,7 @@ internal fun QueryLogDetailsDialog(entry: QueryLogEntry, onDismiss: () -> Unit, 
                     Text(entry.host.ifEmpty { "-" }, style = MaterialTheme.typography.titleMedium)
                     Text(queryLogTime(entry.ts, true), style = MaterialTheme.typography.bodySmall)
                     Text(queryActionSummary(entry), style = MaterialTheme.typography.bodyMedium)
+                    Text(queryLogFamily(entry.family), style = MaterialTheme.typography.bodySmall)
                     if (appLabel != uidFallback) Text(appLabel, style = MaterialTheme.typography.bodySmall)
                     if (entry.uid >= 0) Text("UID ${entry.uid}", style = MaterialTheme.typography.labelSmall)
                     Text(stringResource(if (entry.action == ACTION_ALLOW) R.string.compose_logs_exemption_detail
@@ -210,19 +244,7 @@ internal fun queryActionSummary(entry: QueryLogEntry): String {
     if (entry.action == ACTION_ALLOW) return stringResource(R.string.compose_logs_local_exemption)
     if (entry.action == ACTION_PROXY) return stringResource(R.string.compose_stats_recent_action_proxied)
     val action = stringResource(R.string.compose_stats_recent_action_blocked)
-    val type = when (entry.type) {
-        0 -> stringResource(R.string.compose_stats_type_images)
-        1 -> stringResource(R.string.compose_stats_type_scripts)
-        2 -> stringResource(R.string.compose_stats_type_styles)
-        3 -> stringResource(R.string.compose_stats_type_fonts)
-        4 -> stringResource(R.string.compose_stats_type_media)
-        5 -> stringResource(R.string.compose_stats_type_other)
-        6 -> stringResource(R.string.compose_stats_type_api)
-        7 -> stringResource(R.string.compose_stats_type_telemetry)
-        8 -> stringResource(R.string.compose_stats_type_config)
-        9 -> stringResource(R.string.compose_stats_type_ws)
-        else -> stringResource(R.string.compose_logs_unknown_code, entry.type)
-    }
+    val type = queryLogType(entry.type)
     val mode = when (entry.mode) {
         1 -> stringResource(R.string.compose_stats_mode_204)
         2 -> stringResource(R.string.compose_stats_mode_allowed)
@@ -230,8 +252,24 @@ internal fun queryActionSummary(entry: QueryLogEntry): String {
         3 -> stringResource(R.string.compose_stats_mode_empty)
         else -> stringResource(R.string.compose_logs_unknown_code, entry.mode)
     }
-    return if (type.isEmpty()) "$action · $mode" else "$action · $type · $mode"
+    return "$action · $type · $mode"
 }
+
+@Composable
+private fun queryLogType(type: Int): String = when (type) {
+        0 -> stringResource(R.string.compose_stats_type_images)
+        1 -> stringResource(R.string.compose_stats_type_scripts)
+        2 -> stringResource(R.string.compose_stats_type_styles)
+        3 -> stringResource(R.string.compose_stats_type_fonts)
+        4 -> stringResource(R.string.compose_stats_type_media)
+        5 -> stringResource(R.string.compose_logs_type_structure)
+        6 -> stringResource(R.string.compose_stats_type_api)
+        7 -> stringResource(R.string.compose_stats_type_telemetry)
+        8 -> stringResource(R.string.compose_stats_type_config)
+        9 -> stringResource(R.string.compose_stats_type_ws)
+        -1 -> stringResource(R.string.compose_logs_type_unknown)
+        else -> stringResource(R.string.compose_logs_unknown_code, type)
+    }
 
 private fun csvTypeName(type: Int): String = when (type) {
     0 -> "images"
@@ -239,7 +277,7 @@ private fun csvTypeName(type: Int): String = when (type) {
     2 -> "styles"
     3 -> "fonts"
     4 -> "media"
-    5 -> "other"
+    5 -> "structure"
     6 -> "api"
     7 -> "telemetry"
     8 -> "config"
@@ -263,7 +301,7 @@ private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
         val timeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         file.bufferedWriter(Charsets.UTF_8).use { out ->
             /* 同时给可读名与机器用的编码，两个受众都不吃亏 */
-            out.write("time,result,type_code,type_name,mode_code,mode_name,uid,host\n")
+            out.write("time,result,type_code,type_name,mode_code,mode_name,uid,host,ip_family\n")
             entries.forEach { entry ->
                 val time = if (entry.ts in 1..Long.MAX_VALUE / 1000) timeFmt.format(Date(entry.ts * 1000L)) else ""
                 val result = when (entry.action) {
@@ -281,6 +319,7 @@ private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
                         csvModeName(entry.mode),
                         if (entry.uid >= 0) entry.uid.toString() else "",
                         entry.host,
+                        if (entry.family == 4 || entry.family == 6) "IPv${entry.family}" else "unknown",
                     ).joinToString(",") { csvField(it) } + "\n",
                 )
             }

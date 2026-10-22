@@ -45,6 +45,16 @@ ordinary 80/443 domain path. Unmatched/nonlocal DNS answers are never contacted;
 domain HTTPS is explicitly marked untested when there is no eligible address.
 System resolution observes this application's view, not every app's private DNS.
 
+Each new HTTP log records the actual connection family (`4`, `6`, or unknown
+`0`); IPv4-mapped IPv6 sockets are classified as IPv4. Host text and DNS answer
+types are never used to guess it. Both paged and summary JSON carry the field.
+The bounded QLG2 persistence format restores family metadata; legacy QLOG rows
+remain readable with unknown family. Filtering combines family, response type,
+action, app and domain over loaded rows, and CSV exports family too. Response
+type is the native LT_* policy category, not subscription source attribution.
+Diagnostics include optional legacy IPv6 as well as mandatory configured binds;
+an IPv4-only server must not announce IPv6 as listening.
+
 Automatic application downloads are enabled by default and can be disabled.
 The startup and daily checks use the selected channel. The model persists the
 DownloadManager ID and expected version, deduplicates active/ready downloads,

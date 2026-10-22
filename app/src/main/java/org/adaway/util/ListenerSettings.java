@@ -87,4 +87,14 @@ public final class ListenerSettings {
         if (!ipv6.isEmpty() && (explicitPair || ipv4.isEmpty())) result.add(ipv6.equals("::") ? "::1" : ipv6);
         return result.toArray(new String[0]);
     }
+
+    /** Diagnostics include optional legacy IPv6; readiness retains legacy fallback. */
+    public String[] diagnosticAddresses() {
+        java.util.ArrayList<String> result = new java.util.ArrayList<>(java.util.Arrays.asList(probeAddresses()));
+        if (!ipv6.isEmpty()) {
+            String address6 = ipv6.equals("::") ? "::1" : ipv6;
+            if (!result.contains(address6)) result.add(address6);
+        }
+        return result.toArray(new String[0]);
+    }
 }

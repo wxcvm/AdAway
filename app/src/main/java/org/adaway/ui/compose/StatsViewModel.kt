@@ -111,6 +111,8 @@ data class QueryLogEntry(
     /** How that type answers: 0 = placeholder, 1 = 204, 2 = passthrough. */
     val mode: Int = 0,
     val host: String = "",
+    /** Observed socket family; 0 means not recorded, including legacy rows. */
+    val family: Int = 0,
 )
 
 /** One time bucket of web server activity (hourly or daily series). */
@@ -253,6 +255,7 @@ data class ServerStats(
                         type = if (o.has("type")) o.optInt("type", -1) else -1,
                         mode = o.optInt("mode", 0),
                         host = o.optString("host", ""),
+                        family = o.optInt("family", 0).takeIf { it == 4 || it == 6 } ?: 0,
                     )
                 }
             }

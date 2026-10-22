@@ -110,6 +110,27 @@ class RuleWorkflowUiTest {
         saveScreenshot("logs-history-resume-remains-visible")
     }
 
+    @Test fun logFamilyAndTypeControlsFilterRecordedMetadata() {
+        val family = androidx.compose.runtime.mutableStateOf<Int?>(null)
+        val type = androidx.compose.runtime.mutableStateOf<Int?>(null)
+        val rows = listOf(QueryLogEntry(host = "v4-image.example", family = 4, type = 0, action = 1),
+            QueryLogEntry(host = "v6-script.example", family = 6, type = 1, action = 1),
+            QueryLogEntry(host = "legacy.example", family = 0, type = -1, action = 1))
+        compose.setContent { AdAwayTheme(dynamicColor = false) { Surface {
+            QueryLogContent(rows.filter { (family.value == null || family.value == it.family) &&
+                (type.value == null || type.value == it.type) }, 3, 3, -1, false, false, false, {}, {}, {},
+                family = family.value, onFamily = { family.value = it }, type = type.value, onType = { type.value = it })
+        } } }
+        compose.onNode(hasText("IPv6") and hasClickAction()).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(6, family.value) }
+        compose.onNodeWithText("v4-image.example").assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_type_all)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_stats_type_scripts)).performClick()
+        compose.runOnIdle { assertEquals(1, type.value) }
+        compose.onNodeWithText("v6-script.example").performScrollTo().assertIsDisplayed()
+        saveScreenshot("logs-ipv6-script-classification")
+    }
+
     @Test fun emptyLogFilterStillAllowsHistoryAndReadFailureAllowsRefresh() {
         val failed = androidx.compose.runtime.mutableStateOf(false)
         var older = 0
@@ -141,7 +162,7 @@ class RuleWorkflowUiTest {
                 } }
             }
         }
-        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_pause)).performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_pause)).assertIsDisplayed().performClick()
         compose.runOnIdle { assertTrue(!live.value) }
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_search)).performScrollTo().performTextInput("BLOCKED")
         compose.onNodeWithText("other.example").assertDoesNotExist()

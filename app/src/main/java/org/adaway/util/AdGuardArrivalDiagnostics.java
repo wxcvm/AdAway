@@ -25,7 +25,7 @@ public final class AdGuardArrivalDiagnostics {
         lines.add("VPN 状态：" + org.adaway.model.traffic.AndroidVpnObserver.read(context, false).name() + "；不据此推断 VPN 属于 AdGuard。");
         RootListenerAddresses local = new RootListenerAddresses();
         lines.add(hasManagementReceipt() ? "管理端口回执已确认：当前 AdAway 支持请求到达检测。" : "未确认管理端口回执；服务未就绪、旧版本或路径受影响，不能判定请求被谁处理。");
-        for (String address : settings.probeAddresses()) {
+        for (String address : settings.diagnosticAddresses()) {
             lines.add(directResult(address, settings.http, local));
             lines.add("HTTPS [" + address + "]:" + settings.https + "（localhost）："
                     + ListenerTlsCheck.check(address, settings.https, "localhost", local::exists).describe());
