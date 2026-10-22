@@ -111,6 +111,7 @@ private fun UpdateSwitchRow(
     title: String,
     hint: String,
 ) {
+    val updateContext = LocalContext.current.applicationContext
     var checked by remember { mutableStateOf(prefs.getBoolean(key, def)) }
     Row(
         modifier = Modifier
@@ -129,8 +130,11 @@ private fun UpdateSwitchRow(
         Switch(
             checked = checked,
             onCheckedChange = { v ->
-                checked = v
-                prefs.edit().putBoolean(key, v).apply()
+                if (prefs.edit().putBoolean(key, v).commit()) {
+                    checked = v
+                    org.adaway.model.update.ApkUpdateService.preferencesChanged(updateContext)
+                    org.adaway.model.source.SourceUpdateService.preferencesChanged(updateContext)
+                }
             },
         )
     }
@@ -299,16 +303,16 @@ internal fun setChartStyle(context: Context, style: Int) {
         .edit().putInt("chart_style", style).apply()
 }
 
-/* ── Trend chart range: 0=24h 1=7d 2=30d 3=all (persisted) ────── */
+/* The server retains 24 hourly / 30 daily buckets; legacy all-time maps to 30d. */
 
 internal fun chartRange(context: Context): Int {
     return context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-        .getInt("chart_range", 0)
+        .getInt("chart_range", 0).coerceIn(0, 2)
 }
 
 internal fun setChartRange(context: Context, range: Int) {
     context.getSharedPreferences(PREFS_GENERAL, Context.MODE_PRIVATE)
-        .edit().putInt("chart_range", range).apply()
+        .edit().putInt("chart_range", range.coerceIn(0, 2)).apply()
 }
 
 /* ── Real-time WebSocket push toggle ──────────────────────────── */
@@ -1547,7 +1551,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     Spacer(Modifier.height(8.dp))
                     var refreshKey by remember { mutableStateOf(0) }
                     val chartToggles = listOf(
-                        Triple("chart_lifetime", R.string.compose_settings_chart_lifetime, R.string.compose_settings_chart_lifetime_hint),
                         Triple("chart_rate", R.string.compose_settings_chart_rate, R.string.compose_settings_chart_rate_hint),
                         Triple("chart_donut", R.string.compose_settings_chart_donut, R.string.compose_settings_chart_donut_hint),
                         Triple("chart_trend", R.string.compose_settings_chart_trend, R.string.compose_settings_chart_trend_hint),
@@ -2363,6 +2366,13 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     }
                     Spacer(Modifier.height(8.dp))
                     // 自动更新（旧键共享，直接生效）
+                    UpdateSwitchRow(
+                        prefs = legacyPrefs,
+                        key = "automaticAppUpdate",
+                        def = true,
+                        title = stringResource(R.string.compose_settings_update_automatic),
+                        hint = stringResource(R.string.compose_settings_update_automatic_hint),
+                    )
                     UpdateSwitchRow(
                         prefs = legacyPrefs,
                         key = "updateCheckAppStartup",

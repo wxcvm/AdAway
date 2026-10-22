@@ -59,7 +59,7 @@ public final class ApkUpdateService {
         WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME);
     }
 
-    static void syncPreferences(Context context) {
+    public static void syncPreferences(Context context) {
         if (PreferenceHelper.getUpdateCheckAppDaily(context)) {
             enqueueWork(context, KEEP);
         } else {
@@ -67,9 +67,20 @@ public final class ApkUpdateService {
         }
     }
 
+    /** Apply a changed preference to existing work instead of leaving old constraints. */
+    public static void preferencesChanged(Context context) {
+        if (PreferenceHelper.getUpdateCheckAppDaily(context)) enqueueWork(context, UPDATE);
+        else disable(context);
+    }
+
     private static void enqueueWork(Context context, ExistingPeriodicWorkPolicy workPolicy) {
         // Create work request
-        PeriodicWorkRequest workRequest = new PeriodicWorkRequest.Builder(ApkUpdateWorker.class, 1, DAYS).build();
+        androidx.work.Constraints constraints = new androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .setRequiresStorageNotLow(true).build();
+        PeriodicWorkRequest workRequest = new PeriodicWorkRequest.Builder(ApkUpdateWorker.class, 1, DAYS)
+                .setInitialDelay(1, DAYS)
+                .setConstraints(constraints).build();
         // Enqueue work request
         WorkManager workManager = WorkManager.getInstance(context);
         workManager.enqueueUniquePeriodicWork(WORK_NAME, workPolicy, workRequest);

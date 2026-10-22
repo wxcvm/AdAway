@@ -71,12 +71,19 @@ public final class SourceUpdateService {
      *
      * @param context The application context.
      */
-    static void syncPreferences(Context context) {
+    public static void syncPreferences(Context context) {
         if (PreferenceHelper.getUpdateCheckHostsDaily(context)) {
             enqueueWork(context, KEEP, PreferenceHelper.getUpdateOnlyOnWifi(context));
         } else {
             disable(context);
         }
+    }
+
+    /** Reconfigure the already-enqueued worker after a settings change. */
+    public static void preferencesChanged(Context context) {
+        if (PreferenceHelper.getUpdateCheckHostsDaily(context))
+            enqueueWork(context, UPDATE, PreferenceHelper.getUpdateOnlyOnWifi(context));
+        else disable(context);
     }
 
     private static void enqueueWork(Context context, ExistingPeriodicWorkPolicy workPolicy, boolean unmeteredNetworkOnly) {

@@ -2654,22 +2654,11 @@ struct top_host {
 static struct top_host s_top_hosts[TOP_HOSTS_MAX];
 static int s_top_count;
 
-/* Host header of a request (port stripped), or the URI when there is none. */
+#include "request_host.h"
+/* Host authority only; a missing Host must not expose a request URI. */
 static void req_host_of(struct mg_http_message *hm, char *out, size_t cap) {
-    if (out == NULL || cap == 0) return;
-    out[0] = '\0';
     struct mg_str *hh = hm != NULL ? mg_http_get_header(hm, "Host") : NULL;
-    if (hh != NULL && hh->len > 0) {
-        size_t n = hh->len < cap - 1 ? hh->len : cap - 1;
-        memcpy(out, hh->buf, n);
-        out[n] = '\0';
-        char *colon = strchr(out, ':');
-        if (colon != NULL) *colon = '\0';
-    } else if (hm != NULL && hm->uri.len > 0) {
-        size_t n = hm->uri.len < cap - 1 ? hm->uri.len : cap - 1;
-        memcpy(out, hm->uri.buf, n);
-        out[n] = '\0';
-    }
+    (void)request_host_parse(hh ? hh->buf : NULL, hh ? hh->len : 0, out, cap);
 }
 
 static void top_host_add(const char *host) {

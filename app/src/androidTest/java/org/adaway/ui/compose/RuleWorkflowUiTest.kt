@@ -101,10 +101,80 @@ class RuleWorkflowUiTest {
         } } }
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_more)).performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, older); failed.value = true }
-        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_read_failed)).assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_refresh)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_read_failed)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_refresh)).performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1, refreshed) }
         saveScreenshot("logs-page-failure-refresh")
+    }
+
+    @Test fun logWorkbenchSearchPauseAndDetailsRemainUsableOnNarrowLargeText() {
+        val rows = listOf(QueryLogEntry(ts = 1234, uid = -1, action = 1, type = 1, mode = 1,
+            host = "blocked.example"), QueryLogEntry(ts = 1234, uid = 42, action = 2, host = "other.example"))
+        val query = androidx.compose.runtime.mutableStateOf("")
+        val live = androidx.compose.runtime.mutableStateOf(true)
+        compose.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, 1.5f)) {
+                AdAwayTheme(dynamicColor = false) { Surface(Modifier.widthIn(max = 320.dp)) {
+                    QueryLogContent(rows.filter { it.host.contains(query.value, ignoreCase = true) },
+                        2, 2, -1, false, false, false, {}, {}, {}, query = query.value,
+                        onQuery = { query.value = it }, live = live.value, onLive = { live.value = it },
+                        onInspect = { live.value = false })
+                } }
+            }
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_pause)).performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(!live.value) }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_search)).performScrollTo().performTextInput("BLOCKED")
+        compose.onNodeWithText("other.example").assertDoesNotExist()
+        compose.onNodeWithText("blocked.example").performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_details)).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_only_app)).assertDoesNotExist()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_details_scope)).performScrollTo().assertIsDisplayed()
+        saveScreenshot("logs-workbench-narrow-details", dialog = true)
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_close)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_search)).performScrollTo().performTextReplacement("absent")
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_no_match)).performScrollTo().assertIsDisplayed()
+        saveScreenshot("logs-workbench-filter-empty")
+    }
+
+    @Test fun localExemptionDetailsDoNotClaimSuccessfulUpstreamAccess() {
+        var filtered = false
+        compose.setContent { AdAwayTheme(dynamicColor = false) {
+            QueryLogDetailsDialog(QueryLogEntry(uid = 42, action = 2, host = "exempt.example"), {}, { filtered = true })
+        } }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_local_exemption)).assertIsDisplayed()
+        compose.onAllNodesWithText("UID 42").assertCountEquals(1)
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_exemption_detail)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_only_app)).performClick()
+        compose.runOnIdle { assertTrue(filtered) }
+        saveScreenshot("logs-local-exemption-details", dialog = true)
+    }
+
+    @Test fun legacyAllTimeTrendMapsToAvailableWindowAndEmptyWindowCanBeChanged() {
+        val prefs = compose.activity.getSharedPreferences("compose_general", android.content.Context.MODE_PRIVATE)
+        val hadRange = prefs.contains("chart_range")
+        val previousRange = prefs.getInt("chart_range", 0)
+        try {
+            check(prefs.edit().putInt("chart_range", 3).commit())
+            assertEquals(2, chartRange(compose.activity))
+            compose.setContent { AdAwayTheme(dynamicColor = false) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    TrafficTrendCard(listOf(HistPoint(ts = 1234, requests = 3, blocked = 1)), emptyList(), false)
+                }
+            } } }
+            compose.onNodeWithText(compose.activity.getString(R.string.compose_stats_range_all)).assertDoesNotExist()
+            compose.onNodeWithText(compose.activity.getString(R.string.compose_stats_range_30d)).assertIsSelected()
+            compose.onNodeWithText(compose.activity.getString(R.string.compose_stats_history_empty)).assertIsDisplayed()
+            saveScreenshot("statistics-empty-real-window")
+            compose.onNodeWithText(compose.activity.getString(R.string.compose_stats_range_24h)).performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.compose_stats_range_24h)).assertIsSelected()
+            compose.onNodeWithText(compose.activity.getString(R.string.compose_stats_history_empty)).assertDoesNotExist()
+        } finally {
+            val edit = prefs.edit()
+            if (hadRange) edit.putInt("chart_range", previousRange) else edit.remove("chart_range")
+            check(edit.commit())
+        }
     }
 
     @Test fun startupAddressCreationIsAnUnsavedExplicitOption() {
