@@ -180,8 +180,6 @@ private fun QueryLogClassification(family: Int?, onFamily: (Int?) -> Unit, type:
             for (value in -1..9) DropdownMenuItem(text = { Text(queryLogType(value)) }, onClick = { onType(value); expanded = false })
         }
     }
-    Text(stringResource(R.string.compose_logs_classification_scope), style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -228,6 +226,8 @@ internal fun QueryLogDetailsDialog(entry: QueryLogEntry, onDismiss: () -> Unit, 
                         else if (entry.action == ACTION_PROXY) R.string.compose_logs_proxy_detail
                         else R.string.compose_logs_block_detail), style = MaterialTheme.typography.bodySmall)
                     Text(stringResource(R.string.compose_logs_details_scope), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.compose_logs_classification_scope), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
