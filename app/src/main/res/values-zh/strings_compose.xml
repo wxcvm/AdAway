@@ -584,7 +584,7 @@
     <string name="compose_tcp_unavailable">会话未就绪或忙碌</string>
     <string name="compose_tcp_failed">连接或保护失败</string>
     <string name="compose_logs_refresh">刷新日志</string>
-    <string name="compose_logs_scope">仅记录到达 Web 响应服务器的请求，并非全部 DNS 查询。内存最多保留 10,000 条，重启恢复最多 4,096 条；读取历史时自动暂停实时更新。</string>
+    <string name="compose_logs_scope">Web 响应日志；不包含未到达本服务器的 DNS／Hosts 拦截。</string>
     <string name="compose_logs_loaded_count">当前筛选 %1$d 条 · 已读 %2$d / 可读 %3$d 条</string>
     <string name="compose_logs_read_failed">明细读取失败或历史已过期，已保留当前记录；刷新可重试。</string>
     <string name="compose_logs_more">读取更早请求</string>
@@ -601,8 +601,8 @@
     <string name="compose_stats_scope">这些数值仅统计 Web 响应服务器实际收到的请求；未到达服务器的 Hosts／DNS 拦截不计入此处。</string>
     <string name="compose_stats_snapshot_unknown">磁盘旧快照 · 时间未知</string>
     <string name="compose_stats_type_mechanism">其他拦截机制</string>
-    <string name="compose_logs_live">实时 · 跟随最新请求</string>
-    <string name="compose_logs_paused">已暂停 · 固定当前历史</string>
+    <string name="compose_logs_live">实时更新</string>
+    <string name="compose_logs_paused">历史已暂停</string>
     <string name="compose_logs_pause">暂停</string>
     <string name="compose_logs_resume">恢复实时</string>
     <string name="compose_logs_search">搜索域名</string>

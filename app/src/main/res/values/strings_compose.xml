@@ -584,7 +584,7 @@
     <string name="compose_tcp_unavailable">Session not ready or busy</string>
     <string name="compose_tcp_failed">Connection or protection failed</string>
     <string name="compose_logs_refresh">Refresh logs</string>
-    <string name="compose_logs_scope">Only requests received by the Web response server, not all DNS queries. History keeps up to 10,000 records in memory and restores up to 4,096 after restart. Browsing earlier requests pauses live updates.</string>
+    <string name="compose_logs_scope">Web response logs. DNS or Hosts blocks that never reach this server are not included.</string>
     <string name="compose_logs_loaded_count">Showing %1$d · loaded %2$d / %3$d available</string>
     <string name="compose_logs_read_failed">History could not be read or expired. Displayed records are preserved; refresh to retry.</string>
     <string name="compose_logs_more">Load older requests</string>
@@ -601,8 +601,8 @@
     <string name="compose_stats_scope">These counters describe requests received by the Web response server. Hosts or DNS blocks that do not reach this server are not counted.</string>
     <string name="compose_stats_snapshot_unknown">Saved snapshot · timestamp unavailable</string>
     <string name="compose_stats_type_mechanism">Other blocking mechanisms</string>
-    <string name="compose_logs_live">Live · follows the latest requests</string>
-    <string name="compose_logs_paused">Paused · history stays in place</string>
+    <string name="compose_logs_live">Live</string>
+    <string name="compose_logs_paused">History paused</string>
     <string name="compose_logs_pause">Pause</string>
     <string name="compose_logs_resume">Resume live</string>
     <string name="compose_logs_search">Search domains</string>

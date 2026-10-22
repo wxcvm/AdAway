@@ -144,6 +144,7 @@ class RuleWorkflowUiTest {
             QueryLogDetailsDialog(QueryLogEntry(uid = 42, action = 2, host = "exempt.example"), {}, { filtered = true })
         } }
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_local_exemption)).assertIsDisplayed()
+        compose.onAllNodesWithText("UID 42").assertCountEquals(1)
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_exemption_detail)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_only_app)).performClick()
         compose.runOnIdle { assertTrue(filtered) }

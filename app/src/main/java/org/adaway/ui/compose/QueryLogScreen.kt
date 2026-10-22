@@ -167,6 +167,8 @@ private fun QueryLogRow(entry: QueryLogEntry, onClick: () -> Unit) {
 
 @Composable
 internal fun QueryLogDetailsDialog(entry: QueryLogEntry, onDismiss: () -> Unit, onUid: () -> Unit) {
+    val appLabel = appNameForUid(entry.uid)
+    val uidFallback = stringResource(R.string.compose_stats_app_unknown, entry.uid)
     AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.compose_logs_details)) },
         text = {
             SelectionContainer {
@@ -175,7 +177,7 @@ internal fun QueryLogDetailsDialog(entry: QueryLogEntry, onDismiss: () -> Unit, 
                     Text(entry.host.ifEmpty { "-" }, style = MaterialTheme.typography.titleMedium)
                     Text(queryLogTime(entry.ts, true), style = MaterialTheme.typography.bodySmall)
                     Text(queryActionSummary(entry), style = MaterialTheme.typography.bodyMedium)
-                    Text(appNameForUid(entry.uid), style = MaterialTheme.typography.bodySmall)
+                    if (appLabel != uidFallback) Text(appLabel, style = MaterialTheme.typography.bodySmall)
                     if (entry.uid >= 0) Text("UID ${entry.uid}", style = MaterialTheme.typography.labelSmall)
                     Text(stringResource(if (entry.action == ACTION_ALLOW) R.string.compose_logs_exemption_detail
                         else if (entry.action == ACTION_PROXY) R.string.compose_logs_proxy_detail
