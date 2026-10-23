@@ -55,9 +55,9 @@
 | `compatibility` | 按类型自适应（默认） | ✅ 默认档 |
 | **`visible_image_placeholder`** | 对"可见内容"请求也回占位图（而不是让页面塌陷） | ✅ 已实现（`reply_visible`，**默认关**；见 §3.1） |
 | **`rules` / `rule_override`** | 用户按域/类型覆盖策略 | 🟡 服务端已实现（`rule_override_enabled` + `rule_overrides.txt`，默认关）；**App 内编辑界面未做** |
-| **`request_dedup`** | 短窗口内相同请求只处理一次 | ✅ 已实现（`dedup_enabled`，默认关；1s 窗口） |
+| **`request_dedup`** | 同 uid／域一秒滑动窗口内重复请求改为空 204，包括不同 URI | ✅ 默认关；会改变图片等资源响应 |
 | **`retry_guard`** | 同上请求高频重试时降级应答 | ✅ 已实现（`retry_guard_enabled`，默认关；10s/40 次 → 冷却 30s） |
-| **`cache_reuse`** | 同域同类型的响应短期复用 | ✅ 已实现（`cache_reuse_enabled`，默认关；2s TTL，复用判定而非响应体） |
+| **`cache_reuse`** | 旧路径并未重放响应，只把同域重复请求改成空 204 | 已退役；旧配置键忽略，兼容统计 cache_hits 为 0 |
 | **`circuit_breaker`** | 某域连续失败后短期直接快速失败 | ✅ 已实现（`circuit_breaker_enabled`，默认关；10s/60 次 → 冷却 20s，按"整个域"计） |
 | **有界并发/队列** | 限制同时在处理的请求数 | ❌ **未实现**（当前为单线程事件循环） |
 
@@ -66,16 +66,15 @@
 `mode_*` 配置决定某类型如何作答：`0 = 占位图`、`1 = 204`、`2 = 透传（passthrough）`。
 Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配置的界面（`g_policy[]`）。
 
-### 3.2 F5：四个默认关闭的"降载"开关（互不影响，可单独打开）
+### 3.2 F5：三个默认关闭的降载开关与已退役旧键
 
-四个开关都只在**被拦流量**的应答代价上做文章：**不改变**拦截与否的结论、
-不改变放行/豁免的优先级，关闭时相关代码路径完全不会走到。
+现行去重、重试护栏、熔断只作用于被拦流量，不改变放行／豁免的优先级，但会把原本的图片或其他应答替换成空 204。它们不是保持响应内容的缓存，默认关闭。
 
 | 键（`block_config.json`） | 默认 | 语义 | 计数（`/internal-stats`） |
 |---|---|---|---|
 | `dedup_enabled` | `false` | 同一 `(uid, 域)` 1s 内重复 → 直接快速拒绝 | `dedup_hits` |
 | `retry_guard_enabled` | `false` | 同一 **uid×域** 10s 内 >40 次 → 冷却 30s 快速失败 | `guard_hits` |
-| `cache_reuse_enabled` | `false` | 同一域 2s 内重复 → 复用上次判定，跳过分类 | `cache_hits` |
+| `cache_reuse_enabled` | 忽略 | 已退役；不能再将占位图替换为 204 | `cache_hits` 恒为 0 |
 | `circuit_breaker_enabled` | `false` | 同一**域**（不限 uid）10s 内 >60 次 → 冷却 20s | `breaker_hits` |
 
 分工：`retry_guard` 看"某个应用 × 某个域"；`circuit_breaker` 看"整个域" —— 同一个域被
@@ -84,8 +83,7 @@ Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配�
 
 ### 3.3 请求判定流水线里的位置
 
-这四类判断都在**分类之前**、同一个挂钩点内完成（`reply_blocked_by_type()` 开头），
-因此它们只有"提前快速失败"这一种效果，不会与 §2 的三级分类或 §3.1 的每类回法冲突。
+现行降载判断在分类之前的挂钩点完成（reply_blocked_by_type 开头），命中后提前返回空 204，因此会覆盖后续的分类应答。关闭时才按正常资源策略处理。去重按 uid／域匹配，不是完整 URL／方法／请求头的相同请求判断。
 
 ## 4. 证书固定（pin）策略状态机
 
@@ -123,7 +121,7 @@ Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配�
 |---|---|---|
 | `pin_policy.txt` | `mode=off｜deny` | 视为 `off` |
 | `rule_overrides.txt` | 按域覆盖响应：`<域规则> = <策略>`，策略 ∈ `placeholder｜204｜403｜404｜410｜503｜200`；域规则与豁免同语法、同"过宽即忽略"标准；认不出的策略名忽略该行 | 文件不存在 = 无覆盖 |
-| `block_config.json` | 每类型的 `reply_*` + 五个降载/覆盖开关（`reply_visible`、`dedup_enabled`、`retry_guard_enabled`、`cache_reuse_enabled`、`circuit_breaker_enabled`、`rule_override_enabled`） | 全部按"关闭/默认档"处理 |
+| `block_config.json` | 每类型的 `reply_*` 及可见占位、去重、护栏、熔断、域覆盖；旧 `cache_reuse_enabled` 仅兼容读取 | 旧缓存键忽略，其他开关按各自默认档处理 |
 | `domain_allowlist.txt` | 按域名豁免（多语法） | 不存在 = 无豁免 |
 | `allowlist.txt` | 按 uid 放行（每行一个十进制 uid） | 不存在 = 无放行 |
 | 拦截策略配置 | 每类型的 `reply_*` / `mode_*` | 使用内置默认档 |
@@ -160,7 +158,7 @@ Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配�
 | `req_class_t` 纯函数抽取 | 把 §2 的 3 级判定抽成可单测的纯函数（**行为不变** + 回归快照） | F3（未做） |
 | ~~可见型占位~~ | ✅ 已实现：`Sec-Fetch-Dest` 为 `document`/`iframe`/`embed`/`object` 时回占位图 | F4（完成） |
 | `rules` / `rule_override` | 用户按域/类型覆盖策略（默认关） | F4（未做） |
-| ~~`request_dedup` / `retry_guard` / `cache_reuse` / `circuit_breaker`~~ | ✅ 已实现，四个独立开关，默认关（见 §3.2） | F5（完成） |
+| `request_dedup` / `retry_guard` / `circuit_breaker` | 三个独立降载开关，默认关；旧 cache_reuse 已退役（见 §3.2） | F5 |
 | 有界并发与队列 | 当前单线程事件循环；改动涉及事件循环结构，需单独评估 | F5（未做） |
 | ~~风暴阶梯~~ | ✅ 识别（`tps`/`(风暴)`/`(仅拒绝)`）+ 四级降载开关（默认关） | F5（完成） |
 | ~~真正的源站转发~~ | 已定论：转发式部署下不可靠，改为诚实的 204 + AdGuard 侧豁免提示 | 已定论 |
@@ -182,7 +180,7 @@ Windows GUI 的「拦截策略（勾选后立即生效）」表就是这份配�
 | 11 | 落盘 | 只写最新 4096 条，重启后连续 | ✅ |
 | 12 | 被 AdGuard 拦截的域 | 不再伪造 200，回 204 + 应用内提示 | ✅ |
 | 13 | 可见内容请求（`document`） | 占位图而非塌陷 | ✅ 开关打开后生效（默认关） |
-| 14 | 某域请求风暴 | 阶梯降级（去重/缓存/护栏/熔断） | ✅ 四个开关（默认关）+ 识别与提示（`tps`、`(风暴)`） |
+| 14 | 某域请求风暴 | 去重／护栏／熔断 | 三个现行开关默认关；旧伪缓存已退役 |
 | 15 | 规则覆盖 | 按域/类型自定义策略 | ❌ F4 剩余 |
 
 ## 8. 相关提交（可核对）

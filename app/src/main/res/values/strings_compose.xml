@@ -402,11 +402,11 @@
     <string name="compose_settings_visible_reply">Visible-content placeholder</string>
     <string name="compose_settings_visible_reply_hint">Also answer blocked pages and iframes with the placeholder image, so the page shows a visible placeholder instead of collapsing. Off by default; while off, behaviour is unchanged.</string>
     <string name="compose_settings_dedup">Request de-duplication</string>
-    <string name="compose_settings_dedup_hint">When the same app asks for the same host again within one second, answer once and fast-fail the repeats. Normal requests are unaffected; off by default.</string>
+    <string name="compose_settings_dedup_hint">Repeated requests from the same app to the same host within one second receive empty HTTP 204 replies, including different resource paths. This can hide placeholders or change resource responses. Off by default; it is a load-shedding policy, not content caching.</string>
     <string name="compose_settings_retry_guard">Retry-storm guard</string>
     <string name="compose_settings_retry_guard_hint">If one app hits the same host more than 40 times in 10 seconds, fast-fail it for 30 seconds and log it, then probe again. Off by default.</string>
-    <string name="compose_settings_cache_reuse">Fast 204 for repeated hosts</string>
-    <string name="compose_settings_cache_reuse_hint">Repeated requests from the same app to a recently seen host receive HTTP 204. This changes the response and may reuse the previous resource category; it does not cache original content.</string>
+    <string name="compose_settings_cache_reuse">Old response shortcut retired</string>
+    <string name="compose_settings_cache_reuse_hint">The old option replaced repeated responses with empty HTTP 204 replies instead of reusing their content. It is now ignored, including saved settings, so it cannot turn placeholders into empty replies. Request deduplication and retry protection remain separate options.</string>
     <string name="compose_settings_circuit_breaker">Per-host circuit breaker</string>
     <string name="compose_settings_circuit_breaker_hint">If a host gets fast-failed more than 60 times in 10 seconds by any app, fast-fail it for 20 seconds. Complements the retry guard, which only looks at one app. Off by default.</string>
     <string name="compose_settings_rule_override">Per-host response override</string>

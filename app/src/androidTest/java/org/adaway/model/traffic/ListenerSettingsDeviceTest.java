@@ -52,6 +52,18 @@ public class ListenerSettingsDeviceTest {
             assertTrue(org.adaway.util.WebServerUtils.getManagedListenerAddresses(isolated).contains("fd6b:2a91:84f0::73"));
         } finally { assertTrue(prefs.edit().clear().commit()); }
     }
+
+    @Test public void oldResponseShortcutPreferenceCannotRemainEnabled() {
+        Context application = ApplicationProvider.getApplicationContext();
+        android.content.SharedPreferences prefs = application.getSharedPreferences("retired-response-shortcut-fixture", Context.MODE_PRIVATE);
+        Context isolated = new android.content.ContextWrapper(application) {
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) { return prefs; }
+        };
+        try {
+            assertTrue(prefs.edit().clear().putBoolean("block_reply_cache_reuse", true).commit());
+            assertFalse(org.adaway.util.WebServerUtils.isCacheReuseEnabled(isolated));
+        } finally { assertTrue(prefs.edit().clear().commit()); }
+    }
     @Test public void actualBundledReceiptHandlerAndJavaClientAgreeForBothFamilies() throws Exception {
         Context context = ApplicationProvider.getApplicationContext();
         for (String ip : new String[]{"127.0.0.1", "::1"}) {
