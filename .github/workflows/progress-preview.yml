@@ -48,6 +48,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: Check emitted JSON field contract before preview build
+        run: |
+          python3 tools/check_stats_contract.py
+          python3 -m unittest discover -s tools -p 'test_check_stats_contract.py'
+
       - name: Build production-identity ARM64 preview for in-place upgrade
         shell: bash
         run: |
