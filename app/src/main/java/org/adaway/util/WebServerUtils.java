@@ -97,11 +97,16 @@ public class WebServerUtils {
     }
 
     public static ListenerSettings getListenerSettings(Context context) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE);
-        if (prefs.contains("listen_ipv4"))
-            return new ListenerSettings(prefs.getString("listen_ipv4", ""), prefs.getString("listen_ipv6", ""),
-                    getHttpPort(context), getHttpsPort(context));
-        return new ListenerSettings(getBindAddress(context), isBindAll(context), getHttpPort(context), getHttpsPort(context));
+        // One atomic preference snapshot prevents a concurrent save from mixing
+        // an old listener family with new ports. Diagnostics do not hold the
+        // lifecycle lock while waiting for DNS or network responses.
+        java.util.Map<String, ?> saved = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE).getAll();
+        int http = saved.get(PREF_HTTP_PORT) == null ? 80 : (Integer)saved.get(PREF_HTTP_PORT);
+        int https = saved.get(PREF_HTTPS_PORT) == null ? 443 : (Integer)saved.get(PREF_HTTPS_PORT);
+        if (saved.containsKey("listen_ipv4"))
+            return new ListenerSettings((String)saved.get("listen_ipv4"), (String)saved.get("listen_ipv6"), http, https);
+        boolean all = saved.get(PREF_BIND_ALL) != null && (Boolean)saved.get(PREF_BIND_ALL);
+        return new ListenerSettings((String)saved.get(PREF_BIND_IP), all, http, https);
     }
 
     private static boolean saveListenerSettings(Context context, ListenerSettings settings) {
@@ -142,9 +147,12 @@ public class WebServerUtils {
     }
 
     public static String checkArrivalDiagnostics(Context context, String adblockDomain, String hostsDomain) {
-        LISTENER_LOCK.lock();
-        try { return AdGuardArrivalDiagnostics.check(context, adblockDomain, hostsDomain); }
-        finally { LISTENER_LOCK.unlock(); }
+        return AdGuardArrivalDiagnostics.check(context, adblockDomain, hostsDomain);
+    }
+
+    public static String checkArrivalDiagnostics(Context context, String adblockDomain, String hostsDomain,
+            ListenerDiagnosticSession session) throws IOException {
+        return AdGuardArrivalDiagnostics.check(context, adblockDomain, hostsDomain, session);
     }
 
     private static String checkListenerSettingsLocked(Context context, ListenerSettings settings) {

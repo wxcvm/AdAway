@@ -42,20 +42,35 @@ public final class ListenerTlsCheck {
         return check(address, port, host, local, (SSLSocketFactory)SSLSocketFactory.getDefault());
     }
 
+    public static Result check(String address, int port, String host, ListenerArrivalCheck.LocalAddresses local,
+            ListenerDiagnosticSession session) throws IOException {
+        return check(address, port, host, local, (SSLSocketFactory)SSLSocketFactory.getDefault(), session);
+    }
+
     // A fixture can supply its own in-memory trusted anchor. The UI always uses
     // the platform default factory; this does not change the device trust store.
     static Result check(String address, int port, String host, ListenerArrivalCheck.LocalAddresses local, SSLSocketFactory factory) {
+        try { return check(address, port, host, local, factory, new ListenerDiagnosticSession()); }
+        catch (IOException failure) { return new Result(State.UNAVAILABLE, ""); }
+    }
+
+    static Result check(String address, int port, String host, ListenerArrivalCheck.LocalAddresses local,
+            SSLSocketFactory factory, ListenerDiagnosticSession session) throws IOException {
+        session.checkCancelled();
         if (!ListenerSettings.isLiteral(address) || port < 1 || port > 65535) return new Result(State.UNAVAILABLE, "");
         boolean literal = ListenerSettings.isLiteral(host);
         final String identity;
         try { identity = literal || "localhost".equals(host) ? host : ListenerArrivalCheck.normalizeDomain(host); }
         catch (IllegalArgumentException exception) { return new Result(State.UNAVAILABLE, ""); }
         try {
-            if (!local.contains(address)) return new Result(State.UNAVAILABLE, "");
-            return connect(address, port, identity, literal, factory);
+            boolean assigned = local.contains(address);
+            session.checkCancelled();
+            if (!assigned) return new Result(State.UNAVAILABLE, "");
+            return connect(address, port, identity, literal, factory, session);
         } catch (SSLException exception) {
+            session.checkCancelled();
             return new Result(certificateRejected(exception) ? State.CERTIFICATE_REJECTED : State.UNAVAILABLE, "");
-        } catch (IOException exception) { return new Result(State.UNAVAILABLE, ""); }
+        } catch (IOException exception) { session.checkCancelled(); return new Result(State.UNAVAILABLE, ""); }
     }
 
     private static boolean certificateRejected(SSLException exception) {
@@ -65,28 +80,34 @@ public final class ListenerTlsCheck {
         return false;
     }
 
-    private static Result connect(String address, int port, String identity, boolean literal, SSLSocketFactory factory) throws IOException {
+    private static Result connect(String address, int port, String identity, boolean literal, SSLSocketFactory factory,
+            ListenerDiagnosticSession session) throws IOException {
         try (Socket transport = new Socket()) {
-            ScheduledFuture<?> timeout = WATCHDOG.schedule(() -> {
-                try { transport.close(); } catch (IOException ignored) { /* Close cancels this diagnostic only. */ }
-            }, 2500, TimeUnit.MILLISECONDS);
+            ListenerDiagnosticSession.Registration registered = session.register(transport);
+            ScheduledFuture<?> timeout = WATCHDOG.schedule(() -> closeTransport(transport), 2500, TimeUnit.MILLISECONDS);
             try {
                 transport.connect(new InetSocketAddress(InetAddress.getByName(address), port), 800);
                 transport.setSoTimeout(2000);
                 try (SSLSocket tls = (SSLSocket)factory.createSocket(transport, identity, port, true)) {
+                    session.checkCancelled();
                     SSLParameters parameters = tls.getSSLParameters();
                     parameters.setEndpointIdentificationAlgorithm("HTTPS");
                     if (!literal) parameters.setServerNames(Collections.singletonList(new SNIHostName(identity)));
                     tls.setSSLParameters(parameters);
                     tls.setSoTimeout(2000);
                     tls.startHandshake();
+                    session.checkCancelled();
                     String protocol = tls.getSession().getProtocol();
                     boolean received;
-                    try { received = ListenerArrivalCheck.exchange(tls, identity); }
-                    catch (IOException exception) { received = false; }
+                    try { received = ListenerArrivalCheck.exchange(tls, identity, session); }
+                    catch (IOException exception) { session.checkCancelled(); received = false; }
                     return new Result(received ? State.RECEIPT : State.NO_RECEIPT, protocol);
                 }
-            } finally { timeout.cancel(false); }
+            } finally { timeout.cancel(false); registered.close(); }
         }
+    }
+
+    private static void closeTransport(Socket transport) {
+        try { transport.close(); } catch (IOException ignored) { /* This diagnostic's watchdog only. */ }
     }
 }

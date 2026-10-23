@@ -78,4 +78,79 @@ public class ListenerTlsDeviceTest {
         assertEquals(ListenerTlsCheck.State.UNAVAILABLE,
                 ListenerTlsCheck.check("203.0.113.9", 443, "listener.arrival-fixture.invalid", address -> false).state);
     }
+
+    @Test public void cancellationInterruptsRealDualStackHttpAndTlsWithoutWaitingForTimeout() throws Exception {
+        for (String address : new String[]{"127.0.0.1", "::1"}) {
+            cancelledSocket(address, false);
+            cancelledSocket(address, true);
+        }
+    }
+
+    private static void cancelledSocket(String address, boolean tls) throws Exception {
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        ListenerDiagnosticSession session = new ListenerDiagnosticSession();
+        try (java.net.ServerSocket listener = new java.net.ServerSocket(0, 1, InetAddress.getByName(address))) {
+            listener.setSoTimeout(2000);
+            java.util.concurrent.Future<?> peer = workers.submit(() -> {
+                try (java.net.Socket socket = listener.accept()) {
+                    socket.setSoTimeout(2000);
+                    assertTrue(socket.getInputStream().read() >= 0);
+                    started.countDown();
+                    release.await(3, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (java.io.IOException failure) { throw new AssertionError(failure); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new AssertionError(interrupted); }
+            });
+            java.util.concurrent.Future<?> checking = workers.submit(() -> {
+                if (tls) return ListenerTlsCheck.check(address, listener.getLocalPort(), "localhost", ip -> true, session);
+                return ListenerArrivalCheck.received(address, listener.getLocalPort(), "localhost", session);
+            });
+            assertTrue(started.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            session.cancel();
+            java.util.concurrent.ExecutionException failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> checking.get(1, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof java.io.InterruptedIOException);
+            release.countDown(); peer.get(1, java.util.concurrent.TimeUnit.SECONDS);
+        } finally { release.countDown(); workers.shutdownNow(); }
+    }
+
+    @Test public void cancelledWaitDoesNotAdmitAnotherUnfinishedResolver() throws Exception {
+        java.util.concurrent.ExecutorService worker = java.util.concurrent.Executors.newSingleThreadExecutor();
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch ended = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        ListenerDiagnosticSession session = new ListenerDiagnosticSession();
+        try {
+            java.util.concurrent.Future<?> waiting = worker.submit(() -> ListenerArrivalCheck.resolveSystem(session, () -> {
+                calls.incrementAndGet(); started.countDown();
+                awaitResolverRelease(release);
+                ended.countDown();
+                return new InetAddress[]{InetAddress.getLoopbackAddress()};
+            }));
+            assertTrue(started.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            session.cancel();
+            java.util.concurrent.ExecutionException failure = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> waiting.get(1, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(failure.getCause() instanceof java.io.InterruptedIOException);
+            assertThrows(java.io.IOException.class, () -> ListenerArrivalCheck.resolveSystem(new ListenerDiagnosticSession(), () -> {
+                calls.incrementAndGet(); return new InetAddress[0];
+            }));
+            assertEquals(1, calls.get());
+        } finally {
+            release.countDown(); assertTrue(ended.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            worker.shutdownNow();
+        }
+    }
+
+    private static void awaitResolverRelease(java.util.concurrent.CountDownLatch release) {
+        boolean interrupted = false;
+        try {
+            while (release.getCount() != 0) {
+                try { if (!release.await(3, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("DNS fixture release timed out"); }
+                catch (InterruptedException ignored) { interrupted = true; }
+            }
+        } finally { if (interrupted) Thread.currentThread().interrupt(); }
+    }
 }
