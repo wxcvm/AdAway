@@ -1,6 +1,6 @@
 
 LOCAL_PATH := $(call my-dir)
-OPENSSL_BUILT_DIR := $(LOCAL_PATH)/../build/official-openssl/arm64-v8a
+OPENSSL_BUILT_DIR := $(LOCAL_PATH)/../build/official-openssl/$(TARGET_ARCH_ABI)
 
 
 # Prebuilt official OpenSSL 3.5 LTS archives, built from the pinned source

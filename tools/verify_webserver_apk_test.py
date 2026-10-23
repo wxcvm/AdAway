@@ -15,6 +15,17 @@ def executable():
 
 
 class ApkExecutableTest(unittest.TestCase):
+    def test_cross_architecture_binaries_and_page_alignment_are_checked(self):
+        for abi, machine in [('arm64-v8a', 183), ('x86_64', 62), ('riscv64', 243)]:
+            blob = executable()
+            struct.pack_into('<H', blob, 18, machine)
+            struct.pack_into('<Q', blob, 112, 16384)
+            load_segments(blob, abi, 16384)
+            wrong = 'x86_64' if abi != 'x86_64' else 'riscv64'
+            with self.assertRaises(ValueError): load_segments(blob, wrong, 16384)
+            struct.pack_into('<Q', blob, 112, 4096)
+            with self.assertRaises(ValueError): load_segments(blob, abi, 16384)
+
     def test_agp9_intermediate_output_is_found_but_duplicates_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

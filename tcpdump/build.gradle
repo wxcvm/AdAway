@@ -2,13 +2,13 @@ apply plugin: 'com.android.library'
 
 android {
     compileSdk 36
-    ndkVersion '28.1.13356709'
+    ndkVersion rootProject.ext.adawayNdkVersion
     namespace 'org.adaway.libpcap'
 
     defaultConfig {
-        minSdkVersion 30
+        minSdkVersion rootProject.ext.adawayNativeTarget.api
         targetSdk 35
-        ndk { abiFilters project.findProperty('ruleLoaderTestAbi')?.toString() ?: 'arm64-v8a' }
+        ndk { abiFilters rootProject.ext.adawayNativeAbi }
         externalNativeBuild { ndkBuild { targets 'tcpdump' } }
     }
 
@@ -50,12 +50,11 @@ abstract class PackageTcpdumpExecutable extends DefaultTask {
 androidComponents {
     onVariants(selector().all()) { variant ->
         def capitalized = variant.name.capitalize()
-        def abi = project.findProperty('ruleLoaderTestAbi')?.toString() ?: 'arm64-v8a'
-        if (!(abi in ['arm64-v8a', 'x86_64'])) throw new GradleException("Unsupported tcpdump ABI: ${abi}")
+        def abi = rootProject.ext.adawayNativeAbi
         def packageTask = tasks.register("package${capitalized}TcpdumpExecutable", PackageTcpdumpExecutable) {
             dependsOn "externalNativeBuild${capitalized}"
             targetAbi.set(abi)
-            targetMachine.set(abi == 'arm64-v8a' ? 183 : 62)
+            targetMachine.set(rootProject.ext.adawayNativeTarget.machine)
             nativeDirectory.set(layout.buildDirectory.dir("intermediates/ndkBuild/${variant.name}/obj/local"))
             outputDirectory.set(layout.buildDirectory.dir("generated/tcpdumpJniLibs/${variant.name}"))
         }
