@@ -14,6 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  contracts:
+    name: ABI packaging and feed contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/verify_webserver_apk_test.py
+      - run: python3 -m unittest discover -s tools -p test_prepare_preview_feed.py
+
   package:
     name: Native APK (${{ matrix.abi }})
     runs-on: ubuntu-latest
@@ -29,6 +37,11 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Restore only this ABI's pinned OpenSSL output
+        uses: actions/cache@v4
+        with:
+          path: webserver/build/official-openssl/${{ matrix.abi }}
+          key: official-openssl-${{ matrix.abi }}-ndk28-${{ runner.os }}-${{ hashFiles('webserver/scripts/build-official-openssl.sh') }}
       - name: Install pinned NDK and SDK
         run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.1.13356709"'
       - name: Build full APK with actual native executables
@@ -63,6 +76,11 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Restore pinned x86_64 OpenSSL output
+        uses: actions/cache@v4
+        with:
+          path: webserver/build/official-openssl/x86_64
+          key: official-openssl-x86_64-ndk28-${{ runner.os }}-${{ hashFiles('webserver/scripts/build-official-openssl.sh') }}
       - name: Enable disposable emulator KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
