@@ -30,7 +30,7 @@ Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `tr
 
 ## 2. /internal-stats 的 JSON 字段
 
-权威来源：webserver/jni/webserver.c 中构造该文档的代码；共 68 个字段。
+权威来源：webserver/jni/webserver.c 与 query_log_store.inc 中构造 JSON 的代码；本清单涵盖统计、日志及控制响应，共 69 个字段。抽取 C 字符串中的转义 JSON 键（包括短键），不把条件表达式中的普通字符串当作字段。
 客户端只读需要的字段，允许服务端新增字段（向后兼容），但不得改变既有字段的含义。
 
 - `action`
@@ -60,21 +60,19 @@ Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `tr
 - `daily`
 - `daily_peak`
 - `dedup_hits`
-- `deny`
 - `entries`
 - `error`
+- `family`
 - `guard_hits`
 - `h`
 - `history`
 - `host`
 - `hosts`
 - `limit`
-- `loaded`
 - `mode`
 - `n`
 - `offset`
 - `ok`
-- `on`
 - `pin_refused`
 - `qlog`
 - `query_log`
@@ -99,12 +97,13 @@ Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `tr
 - `total_connections`
 - `total_requests`
 - `tps`
-- `true`
 - `ts`
 - `type`
 - `uid`
 - `uptime_days`
 - `uptime_seconds`
+
+family 表示实际接收 HTTP 连接的地址族：0 为未知，4 为 IPv4，6 为 IPv6。旧历史不补推地址族；不表示原始 DNS 查询类型或订阅来源。
 
 ## 3. 规则与策略文件（以源码为准）
 
