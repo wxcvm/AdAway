@@ -4006,7 +4006,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                        streaming back to the client). */
                     if (proxy_busy(c)) return;
                     if (proxy_start(c, s, hm, phost)) {
-                        qlog_add(req_uid, QLOG_PROXY, hm);
+                        qlog_add(req_uid, QLOG_PROXY, hm, c);
                         return;
                     }
                 }
@@ -4042,7 +4042,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         char allow_host[192];
         req_host_of(hm, allow_host, sizeof(allow_host));
         if (domain_is_allowed(allow_host, s->resource_dir)) {
-            qlog_add(req_uid, QLOG_ALLOW, hm);
+            qlog_add(req_uid, QLOG_ALLOW, hm, c);
             /*
              * 204 而不是伪造的 200 "ok"：在"AdGuard 把拦截 IP 指向本服务器"的部署里，
              * 服务器拿不到真实内容，回一个 200 空正文等于对客户端撒谎（它以为成功、
@@ -4056,7 +4056,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     }
 
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
-        qlog_add(req_uid, QLOG_ALLOW, hm);
+        qlog_add(req_uid, QLOG_ALLOW, hm, c);
         /* 同上：放行不等于"有内容可给"，用 204 而不是伪造的 200。 */
         mg_http_reply(c, 204, "Cache-Control: no-store\r\n", "");
         return;
@@ -4291,7 +4291,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                both the requester and the target. */
             app_note_host(ba, bh);
         }
-        qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
+        qlog_add(conn_load_uid(c), QLOG_BLOCK, hm, c);
         ws_push_broadcast(s);  /* real-time push to WS subscribers */
         return;
     }
@@ -4319,7 +4319,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         top_host_add(bh);
         app_note_host(ba, bh);
     }
-    qlog_add(conn_load_uid(c), QLOG_BLOCK, hm);
+    qlog_add(conn_load_uid(c), QLOG_BLOCK, hm, c);
     ws_push_broadcast(s);  /* real-time push to WS subscribers */
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
@@ -4503,46 +4503,48 @@ int main(int argc, char *argv[]) {
         char su[64], su6[64];
         snprintf(su, sizeof(su), "http://127.0.0.1:%d", s.stats_port);  // NOSONAR: 回环地址，仅本机可访问；这里用明文是设计使然（Sonar c:S5332）
         snprintf(su6, sizeof(su6), "http://[::1]:%d", s.stats_port);  // NOSONAR: 回环地址，仅本机可访问；这里用明文是设计使然（Sonar c:S5332）
-        if (mg_http_listen(&mgr, su, fn, &s) == NULL) {
-            LOG_INFO("Management port %d is not available on 127.0.0.1", s.stats_port);
-        }
-        mg_http_listen(&mgr, su6, fn, &s);
+        bool management4 = mg_http_listen(&mgr, su, fn, &s) != NULL;
+        bool management6 = mg_http_listen(&mgr, su6, fn, &s) != NULL;
+        LOG_INFO("Management listeners: %s %s; %s %s.", su,
+            management4 ? "listening" : "unavailable", su6,
+            management6 ? "listening" : "unavailable");
     }
 
     /* Build listen URLs from the configured bind mode + ports. */
     char http_url[128], https_url[128], http_url6[128], https_url6[128];
     lp_urls(&s.listener_pair,s.bind_ip,s.bind_all,s.http_port,s.https_port,http_url,https_url,http_url6,https_url6);
 
-    if (!mg_http_listen(&mgr, http_url, fn, &s)) {
+    struct mg_connection *http_primary = mg_http_listen(&mgr, http_url, fn, &s);
+    if (!http_primary) {
         LOG_FATAL("HTTP bind failed (%s).", http_url);
         mg_mgr_free(&mgr); return EXIT_FAILURE;
     }
-    if (!mg_http_listen(&mgr, https_url, fn, &s)) {
+    struct mg_connection *https_primary = mg_http_listen(&mgr, https_url, fn, &s);
+    if (!https_primary) {
         LOG_FATAL("HTTPS bind failed (%s).", https_url);
         mg_mgr_free(&mgr); return EXIT_FAILURE;
     }
     /*
      * IPv6 loopback listeners (::1) - optional. Devices with IPv6
      * disabled fail to bind these; that is fine, the IPv4 listeners
-     * above still serve. Both must succeed for ipv6_ok so the ready
-     * log reflects the actual state.
+     * above still serve. Report each protocol's actual socket separately;
+     * an explicit IPv4-only start must not claim IPv6 was enabled.
      */
-    bool ipv6_ok = true;
-    if (http_url6[0] && !mg_http_listen(&mgr, http_url6, fn, &s)) {
+    struct mg_connection *http_extra = http_url6[0] ? mg_http_listen(&mgr, http_url6, fn, &s) : NULL;
+    struct mg_connection *https_extra = https_url6[0] ? mg_http_listen(&mgr, https_url6, fn, &s) : NULL;
+    if (http_url6[0] && !http_extra) {
         if (s.listener_pair.explicit_pair) {
             LOG_FATAL("Requested HTTP IPv6 listener failed (%s); check the local address and port. Server stopped.", http_url6);
             mg_mgr_free(&mgr); return EXIT_FAILURE;
         }
         LOG_WARN("HTTP IPv6 bind failed (%s) — continuing with IPv4 only.", http_url6);
-        ipv6_ok = false;
     }
-    if (https_url6[0] && !mg_http_listen(&mgr, https_url6, fn, &s)) {
+    if (https_url6[0] && !https_extra) {
         if (s.listener_pair.explicit_pair) {
             LOG_FATAL("Requested HTTPS IPv6 listener failed (%s); check the local address and port. Server stopped.", https_url6);
             mg_mgr_free(&mgr); return EXIT_FAILURE;
         }
         LOG_WARN("HTTPS IPv6 bind failed (%s) — continuing with IPv4 only.", https_url6);
-        ipv6_ok = false;
     }
 
     load_block_cfg(s.resource_dir);
@@ -4551,8 +4553,11 @@ int main(int argc, char *argv[]) {
     setup_crash_handler(s.resource_dir);
     harden_process();
     LOG_INFO("ADBlock webserver ready — arm64, Mongoose " MG_VERSION
-        ", SNI cert issuance enabled, IPv6 loopback %s.",
-        ipv6_ok ? "on" : "off");
+        ", SNI cert issuance enabled. HTTP IPv4 %s; HTTPS IPv4 %s; HTTP IPv6 %s; HTTPS IPv6 %s.",
+        lp_ready_state(http_primary->loc.is_ip6 ? 6 : 4, http_url6[0] != 0, http_extra != NULL, 4),
+        lp_ready_state(https_primary->loc.is_ip6 ? 6 : 4, https_url6[0] != 0, https_extra != NULL, 4),
+        lp_ready_state(http_primary->loc.is_ip6 ? 6 : 4, http_url6[0] != 0, http_extra != NULL, 6),
+        lp_ready_state(https_primary->loc.is_ip6 ? 6 : 4, https_url6[0] != 0, https_extra != NULL, 6));
 
     /* Snapshot once at startup, then only when something actually changed and
        at most every 20 s (5 min when idle): writing 16 KB every few seconds for

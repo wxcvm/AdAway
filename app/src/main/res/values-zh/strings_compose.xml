@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="compose_logs_family_all">全部连接</string>
+    <string name="compose_logs_family_unknown">IP 协议未知</string>
+    <string name="compose_logs_type_all">全部响应类型</string>
+    <string name="compose_logs_type_structure">页面结构／通用策略</string>
+    <string name="compose_logs_type_unknown">类型未知／未记录</string>
+    <string name="compose_logs_classification_scope">连接协议与响应分类仅筛选已加载的 HTTP 记录，不代表 DNS A／AAAA 或订阅规则来源。旧记录未采集的信息保留为未知。</string>
     <!-- 新 Compose UI 字符串（中文） -->
 
     <!-- 导航 -->

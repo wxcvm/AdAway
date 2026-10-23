@@ -5,6 +5,12 @@ int main(void) {
     WSADATA data; assert(!WSAStartup(MAKEWORD(2,2),&data));
 #endif
     lp_pair pair={0};
+    assert(!strcmp(lp_ready_state(4,0,0,4),"listening"));
+    assert(!strcmp(lp_ready_state(4,0,0,6),"disabled"));
+    assert(!strcmp(lp_ready_state(6,0,0,4),"disabled"));
+    assert(!strcmp(lp_ready_state(6,0,0,6),"listening"));
+    assert(!strcmp(lp_ready_state(4,1,1,6),"listening"));
+    assert(!strcmp(lp_ready_state(4,1,0,6),"failed (optional)"));
     assert(lp_set(&pair,"--listen-ipv4","127.0.0.2"));
     assert(lp_set(&pair,"--listen-ipv6","::1"));
     assert(!lp_set(&pair,"--listen-ipv4","::1"));
@@ -32,6 +38,6 @@ int main(void) {
 #ifdef _WIN32
     WSACleanup();
 #endif
-    puts("Independent families, disabled family, dual URLs and IPv6 conflict rejection passed");
+    puts("Independent families, disabled family, truthful protocol readiness, dual URLs and IPv6 conflict rejection passed");
     return 0;
 }

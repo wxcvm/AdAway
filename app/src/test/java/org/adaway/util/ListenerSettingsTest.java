@@ -4,6 +4,12 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class ListenerSettingsTest {
+    @org.junit.Test public void diagnosticsIncludeOptionalLegacyIpv6WithoutChangingReadiness() {
+        ListenerSettings legacy = new ListenerSettings("", false, 80, 443);
+        assertArrayEquals(new String[]{"127.0.0.1"}, legacy.probeAddresses());
+        assertArrayEquals(new String[]{"127.0.0.1", "::1"}, legacy.diagnosticAddresses());
+        assertArrayEquals(new String[]{"127.0.0.1"}, new ListenerSettings("127.0.0.1", "", 80, 443).diagnosticAddresses());
+    }
     @Test public void explicitFamiliesStayIndependentAndBothReachStartup() {
         ListenerSettings pair = new ListenerSettings("127.0.0.2", "::1", 18080, 18443);
         assertTrue(pair.arguments().contains("--listen-ipv4 127.0.0.2 --listen-ipv6 ::1"));

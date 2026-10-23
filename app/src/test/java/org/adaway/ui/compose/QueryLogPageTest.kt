@@ -5,6 +5,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class QueryLogPageTest {
+    @Test fun familyIsValidatedAndLegacyMissingFamilyStaysUnknown() {
+        val json = page()
+        val row = json.getJSONArray("entries").getJSONObject(0)
+        assertEquals(0, QueryLogPage.parse(json, 300, null).entries.single().family)
+        for (family in listOf(4, 6)) {
+            row.put("family", family)
+            assertEquals(family, QueryLogPage.parse(json, 300, null).entries.single().family)
+        }
+        row.put("family", 5)
+        assertThrows(IllegalArgumentException::class.java) { QueryLogPage.parse(json, 300, null) }
+    }
     private fun page() = JSONObject("""{"offset":300,"total":600,"returned":1,"nextOffset":301,
         "hasMore":true,"generation":"0123456789abcdef0123456789abcdef","anchor":"600",
         "entries":[{"ts":100,"uid":-1,"action":1,"host":"blocked.example"}]}""")

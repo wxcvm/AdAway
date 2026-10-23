@@ -17,10 +17,13 @@ internal data class QueryLogBrowserState(
     val filter: Int = -1,
     val query: String = "",
     val uid: Int? = null,
+    val family: Int? = null,
+    val type: Int? = null,
 ) {
     val shown: List<QueryLogEntry>
         get() = entries.filter {
             (filter == -1 || it.action == filter) && (uid == null || it.uid == uid) &&
+                (family == null || it.family == family) && (type == null || it.type == type) &&
                 it.host.contains(query.trim(), ignoreCase = true)
         }
 }
@@ -51,6 +54,18 @@ internal class QueryLogBrowser(
         if (value == mutable.value.uid || (value != null && value < 0)) return
         pauseForFiltering()
         mutable.value = mutable.value.copy(uid = value)
+    }
+
+    fun setFamily(value: Int?) {
+        if (value == mutable.value.family || (value != null && value !in listOf(0, 4, 6))) return
+        pauseForFiltering()
+        mutable.value = mutable.value.copy(family = value)
+    }
+
+    fun setType(value: Int?) {
+        if (value == mutable.value.type || (value != null && value !in -1..9)) return
+        pauseForFiltering()
+        mutable.value = mutable.value.copy(type = value)
     }
 
     private fun pauseForFiltering() {

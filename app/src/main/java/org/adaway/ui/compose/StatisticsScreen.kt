@@ -71,6 +71,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.adaway.R
@@ -1077,7 +1078,7 @@ private fun TrendTooltip(point: HistPoint, mode: Int, showConnections: Boolean, 
 @Composable
 private fun TrendCanvas(plot: TrendPlot, palette: TrendPalette, onSelect: (Int) -> Unit) {
     val selectedIndex by androidx.compose.runtime.rememberUpdatedState(plot.selectedIndex)
-    Canvas(Modifier.fillMaxWidth().height(200.dp).pointerInput(plot.data.size) {
+    Canvas(Modifier.fillMaxWidth().height(200.dp).testTag("traffic-trend-chart").pointerInput(plot.data.size) {
         detectTapGestures { offset ->
             val count = plot.data.size
             if (count == 0) return@detectTapGestures
@@ -1198,32 +1199,30 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrendDates(plot
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTrendBars(plot: TrendPlot, geometry: TrendGeometry, palette: TrendPalette) {
     val slotW = geometry.chartW / geometry.count
-    val barW = (slotW * 0.45f).coerceAtMost(14f)
-    val gap = 2.dp.toPx()
+    val seriesCount = if (plot.showConnections) 3 else 2
+    val gap = minOf(2.dp.toPx(), slotW / (seriesCount * 4))
+    val barW = ((slotW - gap * (seriesCount - 1)) / seriesCount).coerceIn(0f, 14.dp.toPx())
+    val groupW = barW * seriesCount + gap * (seriesCount - 1)
     plot.data.forEachIndexed { i, p ->
         val cx = geometry.xAt(i)
-        val hReq = (p.requests.toFloat() / geometry.maxAll) * geometry.chartH
-        val hBlk = (p.blocked.toFloat() / geometry.maxAll) * geometry.chartH
-        // Requests bar (left)
-        if (hReq > 0f) drawRoundRect(
-            color = palette.requests,
-            topLeft = Offset(cx - barW - gap / 2, geometry.base - hReq),
-            size = Size(barW, hReq),
-            cornerRadius = CornerRadius(2.dp.toPx()),
-        )
-        // Blocked bar (right)
-        if (hBlk > 0f) drawRoundRect(
-            color = palette.blocked,
-            topLeft = Offset(cx + gap / 2, geometry.base - hBlk),
-            size = Size(barW, hBlk),
-            cornerRadius = CornerRadius(2.dp.toPx()),
-        )
+        val values = listOf(p.requests to palette.requests, p.blocked to palette.blocked) +
+            if (plot.showConnections) listOf(p.connections to palette.connections) else emptyList()
+        values.forEachIndexed { series, (value, color) ->
+            val height = geometry.yReq(0) - geometry.yReq(value)
+            if (height > 0f) drawRoundRect(
+                color = color,
+                topLeft = Offset(cx - groupW / 2 + series * (barW + gap), geometry.base - height),
+                size = Size(barW, height),
+                cornerRadius = CornerRadius(2.dp.toPx()),
+            )
+        }
         // highlight the selected bar group
         if (i == plot.selectedIndex) {
+            val height = geometry.base - geometry.yReq(values.maxOf { it.first })
             drawRoundRect(
                 color = palette.axis.copy(alpha = 0.35f),
-                topLeft = Offset(cx - barW - gap / 2 - 2.dp.toPx(), geometry.base - kotlin.math.max(hReq, hBlk) - 2.dp.toPx()),
-                size = Size(barW * 2 + gap + 4.dp.toPx(), kotlin.math.max(hReq, hBlk) + 4.dp.toPx()),
+                topLeft = Offset(cx - groupW / 2 - 2.dp.toPx(), geometry.base - height - 2.dp.toPx()),
+                size = Size(groupW + 4.dp.toPx(), height + 4.dp.toPx()),
                 cornerRadius = CornerRadius(4.dp.toPx()),
                 style = Stroke(width = 1.dp.toPx()),
             )

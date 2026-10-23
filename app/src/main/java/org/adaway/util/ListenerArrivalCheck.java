@@ -81,7 +81,8 @@ public final class ListenerArrivalCheck {
         boolean received;
         try { received = prover.received(address, settings.http); }
         catch (IOException exception) { received = false; }
-        return address + (received ? "：DNS 已指向，HTTP 请求已到达 AdAway" : "：DNS 已指向，但未收到 AdAway 回执");
+        return address + (received ? "：DNS 已指向，HTTP 请求已到达 AdAway" : "：DNS 已指向，但未收到 AdAway 回执")
+                + "（HTTP 端口 " + settings.http + "）";
     }
 
     public static boolean validReceipt(String response, String nonce) {

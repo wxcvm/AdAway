@@ -4,6 +4,13 @@
 
 typedef struct { char ipv4[64], ipv6[64]; int explicit_pair; } lp_pair;
 
+/* Call only after the primary bind succeeds, using its observed socket family.
+   The extra URL is optional only for the historical implicit dual-stack mode. */
+static inline const char *lp_ready_state(int primary_family, int extra_requested, int extra_ready, int family) {
+    if (family == primary_family || (family == 6 && extra_ready)) return "listening";
+    return family == 6 && extra_requested ? "failed (optional)" : "disabled";
+}
+
 static inline int lp_set(lp_pair *pair, const char *key, const char *value) {
     char normalized[64];
     int family = !strcmp(key,"--listen-ipv4") ? 4 : 6;

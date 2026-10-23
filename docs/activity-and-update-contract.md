@@ -5,7 +5,10 @@ search, action and application filters across navigation, pins cursors while
 browsing, and keeps previous records on read/expiry errors. Search filters only
 loaded records. Browsing, scrolling and inspection pause live updates. Live
 updates reuse existing statistics refreshes with a ten-second throttle instead
-of adding another polling timer. Late or cancelled responses cannot replace a
+of adding another polling timer. Poll completion wakes the log reader even when
+statistics fail or only an unchanged disk snapshot is available. Only actual
+dragging pins the log; layout/programmatic scrolls do not. Resume remains visible
+while browsing history and returns to the latest page. Late or cancelled responses cannot replace a
 newer or paused page.
 
 The screen has domain search, action filters, pause/resume, request details and
@@ -28,6 +31,32 @@ runtime mechanism counters reset on restart; this is not an all-device lifetime
 blocking total. The repeated-host fast-204 option is documented as changing the
 response, not replaying a complete cached decision. Root Hosts IPv6 records are
 distinct from enabling an IPv6 listener or VPN capture.
+
+Statistics/log reads preserve IPv6-first ordering and fall back to IPv4 and
+direct HTTP when an nc binary or address fails. The entire read has a four-second
+budget and a bounded response, including child-process pipe reads. Live HTTP
+reads validate the complete declared byte length: nc exit code zero is not
+proof of completeness. A truncated/malformed nc response immediately switches
+to the direct HTTP fallback instead of repeating other nc variants. Live HTTP
+observations are ordered against concurrent pushes by publication revision,
+not wall-clock time, so clock correction does not freeze statistics. Disk
+fallback remains stale data. The bar chart includes its connection series.
+
+DNS arrival diagnostics show the exact HTTP port tested. DNS records do not
+specify ports: a receipt from a configured nondefault port does not prove the
+ordinary 80/443 domain path. Unmatched/nonlocal DNS answers are never contacted;
+domain HTTPS is explicitly marked untested when there is no eligible address.
+System resolution observes this application's view, not every app's private DNS.
+
+Each new HTTP log records the actual connection family (`4`, `6`, or unknown
+`0`); IPv4-mapped IPv6 sockets are classified as IPv4. Host text and DNS answer
+types are never used to guess it. Both paged and summary JSON carry the field.
+The bounded QLG2 persistence format restores family metadata; legacy QLOG rows
+remain readable with unknown family. Filtering combines family, response type,
+action, app and domain over loaded rows, and CSV exports family too. Response
+type is the native LT_* policy category, not subscription source attribution.
+Diagnostics include optional legacy IPv6 as well as mandatory configured binds;
+an IPv4-only server must not announce IPv6 as listening.
 
 Automatic application downloads are enabled by default and can be disabled.
 The startup and daily checks use the selected channel. The model persists the

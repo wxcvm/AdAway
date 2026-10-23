@@ -111,6 +111,8 @@ data class QueryLogEntry(
     /** How that type answers: 0 = placeholder, 1 = 204, 2 = passthrough. */
     val mode: Int = 0,
     val host: String = "",
+    /** Observed socket family; 0 means not recorded, including legacy rows. */
+    val family: Int = 0,
 )
 
 /** One time bucket of web server activity (hourly or daily series). */
@@ -253,6 +255,7 @@ data class ServerStats(
                         type = if (o.has("type")) o.optInt("type", -1) else -1,
                         mode = o.optInt("mode", 0),
                         host = o.optString("host", ""),
+                        family = o.optInt("family", 0).takeIf { it == 4 || it == 6 } ?: 0,
                     )
                 }
             }
@@ -345,6 +348,9 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     // 统计获取状态：更新时间戳与错误标记（供 UI 状态横幅展示）
     val statsUpdatedAt = MutableStateFlow<Long>(0L)
     val statsError = MutableStateFlow<String?>(null)
+    // Poll completion also wakes the log reader when statistics are unavailable.
+    internal val statsRefreshTick = MutableStateFlow(0L)
+    private var statsPublicationRevision = 0L
     internal val queryLogBrowser = QueryLogBrowser(viewModelScope, ::loadQueryLogPage)
 
     private var pollingJob: Job? = null
@@ -356,6 +362,7 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
         ) {
             when (event) {
                 androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    refreshServerStats()
                     startPolling()
                     val app = getApplication<org.adaway.AdAwayApplication>()
                     if (org.adaway.ui.compose.isRealtimeEnabled(app)) startRealtime()
@@ -434,10 +441,13 @@ private fun startPolling() {
                             val parsed = ServerStats.fromJson(org.json.JSONObject(text)) ?: return
                             viewModelScope.launch {
                                 if (wsJob === connectionJob && connectionJob.isActive &&
-                                    shouldReplaceStats(_serverStats.value?.snapshotTs, statsUpdatedAt.value, parsed.snapshotTs, false)) {
+                                    shouldReplacePushedStats(_serverStats.value?.snapshotTs,
+                                        _serverStats.value?.uptimeSeconds, parsed.snapshotTs, parsed.uptimeSeconds)) {
                                     _serverStats.value = parsed
+                                    statsPublicationRevision++
                                     statsUpdatedAt.value = System.currentTimeMillis()
                                     statsError.value = null
+                                    statsRefreshTick.value++
                                 }
                             }
                         } catch (e: Exception) {
@@ -483,6 +493,7 @@ private fun startPolling() {
     fun refreshServerStats() {
         if (statsRefreshJob?.isActive == true) return
         statsRefreshJob = viewModelScope.launch {
+            val startedAtRevision = statsPublicationRevision
             try {
                 val context = getApplication<Application>()
                 // OkHttp request must not run on the main dispatcher
@@ -507,10 +518,14 @@ private fun startPolling() {
                     }
                     fromSnapshot = stats != null
                 }
+                // A WebSocket observation published during this request is newer
+                // by delivery order, even if the system clock moved backwards.
+                if (startedAtRevision != statsPublicationRevision) return@launch
                 if (stats != null) {
                     val replace = shouldReplaceStats(_serverStats.value?.snapshotTs, statsUpdatedAt.value, stats.snapshotTs, fromSnapshot)
                     if (replace) {
                         _serverStats.value = stats
+                        statsPublicationRevision++
                         statsUpdatedAt.value = if (fromSnapshot) stats.snapshotTs * 1000 else System.currentTimeMillis()
                     }
                     // "snapshot" 会让状态栏显示“最后一次更新 xx:xx（可能已过期）”
@@ -522,7 +537,9 @@ private fun startPolling() {
                 throw cancelled
             } catch (e: Exception) {
                 Timber.w(e, "Failed to refresh server stats")
-                statsError.value = "error"
+                if (startedAtRevision == statsPublicationRevision) statsError.value = "error"
+            } finally {
+                statsRefreshTick.value++
             }
         }
     }
@@ -1043,6 +1060,7 @@ private fun startPolling() {
 
     override fun onCleared() {
         pollingJob?.cancel()
+        statsRefreshJob?.cancel()
         wsJob?.cancel()
         wsJob = null
         androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver)

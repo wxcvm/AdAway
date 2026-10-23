@@ -12,6 +12,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class QueryLogBrowserTest {
+    @Test fun addressFamilyAndResponseTypeFiltersUseRecordedMetadataOnly() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        try {
+            val rows = listOf(QueryLogEntry(host = "same.example", family = 4, type = 1),
+                QueryLogEntry(host = "same.example", family = 6, type = 1),
+                QueryLogEntry(host = "literal:looking", family = 0, type = -1))
+            val browser = QueryLogBrowser(scope, { _, _, _ -> QueryLogPage(rows, 3, 3, false, cursor) })
+            browser.refresh()
+            browser.setFamily(6)
+            browser.setType(1)
+            assertEquals(6, browser.state.value.shown.single().family)
+            browser.setFamily(0)
+            assertTrue(browser.state.value.shown.isEmpty())
+            browser.setType(-1)
+            assertEquals("literal:looking", browser.state.value.shown.single().host)
+            browser.setFamily(null)
+            browser.setType(null)
+            assertEquals(3, browser.state.value.shown.size)
+        } finally { scope.cancel() }
+    }
     private val cursor = QueryLogCursor("0123456789abcdef0123456789abcdef", "3")
     private fun page(offset: Int) = QueryLogPage(
         listOf(QueryLogEntry(ts = 10, uid = offset, action = offset % 3, host = "Host$offset.example")),

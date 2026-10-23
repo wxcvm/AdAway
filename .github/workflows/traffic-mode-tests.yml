@@ -20,6 +20,12 @@ on:
       - 'app/src/main/java/org/adaway/model/rules/**'
       - 'app/src/main/java/org/adaway/ui/compose/StatsViewModel.kt'
       - 'app/src/main/java/org/adaway/util/WebServerUtils.java'
+      - 'app/src/main/java/org/adaway/util/WebServerNet.java'
+      - 'app/src/main/java/org/adaway/util/WebServerStats.java'
+      - 'app/src/main/java/org/adaway/util/BoundedProcessResponse.java'
+      - 'app/src/test/java/org/adaway/util/*ResponseTest.java'
+      - 'app/src/test/java/org/adaway/util/WebServerStatsTransportTest.java'
+      - 'app/src/androidTest/java/org/adaway/util/WebServerStatsDeviceTest.java'
       - 'app/src/main/java/org/adaway/util/*Listener*.java'
       - 'app/src/test/java/org/adaway/util/*Listener*.java'
       - 'app/src/main/java/org/adaway/model/root/MagiskBootScript.java'
@@ -114,10 +120,10 @@ jobs:
           cc -std=c11 -O1 -g -D_GNU_SOURCE -DMG_TLS=0 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Iwebserver/jni -c "$RUNNER_TEMP/stats-json-bounds.c" -o "$RUNNER_TEMP/stats-json-bounds.o"
           cc -std=c11 -O1 -g -D_GNU_SOURCE -DMG_TLS=0 -fsanitize=address,undefined -fno-omit-frame-pointer "$RUNNER_TEMP/stats-json-bounds.o" webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/stats-json-bounds"
           "$RUNNER_TEMP/stats-json-bounds"
-          cc -std=c11 -O2 -D_GNU_SOURCE -Wall -Wextra -Werror -c webserver/jni/query_log_store_test.c -o "$RUNNER_TEMP/query-log-test.o"
-          cc -std=c11 -O2 -D_GNU_SOURCE -DMG_TLS=0 "$RUNNER_TEMP/query-log-test.o" webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/query-log-test"
+          cc -DMG_ENABLE_IPV6=1 -std=c11 -O2 -D_GNU_SOURCE -Wall -Wextra -Werror -c webserver/jni/query_log_store_test.c -o "$RUNNER_TEMP/query-log-test.o"
+          cc -DMG_ENABLE_IPV6=1 -std=c11 -O2 -D_GNU_SOURCE -DMG_TLS=0 "$RUNNER_TEMP/query-log-test.o" webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/query-log-test"
           "$RUNNER_TEMP/query-log-test" "$RUNNER_TEMP"
-          cc -std=c11 -O1 -g -D_GNU_SOURCE -DMG_TLS=0 -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/query_log_store_test.c webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/query-log-asan"
+          cc -DMG_ENABLE_IPV6=1 -std=c11 -O1 -g -D_GNU_SOURCE -DMG_TLS=0 -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/query_log_store_test.c webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/query-log-asan"
           "$RUNNER_TEMP/query-log-asan" "$RUNNER_TEMP"
           cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/diagnostic_udp_packet_test.c -o "$RUNNER_TEMP/transport-packets"
           "$RUNNER_TEMP/transport-packets" app/src/test/resources/transport/packet_vectors.tsv
