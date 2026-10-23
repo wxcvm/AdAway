@@ -179,7 +179,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat docs/android-abi-preview-contract.md docs/activity-and-update-contract.md docs/query-log-family-format.md docs/listener-arrival.md docs/response-policy-regressions.md docs/listener-settings.md docs/listener-lifecycle.md docs/dual-stack-transport.md docs/tcp-backend.md > release-assets/IMPLEMENTATION-STATUS.md
+          cat docs/android-abi-preview-contract.md docs/android-native-builds.md docs/android-abi-updates.md docs/activity-and-update-contract.md docs/query-log-family-format.md docs/listener-arrival.md docs/response-policy-regressions.md docs/listener-settings.md docs/listener-lifecycle.md docs/dual-stack-transport.md docs/tcp-backend.md > release-assets/IMPLEMENTATION-STATUS.md
           printf '%s\n' "$GITHUB_SHA" > release-assets/SOURCE-COMMIT.txt
           printf '%s\n' "Preview signature: same signing certificate as current published Android stable APK." > release-assets/SIGNING-POLICY.txt
           python3 tools/prepare-preview-feed.py

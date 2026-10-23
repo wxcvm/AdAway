@@ -84,7 +84,7 @@ abstract class PackageWebserverExecutable extends DefaultTask {
     @OutputDirectory abstract DirectoryProperty getOutputDirectory()
 
     @TaskAction void packageExecutable() {
-        def executable = nativeDirectory.file(targetAbi.get() + '/webserver').get().asFile
+        def executable = nativeDirectory.file('webserver').get().asFile
         def header = new byte[32]
         executable.withInputStream { stream ->
             if (stream.read(header) != header.length)
@@ -95,10 +95,13 @@ abstract class PackageWebserverExecutable extends DefaultTask {
         if (header[0] != 0x7f || header[1] != 69 || header[2] != 76 || header[3] != 70 ||
                 header[4] != 2 || header[5] != 1 || (header[18] & 0xff) != targetMachine.get() || header[19] != 0 || entry == 0)
             throw new GradleException("Not an executable for ${targetAbi.get()} (placeholder libraries are forbidden): ${executable}")
-        project.copy {
-            from executable
-            into outputDirectory.dir(targetAbi.get())
-            rename { 'libwebserver_exec.so' }
+        def abi = targetAbi.get()
+        project.sync {
+            into outputDirectory
+            from(executable) {
+                into abi
+                rename { 'libwebserver_exec.so' }
+            }
         }
     }
 }
@@ -112,7 +115,7 @@ androidComponents {
                 dependsOn "externalNativeBuild${capitalized}"
                 targetAbi.set(rootProject.ext.adawayNativeAbi)
                 targetMachine.set(rootProject.ext.adawayNativeTarget.machine)
-                nativeDirectory.set(layout.buildDirectory.dir("intermediates/ndkBuild/${variant.name}/obj/local"))
+                nativeDirectory.set(layout.buildDirectory.dir("intermediates/ndkBuild/${variant.name}/obj/local/${rootProject.ext.adawayNativeAbi}"))
                 outputDirectory.set(layout.buildDirectory.dir("generated/webserverJniLibs/${variant.name}"))
             }
             variant.sources.jniLibs.addGeneratedSourceDirectory(packageTask, { it.outputDirectory })
