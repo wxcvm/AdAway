@@ -381,9 +381,8 @@ static bool cfg_visible = false;
    dedup_enabled / retry_guard_enabled。 */
 static bool cfg_dedup = false;
 static bool cfg_guard = false;
-static bool cfg_cache = false;
 static bool cfg_breaker = false;
-/* 降载（去重/护栏/缓存/熔断）快速失败的请求数：它们确实被拦了，所以计入总拦截量，
+/* 降载（去重/护栏/熔断）快速失败的请求数：它们确实被拦了，所以计入总拦截量，
    但**不计入任何 blocked_* 类型** —— 否则开启降载后类型分布会失真（原实现的 bug）。 */
 static uint64_t s_f5_fastfail;
 /* 按域覆盖命中数：同样不属于任何请求类型，单列计数以免污染类型分布。 */
@@ -1926,7 +1925,6 @@ static void load_block_cfg(const char *dir) {
     cfg_visible = false;   /* 可见型占位默认关：关闭时行为与历史版本一致 */
     cfg_dedup = false;     /* F5 请求去重默认关 */
     cfg_guard = false;     /* F5 重试护栏默认关 */
-    cfg_cache = false;     /* F5 决策缓存默认关 */
     cfg_breaker = false;   /* F5 按域熔断默认关 */
     cfg_rule_override = false;   /* F4 按域覆盖默认关（关闭时连文件都不读） */
         cfg_media = true; cfg_struct = true; cfg_api = true; cfg_tele = true;
@@ -1943,7 +1941,8 @@ static void load_block_cfg(const char *dir) {
     /* F5：默认 false（缺键即关闭），老配置的语义不变 */
     cfg_dedup = jbool(b, "dedup_enabled", false);
     cfg_guard = jbool(b, "retry_guard_enabled", false);
-    cfg_cache = jbool(b, "cache_reuse_enabled", false);
+    if (jbool(b, "cache_reuse_enabled", false))
+        LOG_WARN("Legacy cache_reuse_enabled is retired and ignored; normal response policies remain active.");
     cfg_breaker = jbool(b, "circuit_breaker_enabled", false);
     cfg_rule_override = jbool(b, "rule_override_enabled", false);
     cfg_scripts = jbool(b, "reply_scripts", true);
@@ -1970,8 +1969,9 @@ static bool deny_quick(uint64_t *c, struct mg_connection *co) {
 }
 
 /* ======================= F5：请求去重与重试护栏 =======================
-   目标：把"同一个客户端在极短时间内对同一个域反复重试"变便宜，而不改变正常请求的
-   结果。两个开关互相独立，**默认都关** —— 关闭时这条代码路径完全不会被走到。
+   目标：降低"同一个客户端在极短时间内对同一个域反复重试"的应答开销。
+   开启后可把图片、脚本等回答替换为无正文的 204，并不保持原回答的内容。
+   两个开关互相独立，**默认都关** —— 关闭时这条代码路径完全不会被走到。
 
    - request_dedup：同一 (uid, host) 在 1s 窗口内重复出现时直接快速拒绝，不再走
      分类/占位那套开销。
@@ -2038,37 +2038,21 @@ static bool f5_guard_tripped(uid_t uid, uint32_t hh) {
     return fast_fail;
 }
 
-/* ============ F5 续：决策缓存与按域熔断（各自开关，默认关） ============
-   两者都只在上面那个挂钩点内实现，**不改分类函数**，因此关闭时与之前完全一致。
-
-   - cache_reuse：同一 (uid, 域) 在 2s 内再次出现时，直接复用上一次的"类型+回答方式"，
-     跳过整套分类判定（省的是 CPU，不是行为：仍然是被拦、仍然记 blocked_*）。
-     类型取自上一次调用进入时的 s_last_type，因此是一对一的"同域复用"。
-   - circuit_breaker：同一域（不限 uid）在 10s 内被快速失败超过 60 次 → 判定为
+/* ============ F5 续：按域熔断（独立开关，默认关） ============
+   circuit_breaker：同一域（不限 uid）在 10s 内被快速失败超过 60 次 → 判定为
      "这个域在当前客户端上已成死循环"，随后 20s 内对该域的请求直接快速失败。
      与 retry_guard 的区别：retry_guard 看的是"单个应用 × 单个域"，熔断看的是"整个域"。
+   The former cache_reuse path is retired: it never cached a response, and
+   replaced image/script/style responses with empty 204s. Legacy config keys
+   are ignored; this is not presented as a cache that re-runs classification.
    ====================================================================== */
-#define F5_CACHE_TTL_MS      2000u
 #define F5_BREAK_WINDOW_MS   10000u
 #define F5_BREAK_THRESHOLD   60u
 #define F5_BREAK_COOLDOWN_MS 20000u
 #define F5_BREAKS            32
 
+/* Keep the legacy JSON cache_hits field at zero for older clients. */
 static uint64_t s_f5_cache_hits, s_f5_breaker_hits;   /* RAM-only */
-/*
- * cache_reuse 的判定缓存：按 (uid, host_hash) 的有界表（64 条，最旧优先淘汰）。
- *
- * 早期实现只保存上一条请求的域哈希+时间戳：交替访问两个域时永远不命中（那就不是缓存），
- * 也无法区分 uid（可能把别的应用的判定套过来）。现在键含 uid，且可同时缓存多条；
- * 类型由上一次同键请求写入 —— 跨键绝不互相写入。
- */
-#define F5_CACHE_MAX 64
-struct f5_cache_entry { uid_t uid; uint32_t host_hash; int type; uint64_t ts; };
-static struct f5_cache_entry s_f5_cache[F5_CACHE_MAX];
-static int s_f5_cache_pos;
-static uid_t s_f5_prev_uid;
-static uint32_t s_f5_prev_hash;
-static uint64_t s_f5_prev_ts;
 struct f5_break { uint32_t host_hash; uint64_t win_start; uint32_t count; uint64_t until_ms; };
 static struct f5_break s_f5_breaks[F5_BREAKS];
 
@@ -2208,7 +2192,7 @@ static bool deny_status(uint64_t *counter, struct mg_connection *co, int status)
 /*
  * 降载快速失败：与 deny_quick 的区别是**不累加任何 blocked_* 类型计数**。
  *
- * 为什么需要它：去重/护栏/缓存/熔断命中时，请求确实被拦了（要计入总拦截量与拦截率），
+ * 为什么需要它：去重/护栏/熔断命中时，请求确实被拦了（要计入总拦截量与拦截率），
  * 但它并不属于任何一个请求类型 —— 早期实现统一累加 blocked_other，导致"开启降载后类型
  * 分布失真"（例如图片类看起来变少了）。现在机制命中只看 *_hits，类型分布保持真实。
  */
@@ -2219,29 +2203,8 @@ static bool deny_fast(uint64_t *mechanism_hits, struct mg_connection *co) {
     return true;
 }
 
-/* 在缓存表里找 (uid, host) 的槽位；create != 0 时按"最旧优先"补一个。 */
-static struct f5_cache_entry *f5_cache_slot(uid_t uid, uint32_t hh, int create) {
-    struct f5_cache_entry *oldest = &s_f5_cache[0];
-    for (int i = 0; i < F5_CACHE_MAX; i++) {
-        struct f5_cache_entry *e = &s_f5_cache[i];
-        if (e->type != 0 && e->uid == uid && e->host_hash == hh) return e;
-        if (e->ts < oldest->ts) oldest = e;
-    }
-    if (!create) return NULL;
-    struct f5_cache_entry *e = &s_f5_cache[s_f5_cache_pos];
-    s_f5_cache_pos = (s_f5_cache_pos + 1) % F5_CACHE_MAX;
-    e->uid = uid;
-    e->host_hash = hh;
-    e->type = 0;          /* 0 = 还没有已知判定（LT_IMAGES 也是 0，所以用 type!=0 当"有效"标记） */
-    e->ts = 0;
-    return e;
-}
-
 static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_message *hm) {
     struct mg_str u = hm->uri;
-    /* 进入时先记下上一次的决策类型（下一行就会被清成 -1），供 cache_reuse 配对使用。
-       不这么做就得在每个 return 点各加一次记录，改动面大得多。 */
-    const int f5_prev_type = s_last_type;
     /* Cleared per request so a caller that falls through to the generic
        placeholder does not inherit the previous request's type. */
     s_last_type = -1;
@@ -2252,7 +2215,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
      * （连 req_host_of 的额外调用都不会发生）。deny_quick 自己会累加计数器，
      * 所以这里不再手动加，避免重复计数。
      */
-    if (cfg_dedup || cfg_guard || cfg_cache || cfg_breaker || cfg_rule_override) {
+    if (cfg_dedup || cfg_guard || cfg_breaker || cfg_rule_override) {
         char f5_host[192];
         uid_t f5_uid = conn_load_uid(c);
         uint64_t f5_now = mg_millis();
@@ -2277,28 +2240,6 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
             s_last_mode = RB_DENY;
             return deny_fast(&s_f5_breaker_hits, c);
         }
-        /*
-         * cache_reuse（键 = uid + 域）：
-         *   1) 先把"上一次同键请求"的判定写进缓存 —— 只有 uid 与域都相同才写，
-         *      跨键绝不互相写入，因此不会把别的应用/别的域的结论套过来；
-         *   2) 再查缓存：同一 (uid, 域) 在 TTL 内重复出现 → 直接复用该判定。
-         */
-        if (cfg_cache && f5_prev_type >= 0 && s_f5_prev_ts != 0 &&
-            s_f5_prev_uid == f5_uid && s_f5_prev_hash == f5_hh) {
-            struct f5_cache_entry *w = f5_cache_slot(f5_uid, f5_hh, 1);
-            if (w) { w->type = f5_prev_type + 1; w->ts = s_f5_prev_ts; }
-        }
-        if (cfg_cache) {
-            struct f5_cache_entry *e = f5_cache_slot(f5_uid, f5_hh, 0);
-            if (e && e->type != 0 && f5_now - e->ts <= F5_CACHE_TTL_MS) {
-                s_last_type = e->type - 1;
-                s_last_mode = RB_DENY;
-                return deny_fast(&s_f5_cache_hits, c);
-            }
-        }
-        s_f5_prev_uid = f5_uid;
-        s_f5_prev_hash = f5_hh;
-        s_f5_prev_ts = f5_now;
         if (cfg_guard && f5_guard_tripped(f5_uid, f5_hh)) {
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;

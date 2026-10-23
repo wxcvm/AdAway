@@ -1366,10 +1366,8 @@ private static String computeSubjectHashOld(Path certFile)
             appendBlockReplyField(sb, "retry_guard_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                             .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RETRY_GUARD, false));
-            /* F5 续：决策缓存与按域熔断 —— 同样默认关 */
-            appendBlockReplyField(sb, "cache_reuse_enabled",
-                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CACHE_REUSE, false));
+            /* Retired shortcut: never export a saved true value as active. */
+            appendBlockReplyField(sb, "cache_reuse_enabled", false);
             appendBlockReplyField(sb, "circuit_breaker_enabled",
                     context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
                             .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CIRCUIT_BREAKER, false));
@@ -1412,8 +1410,8 @@ private static String computeSubjectHashOld(Path certFile)
     /**
      * 打开/关闭请求去重（默认关）。
      *
-     * <p>开启后，同一 (uid, 域) 在 1 秒窗口内重复出现时直接快速拒绝：正常请求的结果
-     * 不变，只是把"同一秒里反复重试"的开销压下去。</p>
+     * <p>开启后，同一 (uid, 域) 在一秒滑动窗口内的重复请求返回空 204，包括不同 URI。
+     * 这会改变图片、脚本等资源的响应，可能隐藏占位图；不是内容缓存。</p>
      */
     public static void setDedupEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
@@ -1439,16 +1437,15 @@ private static String computeSubjectHashOld(Path certFile)
         applyBlockReplyConfig(context);
     }
 
-    /** F5：决策缓存是否开启（默认关）。 */
+    /** Retired: the legacy shortcut replaced real responses with an empty 204. */
     public static boolean isCacheReuseEnabled(Context context) {
-        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CACHE_REUSE, false);
+        return false;
     }
 
-    /** 打开/关闭决策缓存（默认关）：同一域 2 秒内重复请求直接复用上次的判定。 */
+    /** Compatibility entry point: old callers can only clear the retired option. */
     public static void setCacheReuseEnabled(Context context, boolean enabled) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CACHE_REUSE, enabled).apply();
+                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CACHE_REUSE, false).apply();
         applyBlockReplyConfig(context);
     }
 

@@ -1443,11 +1443,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                         )
                     }
-                    // ── F5 续：决策缓存 / 按域熔断（各自独立，默认都关）──
+                    // The old shortcut did not replay responses and is retired.
                     Spacer(Modifier.height(8.dp))
-                    var cacheOn by remember {
-                        mutableStateOf(org.adaway.util.WebServerUtils.isCacheReuseEnabled(context))
-                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1463,13 +1460,6 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(
-                            checked = cacheOn,
-                            onCheckedChange = { v ->
-                                cacheOn = v
-                                org.adaway.util.WebServerUtils.setCacheReuseEnabled(context, v)
-                            },
-                        )
                     }
                     Spacer(Modifier.height(8.dp))
                     var breakerOn by remember {
