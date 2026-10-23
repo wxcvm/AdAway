@@ -2464,7 +2464,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
        /gen_204, /generate_204.php, /connecttest.txt (Windows),
        /hotspot-detect.html (iOS/macOS).
        CMCC/China Mobile: /wlan/userip, /wlan/ac_portal, /wlan/login,
-       /portal/*, /eportal/*, /cmcc/* */
+       paths beginning /portal/, /eportal/ or /cmcc/. */
     if (uri_contains_ci(u, "/ping") || uri_contains_ci(u, "/heartbeat") ||
         uri_contains_ci(u, "/generate_204") || uri_contains_ci(u, "/204") ||
         uri_contains_ci(u, "/gen_204") || uri_contains_ci(u, "/generate_204.php") ||
@@ -2491,7 +2491,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* No Sec-Fetch-Dest header (older clients) - fall back to the
        Accept header, which browsers still send for every request:
-       image/* → placeholder image, text/css → empty CSS,
+       an image MIME type → placeholder image, text/css → empty CSS,
        application/javascript → empty JS. This is the last chance to
        classify before the generic placeholder-image fallback. */
     struct mg_str *accept = mg_http_get_header(hm, "Accept");
