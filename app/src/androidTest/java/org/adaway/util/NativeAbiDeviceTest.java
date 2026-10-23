@@ -28,6 +28,13 @@ import static org.junit.Assert.*;
 /** Actual packaged executables on a disposable emulator; no root, route or trust-store changes. */
 @RunWith(AndroidJUnit4.class)
 public class NativeAbiDeviceTest {
+    @Test public void networkPolicyAllowsBothLoopbacksAndKeepsPublicHttpDisabled() {
+        android.security.NetworkSecurityPolicy policy = android.security.NetworkSecurityPolicy.getInstance();
+        assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"));
+        assertTrue(policy.isCleartextTrafficPermitted("::1"));
+        assertFalse(policy.isCleartextTrafficPermitted("198.51.100.1"));
+    }
+
     private static int port(Set<Integer> used) throws Exception {
         for (;;) try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) {
             int candidate = socket.getLocalPort();
