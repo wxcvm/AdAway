@@ -35,6 +35,9 @@ distinct from enabling an IPv6 listener or VPN capture.
 Statistics/log reads preserve IPv6-first ordering and fall back to IPv4 and
 direct HTTP when an nc binary or address fails. The entire read has a four-second
 budget and a bounded response, including child-process pipe reads. Live HTTP
+reads validate the complete declared byte length: nc exit code zero is not
+proof of completeness. A truncated/malformed nc response immediately switches
+to the direct HTTP fallback instead of repeating other nc variants. Live HTTP
 observations are ordered against concurrent pushes by publication revision,
 not wall-clock time, so clock correction does not freeze statistics. Disk
 fallback remains stale data. The bar chart includes its connection series.

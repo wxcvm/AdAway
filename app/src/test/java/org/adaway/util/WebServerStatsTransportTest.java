@@ -2,6 +2,7 @@ package org.adaway.util;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 import org.junit.Test;
 import static org.junit.Assert.*;
@@ -52,5 +53,35 @@ public class WebServerStatsTransportTest {
         assertNull(WebServerNet.bodyFromResponse(BODY));
         assertNull(WebServerNet.bodyFromResponse("HTTP/1.1 200 OK\r\n"));
         assertEquals(BODY, WebServerNet.bodyFromResponse(RESPONSE));
+    }
+
+    @Test public void declaredByteLengthMustBeCompleteUniqueBoundedAndNotChunked() {
+        assertNull(WebServerNet.bodyFromResponse("HTTP/1.1 200 OK\r\nContent-Length: 8192\r\n\r\n{}"));
+        assertNull(WebServerNet.bodyFromResponse("HTTP/1.1 200 OK\r\n\r\n{}"));
+        for (String length : new String[]{"-1", "+2", "two", "1048577", "99999999"}) {
+            assertNull(WebServerNet.bodyFromResponse("HTTP/1.1 200 OK\r\nContent-Length: " + length + "\r\n\r\n{}"));
+        }
+        assertNull(WebServerNet.bodyFromResponse("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}"));
+        assertNull(WebServerNet.bodyFromResponse("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 2\r\n\r\n{}"));
+        String unicode = "{\"host\":\"例子.test\"}";
+        assertEquals(unicode, WebServerNet.bodyFromResponse("HTTP/1.1 200 OK\r\nContent-Length: "
+                + unicode.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + unicode));
+        assertNull(WebServerNet.bodyFromResponse("HTTP/1.1 200 OK\r\nContent-Length: " + unicode.length() + "\r\n\r\n" + unicode));
+    }
+
+    @Test public void truncatedNcImmediatelyUsesHttpWithoutRepeatingTheSameBrokenNc() {
+        int[] calls = {0};
+        JSONObject actual = WebServerStats.getJson("/internal-stats", 8686, new WebServerStats.LocalTransport() {
+            @Override public String nc(String executable, String applet, String host, int port, String request, long timeout) {
+                calls[0]++;
+                return "HTTP/1.1 200 OK\r\nContent-Length: 8192\r\n\r\n{}";
+            }
+            @Override public String http(int port, String path, long timeout) {
+                assertEquals(1, calls[0]);
+                return BODY;
+            }
+        });
+        assertNotNull(actual);
+        assertEquals(4, actual.optInt("total_requests"));
     }
 }

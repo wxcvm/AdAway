@@ -2,6 +2,7 @@ package org.adaway.util;
 
 import androidx.annotation.Nullable;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -103,9 +104,30 @@ public final class WebServerNet {
         if (response == null) return null;
         int headerEnd = response.indexOf("\r\n\r\n");
         int statusEnd = response.indexOf("\r\n");
-        if (headerEnd < 0 || statusEnd < 0) return null;
+        if (headerEnd <= statusEnd || headerEnd > 8192 || statusEnd < 0) return null;
         String status = response.substring(0, statusEnd);
         if (!status.matches("HTTP/1\\.[01] 2\\d{2}( .*)?")) return null;
-        return response.substring(headerEnd + 4);
+        int length = contentLength(response.substring(statusEnd + 2, headerEnd));
+        String body = response.substring(headerEnd + 4);
+        // Some older nc versions exit after one readable chunk when the peer
+        // closes. Exit code zero therefore does not prove a complete response.
+        return length >= 0 && body.getBytes(StandardCharsets.UTF_8).length == length ? body : null;
+    }
+
+    private static int contentLength(String headers) {
+        int length = -1;
+        for (String line : headers.split("\r\n")) {
+            int colon = line.indexOf(':');
+            if (colon < 1) return -1;
+            String name = line.substring(0, colon);
+            if (name.equalsIgnoreCase("Transfer-Encoding")) return -1;
+            if (name.equalsIgnoreCase("Content-Length")) {
+                String value = line.substring(colon + 1).trim();
+                if (length >= 0 || !value.matches("\\d{1,7}")) return -1;
+                length = Integer.parseInt(value);
+                if (length > MAX_RESPONSE_BYTES) return -1;
+            }
+        }
+        return length;
     }
 }

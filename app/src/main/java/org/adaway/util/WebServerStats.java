@@ -94,6 +94,23 @@ public final class WebServerStats {
         String request = "GET " + path + " HTTP/1.1\r\n" +
                 "Host: adaway\r\n" +
                 "Connection: close\r\n\r\n";
+        JSONObject parsed = readNcJson(path, port, transport, request, deadline);
+        if (parsed != null) return parsed;
+        // A response from nc may be truncated on older ROMs despite exit=0.
+        // Re-read through HTTP immediately instead of repeating the same nc bug.
+        try {
+            long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+            if (remaining <= 0 || Thread.currentThread().isInterrupted()) return null;
+            String body = transport.http(port, path, remaining);
+            if (body != null) return new JSONObject(body);
+        } catch (Exception error) {
+            Timber.w(error, "Failed to fetch %s (OkHttp)", path);
+        }
+        return null;
+    }
+
+    @Nullable
+    private static JSONObject readNcJson(String path, int port, LocalTransport transport, String request, long deadline) {
         // 9 组合：3 种 nc 二进制 x 3 种宿主（::1 / v4-mapped / v4）
         String[][] attempts = {
             {"/system/bin/toybox", "nc", "::1"},
@@ -107,23 +124,10 @@ public final class WebServerStats {
             {"nc", null, "127.0.0.1"},
         };
         for (String[] a : attempts) {
-            if (Thread.currentThread().isInterrupted()) return null;
             long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime()) - 1000;
-            if (remaining <= 0) break;
-            String response = transport.nc(a[0], a[1], a[2], port, request, Math.min(1000, remaining));
-            JSONObject parsed = parseNcResponse(response, a[2], path);
-            if (parsed != null) return parsed;
-        }
-        // Direct HTTP shares the same deadline; a stuck nc cannot prevent fallback forever.
-        try {
-            long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
             if (remaining <= 0 || Thread.currentThread().isInterrupted()) return null;
-            String body = transport.http(port, path, remaining);
-            if (body != null) {
-                return new JSONObject(body);
-            }
-        } catch (Exception e) {
-            Timber.w(e, "Failed to fetch %s (OkHttp)", path);
+            String response = transport.nc(a[0], a[1], a[2], port, request, Math.min(1000, remaining));
+            if (response != null) return parseNcResponse(response, a[2], path);
         }
         return null;
     }
