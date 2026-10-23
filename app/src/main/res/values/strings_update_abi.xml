@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="update_verify_architecture">The update does not match this device’s Android architecture or minimum system version.</string>
+    <string name="update_verify_digest">The downloaded APK does not match the selected release’s SHA-256 checksum.</string>
+</resources>

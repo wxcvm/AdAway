@@ -5,6 +5,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.Locale;
 
 /** Channel selection shared by foreground checks and the periodic worker. */
 final class ReleaseFeed {
@@ -19,10 +21,18 @@ final class ReleaseFeed {
 
     private final int currentCode;
     private final Fetcher fetcher;
+    private final String[] supportedAbis;
+    private final int sdk;
 
     ReleaseFeed(int currentCode, Fetcher fetcher) {
+        this(currentCode, fetcher, new String[]{"arm64-v8a"}, Integer.MAX_VALUE);
+    }
+
+    ReleaseFeed(int currentCode, Fetcher fetcher, String[] supportedAbis, int sdk) {
         this.currentCode = currentCode;
         this.fetcher = fetcher;
+        this.supportedAbis = supportedAbis == null ? new String[0] : supportedAbis.clone();
+        this.sdk = sdk;
     }
 
     Manifest check(boolean includePreview) throws IOException, JSONException {
@@ -32,7 +42,12 @@ final class ReleaseFeed {
         if (stable != null && (!includePreview || preview != null)) return best;
         // Missing channel pointers fall back to immutable manifests. A date tag
         // alone cannot establish the versionCode of an installable Android APK.
-        JSONArray releases = new JSONArray(fetcher.get(API));
+        JSONArray releases;
+        try { releases = new JSONArray(fetcher.get(API)); }
+        catch (IOException | JSONException failure) {
+            if (best != null) return best;
+            throw failure;
+        }
         for (int i = 0; i < releases.length(); i++) {
             best = newer(best, fromRelease(releases.optJSONObject(i), includePreview));
         }
@@ -61,7 +76,7 @@ final class ReleaseFeed {
 
     private Manifest read(String url, boolean preview, String expectedTag) {
         try {
-            return parse(new JSONObject(fetcher.get(url)), preview, expectedTag, currentCode);
+            return parse(new JSONObject(fetcher.get(url)), preview, expectedTag, currentCode, supportedAbis, sdk);
         } catch (IOException | JSONException exception) {
             return null;
         }
@@ -73,6 +88,12 @@ final class ReleaseFeed {
     }
 
     static Manifest parse(JSONObject json, boolean preview, String expectedTag, int currentCode) {
+        return parse(json, preview, expectedTag, currentCode, new String[]{"arm64-v8a"}, Integer.MAX_VALUE);
+    }
+
+    static Manifest parse(JSONObject json, boolean preview, String expectedTag, int currentCode,
+                          String[] supportedAbis, int sdk) {
+        if (json == null || supportedAbis == null || supportedAbis.length == 0 || sdk <= 0) return null;
         int code = json.optInt("versionCode", -1);
         String version = json.optString("version");
         if (code <= 0 || version.isEmpty()) return null;
@@ -86,6 +107,46 @@ final class ReleaseFeed {
                 || !"com.wxcvm.Adaway".equals(json.optString("packageName"))
                 || !url.equals(json.optString("downloadUrl")))) return null;
         if (!preview && !tag.matches(STABLE_TAG)) return null;
-        return new Manifest(version, code, json.optString("changelog"), url, code > currentCode, preview);
+        if (!json.has("artifacts")) {
+            // Legacy pointers describe ARM64 only. Never offer them to x86/RISC-V devices.
+            for (String abi : supportedAbis) if ("arm64-v8a".equals(abi)) {
+                return new Manifest(version, code, json.optString("changelog"), url, code > currentCode, preview);
+            }
+            return null;
+        }
+        JSONObject artifacts = json.optJSONObject("artifacts");
+        if (artifacts == null || artifacts.length() == 0 || artifacts.length() > 3) return null;
+        Iterator<String> keys = artifacts.keys();
+        while (keys.hasNext()) {
+            String abi = keys.next();
+            JSONObject artifact = artifacts.optJSONObject(abi);
+            if (!artifactValid(artifact, abi, tag, preview)) return null;
+        }
+        for (String abi : supportedAbis) {
+            JSONObject artifact = artifacts.optJSONObject(abi == null ? "" : abi);
+            if (artifact != null && artifact.optInt("minSdk") <= sdk) {
+                return new Manifest(version, code, json.optString("changelog"), artifact.optString("downloadUrl"),
+                        code > currentCode, preview, abi, artifact.optString("sha256").toLowerCase(Locale.ROOT),
+                        artifact.optInt("minSdk"));
+            }
+        }
+        return null;
+    }
+
+    private static boolean artifactValid(JSONObject artifact, String abi, String tag, boolean preview) {
+        int floor = "riscv64".equals(abi) ? 35 :
+                "arm64-v8a".equals(abi) || "x86_64".equals(abi) ? 30 : -1;
+        if (floor < 0 || artifact == null) return false;
+        Object minimum = artifact.opt("minSdk");
+        if (!(minimum instanceof Integer || minimum instanceof Long)) return false;
+        long api = ((Number) minimum).longValue();
+        if (api < floor || api > 10000) return false;
+        String asset = preview ? "AdAway-preview-" + ("arm64-v8a".equals(abi) ? "arm64" : abi) + ".apk" :
+                "arm64-v8a".equals(abi) ? "ADBlock-latest.apk" : "ADBlock-" + abi + ".apk";
+        return "com.wxcvm.Adaway".equals(artifact.opt("packageName"))
+                && (BASE + tag + "/" + asset).equals(artifact.opt("downloadUrl"))
+                && artifact.opt("sha256") instanceof String
+                && artifact.optString("sha256").matches("[0-9a-fA-F]{64}")
+                && (!artifact.has("nativeAbi") || abi.equals(artifact.opt("nativeAbi")));
     }
 }

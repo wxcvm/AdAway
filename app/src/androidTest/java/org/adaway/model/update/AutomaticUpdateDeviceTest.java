@@ -68,13 +68,20 @@ public class AutomaticUpdateDeviceTest {
         };
         Queue queue = new Queue();
         AtomicInteger nextCode = new AtomicInteger(1900000000);
-        ReleaseFeed.Fetcher feed = url -> "{\"version\":\"6.8.0.1\",\"versionCode\":" + nextCode.get() + "}";
+        ReleaseFeed.Fetcher feed = url -> {
+            try { return UpdateChannelDeviceTest.compatibleStable(nextCode.get()); }
+            catch (org.json.JSONException failure) { throw new java.io.IOException(failure); }
+        };
         try {
             assertTrue(prefs.edit().clear().putBoolean("updateCheckAppDaily", false).commit());
             assertTrue(PreferenceHelper.getAutomaticAppUpdate(isolated));
             UpdateModel first = new UpdateModel(isolated, feed, queue);
             assertTrue(first.checkForUpdate(false).updateAvailable);
             assertEquals(1, queue.enqueued);
+            assertEquals(android.os.Build.SUPPORTED_ABIS[0], UpdateModel.expectedDownloadedAbi(isolated));
+            assertEquals(UpdateChannelDeviceTest.DIGEST, UpdateModel.expectedDownloadedDigest(isolated));
+            assertEquals(android.os.Build.SUPPORTED_ABIS[0].equals("riscv64") ? 35 : 30,
+                    UpdateModel.expectedDownloadedMinSdk(isolated));
             assertEquals(101L, first.update());
             assertEquals(1, queue.enqueued);
             UpdateModel restarted = new UpdateModel(isolated, feed, queue);

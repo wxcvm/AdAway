@@ -40,10 +40,25 @@ public class UpdateModel {
     private static final String PENDING_DOWNLOAD_ID = "pending_download_id";
     private static final String PENDING_PREVIEW = "pending_preview";
     private static final String EXPECTED_APK_VERSION_CODE = "expected_apk_version_code";
+    private static final String EXPECTED_APK_ABI = "expected_apk_abi";
+    private static final String EXPECTED_APK_SHA256 = "expected_apk_sha256";
+    private static final String EXPECTED_APK_MIN_SDK = "expected_apk_min_sdk";
 
     static long expectedDownloadedVersionCode(Context context) {
         return context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
                 .getLong(EXPECTED_APK_VERSION_CODE, -1);
+    }
+
+    static String expectedDownloadedAbi(Context context) {
+        return context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE).getString(EXPECTED_APK_ABI, "arm64-v8a");
+    }
+
+    static String expectedDownloadedDigest(Context context) {
+        return context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE).getString(EXPECTED_APK_SHA256, "");
+    }
+
+    static int expectedDownloadedMinSdk(Context context) {
+        return context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE).getInt(EXPECTED_APK_MIN_SDK, 0);
     }
 
     static boolean pendingDownloadAllowed(Context context, long id) {
@@ -100,7 +115,8 @@ public class UpdateModel {
         android.content.SharedPreferences prefs = context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE);
         clearVerifiedCopies(context, prefs.getLong(PENDING_DOWNLOAD_ID, -1));
         prefs.edit().remove(PENDING_DOWNLOAD_ID)
-                .remove(EXPECTED_APK_VERSION_CODE).remove(PENDING_PREVIEW).apply();
+                .remove(EXPECTED_APK_VERSION_CODE).remove(PENDING_PREVIEW)
+                .remove(EXPECTED_APK_ABI).remove(EXPECTED_APK_SHA256).remove(EXPECTED_APK_MIN_SDK).apply();
     }
 
     private static void clearVerifiedCopies(Context context, long id) {
@@ -290,7 +306,8 @@ public class UpdateModel {
     private Manifest downloadManifest(boolean includePreview) {
         if (!this.versionInfo.isValid()) return null;
         try {
-            return new ReleaseFeed(this.versionInfo.code, this.feedFetcher).check(includePreview);
+            return new ReleaseFeed(this.versionInfo.code, this.feedFetcher,
+                    android.os.Build.SUPPORTED_ABIS, android.os.Build.VERSION.SDK_INT).check(includePreview);
         } catch (IOException | JSONException exception) {
             Timber.w(exception, "Unable to check selected update channel");
             this.lastError = exception.getMessage();
@@ -332,7 +349,8 @@ public class UpdateModel {
         android.content.SharedPreferences prefs = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE);
         long previousId = prefs.getLong(PENDING_DOWNLOAD_ID, -1);
         long previousVersion = prefs.getLong(EXPECTED_APK_VERSION_CODE, -1);
-        if (previousId >= 0 && previousVersion == selected.versionCode && pendingDownloadAllowed(this.context, previousId)) {
+        if (previousId >= 0 && previousVersion == selected.versionCode && pendingSelectionMatches(prefs, selected)
+                && pendingDownloadAllowed(this.context, previousId)) {
             DownloadState state = this.downloads.state(previousId);
             if (state == DownloadState.DOWNLOADING || state == DownloadState.READY_TO_INSTALL) return previousId;
         }
@@ -341,6 +359,9 @@ public class UpdateModel {
         // Persist before accepting a completion event, including after process death.
         if (!prefs.edit().putLong(PENDING_DOWNLOAD_ID, id)
                 .putLong(EXPECTED_APK_VERSION_CODE, selected.versionCode)
+                .putString(EXPECTED_APK_ABI, selected.nativeAbi)
+                .putString(EXPECTED_APK_SHA256, selected.sha256)
+                .putInt(EXPECTED_APK_MIN_SDK, selected.minSdk)
                 .putBoolean(PENDING_PREVIEW, selected.preview).commit()) {
             this.downloads.cancel(id);
             return -1;
@@ -359,13 +380,19 @@ public class UpdateModel {
         if (!PreferenceHelper.getAutomaticAppUpdate(this.context) || !selected.updateAvailable) return;
         android.content.SharedPreferences prefs = this.context.getSharedPreferences(UPDATE_DOWNLOAD_PREFS, Context.MODE_PRIVATE);
         // Failed downloads require an explicit retry; polling must not loop downloads forever.
-        if (prefs.getLong(EXPECTED_APK_VERSION_CODE, -1) == selected.versionCode &&
+        if (prefs.getLong(EXPECTED_APK_VERSION_CODE, -1) == selected.versionCode && pendingSelectionMatches(prefs, selected) &&
                 getPendingDownloadState() == DownloadState.FAILED) return;
         try {
             update();
         } catch (RuntimeException exception) {
             Timber.w(exception, "Automatic update download could not be queued");
         }
+    }
+
+    private static boolean pendingSelectionMatches(android.content.SharedPreferences prefs, Manifest selected) {
+        return selected.nativeAbi.equals(prefs.getString(EXPECTED_APK_ABI, "arm64-v8a"))
+                && selected.sha256.equals(prefs.getString(EXPECTED_APK_SHA256, ""))
+                && selected.minSdk == prefs.getInt(EXPECTED_APK_MIN_SDK, 0);
     }
 
     private long download(Manifest manifest) {

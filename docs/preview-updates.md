@@ -24,3 +24,7 @@ are still enforced immediately before invoking Android's installer.
 Previously published clients require one manual upgrade to this fix. A published
 release cannot retroactively change the updater already installed on a device.
 No device installation is performed by CI; API 30/35 tests use isolated emulators.
+
+Multi-ABI manifests additionally select and verify the device-compatible Android
+APK, checksum and minimum API. Legacy manifests remain ARM64-only; see
+[the Android ABI update contract](android-abi-updates.md).

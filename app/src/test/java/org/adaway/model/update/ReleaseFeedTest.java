@@ -63,4 +63,89 @@ public class ReleaseFeedTest {
         assertNull(ReleaseFeed.parse(new JSONObject("{\"version\":\"progress-android-20261020.99\"}"),true,null,1));
     }
     @Test(expected=IOException.class) public void unavailableChannelIsFailure() throws Exception { feed(1).check(true); }
+
+    private JSONObject artifacts(String tag, boolean beta) throws Exception {
+        JSONObject result = new JSONObject();
+        for (String abi : new String[]{"arm64-v8a", "x86_64", "riscv64"}) {
+            String filename = beta ? "AdAway-preview-" + (abi.equals("arm64-v8a") ? "arm64" : abi) + ".apk" :
+                    abi.equals("arm64-v8a") ? "ADBlock-latest.apk" : "ADBlock-" + abi + ".apk";
+            result.put(abi, new JSONObject().put("downloadUrl", ReleaseFeed.BASE + tag + "/" + filename)
+                    .put("packageName", "com.wxcvm.Adaway").put("minSdk", abi.equals("riscv64") ? 35 : 30)
+                    .put("sha256", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+                    .put("nativeAbi", abi).put("sourceCommit", "metadata is permitted"));
+        }
+        return result;
+    }
+
+    private JSONObject multiAbiPreview() throws Exception {
+        String tag = "progress-android-20261023.1";
+        return new JSONObject(preview(tag, 300)).put("artifacts", artifacts(tag, true));
+    }
+
+    @Test public void choosesEachAndroidAbiInDevicePreferenceOrderAndKeepsLegacyArmEntry() throws Exception {
+        JSONObject json = multiAbiPreview();
+        for (String abi : new String[]{"arm64-v8a", "x86_64", "riscv64"}) {
+            Manifest selected = ReleaseFeed.parse(json, true, null, 1, new String[]{abi}, 35);
+            assertNotNull(selected); assertEquals(abi, selected.nativeAbi);
+            assertEquals(abi.equals("riscv64") ? 35 : 30, selected.minSdk);
+            assertEquals(64, selected.sha256.length());
+            assertEquals(json.getJSONObject("artifacts").getJSONObject(abi).getString("downloadUrl"), selected.downloadUrl);
+        }
+        assertEquals("x86_64", ReleaseFeed.parse(json, true, null, 1,
+                new String[]{"unsupported", "x86_64", "arm64-v8a"}, 35).nativeAbi);
+        assertTrue(ReleaseFeed.parse(json, true, null, 1).downloadUrl.endsWith("AdAway-preview-arm64.apk"));
+    }
+
+    @Test public void legacyArmPointersNeverBecomeX86RiscvOrLinuxPackages() throws Exception {
+        JSONObject json = new JSONObject(preview("progress-android-20261020.5", 300));
+        assertNotNull(ReleaseFeed.parse(json, true, null, 1, new String[]{"arm64-v8a"}, 30));
+        for (String abi : new String[]{"x86_64", "riscv64", "linux-riscv64", "armeabi-v7a"}) {
+            assertNull(ReleaseFeed.parse(json, true, null, 1, new String[]{abi}, 35));
+            assertNull(ReleaseFeed.parse(new JSONObject(stable(300)), false, null, 1, new String[]{abi}, 35));
+        }
+        assertNull(ReleaseFeed.parse(multiAbiPreview(), true, null, 1, new String[]{"linux-riscv64"}, 35));
+    }
+
+    @Test public void rejectsUnavailableSdkAndMalformedArtifactContractWithoutLegacyFallback() throws Exception {
+        assertNull(ReleaseFeed.parse(multiAbiPreview(), true, null, 1, new String[]{"riscv64"}, 34));
+        assertNull(ReleaseFeed.parse(multiAbiPreview(), true, null, 1, new String[]{"x86_64"}, 29));
+        String[] keys = {"downloadUrl", "downloadUrl", "sha256", "packageName", "minSdk", "minSdk", "nativeAbi"};
+        Object[] invalid = {ReleaseFeed.BASE + "android-preview/AdAway-preview-riscv64.apk",
+                ReleaseFeed.BASE + "progress-android-20261023.1/AdAway-preview-arm64.apk",
+                "bad", "com.wxcvm.Adaway.preview", "35", 34, "arm64-v8a"};
+        for (int i = 0; i < keys.length; i++) {
+            JSONObject json = multiAbiPreview();
+            json.getJSONObject("artifacts").getJSONObject("riscv64").put(keys[i], invalid[i]);
+            assertNull(keys[i] + ": " + invalid[i], ReleaseFeed.parse(json, true, null, 1, new String[]{"riscv64"}, 35));
+            assertNull("Malformed metadata cannot fall back to top-level ARM64", ReleaseFeed.parse(json, true, null, 1));
+        }
+        assertNull(ReleaseFeed.parse(multiAbiPreview().put("artifacts", JSONObject.NULL), true, null, 1));
+        assertNull(ReleaseFeed.parse(multiAbiPreview().put("artifacts", new JSONObject()), true, null, 1));
+        JSONObject unknown = multiAbiPreview();
+        unknown.getJSONObject("artifacts").put("linux-riscv64", new JSONObject());
+        assertNull(ReleaseFeed.parse(unknown, true, null, 1));
+    }
+
+    @Test public void compatiblePreviewSurvivesUnavailableLegacyStableAndApiOnX86() throws Exception {
+        documents.put(ReleaseFeed.STABLE, stable(100));
+        documents.put(ReleaseFeed.PREVIEW, multiAbiPreview().toString());
+        ReleaseFeed feed = new ReleaseFeed(200, url -> {
+            if (!documents.containsKey(url)) throw new IOException("unavailable");
+            return documents.get(url);
+        }, new String[]{"x86_64"}, 30);
+        Manifest selected = feed.check(true);
+        assertTrue(selected.preview); assertTrue(selected.updateAvailable);
+        assertEquals("x86_64", selected.nativeAbi);
+        assertThrows(IOException.class, () -> feed.check(false));
+    }
+
+    @Test public void futureStableArtifactSelectionKeepsImmutableUrlAndUppercaseDigestIsNormalized() throws Exception {
+        JSONObject json = new JSONObject(stable(300)).put("artifacts", artifacts("6.7.5.776", false));
+        json.getJSONObject("artifacts").getJSONObject("riscv64").put("sha256",
+                "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789");
+        Manifest selected = ReleaseFeed.parse(json, false, "6.7.5.776", 301, new String[]{"riscv64"}, 35);
+        assertFalse(selected.updateAvailable); assertFalse(selected.preview);
+        assertTrue(selected.downloadUrl.endsWith("/6.7.5.776/ADBlock-riscv64.apk"));
+        assertEquals("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", selected.sha256);
+    }
 }
