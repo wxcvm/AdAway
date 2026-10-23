@@ -296,6 +296,110 @@ class RuleWorkflowUiTest {
         saveScreenshot("listener-arrival-drafts")
     }
 
+    @Test fun arrivalCancellationWaitsForCleanupThenAllowsFreshRetry() {
+        val started = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    AdGuardArrivalCard(true) { _, _, _, session ->
+                        if (calls.incrementAndGet() == 1) {
+                            session.progress("正在检查 IPv6 HTTP 回执…")
+                            started.countDown()
+                            check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                            "已取消任务的迟到结果"
+                        } else "第二轮有效结果"
+                    }
+                }
+            } }
+        }
+        compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+        compose.waitUntil(5000) { started.count == 0L }
+        compose.onNodeWithTag("arrival-cancel").performScrollTo().performClick()
+        compose.onNodeWithTag("arrival-start").assertIsNotEnabled()
+        compose.onNodeWithTag("arrival-status").assertTextContains("正在取消", substring = true)
+        release.countDown()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithText("检测已取消", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+        compose.waitUntil(5000) {
+            compose.onAllNodesWithText("第二轮有效结果").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("已取消任务的迟到结果").assertDoesNotExist()
+        compose.onNodeWithTag("arrival-copy").performScrollTo().assertIsEnabled()
+        compose.runOnIdle { assertEquals(2, calls.get()) }
+        saveScreenshot("listener-arrival-cancel-retry")
+    }
+
+    @Test fun leavingArrivalCardCancelsItsBlockingSession() {
+        val visible = androidx.compose.runtime.mutableStateOf(true)
+        val started = java.util.concurrent.CountDownLatch(1)
+        val finished = java.util.concurrent.CountDownLatch(1)
+        val sessionRef = java.util.concurrent.atomic.AtomicReference<org.adaway.util.ListenerDiagnosticSession>()
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { Surface {
+                if (visible.value) {
+                    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                        AdGuardArrivalCard(true) { _, _, _, session ->
+                            sessionRef.set(session)
+                            started.countDown()
+                            try {
+                                val until = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(8)
+                                while (!session.isCancelled && System.nanoTime() < until) Thread.sleep(10)
+                                session.checkCancelled()
+                                "不应显示的离页结果"
+                            } finally { finished.countDown() }
+                        }
+                    }
+                } else androidx.compose.material3.Text("已离开诊断页面")
+            } }
+        }
+        compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+        compose.waitUntil(5000) { started.count == 0L }
+        compose.runOnIdle { visible.value = false }
+        compose.waitUntil(5000) { finished.count == 0L }
+        compose.runOnIdle { assertTrue(sessionRef.get().isCancelled) }
+        compose.onNodeWithText("已离开诊断页面").assertIsDisplayed()
+        compose.onNodeWithText("不应显示的离页结果").assertDoesNotExist()
+    }
+
+    @Test fun arrivalProgressAndPreviousReportRemainVisibleDuringAnotherRun() {
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val started = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    AdGuardArrivalCard(true) { _, _, _, session ->
+                        if (calls.incrementAndGet() == 1) "上次有效检测结果"
+                        else {
+                            session.progress("正在检查 HTTPS 证书与回执…")
+                            started.countDown()
+                            check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                            session.checkCancelled()
+                            "新检测结果"
+                        }
+                    }
+                }
+            } }
+        }
+        compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+        compose.waitUntil(5000) { compose.onAllNodesWithText("上次有效检测结果").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+        compose.waitUntil(5000) { started.count == 0L }
+        compose.waitUntil(5000) { compose.onAllNodesWithText("正在检查 HTTPS 证书与回执…").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("arrival-progress").assertExists()
+        compose.onNodeWithTag("arrival-report").assertTextEquals("上次有效检测结果")
+        compose.onNodeWithTag("arrival-cancel").performScrollTo()
+        saveScreenshot("listener-arrival-progress-cancel")
+        compose.onNodeWithTag("arrival-cancel").performClick()
+        release.countDown()
+        compose.waitUntil(5000) { compose.onAllNodesWithText("检测已取消", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("arrival-report").assertTextEquals("上次有效检测结果")
+    }
+
     @Test fun listenerDraftDoesNotSaveOrRestartBeforeApplyAndRejectsHostnames() {
         val previous = org.adaway.util.WebServerUtils.getHttpPort(compose.activity)
         compose.setContent {

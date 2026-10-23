@@ -103,6 +103,39 @@ public class ListenerSettingsDeviceTest {
             assertTrue(rebuilt.arguments().contains("--listen-ipv4 127.0.0.2 --listen-ipv6 ::1"));
         } finally { assertTrue(prefs.edit().clear().commit()); }
     }
+
+    @Test public void concurrentSavedConfigurationsNeverMixListenerAndPorts() throws Exception {
+        Context application = ApplicationProvider.getApplicationContext();
+        android.content.SharedPreferences prefs = application.getSharedPreferences("listener-snapshot-fixture", Context.MODE_PRIVATE);
+        Context isolated = new android.content.ContextWrapper(application) {
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) { return prefs; }
+        };
+        java.util.concurrent.ExecutorService worker = java.util.concurrent.Executors.newSingleThreadExecutor();
+        java.util.concurrent.CountDownLatch go = new java.util.concurrent.CountDownLatch(1);
+        try {
+            assertTrue(prefs.edit().clear().putString("listen_ipv4", "127.0.0.2").putString("listen_ipv6", "")
+                    .putInt("http_port", 28080).putInt("https_port", 28443).commit());
+            java.util.concurrent.Future<?> writer = worker.submit(() -> {
+                try { assertTrue(go.await(2, TimeUnit.SECONDS)); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new AssertionError(interrupted); }
+                for (int index = 0; index < 200; index++) {
+                    boolean first = index % 2 == 0;
+                    prefs.edit().putString("listen_ipv4", first ? "127.0.0.2" : "127.0.0.3")
+                            .putInt("http_port", first ? 28080 : 38080).putInt("https_port", first ? 28443 : 38443).apply();
+                }
+            });
+            go.countDown();
+            for (int index = 0; index < 500; index++) {
+                ListenerSettings observed = org.adaway.util.WebServerUtils.getListenerSettings(isolated);
+                boolean first = observed.ipv4.equals("127.0.0.2");
+                assertTrue(first || observed.ipv4.equals("127.0.0.3"));
+                assertEquals(first ? 28080 : 38080, observed.http);
+                assertEquals(first ? 28443 : 38443, observed.https);
+                assertEquals("", observed.ipv6);
+            }
+            writer.get(3, TimeUnit.SECONDS);
+        } finally { worker.shutdownNow(); assertTrue(prefs.edit().clear().commit()); }
+    }
     private Process probe(String... arguments) throws Exception {
         Context context=ApplicationProvider.getApplicationContext();
         String directory=context.getApplicationInfo().nativeLibraryDir;
