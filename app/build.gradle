@@ -42,6 +42,7 @@ android {
                 commandReceiverEnabled: progressPreview ? 'false' : 'true'
         ]
         buildConfigField 'boolean', 'PROGRESS_PREVIEW', progressPreview.toString()
+        buildConfigField 'String', 'NATIVE_ABI', '"' + rootProject.ext.adawayNativeAbi + '"'
         minSdk rootProject.ext.adawayNativeTarget.api
         targetSdk 37
         ndk {

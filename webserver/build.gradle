@@ -52,6 +52,7 @@ def officialOpenSsl = tasks.register('buildOfficialOpenSsl', Exec) {
     workingDir projectDir
     commandLine 'bash', file('scripts/build-official-openssl.sh').absolutePath
     inputs.property('opensslRelease', '3.5.9')
+    inputs.file(file('scripts/build-official-openssl.sh'))
     def abi = rootProject.ext.adawayDisposableFixture ? 'arm64-v8a' : rootProject.ext.adawayNativeAbi
     inputs.property('abi', abi)
     inputs.property('ndkVersion', rootProject.ext.adawayNdkVersion)

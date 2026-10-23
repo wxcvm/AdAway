@@ -31,7 +31,7 @@ if [[ ! -x "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${TRIPLE}${API}-clang
   exit 1
 fi
 OUT="$HERE/build/official-openssl/$ABI"
-IDENTITY="$COMMIT $ABI $API $(sed -n 's/^Pkg.Revision *= *//p' "$NDK/source.properties")"
+IDENTITY="$COMMIT $ABI $API $(sed -n 's/^Pkg.Revision *= *//p' "$NDK/source.properties") keccak-riscv-o1-v1"
 SOURCE="$HERE/build/official-openssl/source"
 mkdir -p "$OUT"
 if [[ ! -e "$SOURCE/.git" ]]; then
@@ -63,6 +63,16 @@ pushd "$WORK" >/dev/null
   no-shared no-tests no-apps no-docs no-module \
   -Wl,-z,max-page-size=16384 \
   --prefix="$OUT" --libdir=lib --openssldir="$OUT/ssl"
+if [[ "$ABI" == riscv64 ]]; then
+  # NDK 28.1 clang 19 crashes in the optimizer for OpenSSL 3.5.9 keccak1600.c
+  # at -O3 (CI 39974845635). Keep the workaround local to that object; do not
+  # disable SHA-3, TLS, assembly, or optimization for the rest of the library.
+  grep -q '^crypto/sha/libcrypto-lib-keccak1600.o:' Makefile || {
+    echo 'ERROR: OpenSSL Keccak target changed; review the compiler workaround' >&2; exit 1;
+  }
+  printf '\ncrypto/sha/libcrypto-lib-keccak1600.o: LIB_CFLAGS += -O1\n' >> Makefile
+  echo 'Android riscv64: compiling only the Keccak C object at -O1 to avoid the observed NDK optimizer crash.'
+fi
 make -j "${OPENSSL_JOBS:-4}" build_libs
 make install_dev
 popd >/dev/null
