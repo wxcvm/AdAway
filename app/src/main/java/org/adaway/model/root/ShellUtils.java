@@ -21,6 +21,8 @@ public final class ShellUtils {
     private static final String EXECUTABLE_PREFIX = "lib";
     private static final String EXECUTABLE_SUFFIX = "_exec.so";
     private static final String WEB_SERVER_LIBRARY = "libwebserver_exec.so";
+    private static final String STAGING_DIRECTORY = "/data/local/tmp/";
+    private static final String REMOVE_FILE = "rm -f ";
     private static volatile String lifecycleShellPid;
     private static String lifecycleHelper;
 
@@ -49,7 +51,7 @@ public final class ShellUtils {
 
     private static String stagedExecutablePath(String executable) {
         if (!executable.matches("\\w+")) throw new IllegalArgumentException("Invalid executable name");
-        return "/data/local/tmp/" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
+        return STAGING_DIRECTORY + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
     }
 
     private static Shell.Result identityCommand(String script) {
@@ -93,7 +95,7 @@ public final class ShellUtils {
 
     private static void clearLifecycleHelper() {
         if (lifecycleHelper != null) {
-            Shell.cmd("rm -f " + escapedString(lifecycleHelper) + " " + escapedString(lifecycleHelper + ".new")).exec();
+            Shell.cmd(REMOVE_FILE + escapedString(lifecycleHelper) + " " + escapedString(lifecycleHelper + ".new")).exec();
             lifecycleHelper = null;
         }
     }
@@ -187,7 +189,7 @@ public final class ShellUtils {
          * success and failure so a later crash/start failure is always
          * recoverable, and neither accumulate files nor unlink a live fd.
          */
-        String logPath = "/data/local/tmp/" + executable + "_start.log";
+        String logPath = STAGING_DIRECTORY + executable + "_start.log";
 
         // Start in background, redirect stdout/stderr to the (fixed) log file
         String cmd = lifecycleShellGuard() + " && { LD_LIBRARY_PATH=" + escapedString(nativeLibraryDir)
@@ -253,7 +255,7 @@ public final class ShellUtils {
      */
     private static void deleteLogFile(String logPath) {
         try {
-            Shell.cmd("rm -f " + escapedString(logPath)).exec();
+            Shell.cmd(REMOVE_FILE + escapedString(logPath)).exec();
         } catch (Exception ignored) {
         }
     }
@@ -303,7 +305,7 @@ public final class ShellUtils {
         Shell.Result result = Shell.cmd("cp -f " + escapedString(source) + " " + escapedString(target)
                 + " && chmod 755 " + escapedString(target) + " && LD_LIBRARY_PATH=" + escapedString(libDir)
                 + " " + escapedString(target) + " --check-listen " + parameters).exec();
-        Shell.cmd("rm -f " + escapedString(target)).exec();
+        Shell.cmd(REMOVE_FILE + escapedString(target)).exec();
         if (result.getOut().isEmpty())
             throw new java.io.IOException("检测程序未返回结果（退出码 " + result.getCode()
                     + "）；请检查 Root 授权、执行权限和服务器安装包");

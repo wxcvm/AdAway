@@ -27,7 +27,7 @@ static int competitor(const char *path) {
 }
 
 int main(void) {
-    char path[] = "/tmp/adaway-lifecycle-XXXXXX";
+    char path[] = "/tmp/adaway-lifecycle-XXXXXX"; /* NOSONAR: isolated test, mkstemp atomically creates a random 0600 file; no predictable open. */
     int descriptor = mkstemp(path);
     assert(descriptor >= 0 && dup2(descriptor, 9) == 9);
     if (descriptor != 9) close(descriptor);
