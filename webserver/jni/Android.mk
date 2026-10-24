@@ -31,6 +31,20 @@ LOCAL_LDLIBS           := -llog -ldl
 
 include $(BUILD_EXECUTABLE)
 
+# Build the missing ABI of the exact graphics-path:1.0.1 JNI contract. Other
+# ABIs retain the native library from Google's AAR, preventing duplicate names.
+ifeq ($(TARGET_ARCH_ABI),riscv64)
+GRAPHICS_PATH_SRC := $(LOCAL_PATH)/../build/official-graphics-path/source/src/main/cpp
+include $(CLEAR_VARS)
+LOCAL_MODULE := androidx.graphics.path
+LOCAL_SRC_FILES := $(GRAPHICS_PATH_SRC)/Conic.cpp $(GRAPHICS_PATH_SRC)/PathIterator.cpp $(GRAPHICS_PATH_SRC)/pathway.cpp
+LOCAL_C_INCLUDES := $(GRAPHICS_PATH_SRC)
+# Match the official 1.0.1 flags and exported JNI surface; sources are unmodified.
+LOCAL_CPPFLAGS := -std=c++17 -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-rtti -ffast-math -ffp-contract=fast -fvisibility-inlines-hidden -fvisibility=hidden -fomit-frame-pointer -ffunction-sections -fdata-sections -nostdlib++
+LOCAL_LDFLAGS := -Wl,--version-script=$(GRAPHICS_PATH_SRC)/libandroidx.graphics.path.map -Wl,--hash-style=both -Wl,--gc-sections -Wl,-Bsymbolic-functions -Wl,-z,max-page-size=16384
+include $(BUILD_SHARED_LIBRARY)
+endif
+
 #
 # The executable is packaged by the variant's generated jniLibs source.
 # Never build a same-named placeholder: it can silently reach a release APK.

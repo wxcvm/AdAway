@@ -16,7 +16,7 @@ def find_apk(root, variant):
 ABI_MACHINES = {'arm64-v8a': 183, 'x86_64': 62, 'riscv64': 243}
 
 
-def load_segments(blob, abi='arm64-v8a', minimum_page_size=None):
+def load_segments(blob, abi='arm64-v8a', minimum_page_size=None, require_entry=True):
     if abi not in ABI_MACHINES:
         raise ValueError(f'Unsupported ABI: {abi}')
     if len(blob) < 64 or blob[:6] != b'\x7fELF\x02\x01':
@@ -24,7 +24,8 @@ def load_segments(blob, abi='arm64-v8a', minimum_page_size=None):
     kind, machine = struct.unpack_from('<HH', blob, 16)
     entry, phoff = struct.unpack_from('<QQ', blob, 24)
     size, count = struct.unpack_from('<HH', blob, 54)
-    if kind != 3 or machine != ABI_MACHINES[abi] or not entry or size != 56 or not count or phoff + size * count > len(blob):
+    if (kind != 3 or machine != ABI_MACHINES[abi] or (require_entry and not entry)
+            or size != 56 or not count or phoff + size * count > len(blob)):
         raise ValueError(f'Server is not a {abi} PIE executable; shared-library placeholder rejected')
     headers = [(offset, struct.unpack_from('<IIQQQQQQ', blob, offset))
                for offset in range(phoff, phoff + size * count, size)]
@@ -61,8 +62,10 @@ def load_segments(blob, abi='arm64-v8a', minimum_page_size=None):
             payload[40:48] = bytes(8)
             payload[58:64] = bytes(6)
         segments.append((address, flags, mem_size, bytes(payload)))
-    if not entry_executable:
+    if require_entry and not entry_executable:
         raise ValueError('Server entry point is outside executable load segments')
+    if not require_entry and (entry or not any(segment[1] & 1 for segment in segments)):
+        raise ValueError('Expected shared library with executable code and no PIE entry')
     return entry, segments, attributes
 
 
@@ -75,6 +78,7 @@ def main():
     parser.add_argument('--write-apk-path-file', type=Path)
     parser.add_argument('--executable', type=Path, required=True)
     parser.add_argument('--tcpdump-executable', type=Path)
+    parser.add_argument('--graphics-path-library', type=Path)
     args = parser.parse_args()
     apk_path = args.apk if args.apk is not None else find_apk(args.apk_root, args.variant)
     tcpdump = args.tcpdump_executable or Path(f'tcpdump/build/generated/tcpdumpJniLibs/{args.variant}/{args.abi}/libtcpdump_exec.so')
@@ -85,6 +89,18 @@ def main():
             if load_segments(packaged, args.abi, 16384) != load_segments(executable.read_bytes(), args.abi, 16384):
                 raise ValueError(f'Packaged {name} differs from this variant\'s generated executable')
             print(f'Verified {args.abi} executable {name}, entry={load_segments(packaged, args.abi)[0]:#x}, '
+                  f'bytes={len(packaged)}, sha256={hashlib.sha256(packaged).hexdigest()}')
+        if args.abi == 'riscv64':
+            library = args.graphics_path_library or Path(
+                f'webserver/build/intermediates/ndkBuild/{args.variant}/obj/local/riscv64/libandroidx.graphics.path.so')
+            packaged = apk.read('lib/riscv64/libandroidx.graphics.path.so')
+            if b'libc++_shared.so\0' in packaged:
+                raise ValueError('RISC-V graphics-path must not depend on the 4KB prebuilt C++ runtime')
+            if 'lib/riscv64/libc++_shared.so' in apk.namelist():
+                raise ValueError('Unneeded prebuilt RISC-V C++ runtime must not be packaged')
+            if load_segments(packaged, args.abi, 16384, False) != load_segments(library.read_bytes(), args.abi, 16384, False):
+                raise ValueError('Packaged graphics-path differs from this variant\'s generated library')
+            print(f'Verified {args.abi} shared library androidx.graphics.path, '
                   f'bytes={len(packaged)}, sha256={hashlib.sha256(packaged).hexdigest()}')
     if args.write_apk_path_file:
         args.write_apk_path_file.write_text(str(apk_path) + '\n', encoding='utf-8')

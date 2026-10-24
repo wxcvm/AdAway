@@ -18,6 +18,9 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ListenerSettingsDeviceTest {
+    @Test public void graphicsPathNativeConversionWorksAcrossApiLevels() {
+        org.adaway.util.NativeAbiDeviceTest.assertGraphicsPathSupport();
+    }
     @Test public void managementCleartextPolicyPermitsOnlyBothLoopbackFamilies() {
         android.security.NetworkSecurityPolicy policy = android.security.NetworkSecurityPolicy.getInstance();
         assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"));

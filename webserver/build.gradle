@@ -15,7 +15,11 @@ android {
             abiFilters rootProject.ext.adawayDisposableFixture ? 'arm64-v8a' : rootProject.ext.adawayNativeAbi
         }
         externalNativeBuild {
-            ndkBuild { targets 'webserver' }
+            ndkBuild {
+                // The official 1.0.1 AAR supplies ARM/x86 JNI, but no RISC-V library.
+                if (rootProject.ext.adawayNativeAbi == 'riscv64') targets 'webserver', 'androidx.graphics.path'
+                else targets 'webserver'
+            }
         }
     }
 
@@ -64,6 +68,16 @@ def officialOpenSsl = tasks.register('buildOfficialOpenSsl', Exec) {
     )
 }
 
+// The source lock also includes the exact released Kotlin files for JNI contract auditing.
+def officialGraphicsPath = tasks.register('prepareOfficialGraphicsPath', Exec) {
+    onlyIf { rootProject.ext.adawayNativeAbi == 'riscv64' }
+    workingDir projectDir
+    commandLine 'python3', file('scripts/prepare-graphics-path.py').absolutePath,
+            '--output', layout.buildDirectory.dir('official-graphics-path/source').get().asFile.absolutePath
+    inputs.files(file('scripts/prepare-graphics-path.py'), file('scripts/graphics-path-source.json'))
+    outputs.dir(layout.buildDirectory.dir('official-graphics-path/source'))
+}
+
 tasks.configureEach { t ->
     // AGP runs configureNdkBuild* (including ndk-build -n) *before* the
     // externalNativeBuild* compile task; prebuilt archives must exist already
@@ -72,6 +86,7 @@ tasks.configureEach { t ->
          t.name.startsWith('externalNativeBuild')) &&
         !t.name.contains('Clean')) {
         t.dependsOn officialOpenSsl
+        if (rootProject.ext.adawayNativeAbi == 'riscv64') t.dependsOn officialGraphicsPath
     }
 }
 

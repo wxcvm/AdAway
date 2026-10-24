@@ -42,6 +42,27 @@ class PreviewFeedTest(unittest.TestCase):
         with zipfile.ZipFile(self.assets / f'AdAway-preview-{slug}.apk', 'w') as archive:
             for name in ('webserver', 'tcpdump'):
                 archive.writestr(f'lib/{abi}/lib{name}_exec.so', elf(abi))
+            if abi == 'riscv64':
+                library = elf(abi)
+                struct.pack_into('<Q', library, 24, 0)
+                archive.writestr('lib/riscv64/libandroidx.graphics.path.so', library)
+
+    def test_riscv_preview_rejects_missing_or_invalid_graphics_native_library(self):
+        self.package('arm64-v8a')
+        for failure in ('missing', 'wrong_machine', 'pie_placeholder', 'unaligned'):
+            self.package('riscv64')
+            apk = self.assets / 'AdAway-preview-riscv64.apk'
+            with zipfile.ZipFile(apk) as archive:
+                entries = {name: archive.read(name) for name in archive.namelist()}
+            name = 'lib/riscv64/libandroidx.graphics.path.so'
+            library = bytearray(entries.pop(name))
+            if failure == 'wrong_machine': struct.pack_into('<H', library, 18, 183)
+            elif failure == 'pie_placeholder': struct.pack_into('<Q', library, 24, 128)
+            elif failure == 'unaligned': struct.pack_into('<Q', library, 112, 4096)
+            if failure != 'missing': entries[name] = library
+            with zipfile.ZipFile(apk, 'w') as archive:
+                for entry, data in entries.items(): archive.writestr(entry, data)
+            with self.assertRaises((ValueError, KeyError), msg=failure): self.prepare()
 
     def prepare(self):
         return feed.prepare(self.assets, TAG, SOURCE)
