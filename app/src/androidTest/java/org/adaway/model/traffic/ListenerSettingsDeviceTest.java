@@ -18,6 +18,12 @@ import static org.junit.Assert.*;
 
 @RunWith(AndroidJUnit4.class)
 public class ListenerSettingsDeviceTest {
+    @Test public void managementCleartextPolicyPermitsOnlyBothLoopbackFamilies() {
+        android.security.NetworkSecurityPolicy policy = android.security.NetworkSecurityPolicy.getInstance();
+        assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"));
+        assertTrue(policy.isCleartextTrafficPermitted("::1"));
+        assertFalse(policy.isCleartextTrafficPermitted("198.51.100.1"));
+    }
     @Test public void delayedColdStartWaitsForRealBothFamilyListeners() throws Exception {
         for (String ip : new String[]{"127.0.0.1", "::1"}) {
             InetAddress address = InetAddress.getByName(ip);
@@ -148,6 +154,99 @@ public class ListenerSettingsDeviceTest {
             writer.get(3, TimeUnit.SECONDS);
         } finally { worker.shutdownNow(); assertTrue(prefs.edit().clear().commit()); }
     }
+    @Test public void contentSettingsAtomicFailureKeepsLegacyPreferencesAndPublishedFiles() throws Exception {
+        Context application = ApplicationProvider.getApplicationContext();
+        android.content.SharedPreferences prefs = application.getSharedPreferences("content-settings-fixture", Context.MODE_PRIVATE);
+        File directory = java.nio.file.Files.createTempDirectory(application.getCacheDir().toPath(), "content-settings-").toFile();
+        Context isolated = new android.content.ContextWrapper(application) {
+            @Override public File getFilesDir() { return directory; }
+            @Override public android.content.SharedPreferences getSharedPreferences(String name, int mode) { return prefs; }
+        };
+        File resource = org.adaway.util.WebServerUtils.getResourcePath(isolated).toFile();
+        File target = new File(resource, org.adaway.util.ContentResponseSettings.FILE_NAME);
+        File marker = new File(target, "previous");
+        try {
+            assertTrue(prefs.edit().clear().putBoolean("block_reply_images", true).putBoolean("block_reply_cache_reuse", true).commit());
+            org.adaway.util.ContentResponseSettings settings = org.adaway.util.WebServerUtils.loadContentResponseSettings(isolated);
+            assertTrue(settings.enabled("images"));
+            assertTrue(target.mkdirs());
+            java.nio.file.Files.write(marker.toPath(), new byte[]{42});
+            assertThrows(java.io.IOException.class, () -> org.adaway.util.WebServerUtils.saveContentResponseSettings(isolated, settings.with("images", false)));
+            assertTrue(prefs.getBoolean("block_reply_images", false));
+            assertEquals(42, java.nio.file.Files.readAllBytes(marker.toPath())[0]);
+            assertTrue(marker.delete()); assertTrue(target.delete());
+            org.adaway.util.ContentResponseSettings.Saved saved = settings.with("images", false).publish(target, generation -> false);
+            assertFalse(saved.confirmed);
+            assertFalse(org.adaway.util.WebServerUtils.loadContentResponseSettings(isolated).enabled("images"));
+            assertEquals(0, new JSONObject(new String(java.nio.file.Files.readAllBytes(target.toPath()), StandardCharsets.UTF_8)).getInt("cache_reuse_enabled"));
+            File rules = new File(resource, org.adaway.util.ContentResponseRules.FILE_NAME);
+            org.adaway.util.WebServerUtils.saveContentResponseRules(isolated, "example.com=404");
+            assertThrows(java.io.IOException.class, () -> org.adaway.util.WebServerUtils.saveContentResponseRules(isolated, "example.com/path=204"));
+            assertEquals("example.com = 404\n", org.adaway.util.WebServerUtils.loadContentResponseRules(isolated));
+            assertTrue(rules.delete());
+        } finally {
+            marker.delete(); target.delete(); resource.delete(); directory.delete();
+            assertTrue(prefs.edit().clear().commit());
+        }
+    }
+
+    @Test public void actualIpv4OnlyControlRequiresCurrentGenerationAndRejectsLegacyAcknowledgement() throws Exception {
+        String token = "0123456789abcdef0123456789abcdef";
+        for (String acknowledged : new String[]{token, "11111111111111111111111111111111", ""}) {
+            try (ControlAckFixture fixture = new ControlAckFixture(acknowledged)) {
+                assertEquals(token.equals(acknowledged), org.adaway.util.WebServerControl.reloadConfig(token, fixture.listener.getLocalPort()));
+                assertTrue("Production transport did not reach IPv4-only control", fixture.correct.get() > 0);
+            }
+        }
+    }
+
+    private static final class ControlAckFixture implements AutoCloseable {
+        final ServerSocket listener = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"));
+        final java.util.concurrent.ExecutorService worker = java.util.concurrent.Executors.newSingleThreadExecutor();
+        final java.util.concurrent.atomic.AtomicBoolean running = new java.util.concurrent.atomic.AtomicBoolean(true);
+        final java.util.concurrent.atomic.AtomicInteger correct = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.Future<?> served;
+        ControlAckFixture(String token) throws Exception {
+            listener.setSoTimeout(100);
+            served = worker.submit(() -> {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6);
+                int count = 0;
+                while (running.get() && count < 8 && System.nanoTime() < deadline) {
+                    try (java.net.Socket client = listener.accept()) {
+                        count++;
+                        client.setSoTimeout(1500);
+                        java.io.BufferedReader input = new java.io.BufferedReader(new java.io.InputStreamReader(client.getInputStream(), StandardCharsets.US_ASCII));
+                        assertEquals("POST /control HTTP/1.1", input.readLine());
+                        String line; int length = 0;
+                        while ((line = input.readLine()) != null && !line.isEmpty())
+                            if (line.startsWith("Content-Length:")) length = Integer.parseInt(line.substring(15).trim());
+                        assertTrue(length > 0 && length < 128);
+                        char[] body = new char[length]; int read = 0;
+                        while (read < length) {
+                            int next = input.read(body, read, length - read);
+                            if (next < 0) throw new AssertionError("Truncated control request");
+                            read += next;
+                        }
+                        assertEquals("cmd=reload_config", new String(body));
+                        correct.incrementAndGet();
+                        String response = "OK: block config reloaded";
+                        String header = token.isEmpty() ? "" : "X-AdAway-Config-Generation: " + token + "\r\n";
+                        client.getOutputStream().write(("HTTP/1.1 200 OK\r\n" + header + "Content-Length: " + response.length()
+                                + "\r\nConnection: close\r\n\r\n" + response).getBytes(StandardCharsets.US_ASCII));
+                        client.getOutputStream().flush();
+                    } catch (java.net.SocketTimeoutException timeout) {
+                        // Bounded accept lets close stop retries without blocking the device suite.
+                    } catch (java.io.IOException error) { throw new AssertionError(error); }
+                }
+            });
+        }
+        @Override public void close() throws Exception {
+            running.set(false);
+            try { served.get(2, TimeUnit.SECONDS); }
+            finally { listener.close(); worker.shutdownNow(); }
+        }
+    }
+
     private Process probe(String... arguments) throws Exception {
         Context context=ApplicationProvider.getApplicationContext();
         String directory=context.getApplicationInfo().nativeLibraryDir;

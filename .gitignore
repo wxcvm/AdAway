@@ -17,3 +17,7 @@ build
 
 # CI-generated version metadata (never commit)
 version.txt
+
+# Python verification tools
+__pycache__/
+*.pyc

@@ -193,6 +193,13 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
 
     private static int verifyArchive(Context context, File copy) {
         try {
+            String abi = UpdateModel.expectedDownloadedAbi(context);
+            boolean compatible = false;
+            for (String supported : android.os.Build.SUPPORTED_ABIS) compatible |= supported.equals(abi);
+            if (!compatible) return R.string.update_verify_architecture;
+            String digest = UpdateModel.expectedDownloadedDigest(context);
+            if (!digest.isEmpty() && !UpdateArchive.digestMatches(copy, digest)) return R.string.update_verify_digest;
+            if (!UpdateArchive.nativeAbiMatches(copy, abi)) return R.string.update_verify_architecture;
             PackageManager packageManager = context.getPackageManager();
             PackageInfo archive = packageManager.getPackageArchiveInfo(copy.getAbsolutePath(), GET_SIGNING_CERTIFICATES);
             if (archive == null) {
@@ -200,6 +207,11 @@ public class ApkDownloadReceiver extends BroadcastReceiver {
             }
             if (!context.getPackageName().equals(archive.packageName)) {
                 return R.string.update_verify_package;
+            }
+            int expectedMinimum = UpdateModel.expectedDownloadedMinSdk(context);
+            if (archive.applicationInfo == null || archive.applicationInfo.minSdkVersion > android.os.Build.VERSION.SDK_INT
+                    || (expectedMinimum > 0 && archive.applicationInfo.minSdkVersion != expectedMinimum)) {
+                return R.string.update_verify_architecture;
             }
             PackageInfo current = packageManager.getPackageInfo(context.getPackageName(), GET_SIGNING_CERTIFICATES);
             // Installing an equal-version APK is not an update: this used to

@@ -15,6 +15,17 @@ def executable():
 
 
 class ApkExecutableTest(unittest.TestCase):
+    def test_cross_architecture_binaries_and_page_alignment_are_checked(self):
+        for abi, machine in [('arm64-v8a', 183), ('x86_64', 62), ('riscv64', 243)]:
+            blob = executable()
+            struct.pack_into('<H', blob, 18, machine)
+            struct.pack_into('<Q', blob, 112, 16384)
+            load_segments(blob, abi, 16384)
+            wrong = 'x86_64' if abi != 'x86_64' else 'riscv64'
+            with self.assertRaises(ValueError): load_segments(blob, wrong, 16384)
+            struct.pack_into('<Q', blob, 112, 4096)
+            with self.assertRaises(ValueError): load_segments(blob, abi, 16384)
+
     def test_agp9_intermediate_output_is_found_but_duplicates_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -50,6 +61,23 @@ class ApkExecutableTest(unittest.TestCase):
     def test_rejects_truncated_load_segments(self):
         with self.assertRaises(ValueError):
             load_segments(executable()[:200])
+
+    def test_riscv_strip_may_relocate_only_nonloaded_attributes(self):
+        built = executable()
+        struct.pack_into('<H', built, 18, 243)
+        struct.pack_into('<H', built, 56, 2)
+        struct.pack_into('<IIQQQQQQ', built, 120, 0x70000003, 4, 256, 0, 0, 8, 8, 1)
+        built.extend(b'ATTRtest')
+        stripped = bytearray(built)
+        stripped.extend(b'ATTRtest')
+        struct.pack_into('<Q', stripped, 128, 264)
+        self.assertEqual(load_segments(built, 'riscv64'), load_segments(stripped, 'riscv64'))
+        stripped[270] ^= 1
+        self.assertNotEqual(load_segments(built, 'riscv64'), load_segments(stripped, 'riscv64'))
+        stripped[200] ^= 1
+        self.assertNotEqual(load_segments(built, 'riscv64'), load_segments(stripped, 'riscv64'))
+        struct.pack_into('<Q', stripped, 128, 200)
+        with self.assertRaises(ValueError): load_segments(stripped, 'riscv64')
 
 
 if __name__ == '__main__':

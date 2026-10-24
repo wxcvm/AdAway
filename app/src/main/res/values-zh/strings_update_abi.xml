@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="update_verify_architecture">更新包的 Android 原生架构或最低系统版本与当前设备不匹配。</string>
+    <string name="update_verify_digest">下载 APK 的 SHA-256 校验和与选中的发布附件不一致。</string>
+</resources>

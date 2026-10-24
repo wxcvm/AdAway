@@ -1,0 +1,16 @@
+// One production ABI per APK. Disposable Room/UI fixtures keep their old switch.
+def requested = providers.gradleProperty('nativeAbi').orNull
+def fixture = providers.gradleProperty('ruleLoaderTestAbi').orNull
+if (requested && fixture) throw new GradleException('Choose nativeAbi or ruleLoaderTestAbi, never both')
+def abi = requested ?: fixture ?: 'arm64-v8a'
+def targets = [
+    'arm64-v8a': [machine: 183, api: 30, openssl: 'android-arm64'],
+    'x86_64': [machine: 62, api: 30, openssl: 'android-x86_64'],
+    'riscv64': [machine: 243, api: 35, openssl: 'android-riscv64']
+]
+if (!targets.containsKey(abi)) throw new GradleException("Unsupported Android ABI: ${abi}; choose ${targets.keySet()}")
+if (fixture && fixture != 'x86_64') throw new GradleException('Disposable test fixtures require x86_64')
+ext.adawayNativeAbi = abi
+ext.adawayNativeTarget = targets[abi]
+ext.adawayDisposableFixture = fixture != null
+ext.adawayNdkVersion = '28.1.13356709'

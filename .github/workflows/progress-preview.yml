@@ -14,7 +14,10 @@ jobs:
       group: android-preview-publication
       cancel-in-progress: false
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 75
+    env:
+      # A failed ABI build blocks publication; never substitute an ARM64 APK.
+      PREVIEW_ABIS: 'arm64-v8a x86_64 riscv64'
     permissions:
       contents: write
     steps:
@@ -52,18 +55,35 @@ jobs:
         run: |
           python3 tools/check_stats_contract.py
           python3 -m unittest discover -s tools -p 'test_check_stats_contract.py'
+          python3 -m unittest discover -s tools -p 'test_prepare_preview_feed.py'
 
-      - name: Build production-identity ARM64 preview for in-place upgrade
+      - name: Build and verify ABI-specific production-identity release APKs
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon --max-workers=2 \
-            -PversionName=6.7.6-preview.${GITHUB_RUN_NUMBER} \
-            -PversionCode=$(($(date -u +%s) - 1577836800)) \
-            -Pandroid.injected.build.abi=arm64-v8a
-
-      - name: Reject placeholder or wrong-variant server in final APK
-        run: python3 tools/verify_webserver_apk.py --apk-root app/build --variant release --executable webserver/build/generated/webserverJniLibs/release/arm64-v8a/libwebserver_exec.so --write-apk-path-file "$RUNNER_TEMP/verified-release-apk.txt"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;28.1.13356709'
+          version_name="6.7.6-preview.${GITHUB_RUN_NUMBER}"
+          version_code=$(($(date -u +%s) - 1577836800))
+          echo "PREVIEW_VERSION_NAME=$version_name" >> "$GITHUB_ENV"
+          echo "PREVIEW_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
+          for abi in $PREVIEW_ABIS; do
+            stage="$RUNNER_TEMP/android-preview-$abi"
+            mkdir -p "$stage"
+            # Preserve the complete prior preview before switching Gradle's ABI.
+            # Inputs declare ABI; each APK is checked against this ABI's own
+            # executable outputs and is copied away before the next build.
+            tasks=(:app:assembleRelease)
+            if [[ "$abi" == arm64-v8a ]]; then tasks=(:app:testDebugUnitTest "${tasks[@]}"); fi
+            ./gradlew "${tasks[@]}" --no-daemon --max-workers=2 \
+              -PversionName="$version_name" -PversionCode="$version_code" \
+              -PnativeAbi="$abi" -Pandroid.injected.build.abi="$abi"
+            python3 tools/verify_webserver_apk.py --apk-root app/build --variant release --abi "$abi" \
+              --executable "webserver/build/generated/webserverJniLibs/release/$abi/libwebserver_exec.so" \
+              --write-apk-path-file "$stage/verified-apk.txt" | tee "$stage/NATIVE-VERIFICATION.txt"
+            cp -- "$(cat "$stage/verified-apk.txt")" "$stage/unsigned.apk"
+            cp -- "webserver/build/generated/webserverJniLibs/release/$abi/libwebserver_exec.so" "$stage/libwebserver_exec.so"
+            cp -- "tcpdump/build/generated/tcpdumpJniLibs/release/$abi/libtcpdump_exec.so" "$stage/libtcpdump_exec.so"
+          done
 
       - name: Run native loader regressions before publication
         shell: bash
@@ -113,34 +133,8 @@ jobs:
             exit 1
           fi
           echo "Using Android build tools: ${bt##*/}"
-          # AGP 9 may put the packaged APK under intermediates/apk rather
-          # than the legacy outputs/apk directory. Select only release APKs,
-          # never a debug/androidTest APK, and refuse ambiguous candidates.
-          mapfile -t release_apks < <(find app/build -type f -name '*.apk' \
-            | grep -E '/apk/release/[^/]+\.apk$' | sort)
-          if [[ "${#release_apks[@]}" -ne 1 || ! -s "${release_apks[0]:-}" ]]; then
-            echo "::error::Expected exactly one packaged release APK, found ${#release_apks[@]}"
-            find app/build -type f -name '*.apk' -print || true
-            exit 1
-          fi
-          unsigned=$(cat "$RUNNER_TEMP/verified-release-apk.txt")
-          [[ "$unsigned" == "${release_apks[0]}" ]] || { echo '::error::APK changed after verification'; exit 1; }
-          echo "Using release APK from: $unsigned"
-          export SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD
-          "$bt/apksigner" sign --ks "$keystore" \
-            --ks-pass env:SIGNING_STORE_PASSWORD \
-            --ks-key-alias "$SIGNING_KEY_ALIAS" \
-            --key-pass env:SIGNING_KEY_PASSWORD \
-            --out release-assets/AdAway-preview-arm64.apk "$unsigned"
-          "$bt/apksigner" verify --verbose --print-certs release-assets/AdAway-preview-arm64.apk > release-assets/APK-SIGNATURE.txt
-          "$bt/aapt" dump badging release-assets/AdAway-preview-arm64.apk > release-assets/APK-IDENTITY.txt
-          grep -Fq "package: name='com.wxcvm.Adaway'" release-assets/APK-IDENTITY.txt
-          grep -Fq "native-code: 'arm64-v8a'" release-assets/APK-IDENTITY.txt
-          unzip -Z1 release-assets/AdAway-preview-arm64.apk > "$RUNNER_TEMP/preview-apk-entries.txt"
-          grep -Fxq 'lib/arm64-v8a/libwebserver_exec.so' "$RUNNER_TEMP/preview-apk-entries.txt"
-
-          # Reference must be an actual stable production APK from this same
-          # repository, not the former CI-debug-signed preview.
+          # The reference is the actual current stable production APK, fetched
+          # once. Every ABI must verify against that same signer independently.
           stable_tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
           [[ "$stable_tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
             echo "::error::latest stable release is not a production Android version"; exit 1;
@@ -150,17 +144,42 @@ jobs:
           "$bt/apksigner" verify --verbose --print-certs \
             "$RUNNER_TEMP/reference-release/ADBlock-latest.apk" > "$RUNNER_TEMP/stable-signature.txt"
           "$bt/aapt" dump badging "$RUNNER_TEMP/reference-release/ADBlock-latest.apk" > "$RUNNER_TEMP/stable-identity.txt"
-          preview_code=$(sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" release-assets/APK-IDENTITY.txt | head -1)
           stable_code=$(sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" "$RUNNER_TEMP/stable-identity.txt" | head -1)
-          test "$preview_code" -gt "$stable_code" || { echo "::error::preview must upgrade current stable versionCode"; exit 1; }
-          python3 tools/compare_apk_signers.py \
-            "$RUNNER_TEMP/stable-signature.txt" release-assets/APK-SIGNATURE.txt
+          test "$PREVIEW_VERSION_CODE" -gt "$stable_code" || { echo "::error::preview must upgrade current stable versionCode"; exit 1; }
+          export SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD
+          for abi in $PREVIEW_ABIS; do
+            case "$abi" in
+              arm64-v8a) slug=arm64; suffix='' ;;
+              x86_64) slug=x86_64; suffix=-x86_64 ;;
+              riscv64) slug=riscv64; suffix=-riscv64 ;;
+              *) echo '::error::unrecognized preview ABI'; exit 1 ;;
+            esac
+            stage="$RUNNER_TEMP/android-preview-$abi"
+            unsigned="$stage/unsigned.apk"
+            test -s "$unsigned"
+            apk="release-assets/AdAway-preview-$slug.apk"
+            signature="release-assets/APK-SIGNATURE$suffix.txt"
+            identity="release-assets/APK-IDENTITY$suffix.txt"
+            "$bt/apksigner" sign --ks "$keystore" \
+              --ks-pass env:SIGNING_STORE_PASSWORD --ks-key-alias "$SIGNING_KEY_ALIAS" \
+              --key-pass env:SIGNING_KEY_PASSWORD --out "$apk" "$unsigned"
+            "$bt/apksigner" verify --verbose --print-certs "$apk" > "$signature"
+            "$bt/aapt" dump badging "$apk" > "$identity"
+            grep -Fq "package: name='com.wxcvm.Adaway'" "$identity"
+            grep -Fq "versionCode='$PREVIEW_VERSION_CODE' versionName='$PREVIEW_VERSION_NAME'" "$identity"
+            grep -Fq "native-code: '$abi'" "$identity"
+            python3 tools/compare_apk_signers.py "$RUNNER_TEMP/stable-signature.txt" "$signature"
+            cp "$stage/NATIVE-VERIFICATION.txt" "release-assets/NATIVE-VERIFICATION-$abi.txt"
+            python3 tools/verify_webserver_apk.py --apk "$apk" --variant release --abi "$abi" \
+              --executable "$stage/libwebserver_exec.so" --tcpdump-executable "$stage/libtcpdump_exec.so" \
+              | tee -a "release-assets/NATIVE-VERIFICATION-$abi.txt"
+          done
 
       - name: Verify bundled preview status and checksums
         shell: bash
         run: |
           set -euo pipefail
-          cat docs/activity-and-update-contract.md docs/query-log-family-format.md docs/listener-arrival.md docs/response-policy-regressions.md docs/listener-settings.md docs/listener-lifecycle.md docs/dual-stack-transport.md docs/tcp-backend.md > release-assets/IMPLEMENTATION-STATUS.md
+          cat docs/content-response-settings.md docs/android-abi-preview-contract.md docs/android-native-builds.md docs/android-abi-updates.md docs/activity-and-update-contract.md docs/query-log-family-format.md docs/listener-arrival.md docs/response-policy-regressions.md docs/listener-settings.md docs/listener-lifecycle.md docs/dual-stack-transport.md docs/tcp-backend.md > release-assets/IMPLEMENTATION-STATUS.md
           printf '%s\n' "$GITHUB_SHA" > release-assets/SOURCE-COMMIT.txt
           printf '%s\n' "Preview signature: same signing certificate as current published Android stable APK." > release-assets/SIGNING-POLICY.txt
           python3 tools/prepare-preview-feed.py
@@ -173,7 +192,11 @@ jobs:
         run: |
           set -euo pipefail
           cat > "$RUNNER_TEMP/preview-notes.md" <<'NOTES'
-          Android ARM64 opt-in progress preview for inspection (Android 11+).
+          Android ABI-specific opt-in progress preview for inspection.
+          ARM64 and x86_64 require Android 11/API30 or later. RISC-V requires
+          API35 or later and remains a provisional Google Android ABI.
+          RISC-V build/signature checks do not establish device or emulator
+          acceptance; no RISC-V runtime acceptance is claimed.
 
           Package identity is com.wxcvm.Adaway: this APK upgrades the installed
           production app in place and preserves app data. No parallel app is installed.
@@ -188,9 +211,12 @@ jobs:
           implement default whole-device routing or unrestricted DNS/TCP/UDP
           forwarding. No production update feeds are changed.
 
-          Source revision, identity, signature, status and checksums attached.
+          All ABI APKs share one versionCode/versionName and production signer.
+          Legacy clients keep the ARM64 URL; ABI-aware clients use the artifacts
+          map. Source revision, per-ABI identity/signature/native verification,
+          status and checksums are attached.
           NOTES
-          cat docs/listener-lifecycle.md >> "$RUNNER_TEMP/preview-notes.md"
+          cat docs/content-response-settings.md docs/android-abi-preview-contract.md docs/listener-lifecycle.md >> "$RUNNER_TEMP/preview-notes.md"
           cat docs/preview-updates.md >> "$RUNNER_TEMP/preview-notes.md"
           cat docs/dual-stack-transport.md docs/tcp-backend.md >> "$RUNNER_TEMP/preview-notes.md"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then

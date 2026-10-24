@@ -629,4 +629,35 @@
     <string name="compose_logs_unknown_app">应用未知</string>
     <string name="compose_stats_mode_empty">空响应</string>
     <string name="compose_stats_history_empty">当前时间范围暂无活动记录</string>
+    <string name="content_scope">仅调整已到达此 Web 服务器的 HTTP 请求如何应答，不新增拦截规则，也不改变 DNS／Hosts。HTTPS 须先完成受信任的 TLS 连接；这里不处理 QUIC。</string>
+    <string name="content_status_loading">正在读取已保存的响应设置…</string>
+    <string name="content_status_saved_unknown">已保存到文件 · 尚未获得运行中服务器对本次配置的确认。下次成功启动时读取。</string>
+    <string name="content_status_draft">未保存草稿 · 开关变动须保存后才会发布。</string>
+    <string name="content_status_confirmed">已保存 · 服务器已确认加载本次配置。按域响应文本单独保存。</string>
+    <string name="content_status_load_failed">无法读取已保存的设置。保留现有文件，请检查存储后重试。</string>
+    <string name="content_status_save_failed">保存失败，上一份已发布配置未改变；草稿已保留，可重试。</string>
+    <string name="content_types_title">分类响应</string>
+    <string name="content_types_hint">开启：使用相应类别的策略（例如占位图、空脚本或 JSON）；关闭：该类请求返回空 HTTP 204，并非放行域名。部分类别本来就使用 204。</string>
+    <string name="content_type_structures">结构化资源（XML／文本／WASM）</string>
+    <string name="content_protection_title">应答行为与重试保护</string>
+    <string name="content_rules_hint">每行：域名 = 状态码。最多 64 条，ASCII 域名须短于 128 字符；支持 204、403、404、410、503、200（非 204 状态返回简短的纯文本拦截提示）。域名匹配自身及标签边界上的子域，按顺序取第一条命中。拒绝路径、通配和过滤条件。只改变 HTTP 应答，不改变 DNS 拦截规则。</string>
+    <string name="content_rules_legacy">已保存文本包含旧格式或不支持的语法，请先在编辑器中修正，再启用或保存设置。</string>
+    <string name="content_rules_count">已保存 %1$d／64 条按域响应。没有规则时不能启用覆盖。</string>
+    <string name="content_rules_edit">编辑按域响应</string>
+    <string name="content_save">保存并请求重载</string>
+    <string name="content_verify">确认已保存配置</string>
+    <string name="content_retry_load">重新读取设置</string>
+    <string name="content_rules_format">example.com = 204</string>
+    <string name="content_rules_invalid">未保存。请检查格式、域名长度、64 条上限及存储。上一份文件保留。</string>
+    <string name="content_rules_saved">规则文件已原子保存，未因此启用覆盖。启用后服务器会随请求刷新（最多每秒一次）；此文件尚无运行时确认。</string>
+    <string name="content_rules_save">保存规则文件</string>
+    <string name="content_close">关闭</string>
+    <string name="content_native_abi">当前安装架构：%1$s</string>
+    <string name="content_status_ready">已读取保存值或默认值 · 尚未确认运行中服务器的状态。保存后发布，并请求服务器确认。</string>
+    <string name="content_rules_missing">尚无按域响应文件。请先保存至少一条有效规则，再启用覆盖。</string>
+    <string name="content_legacy_save_failed">保存失败，保留之前的响应设置。</string>
+    <string name="content_rules_inactive">覆盖开关已选中，但文件中没有可用的编辑器规则。请修正规则，或先关闭覆盖再保存配置。</string>
+    <string name="content_rules_read_failed">无法读取已保存的按域响应文件。其他设置仍可使用；可关闭覆盖后保存，原规则文件不会被替换。</string>
+    <string name="content_rules_retry">重新读取按域响应</string>
+    <string name="content_log_domain_response">按域响应</string>
 </resources>

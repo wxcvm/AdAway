@@ -293,7 +293,7 @@
     <string name="pref_block_reply_mode">Response scheme</string>
     <string name="pref_block_reply_advanced">Advanced per-type switches</string>
     <string name="pref_block_reply_images">Simulate images</string>
-    <string name="pref_block_reply_images_summary">1x1 transparent GIF (no broken images)</string>
+    <string name="pref_block_reply_images_summary">Use the selected or bundled placeholder image; off returns an empty 204</string>
     <string name="pref_block_reply_scripts">Simulate scripts</string>
     <string name="pref_block_reply_scripts_summary">Empty JS body, HTTP 200</string>
     <string name="pref_block_reply_styles">Simulate styles</string>

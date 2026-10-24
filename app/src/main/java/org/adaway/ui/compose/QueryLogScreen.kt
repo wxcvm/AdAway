@@ -251,6 +251,7 @@ internal fun queryActionSummary(entry: QueryLogEntry): String {
         2 -> stringResource(R.string.compose_stats_mode_allowed)
         0 -> stringResource(R.string.compose_stats_mode_placeholder)
         3 -> stringResource(R.string.compose_stats_mode_empty)
+        4 -> stringResource(R.string.content_log_domain_response)
         else -> stringResource(R.string.compose_logs_unknown_code, entry.mode)
     }
     return "$action · $type · $mode"
@@ -291,6 +292,7 @@ private fun csvModeName(mode: Int): String = when (mode) {
     1 -> "204"
     2 -> "allowed"
     3 -> "empty_response"
+    4 -> "domain_response"
     else -> "unknown"
 }
 

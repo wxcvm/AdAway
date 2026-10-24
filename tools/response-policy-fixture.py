@@ -1,6 +1,6 @@
 """Extract production response functions for real private dual-stack HTTP tests.
 
-Only UID attribution, bookkeeping and disabled domain overrides are fixtures.
+Only UID attribution and bookkeeping are fixtures.
 The classifier, config reader, fast-fail paths, image selection and Mongoose
 file response are production code, not a rewritten response implementation.
 """
@@ -18,14 +18,17 @@ PREAMBLE = r'''
 #include "lt_map.h"
 #include "f5_guard.h"
 #include "request_host.h"
+#include "rule_norm.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <limits.h>
+#include <errno.h>
 #ifdef _WIN32
 typedef unsigned int uid_t;
 #define strcasecmp _stricmp
+#define strncasecmp _strnicmp
 #endif
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -36,7 +39,6 @@ typedef unsigned int uid_t;
 struct settings { const char *resource_dir; int block_image_count; char block_images[1][128]; };
 static const char *s_pin_resource_dir;
 static uid_t conn_load_uid(struct mg_connection *c) { (void)c; return 42; }
-static int rule_override_status(const char *host, const char *dir) { (void)host; (void)dir; return 0; }
 enum { HIST_BLOCKED, QLOG_BLOCK };
 static void hist_add(int kind) { (void)kind; }
 struct appstat { uint64_t blocked; };
@@ -55,6 +57,13 @@ static void fixture_server(struct mg_connection *c,int event,void *data) {
     if (event==MG_EV_HTTP_MSG) {
         struct mg_http_message *hm=(struct mg_http_message *)data;
         struct settings *s=&fixture_settings;
+#ifdef FIXTURE_CONFIG_GENERATION
+        if (mg_match(hm->uri, mg_str("/control"), NULL)) {
+            if (load_block_cfg(s->resource_dir)) reply_block_config_ack(c);
+            else mg_http_reply(c,503,"Content-Type: text/plain\r\n","Block config reload failed");
+            return;
+        }
+#endif
         uint64_t tick=mg_millis(); memcpy(c->data,&tick,sizeof(tick));
         server_family=c->rem.is_ip6 ? 6u : 4u;
         if (!reply_blocked_by_type(c,hm)) {
@@ -68,7 +77,7 @@ static void bytes_hash(const unsigned char *bytes,size_t length,unsigned char ha
     mg_sha256_ctx context;
     mg_sha256_init(&context); mg_sha256_update(&context,bytes,length); mg_sha256_final(hash,&context);
 }
-struct receipt { int done,status; char request[512],type[128],etag[128]; unsigned char prefix[12],hash[32]; size_t length; };
+struct receipt { int done,status; char request[512],type[128],etag[128],generation[40],text[64],cache[128]; unsigned char prefix[12],hash[32]; size_t length; };
 static void fixture_client(struct mg_connection *c,int event,void *data) {
     struct receipt *result=(struct receipt *)c->fn_data;
     if (event==MG_EV_CONNECT) mg_send(c,result->request,strlen(result->request));
@@ -79,6 +88,11 @@ static void fixture_client(struct mg_connection *c,int event,void *data) {
         result->status=mg_http_status(hm);
         if(type) snprintf(result->type,sizeof(result->type),"%.*s",(int)type->len,type->buf);
         if(etag) snprintf(result->etag,sizeof(result->etag),"%.*s",(int)etag->len,etag->buf);
+        struct mg_str *cache=mg_http_get_header(hm,"Cache-Control");
+        if(cache) snprintf(result->cache,sizeof(result->cache),"%.*s",(int)cache->len,cache->buf);
+        struct mg_str *generation=mg_http_get_header(hm,"X-AdAway-Config-Generation");
+        if(generation) snprintf(result->generation,sizeof(result->generation),"%.*s",(int)generation->len,generation->buf);
+        if(hm->body.len<sizeof(result->text)) snprintf(result->text,sizeof(result->text),"%.*s",(int)hm->body.len,hm->body.buf);
         CHECK(hm->body.len<=128u*1024u);
         size_t prefix=hm->body.len<sizeof(result->prefix) ? hm->body.len : sizeof(result->prefix);
         memcpy(result->prefix,hm->body.buf,prefix); result->length=hm->body.len;
@@ -108,11 +122,96 @@ static void image_is_complete(const struct receipt *result) {
     CHECK(result->length==expected_image_length && !memcmp(result->hash,expected_image_hash,sizeof(result->hash)));
     CHECK(!memcmp(result->prefix,"RIFF",4) && !memcmp(result->prefix+8,"WEBP",4));
 }
+static void write_policy(const char *directory,const char *key,int enabled) {
+    char path[PATH_MAX]; snprintf(path,sizeof(path),"%s/block_config.json",directory);
+    FILE *file=fopen(path,"w"); CHECK(file);
+    CHECK(fprintf(file,"{\"%s\":%d}",key,enabled)>0); CHECK(fclose(file)==0);
+    load_block_cfg(directory);
+}
+static void check_categories(struct mg_mgr *manager,const char *url,const char *directory,unsigned family) {
+    const struct { const char *key,*path,*headers; int status,type; } cases[]={
+        {"reply_images","/category.png","",200,LT_IMAGES},
+        {"reply_scripts","/category.js","",200,LT_SCRIPTS},
+        {"reply_styles","/category.css","",200,LT_STYLES},
+        {"reply_fonts","/category.woff","",204,LT_FONTS},
+        {"reply_media","/category.mp4","",204,LT_MEDIA},
+        {"reply_structures","/category.xml","",200,LT_STRUCT},
+        {"reply_api","/category.json","",200,LT_API},
+        {"reply_telemetry","/event","",204,LT_TELEMETRY},
+        {"reply_config","/config","",200,LT_CONFIG},
+        {"reply_ws_sse","/stream","Accept: text/event-stream\r\n",204,LT_WS}
+    };
+    for(size_t index=0;index<sizeof(cases)/sizeof(cases[0]);index++) {
+        write_policy(directory,cases[index].key,1);
+        struct receipt enabled=request(manager,url,cases[index].path,"categories.fixture.invalid",cases[index].headers);
+        CHECK(enabled.status==cases[index].status && s_last_type==cases[index].type && s_last_mode==RB_REPLY);
+        if(index==0) image_is_complete(&enabled);
+        write_policy(directory,cases[index].key,0);
+        struct receipt disabled=request(manager,url,cases[index].path,"categories.fixture.invalid",cases[index].headers);
+        CHECK(disabled.status==204 && disabled.length==0 && !strcmp(disabled.cache,"no-store"));
+        CHECK(s_last_type==cases[index].type && s_last_mode==RB_DENY);
+    }
+    printf("family%u policy categories=10 on/off verified\n",family);
+}
+static void check_domain_responses(struct mg_mgr *manager,const char *url,const char *directory,unsigned family) {
+    char path[PATH_MAX]; snprintf(path,sizeof(path),"%s/rule_overrides.txt",directory);
+    FILE *file=fopen(path,"w"); CHECK(file);
+    CHECK(fputs("example.com = 404\nsub.example.com = 200\n",file)>=0); CHECK(fclose(file)==0);
+    write_policy(directory,"rule_override_enabled",1); s_override_loaded_ms=0;
+    struct receipt first=request(manager,url,"/domain.png","sub.example.com","");
+    CHECK(first.status==404 && !strcmp(first.text,"blocked by rule override\n"));
+    struct receipt boundary=request(manager,url,"/domain.png","badexample.com",""); image_is_complete(&boundary);
+    const int statuses[]={204,403,404,410,503,200};
+    for(size_t index=0;index<sizeof(statuses)/sizeof(statuses[0]);index++) {
+        file=fopen(path,"w"); CHECK(file);
+        CHECK(fprintf(file,"example.com = %d\n",statuses[index])>0); CHECK(fclose(file)==0);
+        s_override_loaded_ms=0;
+        struct receipt result=request(manager,url,"/domain.png","child.example.com","");
+        CHECK(result.status==statuses[index]);
+        CHECK(s_last_type==-1 && s_last_mode==RB_DOMAIN_RESPONSE);
+        if(statuses[index]==204) CHECK(result.length==0);
+        else CHECK(!strcmp(result.text,"blocked by rule override\n") && !strcmp(result.type,"text/plain"));
+    }
+    write_policy(directory,"rule_override_enabled",0);
+    struct receipt disabled=request(manager,url,"/domain.png","example.com",""); image_is_complete(&disabled);
+    CHECK(remove(path)==0);
+    printf("family%u domain responses=6 first-match/label-boundary/disabled verified\n",family);
+}
+#ifdef FIXTURE_CONFIG_GENERATION
+static void check_generation_ack(struct mg_mgr *manager,const char *url,const char *directory) {
+    char path[PATH_MAX]; snprintf(path,sizeof(path),"%s/block_config.json",directory);
+    FILE *file=fopen(path,"w"); CHECK(file);
+    const char *token="0123456789abcdef0123456789abcdef";
+    CHECK(fprintf(file,"{\"generation\":\"%s\",\"reply_images\":0}",token)>0); CHECK(fclose(file)==0);
+    struct receipt result=request(manager,url,"/control","fixture.invalid","");
+    CHECK(result.status==200 && !strcmp(result.generation,token) && !strcmp(result.text,"OK: block config reloaded"));
+    CHECK(!cfg_images);
+    file=fopen(path,"w"); CHECK(file);
+    CHECK(fputs("{\"reply_images\":2}",file)>=0); CHECK(fclose(file)==0);
+    result=request(manager,url,"/control","fixture.invalid","");
+    CHECK(result.status==503 && !cfg_images && !result.generation[0]);
+    file=fopen(path,"w"); CHECK(file);
+    CHECK(fputs("{\"reply_images\":1",file)>=0); CHECK(fclose(file)==0);
+    result=request(manager,url,"/control","fixture.invalid","");
+    CHECK(result.status==503 && !cfg_images);
+    file=fopen(path,"w"); CHECK(file);
+    CHECK(fputs("{\"nested\":{\"reply_images\":0}}",file)>=0); CHECK(fclose(file)==0);
+    result=request(manager,url,"/control","fixture.invalid","");
+    CHECK(result.status==200 && cfg_images && !result.generation[0]);
+    configure(directory,0,0,1);
+    result=request(manager,url,"/control","fixture.invalid","");
+    CHECK(result.status==200 && !result.generation[0] && !strcmp(result.text,"OK: block config reloaded"));
+    puts("generation ACK / legacy body / invalid configuration preservation verified");
+}
+#endif
 static void run_family(const char *directory,const char *binding,unsigned family,int baseline) {
     struct mg_mgr manager; mg_mgr_init(&manager);
     struct mg_connection *listener=mg_http_listen(&manager,binding,fixture_server,NULL); CHECK(listener);
     char url[128]; mg_snprintf(url,sizeof(url),"%s:%c%c%M","http",'/','/',mg_print_ip_port,&listener->loc);
     char host[96]; snprintf(host,sizeof(host),"repeat-%u.fixture.invalid",family);
+#ifdef FIXTURE_CONFIG_GENERATION
+    if(!baseline) check_generation_ack(&manager,url,directory);
+#endif
     configure(directory,1,0,1);
     struct receipt first=request(&manager,url,"/same.png",host,"Accept: image/png\r\n");
     struct receipt second=request(&manager,url,"/same.png",host,"Accept: image/png\r\n");
@@ -139,6 +238,10 @@ static void run_family(const char *directory,const char *binding,unsigned family
     configure(directory,1,0,0);
     snprintf(host,sizeof(host),"explicit-policy-%u.fixture.invalid",family);
     struct receipt denied=request(&manager,url,"/same.png",host,"Accept: image/png\r\n"); CHECK(denied.status==204);
+    if(!baseline) {
+        check_categories(&manager,url,directory,family);
+        check_domain_responses(&manager,url,directory,family);
+    }
     mg_mgr_free(&manager);
 }
 int main(int argc,char **argv) {
@@ -166,14 +269,19 @@ int main(int argc,char **argv) {
 
 def generate(source):
     pre = source[source.index('struct webstats {'):source.index('/* Verbose (per-connection/request)')]
-    gates = source[source.index('static bool cfg_images'):source.index('/* Sum of every blocked_*')]
+    gates_start = 'static char s_block_cfg_generation' if 'static char s_block_cfg_generation' in source else 'static bool cfg_images'
+    gates = source[source.index(gates_start):source.index('/* Sum of every blocked_*')]
     f5 = source[source.index('#define F5_DEDUP_WINDOW_MS'):source.index('/* ============ F4')]
     helper = '\n'.join(blocks.block(source, marker) for marker in (
         'static bool uri_ends_with_ci(', 'static bool uri_contains_ci(', 'static bool jbool(',
-        'static void load_block_cfg(', 'static bool deny_quick(',
+        'static bool load_block_cfg(' if 'static bool load_block_cfg(' in source else 'static void load_block_cfg(', 'static bool deny_quick(',
         'static bool deny_status(', 'static bool deny_fast('))
+    helper += '\n' + source[source.index('#define RULE_OVERRIDE_FILE'):source.index('/* 按覆盖策略回答')]
     if 'static struct f5_cache_entry *f5_cache_slot(' in source:
         helper += '\n' + blocks.block(source, 'static struct f5_cache_entry *f5_cache_slot(')
+    if 'static void block_cfg_generation(' in source:
+        helper = '#define FIXTURE_CONFIG_GENERATION 1\n' + blocks.block(source, 'static void block_cfg_generation(') + '\n' + blocks.block(source, 'static bool block_cfg_flags_valid(') + '\n' + helper
+        helper += '\n' + blocks.block(source, 'static void reply_block_config_ack(')
     start = source.index('    uint64_t t; memcpy(&t, c->data, sizeof(t));', source.index('/* Random block image'))
     end = source.index('    mg_http_serve_file(c, hm, img_path, &o);', start) + len('    mg_http_serve_file(c, hm, img_path, &o);')
     tail = TAIL.replace('PLACEHOLDER_BODY', source[start:end])

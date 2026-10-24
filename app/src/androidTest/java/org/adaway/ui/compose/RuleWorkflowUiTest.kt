@@ -33,6 +33,116 @@ import org.junit.Test
 class RuleWorkflowUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    private class ContentBackend : ContentResponseBackend {
+        @Volatile var policy = org.adaway.util.ContentResponseSettings.fromPreferences(emptyMap<String, Any>())
+        var ruleText = ""
+        val saves = java.util.concurrent.atomic.AtomicInteger()
+        val ruleSaves = java.util.concurrent.atomic.AtomicInteger()
+        @Volatile var fail = false
+        @Volatile var acknowledged = false
+        @Volatile var failRules = false
+        override fun load() = policy
+        override fun loadRules(): String {
+            if (failRules) throw java.io.IOException("fixture rule file unreadable")
+            return ruleText
+        }
+        override fun save(settings: org.adaway.util.ContentResponseSettings): Boolean {
+            saves.incrementAndGet()
+            if (fail) throw java.io.IOException("fixture storage unavailable")
+            policy = settings
+            return acknowledged
+        }
+        override fun saveRules(text: String): String {
+            ruleSaves.incrementAndGet()
+            ruleText = org.adaway.util.ContentResponseRules.validate(text)
+            return ruleText
+        }
+    }
+
+    private fun showContentSettings(backend: ContentBackend) {
+        compose.setContent { AdAwayTheme(dynamicColor = false) { Surface {
+            Column(Modifier.verticalScroll(rememberScrollState())) { ContentResponseSettingsCard(backend) }
+        } } }
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("content-toggle-images").fetchSemanticsNodes().isNotEmpty() }
+        compose.waitForIdle()
+    }
+
+    @Test fun contentCategoriesStayDraftUntilSaveAndLegacyAckIsNotApplied() {
+        val backend = ContentBackend()
+        showContentSettings(backend)
+        listOf("images", "scripts", "styles", "fonts", "media", "structures", "api", "telemetry", "config", "ws_sse").forEach {
+            compose.onNodeWithTag("content-toggle-$it").assertExists()
+        }
+        compose.onNodeWithTag("content-toggle-images").performScrollTo().performClick().assertIsOff()
+        assertEquals(0, backend.saves.get())
+        compose.onNodeWithTag("content-status").assertTextEquals(compose.activity.getString(R.string.content_status_draft))
+        compose.onNodeWithTag("content-save").performScrollTo().performClick()
+        compose.waitUntil(5_000) { backend.saves.get() == 1 && !backend.policy.enabled("images") }
+        compose.waitForIdle()
+        compose.onNodeWithTag("content-status").assertTextEquals(compose.activity.getString(R.string.content_status_saved_unknown))
+        compose.onNodeWithTag("content-toggle-images").performScrollTo()
+        saveScreenshot("content-response-categories")
+    }
+
+    @Test fun unreadableRulesDoNotPreventDisablingOverrideOrOverwriteTheFile() {
+        val backend = ContentBackend().apply {
+            failRules = true
+            policy = policy.with("rule_override", true)
+            ruleText = "unreadable legacy rules retained"
+        }
+        showContentSettings(backend)
+        compose.onNodeWithTag("content-rules-load-error").assertExists()
+        compose.onNodeWithTag("content-edit-rules").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("content-toggle-rule_override").performScrollTo().performClick().assertIsOff()
+        compose.onNodeWithTag("content-save").performScrollTo().performClick()
+        compose.waitUntil(5_000) { backend.saves.get() == 1 && !backend.policy.enabled("rule_override") }
+        assertEquals(0, backend.ruleSaves.get())
+        assertEquals("unreadable legacy rules retained", backend.ruleText)
+    }
+
+    @Test fun domainResponseLogDoesNotClaim204OrAStructuredResource() {
+        compose.setContent { AdAwayTheme(dynamicColor = false) {
+            androidx.compose.material3.Text(queryActionSummary(QueryLogEntry(action = 1, type = -1, mode = 4)))
+        } }
+        compose.onNodeWithText(compose.activity.getString(R.string.content_log_domain_response), substring = true).assertExists()
+        compose.onNodeWithText("204", substring = true).assertDoesNotExist()
+    }
+
+    @Test fun contentSaveFailureKeepsDraftAndRetryRequiresMatchingServerAck() {
+        val backend = ContentBackend().apply { fail = true }
+        showContentSettings(backend)
+        compose.onNodeWithTag("content-toggle-images").performScrollTo().performClick()
+        compose.onNodeWithTag("content-save").performScrollTo().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("content-save-error").fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(backend.policy.enabled("images"))
+        compose.onNodeWithTag("content-toggle-images").assertIsOff()
+        backend.fail = false
+        backend.acknowledged = true
+        compose.onNodeWithTag("content-save").performScrollTo().performClick()
+        compose.waitUntil(5_000) { backend.saves.get() == 2 && !backend.policy.enabled("images") }
+        compose.waitForIdle()
+        compose.onNodeWithTag("content-status").assertTextEquals(compose.activity.getString(R.string.content_status_confirmed))
+    }
+
+    @Test fun domainResponseEditorRejectsPathsAndDoesNotEnableDraftOnSave() {
+        val backend = ContentBackend()
+        showContentSettings(backend)
+        compose.onNodeWithTag("content-toggle-rule_override").performScrollTo().assertIsNotEnabled().assertIsOff()
+        compose.onNodeWithTag("content-edit-rules").performScrollTo().performClick()
+        compose.onNodeWithTag("content-rules-text").performTextInput("example.com/path=204")
+        compose.onNodeWithTag("content-rules-save").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("content-rules-error").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, backend.ruleSaves.get())
+        compose.onNodeWithTag("content-rules-text").performTextReplacement("example.com=404")
+        compose.onNodeWithTag("content-rules-save").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("content-rules-saved").fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("example.com = 404\n", backend.ruleText)
+        assertEquals(0, backend.saves.get())
+        compose.onNodeWithText(compose.activity.getString(R.string.content_close)).performClick()
+        compose.onNodeWithTag("content-toggle-rule_override").performScrollTo().assertIsEnabled().assertIsOff()
+        compose.onNodeWithTag("content-rule-count").assertTextEquals(compose.activity.getString(R.string.content_rules_count, 1))
+    }
+
     @Test fun sourceCardsRepairRawNamesAndHideCredentials() {
         val source = org.adaway.db.entity.HostsSource().apply {
             id = 2

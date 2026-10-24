@@ -31,6 +31,10 @@ public class Manifest {
     public final String downloadUrl;
     public final boolean updateAvailable;
     public final boolean preview;
+    /** Selected Android native ABI, archive digest and required Android API. */
+    public final String nativeAbi;
+    public final String sha256;
+    public final int minSdk;
 
     /**
      * Constructor from a manifest.json content.
@@ -47,6 +51,9 @@ public class Manifest {
         this.downloadUrl = manifestObject.optString("downloadUrl", "");
         this.updateAvailable = this.versionCode > currentVersionCode;
         this.preview = false;
+        this.nativeAbi = "arm64-v8a";
+        this.sha256 = "";
+        this.minSdk = 0;
     }
 
     /**
@@ -64,11 +71,19 @@ public class Manifest {
 
     public Manifest(String version, int versionCode, String changelog, String downloadUrl,
                     boolean updateAvailable, boolean preview) {
+        this(version, versionCode, changelog, downloadUrl, updateAvailable, preview, "arm64-v8a", "", 0);
+    }
+
+    public Manifest(String version, int versionCode, String changelog, String downloadUrl,
+                    boolean updateAvailable, boolean preview, String nativeAbi, String sha256, int minSdk) {
         this.version = version;
         this.versionCode = versionCode;
         this.changelog = changelog;
         this.downloadUrl = downloadUrl;
         this.updateAvailable = updateAvailable;
         this.preview = preview;
+        this.nativeAbi = nativeAbi;
+        this.sha256 = sha256;
+        this.minSdk = minSdk;
     }
 }
