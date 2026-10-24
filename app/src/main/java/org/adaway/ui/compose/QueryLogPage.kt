@@ -27,18 +27,41 @@ data class QueryLogPage(
             return QueryLogPage(entries, total, next, more, cursor)
         }
 
-        private fun parseEntry(row: JSONObject): QueryLogEntry =
+        internal fun parseEntry(row: JSONObject): QueryLogEntry =
             QueryLogEntry(row.getLong("ts"), row.optInt("uid", -1), row.getInt("action"),
                 row.optInt("type", -1), row.optInt("mode", 0), row.getString("host"),
-                if (row.has("family")) row.getInt("family") else 0).also {
+                if (row.has("family")) row.getInt("family") else 0,
+                if (row.has("path")) row.get("path").also { require(it is String) } as String else "",
+                responseStatus(row),
+                pathTruncated(row)).also {
                 // Unknown persisted policy codes remain inspectable, never guessed.
-                require(it.ts >= 0 && it.uid >= -1 && it.action in 0..2 &&
+                require(it.ts >= 0 && it.uid >= -1 && it.action in 0..3 &&
                     it.type in -1..65534 && it.mode in 0..255)
                 require(it.family == 0 || it.family == 4 || it.family == 6)
                 require(it.host.isNotEmpty() && it.host.toByteArray(Charsets.UTF_8).size <= 191 &&
                     it.host.none { c -> c < ' ' || c in '\u007f'..'\u009f' })
                 validateSurrogates(it.host)
+                require(it.path.toByteArray(Charsets.UTF_8).size <= 159 &&
+                    (it.path.isEmpty() || it.path.startsWith("/")) &&
+                    it.path.none { c -> c < ' ' || c in '\u007f'..'\u009f' || c == '?' || c == '#' })
+                require(it.path.isNotEmpty() || !it.pathTruncated)
+                validateSurrogates(it.path)
             }
+
+        private fun responseStatus(row: JSONObject): Int {
+            if (!row.has("status")) return 0
+            val status = row.get("status")
+            require(status is Int || status is Long)
+            val value = (status as Number).toLong()
+            require(value == 0L || value in 100L..599L)
+            return value.toInt()
+        }
+
+        private fun pathTruncated(row: JSONObject): Boolean = when (val value = row.opt("pathTruncated")) {
+            null -> false
+            is Boolean -> value
+            else -> throw IllegalArgumentException("Invalid path truncation metadata")
+        }
 
         private fun validateSurrogates(host: String) {
             var index = 0

@@ -190,7 +190,7 @@ public final class MagiskBootScript {
         }
         long deadline = System.currentTimeMillis() + RUN_NOW_VERIFY_MS;
         while (System.currentTimeMillis() < deadline) {
-            if (WebServerUtils.isWebServerReachable(context)) {
+            if (WebServerUtils.isCurrentWebServerReady(context)) {
                 return "脚本运行成功：服务器已启动";
             }
             sleep(500L);
@@ -319,30 +319,43 @@ public final class MagiskBootScript {
                 + "      fi\n"
                 + "    done\n"
                 + "  fi\n"
-                + "  # Refresh the staged copy whenever its CONTENT differs - not only when\n"
-                + "  # it is missing/not executable. The old test (only '-x') is why a new\n"
-                + "  # APK never replaced the copy in /data/local/tmp: the boot-started\n"
-                + "  # server kept running yesterday's binary.\n"
-                + "  same=0\n"
-                + "  if [ -x \"$BIN\" ] && [ -f \"$SRC\" ]; then\n"
-                + "    if [ \"$(wc -c < \"$SRC\")\" = \"$(wc -c < \"$BIN\")\" ] && cmp -s \"$SRC\" \"$BIN\"; then\n"
-                + "      same=1\n"
-                + "    fi\n"
+                + "  GUARD=\"$BIN.lifecycle-guard.$$\"\n"
+                + "  trap 'rm -f \"$GUARD\" \"$GUARD.new\"; exec 9>&-' EXIT\n"
+                + "  if cp \"$SRC\" \"$GUARD.new\" && chmod 755 \"$GUARD.new\" && cmp -s \"$SRC\" \"$GUARD.new\" && mv -f \"$GUARD.new\" \"$GUARD\"; then :; else\n"
+                + "    echo 'could not prepare lifecycle guard; keeping existing server' >> \"$LOG\"; exit 1\n"
                 + "  fi\n"
-                + "  if [ \"$same\" != \"1\" ] && [ -f \"$SRC\" ]; then\n"
-                + "    if cp -f \"$SRC\" \"$BIN\"; then\n"
-                + "      chmod 755 \"$BIN\"\n"
-                + "      echo \"$(date) staged binary refreshed from $SRC\" >> \"$LOG\"\n"
-                + "    else\n"
-                + "      echo \"$(date) WARNING could not stage $SRC\" >> \"$LOG\"\n"
+                + "  if {\n"
+                + org.adaway.util.BundledExecutableIdentity.acquireLockCommand(
+                        org.adaway.util.BundledExecutableIdentity.LIFECYCLE_LOCK,
+                        "LD_LIBRARY_PATH=\"$APP_LIB\" \"$GUARD\"", 100)
+                + "  }; then :; else echo 'lifecycle lock unavailable; keeping existing server' >> \"$LOG\"; exit 1; fi\n"
+                + org.adaway.util.BundledExecutableIdentity.ownershipFunctions(bin)
+                + "  owned_count=0; current_count=0\n"
+                + "  for owned_proc in $(owned_candidates); do\n"
+                + "    if owned_process \"$owned_proc\"; then\n"
+                + "      owned_count=$((owned_count+1))\n"
+                + "      if cmp -s \"$SRC\" \"$owned_proc/exe\"; then current_count=$((current_count+1)); fi\n"
                 + "    fi\n"
-                + "  fi\n"
+                + "  done\n"
+                + "  if [ \"$owned_count\" = 1 ] && [ \"$current_count\" = 1 ]; then exit 0; fi\n"
+                + "  [ \"$owned_count\" -le 1 ] || { echo 'ambiguous server images; refusing replacement' >> \"$LOG\"; exit 1; }\n"
+                + org.adaway.util.BundledExecutableIdentity.stageCommand(src, bin)
+                        .replace("stage_source='" + src + "'", "stage_source=\"$SRC\"")
+                + org.adaway.util.BundledExecutableIdentity.stopCommand(bin)
+                + "  n=0\n"
+                + "  while [ $n -lt 20 ]; do\n"
+                + "    still_running=0\n"
+                + "    for owned_proc in $(owned_candidates); do owned_process \"$owned_proc\" && still_running=1; done\n"
+                + "    [ \"$still_running\" = 0 ] && break\n"
+                + "    sleep 0.1; n=$((n+1))\n"
+                + "  done\n"
+                + "  [ \"$still_running\" = 0 ] || { echo 'previous server did not stop' >> \"$LOG\"; exit 1; }\n"
                 + "  echo \"$(date) boot start\" >> \"$LOG\"\n"
                 + "  # Restore managed listener addresses here.\n"
                 + "  LD_LIBRARY_PATH=\"$APP_LIB\" \"$BIN\" --resources \"$RES\""
                 + settings.arguments().replace("--stats-port 8686", "--stats-port " + statsPort)
                 + (proxyFilter ? " --proxy-filter" : "")
-                + " >> \"$LOG\" 2>&1 &\n"
+                + " 9>&- >> \"$LOG\" 2>&1 &\n"
                 + ") &\n"
                 + "exit 0\n";
     }

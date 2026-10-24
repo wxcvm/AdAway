@@ -140,11 +140,10 @@ public class ServerKeepAliveService extends Service {
         }
         new Thread(() -> {
             try {
-                if (WebServerUtils.isWebServerReachable(this) || WebServerUtils.isWebServerRunning()) {
-                    return;
+                if (PreferenceHelper.getWebServerEnabled(this)
+                        && !WebServerUtils.ensureCurrentWebServer(this)) {
+                    Timber.w("keep-alive: current packaged server is not ready");
                 }
-                Timber.i("keep-alive: server is gone - restarting it");
-                WebServerUtils.startWebServer(this);
             } catch (Throwable throwable) {
                 Timber.w(throwable, "keep-alive: check failed");
             }

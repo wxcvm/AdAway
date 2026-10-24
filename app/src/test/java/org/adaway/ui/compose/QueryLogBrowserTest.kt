@@ -12,6 +12,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class QueryLogBrowserTest {
+    @Test fun deniedFilterAndPathOrStatusSearchKeepRequestsSeparate() {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+        val rows = listOf(
+            QueryLogEntry(host = "same.example", action = 3, path = "/internal-test", httpStatus = 403),
+            QueryLogEntry(host = "same.example", action = 1, path = "/favicon.ico", httpStatus = 200),
+        )
+        try {
+            val browser = QueryLogBrowser(scope, { _, _, _ -> QueryLogPage(rows, 2, 2, false, cursor) })
+            browser.refresh()
+            browser.setFilter(3)
+            assertEquals("/internal-test", browser.state.value.shown.single().path)
+            browser.setFilter(-1)
+            browser.setQuery("favicon")
+            assertEquals(200, browser.state.value.shown.single().httpStatus)
+            browser.setQuery("403")
+            assertEquals(3, browser.state.value.shown.single().action)
+        } finally { scope.cancel() }
+    }
     @Test fun addressFamilyAndResponseTypeFiltersUseRecordedMetadataOnly() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
         try {

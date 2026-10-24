@@ -158,8 +158,8 @@ public class RootModel extends AdBlockModel {
     }
 
     private void syncPreferences(Context context) {
-        if (PreferenceHelper.getWebServerEnabled(context) && !WebServerUtils.isWebServerRunning()) {
-            WebServerUtils.startWebServer(context);
+        if (PreferenceHelper.getWebServerEnabled(context)) {
+            WebServerUtils.ensureCurrentWebServer(context);
         }
     }
 

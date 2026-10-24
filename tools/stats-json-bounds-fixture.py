@@ -63,7 +63,7 @@ static int s_app_count, s_top_count, s_tls_count, s_tls_pos, s_listener_count;
 static bool fixture_special_metadata;
 static bool pin_uid_bypassed(uint32_t uid) { return uid % 2 == 0; }
 #ifdef _WIN32
-static void win32_process_name(DWORD pid, char *out, size_t cap) {
+static inline void win32_process_name(DWORD pid, char *out, size_t cap) {
     (void)pid;
     memset(out,'p',cap-1); out[cap-1]=0;
 }

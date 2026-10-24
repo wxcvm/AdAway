@@ -139,7 +139,7 @@ public class ServerBootService extends Service {
             new Thread(() -> {
                 try {
                     // Socket I/O belongs here, never on the main-thread Handler callback.
-                    if (WebServerUtils.isWebServerReachable(ServerBootService.this)) {
+                    if (WebServerUtils.isCurrentWebServerReady(ServerBootService.this)) {
                         handler.post(() -> finish("前台服务已确认服务器运行", true));
                         return;
                     }

@@ -611,7 +611,7 @@
     <string name="compose_logs_paused">History paused</string>
     <string name="compose_logs_pause">Pause</string>
     <string name="compose_logs_resume">Resume live</string>
-    <string name="compose_logs_search">Search domains</string>
+    <string name="compose_logs_search">Search domain, path or status</string>
     <string name="compose_logs_search_scope">Filters only loaded records. Read earlier requests to search more.</string>
     <string name="compose_logs_local_exemption">Local exemption</string>
     <string name="compose_logs_uid_filter">UID %1$d · tap to clear</string>
@@ -622,7 +622,7 @@
     <string name="compose_logs_exemption_detail">The local server returned no content (HTTP 204). This exemption does not prove that the original site was reached; upstream DNS blocking may still apply.</string>
     <string name="compose_logs_proxy_detail">Handed to the local forwarding path. This entry does not prove that the upstream request completed successfully.</string>
     <string name="compose_logs_block_detail">The local server replaced or suppressed the response. Resource types are inferred from the request, not proof that it was an advertisement.</string>
-    <string name="compose_logs_details_scope">These are Web response records. DNS decisions, the matching subscription rule, HTTPS content and upstream completion are not collected by this log. Unknown app attribution stays unknown.</string>
+    <string name="compose_logs_details_scope">These are server processing records. HTTP status describes a locally generated response, not confirmed client receipt. Paths omit query and fragment; missing legacy data stays unknown. DNS decisions, subscription matches, HTTPS content and upstream completion are not recorded.</string>
     <string name="compose_settings_update_automatic">Automatically download app updates</string>
     <string name="compose_settings_update_automatic_hint">Download and verify updates from the selected channel automatically. Android may require installation confirmation; background downloads notify you to continue.</string>
     <string name="compose_logs_unknown_code">Unknown (%1$d)</string>
@@ -660,4 +660,11 @@
     <string name="content_rules_read_failed">Cannot read the saved domain response file. Other settings remain available; turn off domain overrides to save without replacing that file.</string>
     <string name="content_rules_retry">Retry reading domain responses</string>
     <string name="content_log_domain_response">Domain response</string>
+    <string name="compose_logs_access_denied">Access denied</string>
+    <string name="compose_logs_status_unknown">HTTP status not recorded</string>
+    <string name="compose_logs_path_unknown">Request path not recorded</string>
+    <string name="compose_logs_path_truncated">%1$s… (truncated)</string>
+    <string name="compose_logs_placeholder_policy">Placeholder policy</string>
+    <string name="compose_logs_category_policy">Category response policy</string>
+    <string name="compose_logs_rejection_detail">The request was refused by an access check, for example a protected management endpoint, a web Origin, or a pinning policy. These rejections are not counted as ad filtering. Use the recorded path and HTTP status to distinguish this request from other requests to the same host.</string>
 </resources>

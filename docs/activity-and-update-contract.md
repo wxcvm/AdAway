@@ -11,7 +11,7 @@ dragging pins the log; layout/programmatic scrolls do not. Resume remains visibl
 while browsing history and returns to the latest page. Late or cancelled responses cannot replace a
 newer or paused page.
 
-The screen has domain search, action filters, pause/resume, request details and
+The screen has domain/path/status search, action filters, pause/resume, request details and
 CSV export. Details distinguish local exemptions (a no-content reply) and
 forwarding started from successful origin access. Missing app/rule/source
 identity and unknown legacy codes are not guessed. The server keeps up to
@@ -51,7 +51,7 @@ System resolution observes this application's view, not every app's private DNS.
 Each new HTTP log records the actual connection family (`4`, `6`, or unknown
 `0`); IPv4-mapped IPv6 sockets are classified as IPv4. Host text and DNS answer
 types are never used to guess it. Both paged and summary JSON carry the field.
-The bounded QLG2 persistence format restores family metadata; legacy QLOG rows
+The bounded QLG3 persistence format restores family and local-response metadata; legacy QLOG rows
 remain readable with unknown family. Filtering combines family, response type,
 action, app and domain over loaded rows, and CSV exports family too. Response
 type is the native LT_* policy category, not subscription source attribution.
@@ -74,6 +74,15 @@ after replacement. See the official
 [PackageInstaller user-action contract](https://developer.android.com/reference/android/content/pm/PackageInstaller.SessionParams).
 After installation, existing startup/restoration settings still govern the
 response service. Device installation and reboot acceptance are separate tests.
+
+At lifecycle reconciliation, a reachable port or surviving process alone cannot
+certify the installed version. The app compares the APK's bundled image hash
+with the owned process's actual `/proc/PID/exe`, including deleted old images.
+Staging uses a verified temporary copy and atomic rename before stopping the
+old process, retaining its actual image as `.previous`. Failed preparation
+leaves the existing process alive; failed new startup reports failure and
+retains the backup/configuration without claiming an automatic rollback.
+Hashing is outside statistics polling. See `listener-lifecycle.md` for limits.
 
 Compose update switches now reschedule/cancel the real WorkManager jobs, including
 the source-update network constraint, instead of merely writing preferences.

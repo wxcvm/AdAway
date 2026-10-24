@@ -111,23 +111,8 @@ public class ServerWatchdogWorker extends Worker {
             }
             return Result.success();
         }
-        // Reachability first: it is a single socket connect to the management
-        // port, while the process check spawns a root shell (CPU/battery).
-        boolean running = WebServerUtils.isWebServerReachable(context)
-                || WebServerUtils.isWebServerRunning();
-        if (!running) {
-            Timber.w("ServerWatchdog: web server not running - restarting it.");
-            WebServerUtils.startWebServer(context);
-            sleep(START_VERIFY_MS);
-            running = WebServerUtils.isWebServerReachable(context)
-                    || WebServerUtils.isWebServerRunning();
-            if (running) {
-                Timber.i("ServerWatchdog: web server restarted successfully.");
-            } else {
-                Timber.w("ServerWatchdog: restart attempt did not come up (next check in %d min)",
-                        FOLLOW_UP_DELAY_MINUTES);
-            }
-        }
+        boolean running = WebServerUtils.ensureCurrentWebServer(context);
+        if (!running) Timber.w("ServerWatchdog: current packaged server is not ready; will retry");
         /*
          * Hijack mode safety: with the iptables redirect in place a dead server
          * means "no internet at all" on ports 80/443, which is far worse than
@@ -264,11 +249,5 @@ public class ServerWatchdogWorker extends Worker {
                 UNIQUE_IMMEDIATE, ExistingWorkPolicy.REPLACE, now);
     }
 
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
+
 }

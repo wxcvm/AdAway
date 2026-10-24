@@ -84,6 +84,8 @@ public class NativeAbiDeviceTest {
         Files.write(new File(resources, "img_01.webp").toPath(), image);
         Files.write(new File(resources, "test.html").toPath(), "native ABI fixture".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         File library = new File(context.getApplicationInfo().nativeLibraryDir);
+        // Use the same selected-ABI guard as the app's real launch and listener-probe paths.
+        NativeServerExecutable.verify(new File(library, "libwebserver_exec.so"), BuildConfig.NATIVE_ABI);
         File captureLog = new File(resources, "tcpdump.log");
         Process capture = new ProcessBuilder(new File(library, "libtcpdump_exec.so").getAbsolutePath(), "--version")
                 .redirectErrorStream(true).redirectOutput(captureLog).start();
@@ -166,6 +168,30 @@ public class NativeAbiDeviceTest {
             try (Response response = client.newCall(new Request.Builder()
                     .url("http://127.0.0.1:" + stats + "/tile.png").build()).execute()) {
                 assertEquals("Management port must not serve arbitrary resources", 404, response.code());
+            }
+            // Read the actual server log endpoint, not a reconstructed pure-function result.
+            try (Response response = client.newCall(new Request.Builder()
+                    .url("http://127.0.0.1:" + stats + "/internal-qlog?offset=0&limit=100").build()).execute()) {
+                assertEquals(200, response.code());
+                assertNotNull(response.body());
+                org.json.JSONArray entries = new org.json.JSONObject(response.body().string()).getJSONArray("entries");
+                boolean denied = false, image4 = false, image6 = false, noContent = false;
+                for (int i = 0; i < entries.length(); i++) {
+                    org.json.JSONObject entry = entries.getJSONObject(i);
+                    String path = entry.getString("path");
+                    if (path.equals("/control") && entry.getInt("action") == 3 && entry.getInt("status") == 403) denied = true;
+                    if (path.equals("/tile.png") && entry.getInt("action") == 1) {
+                        if (entry.getInt("status") == 200) {
+                            if (entry.getInt("family") == 4) image4 = true;
+                            if (entry.getInt("family") == 6) image6 = true;
+                        }
+                        if (entry.getInt("status") == 204) noContent = true;
+                    }
+                }
+                assertTrue("Refused controls must remain access-denied, not placeholder success", denied);
+                assertTrue("Actual IPv4 image response metadata missing", image4);
+                assertTrue("Actual IPv6 image response metadata missing", image6);
+                assertTrue("Policy-off response must record its actual 204", noContent);
             }
             try (Response response = client.newCall(new Request.Builder()
                     .url("http://127.0.0.1:" + stats + "/control")

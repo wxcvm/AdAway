@@ -96,7 +96,7 @@ jobs:
           api-level: 35
           arch: x86_64
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PnativeAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.util.NativeAbiDeviceTest
+          script: ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PnativeAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.util.NativeAbiDeviceTest,org.adaway.util.BundledExecutableIdentityDeviceTest
       - name: Preserve actual native runtime evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -145,7 +145,8 @@ private fun QueryLogFilters(filter: Int, onFilter: (Int) -> Unit) {
         for ((value, label) in listOf(FILTER_ALL to R.string.compose_logs_filter_all,
             ACTION_BLOCK to R.string.compose_stats_recent_action_blocked,
             ACTION_ALLOW to R.string.compose_logs_local_exemption,
-            ACTION_PROXY to R.string.compose_stats_recent_action_proxied)) {
+            ACTION_PROXY to R.string.compose_stats_recent_action_proxied,
+            ACTION_REJECT to R.string.compose_logs_access_denied)) {
             FilterChip(selected = filter == value, onClick = { onFilter(value) }, label = { Text(stringResource(label)) })
         }
     }
@@ -154,6 +155,7 @@ private fun QueryLogFilters(filter: Int, onFilter: (Int) -> Unit) {
 private const val ACTION_PROXY = 0
 private const val ACTION_BLOCK = 1
 private const val ACTION_ALLOW = 2
+private const val ACTION_REJECT = 3
 private const val FILTER_ALL = -1
 
 @Composable
@@ -185,7 +187,7 @@ private fun QueryLogClassification(family: Int?, onFamily: (Int?) -> Unit, type:
 @Composable
 private fun QueryLogRow(entry: QueryLogEntry, onClick: () -> Unit) {
     val actionColor = when (entry.action) {
-        ACTION_BLOCK -> MaterialTheme.colorScheme.error
+        ACTION_BLOCK, ACTION_REJECT -> MaterialTheme.colorScheme.error
         ACTION_ALLOW -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
@@ -195,6 +197,10 @@ private fun QueryLogRow(entry: QueryLogEntry, onClick: () -> Unit) {
             Text(entry.host.ifEmpty { "-" }, style = MaterialTheme.typography.titleSmall,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(queryActionSummary(entry), style = MaterialTheme.typography.labelMedium, color = actionColor)
+            Text(queryLogHttpStatus(entry.httpStatus), style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.testTag("query-status-${entry.httpStatus}"))
+            Text(queryLogPath(entry), style = MaterialTheme.typography.bodySmall,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, fontFamily = FontFamily.Monospace)
             Text(queryLogFamily(entry.family), style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -219,12 +225,17 @@ internal fun QueryLogDetailsDialog(entry: QueryLogEntry, onDismiss: () -> Unit, 
                     Text(entry.host.ifEmpty { "-" }, style = MaterialTheme.typography.titleMedium)
                     Text(queryLogTime(entry.ts, true), style = MaterialTheme.typography.bodySmall)
                     Text(queryActionSummary(entry), style = MaterialTheme.typography.bodyMedium)
+                    Text(queryLogHttpStatus(entry.httpStatus), style = MaterialTheme.typography.bodyMedium)
+                    Text(queryLogPath(entry), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                     Text(queryLogFamily(entry.family), style = MaterialTheme.typography.bodySmall)
                     if (appLabel != uidFallback) Text(appLabel, style = MaterialTheme.typography.bodySmall)
                     if (entry.uid >= 0) Text("UID ${entry.uid}", style = MaterialTheme.typography.labelSmall)
-                    Text(stringResource(if (entry.action == ACTION_ALLOW) R.string.compose_logs_exemption_detail
-                        else if (entry.action == ACTION_PROXY) R.string.compose_logs_proxy_detail
-                        else R.string.compose_logs_block_detail), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(when (entry.action) {
+                        ACTION_ALLOW -> R.string.compose_logs_exemption_detail
+                        ACTION_PROXY -> R.string.compose_logs_proxy_detail
+                        ACTION_REJECT -> R.string.compose_logs_rejection_detail
+                        else -> R.string.compose_logs_block_detail
+                    }), style = MaterialTheme.typography.bodySmall)
                     Text(stringResource(R.string.compose_logs_details_scope), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(stringResource(R.string.compose_logs_classification_scope), style = MaterialTheme.typography.bodySmall,
@@ -242,6 +253,7 @@ internal fun queryLogTime(timestamp: Long, full: Boolean): String =
 
 @Composable
 internal fun queryActionSummary(entry: QueryLogEntry): String {
+    if (entry.action == ACTION_REJECT) return stringResource(R.string.compose_logs_access_denied)
     if (entry.action == ACTION_ALLOW) return stringResource(R.string.compose_logs_local_exemption)
     if (entry.action == ACTION_PROXY) return stringResource(R.string.compose_stats_recent_action_proxied)
     val action = stringResource(R.string.compose_stats_recent_action_blocked)
@@ -249,12 +261,23 @@ internal fun queryActionSummary(entry: QueryLogEntry): String {
     val mode = when (entry.mode) {
         1 -> stringResource(R.string.compose_stats_mode_204)
         2 -> stringResource(R.string.compose_stats_mode_allowed)
-        0 -> stringResource(R.string.compose_stats_mode_placeholder)
+        0 -> stringResource(if (entry.type == 0) R.string.compose_logs_placeholder_policy else R.string.compose_logs_category_policy)
         3 -> stringResource(R.string.compose_stats_mode_empty)
         4 -> stringResource(R.string.content_log_domain_response)
         else -> stringResource(R.string.compose_logs_unknown_code, entry.mode)
     }
     return "$action · $type · $mode"
+}
+
+@Composable
+private fun queryLogHttpStatus(status: Int): String =
+    if (status in 100..599) "HTTP $status" else stringResource(R.string.compose_logs_status_unknown)
+
+@Composable
+private fun queryLogPath(entry: QueryLogEntry): String = when {
+    entry.path.isEmpty() -> stringResource(R.string.compose_logs_path_unknown)
+    entry.pathTruncated -> stringResource(R.string.compose_logs_path_truncated, entry.path)
+    else -> entry.path
 }
 
 @Composable
@@ -304,7 +327,7 @@ private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
         val timeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
         file.bufferedWriter(Charsets.UTF_8).use { out ->
             /* 同时给可读名与机器用的编码，两个受众都不吃亏 */
-            out.write("time,result,type_code,type_name,mode_code,mode_name,uid,host,ip_family\n")
+            out.write("time,result,type_code,type_name,mode_code,mode_name,uid,host,ip_family,path,http_status,path_truncated\n")
             entries.forEach { entry ->
                 out.write(queryLogCsvRow(entry, timeFmt))
             }
@@ -332,16 +355,21 @@ private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
     }
 }
 
-private fun queryLogCsvRow(entry: QueryLogEntry, formatter: SimpleDateFormat): String {
+internal fun queryLogCsvRow(entry: QueryLogEntry, formatter: SimpleDateFormat): String {
     val time = if (entry.ts in 1..Long.MAX_VALUE / 1000) formatter.format(Date(entry.ts * 1000L)) else ""
     val result = when (entry.action) {
         ACTION_BLOCK -> "blocked"
         ACTION_ALLOW -> "local_exemption"
-        else -> "forwarding_started"
+        ACTION_PROXY -> "forwarding_started"
+        ACTION_REJECT -> "access_denied"
+        else -> "unknown"
     }
     return listOf(time, result, if (entry.type >= 0) entry.type.toString() else "", csvTypeName(entry.type),
-        entry.mode.toString(), csvModeName(entry.mode), if (entry.uid >= 0) entry.uid.toString() else "", entry.host,
-        if (entry.family == 4 || entry.family == 6) "IPv${entry.family}" else "unknown")
+        if (entry.action == ACTION_BLOCK) entry.mode.toString() else "",
+        if (entry.action == ACTION_BLOCK) csvModeName(entry.mode) else "",
+        if (entry.uid >= 0) entry.uid.toString() else "", entry.host,
+        if (entry.family == 4 || entry.family == 6) "IPv${entry.family}" else "unknown", entry.path,
+        if (entry.httpStatus in 100..599) entry.httpStatus.toString() else "", entry.pathTruncated.toString())
         .joinToString(",") { csvField(it) } + "\n"
 }
 

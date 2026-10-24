@@ -5,6 +5,57 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class QueryLogPageTest {
+    @Test fun localStatusAndPathDistinguishRejectedDocumentFromSameHostImage() {
+        val json = page()
+        val row = json.getJSONArray("entries").getJSONObject(0)
+        val legacy = QueryLogPage.parse(json, 300, null).entries.single()
+        assertEquals("", legacy.path)
+        assertEquals(0, legacy.httpStatus)
+        assertFalse(legacy.pathTruncated)
+        row.put("action", 3).put("path", "/internal-test").put("status", 403).put("pathTruncated", false)
+        val rejected = QueryLogPage.parse(json, 300, null).entries.single()
+        assertEquals(3, rejected.action)
+        assertEquals("/internal-test", rejected.path)
+        assertEquals(403, rejected.httpStatus)
+        row.put("action", 1).put("path", "/favicon.ico").put("status", 200)
+        val image = QueryLogPage.parse(json, 300, null).entries.single()
+        assertEquals(rejected.host, image.host)
+        assertNotEquals(rejected.path, image.path)
+        assertNotEquals(rejected.httpStatus, image.httpStatus)
+    }
+
+    @Test fun malformedOrSensitiveResponseMetadataCannotReplaceHistory() {
+        val invalid = listOf(
+            "status" to -1, "status" to 600, "status" to "200", "status" to 200.5,
+            "path" to "https://user:password@example.test/", "path" to "/?token=secret",
+            "path" to "/#secret", "path" to "/a\nb", "path" to ("/" + "a".repeat(159)),
+            "path" to "/a\ud800", "pathTruncated" to "false",
+        )
+        for ((field, value) in invalid) {
+            val json = page()
+            json.getJSONArray("entries").getJSONObject(0).put(field, value)
+            assertThrows("$field=$value", IllegalArgumentException::class.java) { QueryLogPage.parse(json, 300, null) }
+        }
+    }
+
+    @Test fun optionalBrokenLogMetadataDoesNotDiscardAuthoritativeStatistics() {
+        val json = JSONObject("""{"uptime_seconds":20,"total_requests":100,"total_blocked":40,
+            "query_log":[{"ts":100,"uid":-1,"host":"example.test","action":1,"status":"invalid"}]}""")
+        val stats = ServerStats.fromJson(json)!!
+        assertEquals(100L, stats.totalRequests)
+        assertEquals(40L, stats.totalBlocked)
+        assertTrue(stats.queryLog.isEmpty())
+    }
+
+    @Test fun csvRetainsRejectionStatusAndEscapesTheRecordedPath() {
+        val row = queryLogCsvRow(QueryLogEntry(action = 3, host = "local.example", family = 6,
+            path = "/item,\"x\"", httpStatus = 403), java.text.SimpleDateFormat("yyyy-MM-dd"))
+        assertTrue(row.contains(",access_denied,"))
+        assertTrue(row.endsWith(",IPv6,\"/item,\"\"x\"\"\",403,false\n"))
+        assertFalse(row.contains("forwarding_started"))
+        assertFalse("A rejected endpoint has no placeholder policy", row.contains("placeholder"))
+    }
+
     @Test fun familyIsValidatedAndLegacyMissingFamilyStaysUnknown() {
         val json = page()
         val row = json.getJSONArray("entries").getJSONObject(0)

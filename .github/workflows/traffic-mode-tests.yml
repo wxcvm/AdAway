@@ -128,6 +128,10 @@ jobs:
           python3 tools/test-artifact-cleanup.py
       - name: Test actual native loader and concurrent immutable publication
         run: |
+          cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/lifecycle_lock_test.c -o "$RUNNER_TEMP/lifecycle-lock-test"
+          "$RUNNER_TEMP/lifecycle-lock-test"
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/lifecycle_lock_test.c -o "$RUNNER_TEMP/lifecycle-lock-asan"
+          "$RUNNER_TEMP/lifecycle-lock-asan"
           cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/request_host_test.c -o "$RUNNER_TEMP/request-host-test"
           "$RUNNER_TEMP/request-host-test"
           cc -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/request_host_test.c -o "$RUNNER_TEMP/request-host-asan"

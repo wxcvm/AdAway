@@ -121,17 +121,19 @@ static void pages(void) {
     for (unsigned i = 1; i <= 600; i++) add(i);
     reply("", 200);
     struct mg_str body = reply("offset=0&limit=300", 200);
-    assert(mg_json_get_long(body, "$.returned", -1) == 300);
+    unsigned first_returned = (unsigned)mg_json_get_long(body, "$.returned", -1);
+    assert(first_returned > 0 && first_returned <= 300);
     assert(mg_json_get_long(body, "$.total", -1) == 600);
     char generation[33], query[200];
     memcpy(generation, s_qlog_generation, sizeof(generation));
     for (unsigned i = 601; i <= 620; i++) add(i);
-    snprintf(query, sizeof(query), "offset=300&limit=300&generation=%s&anchor=600", generation);
+    snprintf(query, sizeof(query), "offset=%u&limit=300&generation=%s&anchor=600", first_returned, generation);
     body = reply(query, 200);
     char *host = mg_json_get_str(body, "$.entries[0].host");
-    assert(host != NULL && strcmp(host, "request-300.example.test") == 0);
+    char expected[192]; snprintf(expected, sizeof(expected), "request-%u.example.test", 600-first_returned);
+    assert(host != NULL && strcmp(host, expected) == 0);
     free(host);
-    assert(mg_json_get_long(body, "$.nextOffset", -1) == 600);
+    assert(mg_json_get_long(body, "$.nextOffset", -1) == (long)(first_returned + mg_json_get_long(body, "$.returned", -1)));
     assert(mg_json_get_long(body, "$.total", -1) == 600);
     static char small[250];
     assert(qlog_render_page(0, 1000, small, sizeof(small)) > 0);
@@ -277,6 +279,7 @@ static void host_authorities(void) {
 
 static void add_with_family(unsigned number, unsigned family) {
     char host[192];
+    char path[64];
     struct mg_http_message request;
     struct mg_connection connection;
     memset(&request, 0, sizeof(request));
@@ -284,9 +287,11 @@ static void add_with_family(unsigned number, unsigned family) {
     connection.rem.is_ip6 = family == 6;
     connection.rem.addr.ip[0] = family == 6 ? 0x20 : 127;
     snprintf(host, sizeof(host), "request-%u.example.test", number);
+    snprintf(path, sizeof(path), "/request-%u", number);
+    request.uri = mg_str(path);
     request.headers[0].name = mg_str("Host");
     request.headers[0].value = mg_str(host);
-    qlog_add((uid_t)-1, QLOG_BLOCK, &request, family ? &connection : NULL);
+    qlog_add_status((uid_t)-1, QLOG_BLOCK, &request, family ? &connection : NULL, (uint16_t)(200 + number % 400));
 }
 
 static void family_metadata(const char *directory) {
@@ -342,12 +347,14 @@ static void family_compaction(const char *directory) {
         snprintf(host, sizeof(host), "request-%u.example.test", number);
         assert(!strcmp(s_qlog[k].host, host));
         assert(s_qlog_family[k] == family_for_number(number));
+        char expected_path[64]; snprintf(expected_path,sizeof(expected_path),"/request-%u",number);
+        assert(!strcmp(s_qlog_metadata[k].path,expected_path) && s_qlog_metadata[k].status==200+number%400 && !s_qlog_metadata[k].flags);
     }
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/query_log.dat", directory);
     FILE *file = fopen(path, "rb");
     assert(file && fseek(file, 0, SEEK_END) == 0);
-    assert(ftell(file) == (long)(12 + QLOG_PERSIST_MAX * (sizeof(struct qlog_entry) + 1)));
+    assert(ftell(file) == (long)(12 + QLOG_PERSIST_MAX * (sizeof(struct qlog_entry) + 1 + sizeof(struct response_log_metadata))));
     fclose(file);
 }
 
@@ -375,7 +382,7 @@ static void legacy_family_migration(const char *directory) {
         write_legacy(directory, counts[variant], positions[variant]);
         qlog_load(directory);
         assert(s_qlog_count == counts[variant] && s_qlog_pos == positions[variant]);
-        for (uint32_t i = 0; i < s_qlog_count; i++) assert(s_qlog_family[i] == 0);
+        for (uint32_t i = 0; i < s_qlog_count; i++) assert(s_qlog_family[i] == 0 && !s_qlog_metadata[i].path[0] && !s_qlog_metadata[i].status && !s_qlog_metadata[i].flags);
         struct mg_str body = reply("offset=0&limit=1", 200);
         assert(mg_json_get_long(body, "$.entries[0].family", -1) == 0);
         assert(mg_json_get_long(body, "$.entries[0].type", -1) == 13);
@@ -450,6 +457,124 @@ static void live_family(const char *bind, unsigned expected) {
     mg_mgr_free(&manager);
 }
 
+static void long_path_pages(void) {
+    uint32_t offset=0;
+    char generation[33]={0};
+    while (offset<1000) {
+        char query[180];
+        if (!offset) snprintf(query,sizeof(query),"offset=0&limit=1000");
+        else snprintf(query,sizeof(query),"offset=%u&limit=1000&generation=%s&anchor=1000",offset,generation);
+        struct mg_str body=reply(query,200);
+        if (!offset) memcpy(generation,s_qlog_generation,sizeof(generation));
+        long returned=mg_json_get_long(body,"$.returned",-1);
+        long next=mg_json_get_long(body,"$.nextOffset",-1);
+        assert(returned>0 && next==(long)offset+returned && next<=1000);
+        int length=0; assert(mg_json_get(body,"$",&length)==0 && (size_t)length==body.len);
+        bool truncated=false; assert(mg_json_get_bool(body,"$.entries[0].pathTruncated",&truncated) && truncated);
+        offset=(uint32_t)next;
+    }
+}
+
+static void response_metadata(const char *directory) {
+    const char *uris[] = {"/internal-test?password=secret#fragment", "/favicon.ico", "https://secret.example/path",
+                          "authority:443", "*", "/bad\001path", "/bad\xc0\xaf", "/bad\xed\xa0\x80", "/bad\xf4\x90\x80\x80", "/quote\"and\\slash"};
+    const char *expected[] = {"/internal-test", "/favicon.ico", "", "", "", "", "", "", "", "/quote\"and\\slash"};
+    qlog_clear();
+    for (unsigned i = 0; i < sizeof(uris)/sizeof(uris[0]); i++) {
+        struct mg_http_message hm; memset(&hm, 0, sizeof(hm)); hm.uri = mg_str(uris[i]);
+        qlog_add_status((uid_t)-1, i == 0 ? QLOG_DENY : QLOG_BLOCK, &hm, NULL, i == 0 ? 403 : 200);
+        assert(!strcmp(s_qlog_metadata[i].path, expected[i]) && !s_qlog_metadata[i].flags);
+    }
+    qlog_save(directory); qlog_clear(); qlog_load(directory);
+    assert(s_qlog_count == sizeof(uris)/sizeof(uris[0]));
+    for (unsigned i = 0; i < s_qlog_count; i++) {
+        assert(!strcmp(s_qlog_metadata[i].path, expected[i]));
+        assert(s_qlog_metadata[i].status == (i == 0 ? 403 : 200));
+    }
+    struct mg_str body = reply("limit=1", 200);
+    char *path = mg_json_get_str(body, "$.entries[0].path");
+    assert(path && !strcmp(path, expected[9])); free(path);
+    assert(!strstr(body.buf, "password") && !strstr(body.buf, "fragment"));
+
+    char long_path[700]; memset(long_path, 'a', sizeof(long_path)); long_path[0]='/';
+    struct response_log_metadata metadata;
+    memset(&metadata, 0, sizeof(metadata));
+    response_log_path(&metadata, long_path, 159); assert(strlen(metadata.path)==159 && !metadata.flags);
+    response_log_path(&metadata, long_path, 160); assert(strlen(metadata.path)==159 && metadata.flags==1);
+    /* A multi-byte code point straddling the byte limit is omitted in full. */
+    memcpy(long_path+158, "\xe6\xb1\x89", 3);
+    response_log_path(&metadata, long_path, 161); assert(strlen(metadata.path)==158 && metadata.flags==1);
+    long_path[650]=(char)0xff;
+    response_log_path(&metadata, long_path, sizeof(long_path)); assert(!metadata.path[0] && !metadata.flags);
+    long_path[650]='a';
+    response_log_path(&metadata,"/c1\xc2\x80",6); assert(!metadata.path[0] && !metadata.flags);
+    qlog_clear();
+    for (unsigned i=0; i<1000; i++) {
+        struct mg_http_message hm; memset(&hm,0,sizeof(hm)); hm.uri=mg_str_n(long_path, sizeof(long_path));
+        qlog_add_status(42,QLOG_BLOCK,&hm,NULL,304);
+    }
+    qlog_save(directory); qlog_clear(); qlog_load(directory);
+    assert(s_qlog_count==1000 && s_qlog_metadata[999].flags==1 && s_qlog_metadata[999].status==304);
+    long_path_pages();
+    /* Parser sees only this request's newly queued response. */
+    const char responses[]="HTTP/1.1 403 Forbidden\r\n\r\nHTTP/1.1 200 OK\r\n\r\n";
+    size_t second=strlen("HTTP/1.1 403 Forbidden\r\n\r\n");
+    assert(response_log_status(responses,strlen(responses),0)==403);
+    assert(response_log_status(responses,strlen(responses),second)==200);
+    assert(!response_log_status(responses,second,second));
+    assert(!response_log_status(responses,strlen(responses),strlen(responses)+1));
+    assert(!response_log_status("HTTP/1.1 999 Bad\r\n",18,0));
+}
+
+static void v2_migration_and_corrupt_v3(const char *directory) {
+    char path[PATH_MAX]; snprintf(path,sizeof(path),"%s/query_log.dat",directory);
+    qlog_clear(); add_with_family(1,4); add_with_family(2,6);
+    FILE *file=fopen(path,"wb"); assert(file);
+    uint32_t header[]={QLOG_MAGIC_V2,0,2};
+    assert(fwrite(header,sizeof(header),1,file)==1 && fwrite(s_qlog,sizeof(*s_qlog),2,file)==2 && fwrite(s_qlog_family,1,2,file)==2);
+    assert(!fclose(file)); qlog_load(directory);
+    for (unsigned i=0;i<2;i++) assert(!s_qlog_metadata[i].path[0] && !s_qlog_metadata[i].status && !s_qlog_metadata[i].flags);
+    struct mg_http_message hm; memset(&hm,0,sizeof(hm)); hm.uri=mg_str("/internal-test?secret=never-store");
+    qlog_add_status(42,QLOG_DENY,&hm,NULL,403);
+    qlog_save(directory); qlog_clear(); qlog_load(directory);
+    assert(s_qlog_count==3 && s_qlog[2].action==QLOG_DENY && s_qlog_metadata[2].status==403);
+    reply("limit=1",200);
+    char cursor[180]; snprintf(cursor,sizeof(cursor),"limit=1&generation=%s&anchor=3",s_qlog_generation);
+    struct qlog_entry entries[3]; memcpy(entries,s_qlog,sizeof(entries));
+    struct response_log_metadata metadata[3]; memcpy(metadata,s_qlog_metadata,sizeof(metadata));
+    uint8_t families[3]; memcpy(families,s_qlog_family,sizeof(families));
+    for (unsigned variant=0;variant<15;variant++) {
+        struct response_log_metadata broken[3]; memcpy(broken,metadata,sizeof(broken));
+        struct qlog_entry records[3]; memcpy(records,entries,sizeof(records));
+        switch(variant) {
+            case 0: broken[2].status=99; break;
+            case 1: broken[2].status=600; break;
+            case 2: broken[2].flags=2; break;
+            case 3: broken[2].reserved=1; break;
+            case 4: memset(broken[2].path,'a',sizeof(broken[2].path)); break;
+            case 5: snprintf(broken[2].path,sizeof(broken[2].path),"http://absolute/path"); break; // NOSONAR: Invalid persisted metadata fixture, never fetched or opened; production TLS is unchanged.
+            case 6: snprintf(broken[2].path,sizeof(broken[2].path),"/path?secret=value"); break;
+            case 7: snprintf(broken[2].path,sizeof(broken[2].path),"/path#fragment"); break;
+            case 8: broken[2].path[1]=1; break;
+            case 9: broken[2].path[1]=(char)0xff; break;
+            case 10: broken[2].path[0]=0; broken[2].flags=1; break;
+            case 11: records[2].action=4; break;
+            case 12: records[2].ts=0; break;
+            default: break;
+        }
+        header[0]=QLOG_MAGIC_V3; header[2]=3;
+        file=fopen(path,"wb"); assert(file);
+        assert(fwrite(header,sizeof(header),1,file)==1 && fwrite(records,sizeof(records),1,file)==1 && fwrite(families,1,3,file)==3);
+        size_t bytes=sizeof(broken)-(variant==13 ? 1 : 0);
+        assert(fwrite(broken,1,bytes,file)==bytes);
+        if(variant==14) assert(fputc(0,file)==0);
+        assert(!fclose(file)); qlog_load(directory);
+        assert(s_qlog_count==3 && s_qlog_pos==3 && s_qlog_sequence==3);
+        assert(!memcmp(s_qlog,entries,sizeof(entries)) && !memcmp(s_qlog_metadata,metadata,sizeof(metadata)) && !memcmp(s_qlog_family,families,sizeof(families)));
+        reply(cursor,200);
+    }
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2); /* Existing disposable directory supplied by the test runner. */
     mg_log_set(MG_LL_NONE);
@@ -463,10 +588,12 @@ int main(int argc, char **argv) {
     family_compaction(argv[1]);
     legacy_family_migration(argv[1]);
     corrupt_family_keeps_live_state(argv[1]);
+    response_metadata(argv[1]);
+    v2_migration_and_corrupt_v3(argv[1]);
     live_family("http://127.0.0.1:0", 4);
 #if MG_ENABLE_IPV6
     live_family("http://[::1]:0", 6);
 #endif
-    puts("PASS: production query log persistence, rollback, bounded pages, stable cursor, family metadata/mapped peers, QLOG migration, QLG2 rejection and actual IPv4/IPv6 HTTP round trips");
+    puts("PASS: production query log persistence, rollback, bounded pages, stable cursor, family metadata/mapped peers, QLOG/QLG2 migration, QLG3 metadata/corruption, private UTF-8 bounded paths, response offsets and actual IPv4/IPv6 HTTP round trips");
     return 0;
 }

@@ -57,6 +57,7 @@ public class WebServerUtils {
     private static final String CA_KEY_FILE  = "localhost-2410.key";
     private static final String PREFS_WS = "compose_webserver";
     private static final java.util.concurrent.locks.ReentrantLock LISTENER_LOCK = new java.util.concurrent.locks.ReentrantLock();
+    private static volatile Context lifecycleContext;
     private static final String PROBE_HTTPS = "https";
     private static final String PREF_HTTPS_PORT = "https_port";
     private static final String PREF_HTTP_PORT = "http_port";
@@ -201,12 +202,19 @@ public class WebServerUtils {
 
     public static String applyListenerSettings(Context context, ListenerSettings settings, boolean createMissing, boolean autoCreate) {
         LISTENER_LOCK.lock();
-        try { return applyListenerSettingsLocked(context, settings, createMissing || autoCreate, autoCreate); }
-        finally { LISTENER_LOCK.unlock(); }
+        boolean rootLocked = false;
+        try {
+            rootLocked = acquireRootLifecycle(context);
+            if (!rootLocked) return "未应用：服务器生命周期锁获取失败。原服务与配置保持不变。";
+            return applyListenerSettingsLocked(context, settings, createMissing || autoCreate, autoCreate);
+        } finally {
+            if (rootLocked) releaseRootLifecycle();
+            LISTENER_LOCK.unlock();
+        }
     }
 
     private static String applyListenerSettingsLocked(Context context, ListenerSettings settings, boolean createMissing, boolean autoCreate) {
-        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so")); }
+        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so"), org.adaway.BuildConfig.NATIVE_ABI); }
         catch (IOException exception) { return "未应用：" + exception.getMessage() + "。原服务与配置保持不变。"; }
         if ((BlockMode.current(context) == BlockMode.HIJACK || org.adaway.model.root.HijackModel.isEnabled())
                 && !settings.supportsRootRedirect())
@@ -216,6 +224,9 @@ public class WebServerUtils {
         if (org.adaway.model.root.HijackModel.isEnabled()
                 && (previous.http != settings.http || previous.https != settings.https))
             return "未应用：当前 Root 重定向仍指向原端口。请先停用 Root 重定向，再修改监听端口。";
+        boolean running = isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
+        if (running && !org.adaway.model.root.ShellUtils.prepareBundledExecutable(context, WEB_SERVER_EXECUTABLE))
+            return "未应用：当前服务器程序暂存失败。原服务与配置保持不变。";
         java.util.Set<String> previousManaged = getManagedListenerAddresses(context);
         java.util.Set<String> managed = new java.util.HashSet<>(previousManaged);
         ListenerAddressTransaction addresses = new ListenerAddressTransaction(new RootListenerAddresses());
@@ -228,7 +239,6 @@ public class WebServerUtils {
                 return "未应用：" + exception.getMessage() + (cleanup.isEmpty() ? "。原服务与配置保持不变。" : "。地址清理未完成：" + cleanup);
             }
         }
-        boolean running = isBundledExecutableRunning(WEB_SERVER_EXECUTABLE);
         boolean boot = org.adaway.model.root.MagiskBootScript.isInstalled();
         stopWebServer();
         try {
@@ -239,7 +249,7 @@ public class WebServerUtils {
             if (!saveListenerSettings(context, settings, managed, autoCreate)) throw new IOException("配置保存失败");
             if (boot && !org.adaway.model.root.MagiskBootScript.install(context)) throw new IOException("开机配置写入失败");
             startWebServer(context);
-            if (!listenerReachable(settings)) throw new IOException("新服务未就绪");
+            if (!isCurrentWebServerReady(context)) throw new IOException("当前安装包中的新服务未就绪");
             String address = "IPv4 " + (settings.ipv4.isEmpty() ? "关闭" : settings.ipv4)
                     + " / IPv6 " + (settings.ipv6.isEmpty() ? "关闭" : settings.ipv6);
             String cleanup = cleanupUnusedListenerAddresses(context, settings, managed);
@@ -274,7 +284,7 @@ public class WebServerUtils {
         if (boot) restored &= org.adaway.model.root.MagiskBootScript.install(context);
         if (running) startWebServer(context);
         String result = "未应用：" + reason + (restored ? "。已恢复原配置。" : "。原配置恢复失败，请检查存储权限。");
-        if (running && !listenerReachable(previous)) result += "原服务尚未恢复，请检查服务日志。";
+        if (running && !isCurrentWebServerReady(context)) result += "原服务尚未恢复，请检查服务日志。";
         return result;
     }
 
@@ -332,6 +342,7 @@ public class WebServerUtils {
 
     /** Load persisted ports into the static cache (called at app start). */
     public static void initPortCache(Context context) {
+        lifecycleContext = context.getApplicationContext();
         sHttpPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
                 .getInt(PREF_HTTP_PORT, 80);
         sHttpsPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
@@ -623,23 +634,70 @@ public class WebServerUtils {
      */
     /** Boot fallbacks may run together; recheck under the same lock before replacing a live server. */
     public static void ensureWebServer(Context context) {
-        LISTENER_LOCK.lock();
-        try {
-            if (isBundledExecutableRunning(WEB_SERVER_EXECUTABLE)
-                    && listenerReachable(getListenerSettings(context))) return;
-            startWebServerLocked(context);
-        } finally { LISTENER_LOCK.unlock(); }
+        ensureCurrentWebServer(context);
     }
 
-public static void startWebServer(Context context) {
+    /** Used by boot/update/self-recovery only. Statistics requests never hash native images. */
+    public static boolean isCurrentWebServerReady(Context context) {
+        return org.adaway.model.root.ShellUtils.isBundledExecutableCurrent(context, WEB_SERVER_EXECUTABLE)
+                && listenerReachable(getListenerSettings(context));
+    }
+
+    /** Serial, bounded reconciliation: a reachable old image cannot pass as this APK. */
+    public static boolean ensureCurrentWebServer(Context context) {
+        boolean locked = false;
+        boolean rootLocked = false;
+        try {
+            locked = LISTENER_LOCK.tryLock(10, TimeUnit.SECONDS);
+            if (!locked) {
+                Timber.w("Server lifecycle is busy; deferring current-image reconciliation");
+                return false;
+            }
+            if (!org.adaway.helper.PreferenceHelper.getWebServerEnabled(context)) return false;
+            // Healthy background checks only read identity/listeners: no helper copy or root lock file write.
+            if (isCurrentWebServerReady(context)) return true;
+            rootLocked = acquireRootLifecycle(context);
+            if (!rootLocked) { Timber.w("Could not acquire cross-process server lifecycle lock"); return false; }
+            if (isCurrentWebServerReady(context)) return true;
+            startWebServerLocked(context);
+            return isCurrentWebServerReady(context);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
+        } finally {
+            if (rootLocked) releaseRootLifecycle();
+            if (locked) LISTENER_LOCK.unlock();
+        }
+    }
+
+    private static boolean acquireRootLifecycle(Context context) {
+        if (LISTENER_LOCK.getHoldCount() > 1) return true;
+        if (context == null) return false;
+        lifecycleContext = context.getApplicationContext();
+        return org.adaway.model.root.ShellUtils.acquireWebServerLifecycleLock(context);
+    }
+
+    private static void releaseRootLifecycle() {
+        if (LISTENER_LOCK.getHoldCount() == 1)
+            org.adaway.model.root.ShellUtils.releaseWebServerLifecycleLock();
+    }
+
+    public static void startWebServer(Context context) {
         LISTENER_LOCK.lock();
-        try { startWebServerLocked(context); }
-        finally { LISTENER_LOCK.unlock(); }
+        boolean rootLocked = false;
+        try {
+            rootLocked = acquireRootLifecycle(context);
+            if (rootLocked) startWebServerLocked(context);
+            else showToast(context, R.string.pref_webserver_start_failed);
+        } finally {
+            if (rootLocked) releaseRootLifecycle();
+            LISTENER_LOCK.unlock();
+        }
     }
 
     private static void startWebServerLocked(Context context) {
         Timber.d("Starting web server…");
-        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so")); }
+        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so"), org.adaway.BuildConfig.NATIVE_ABI); }
         catch (IOException exception) {
             Timber.e(exception, "Invalid packaged webserver");
             showToast(context, exception.getMessage());
@@ -696,13 +754,21 @@ public static void startWebServer(Context context) {
             return false;
         }
 
-        // Kill any previous instance and wait for port 80/443 to be released.
+        // Publish a complete image and retain /proc/PID/exe before terminating the old server.
+        // Configuration and resource paths stay in place; failure remains visible to the caller.
+        if (!org.adaway.model.root.ShellUtils.prepareBundledExecutable(context, WEB_SERVER_EXECUTABLE)) {
+            Timber.e("Could not prepare current webserver; previous process and configuration retained");
+            showToast(context, R.string.pref_webserver_start_failed);
+            return false;
+        }
         if (isBundledExecutableRunning(WEB_SERVER_EXECUTABLE)) {
             Timber.d("Stopping stale webserver instance before restart.");
-            killBundledExecutable(WEB_SERVER_EXECUTABLE);
-            try { Thread.sleep(600); } catch (InterruptedException ignored) {
-            /* 恢复中断标志：吞掉 InterruptedException 会让上层的取消/退出逻辑失效（Sonar java:S2142）。 */
-            Thread.currentThread().interrupt();}
+            stopWebServerLocked();
+            if (isBundledExecutableRunning(WEB_SERVER_EXECUTABLE)) {
+                Timber.e("Previous webserver did not stop; refusing overlapping launch");
+                showToast(context, R.string.pref_webserver_start_failed);
+                return false;
+            }
         }
 
         // Ensure captive portal login UIDs are in allowlist.txt
@@ -739,7 +805,7 @@ public static void startWebServer(Context context) {
         String params = "--resources " + resourcePath.toAbsolutePath() +
                 debugFlag + proxyFlag + selected.arguments();
         boolean started = runBundledExecutable(context, WEB_SERVER_EXECUTABLE, params);
-        boolean ready = started && listenerReachable(selected);
+        boolean ready = started && isCurrentWebServerReady(context);
         if (!ready) {
             stopWebServer();
             Timber.e("Webserver failed to start; check logs in /data/local/tmp/webserver_start.log for details.");
@@ -752,8 +818,15 @@ public static void startWebServer(Context context) {
 
     public static void stopWebServer() {
         LISTENER_LOCK.lock();
-        try { stopWebServerLocked(); }
-        finally { LISTENER_LOCK.unlock(); }
+        boolean rootLocked = false;
+        try {
+            rootLocked = acquireRootLifecycle(lifecycleContext);
+            if (rootLocked) stopWebServerLocked();
+            else Timber.w("Could not acquire cross-process server lifecycle lock; not stopping server");
+        } finally {
+            if (rootLocked) releaseRootLifecycle();
+            LISTENER_LOCK.unlock();
+        }
     }
 
     private static void stopWebServerLocked() {

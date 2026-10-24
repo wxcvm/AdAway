@@ -14,6 +14,7 @@
 #include "cosmetic_scope.h"
 #include "lt_map.h"
 #include "listener_pair.h"
+#include "lifecycle_lock.h"
 
 
 /*
@@ -2614,10 +2615,9 @@ static void json_safe_copy(char *dst, size_t cap, const char *src) {
 /*
  * Query log ring. Raised from 4096 to 10000 entries: the app pages through the
  * history, and "why was this blocked?" needs more than the last few minutes on
- * a busy device. 10000 entries cost roughly 2 MB of RAM, which is acceptable;
- * what is NOT acceptable is flushing 2 MB to flash on every throttled save, so
- * qlog_save() persists only the newest QLOG_PERSIST_MAX entries (same disk cost
- * as before).
+ * a busy device. Base records plus family and bounded response metadata cost
+ * about 3.6 MiB for 10000 entries. Only the newest QLOG_PERSIST_MAX entries are
+ * written to flash (about 1.46 MiB in QLG3), avoiding a full-ring write.
  */
 #define QLOG_MAX 10000
 #define QLOG_PERSIST_MAX 4096
@@ -3731,6 +3731,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev != MG_EV_HTTP_MSG) return;
     struct mg_http_message *hm = (struct mg_http_message *)ev_data;
     struct settings *s = (struct settings *)c->fn_data;
+    /* A pipeline may already have an earlier response queued. Observe only the
+       response appended while handling this request, never that older status. */
+    size_t response_offset = c->send.len;
     if (ap_reply(c, hm)) return;
 
     /* Keep-alive: the idle timer must measure IDLE time, not the age of the
@@ -3746,7 +3749,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     bool private_path = mg_match(hm->uri, mg_str("/internal-*"), NULL) ||
                         mg_match(hm->uri, mg_str("/control"), NULL);
     if (!local_peer && (private_path || s->proxy_filter)) {
-        mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+        mg_http_reply(c, 403, "Content-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\n",
+                      "Access denied: this diagnostic or proxy endpoint is restricted.\n"
+                      "To check the ordinary local response, open / on the same address.\n");
+        qlog_add_status(conn_load_uid(c), QLOG_DENY, hm, c,
+                        response_log_status(c->send.buf, c->send.len, response_offset));
         return;
     }
     /* The management port only answers the internal endpoints. */
@@ -4022,6 +4029,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         LOG_WARN("pin: refusing CONNECT from uid %d without interception", (int)chk_uid);
         mg_http_reply(c, 403, "Content-Type: text/plain\r\nCache-Control: no-store\r\n",
                       "pinned certificate: refused without interception\n");
+        qlog_add_status(req_uid, QLOG_DENY, hm, c,
+                        response_log_status(c->send.buf, c->send.len, response_offset));
         return;
     }
 
@@ -4037,7 +4046,6 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         char allow_host[192];
         req_host_of(hm, allow_host, sizeof(allow_host));
         if (domain_is_allowed(allow_host, s->resource_dir)) {
-            qlog_add(req_uid, QLOG_ALLOW, hm, c);
             /*
              * 204 而不是伪造的 200 "ok"：在"AdGuard 把拦截 IP 指向本服务器"的部署里，
              * 服务器拿不到真实内容，回一个 200 空正文等于对客户端撒谎（它以为成功、
@@ -4046,14 +4054,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
              * （应用内已有该提示）。
              */
             mg_http_reply(c, 204, "Cache-Control: no-store\r\n", "");
+            qlog_add_status(req_uid, QLOG_ALLOW, hm, c,
+                            response_log_status(c->send.buf, c->send.len, response_offset));
             return;
         }
     }
 
     if (req_uid != (uid_t)-1 && uid_is_allowed(chk_uid, s->resource_dir)) {
-        qlog_add(req_uid, QLOG_ALLOW, hm, c);
         /* 同上：放行不等于"有内容可给"，用 204 而不是伪造的 200。 */
         mg_http_reply(c, 204, "Cache-Control: no-store\r\n", "");
+        qlog_add_status(req_uid, QLOG_ALLOW, hm, c,
+                        response_log_status(c->send.buf, c->send.len, response_offset));
         return;
     }
 
@@ -4240,6 +4251,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         if (mg_http_get_header(hm, "Origin") != NULL ||
             s->stats_port == 0 || mg_ntohs(c->loc.port) != (uint16_t) s->stats_port) {
             mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
+            qlog_add_status(conn_load_uid(c), QLOG_DENY, hm, c,
+                            response_log_status(c->send.buf, c->send.len, response_offset));
             return;
         }
         char cmd_buf[32];
@@ -4290,7 +4303,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                both the requester and the target. */
             app_note_host(ba, bh);
         }
-        qlog_add(conn_load_uid(c), QLOG_BLOCK, hm, c);
+        qlog_add_status(conn_load_uid(c), QLOG_BLOCK, hm, c,
+                        response_log_status(c->send.buf, c->send.len, response_offset));
         ws_push_broadcast(s);  /* real-time push to WS subscribers */
         return;
     }
@@ -4318,8 +4332,6 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         top_host_add(bh);
         app_note_host(ba, bh);
     }
-    qlog_add(conn_load_uid(c), QLOG_BLOCK, hm, c);
-    ws_push_broadcast(s);  /* real-time push to WS subscribers */
     struct mg_http_serve_opts o = {0};
     o.mime_types = "webp=image/webp";
     /*
@@ -4351,6 +4363,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      */
     o.extra_headers = "Cache-Control: no-cache\r\n";
     mg_http_serve_file(c, hm, img_path, &o);
+    qlog_add_status(conn_load_uid(c), QLOG_BLOCK, hm, c,
+                    response_log_status(c->send.buf, c->send.len, response_offset));
+    ws_push_broadcast(s);  /* include this response's actual queued file status */
 }
 
 /* ── CLI parsing ──────────────────────────────────────────────── */
@@ -4443,6 +4458,8 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 
 /* ── main ─────────────────────────────────────────────────────── */
 int main(int argc, char *argv[]) {
+    int lifecycle = lifecycle_lock_cli(argc, argv);
+    if (lifecycle >= 0) return lifecycle;
     int check=lp_check_cli(argc,argv,80,443,8686);
     if (check>=0) return check;
     setsid();

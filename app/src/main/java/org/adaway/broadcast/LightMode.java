@@ -47,7 +47,7 @@ public final class LightMode {
     private static final String MECHANISM = "轻量模式";
 
     /** Only one pending exit check per process. */
-    private static boolean armed;
+    private static volatile boolean armed;
 
     private LightMode() {
     }
@@ -67,8 +67,8 @@ public final class LightMode {
             return;
         }
         armed = true;
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            armed = false;
+        Handler mainHandler = new Handler(Looper.getMainLooper());
+        mainHandler.postDelayed(() -> new Thread(() -> {
             try {
                 if (!isEnabled(app)) {
                     return;
@@ -77,20 +77,36 @@ public final class LightMode {
                     Timber.d("LightMode: an activity is visible, staying resident (%s)", reason);
                     return;
                 }
-                if (!WebServerUtils.isWebServerReachable(app)) {
+                if (!WebServerUtils.isCurrentWebServerReady(app)) {
                     // Blocking is not up: the watchdog must keep the process
                     // around to fix that first.
                     Timber.d("LightMode: server not reachable, staying resident (%s)", reason);
                     return;
                 }
-                PreferenceHelper.recordBootEvent(app, PreferenceHelper.getLastBootAction(app),
-                        MECHANISM, "服务器已就绪，退出应用进程以节省内存", true);
-                Timber.i("LightMode: exiting the app process to free ~180 MB (%s)", reason);
-                Process.killProcess(Process.myPid());
+                // Hash/root/socket work can outlast the user's return to the app.
+                // Final eligibility and exit run together on the UI thread.
+                mainHandler.post(() -> exitIfStillIdle(app, reason));
             } catch (Throwable throwable) {
                 Timber.w(throwable, "LightMode: exit check failed");
+            } finally {
+                mainHandler.post(() -> armed = false);
             }
-        }, GRACE_MS);
+        }, "light-mode-identity").start(), GRACE_MS);
+    }
+
+    private static void exitIfStillIdle(Context app, String reason) {
+        try {
+            if (!isEnabled(app) || !isInBackground()) {
+                Timber.d("LightMode: exit cancelled after readiness check (%s)", reason);
+                return;
+            }
+            PreferenceHelper.recordBootEvent(app, PreferenceHelper.getLastBootAction(app),
+                    MECHANISM, "服务器已就绪，退出应用进程以节省内存", true);
+            Timber.i("LightMode: exiting the app process to free ~180 MB (%s)", reason);
+            Process.killProcess(Process.myPid());
+        } catch (Throwable throwable) {
+            Timber.w(throwable, "LightMode: final exit check failed");
+        }
     }
 
     /**
