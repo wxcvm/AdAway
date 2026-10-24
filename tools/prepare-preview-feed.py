@@ -47,6 +47,11 @@ def artifact(assets, abi, tag, source):
             raise ValueError(f'APK contains another ABI or no native code: {abi}')
         for executable in ('webserver', 'tcpdump'):
             load_segments(archive.read(f'lib/{abi}/lib{executable}_exec.so'), abi, 16384)
+        if abi == 'riscv64':
+            graphics = archive.read('lib/riscv64/libandroidx.graphics.path.so')
+            load_segments(graphics, abi, 16384, False)
+            if b'libc++_shared.so\0' in graphics or 'lib/riscv64/libc++_shared.so' in names:
+                raise ValueError('RISC-V preview must not use the prebuilt 4KB C++ runtime')
     signer = fingerprint((assets / f'APK-SIGNATURE{suffix}.txt').read_text(encoding='utf-8'))
     return dict(downloadUrl=f'https://github.com/wxcvm/AdAway/releases/download/{tag}/{apk.name}',
                 sha256=hashlib.sha256(apk.read_bytes()).hexdigest(), packageName=PACKAGE,

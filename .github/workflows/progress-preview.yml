@@ -83,6 +83,9 @@ jobs:
             cp -- "$(cat "$stage/verified-apk.txt")" "$stage/unsigned.apk"
             cp -- "webserver/build/generated/webserverJniLibs/release/$abi/libwebserver_exec.so" "$stage/libwebserver_exec.so"
             cp -- "tcpdump/build/generated/tcpdumpJniLibs/release/$abi/libtcpdump_exec.so" "$stage/libtcpdump_exec.so"
+            if [[ "$abi" == riscv64 ]]; then
+              cp -- "webserver/build/intermediates/ndkBuild/release/obj/local/riscv64/libandroidx.graphics.path.so" "$stage/libandroidx.graphics.path.so"
+            fi
           done
 
       - name: Run native loader regressions before publication
@@ -172,6 +175,7 @@ jobs:
             cp "$stage/NATIVE-VERIFICATION.txt" "release-assets/NATIVE-VERIFICATION-$abi.txt"
             python3 tools/verify_webserver_apk.py --apk "$apk" --variant release --abi "$abi" \
               --executable "$stage/libwebserver_exec.so" --tcpdump-executable "$stage/libtcpdump_exec.so" \
+              --graphics-path-library "$stage/libandroidx.graphics.path.so" \
               | tee -a "release-assets/NATIVE-VERIFICATION-$abi.txt"
           done
 
@@ -180,6 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           cat docs/content-response-settings.md docs/android-abi-preview-contract.md docs/android-native-builds.md docs/android-abi-updates.md docs/activity-and-update-contract.md docs/query-log-family-format.md docs/listener-arrival.md docs/response-policy-regressions.md docs/listener-settings.md docs/listener-lifecycle.md docs/dual-stack-transport.md docs/tcp-backend.md > release-assets/IMPLEMENTATION-STATUS.md
+          cp webserver/scripts/graphics-path-source.json release-assets/GRAPHICS-PATH-SOURCE.json
           printf '%s\n' "$GITHUB_SHA" > release-assets/SOURCE-COMMIT.txt
           printf '%s\n' "Preview signature: same signing certificate as current published Android stable APK." > release-assets/SIGNING-POLICY.txt
           python3 tools/prepare-preview-feed.py

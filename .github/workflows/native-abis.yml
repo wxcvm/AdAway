@@ -66,6 +66,7 @@ jobs:
             webserver/build/official-openssl/${{ matrix.abi }}/BUILD-IDENTITY
             webserver/build/generated/webserverJniLibs/debug/${{ matrix.abi }}/*
             tcpdump/build/generated/tcpdumpJniLibs/debug/${{ matrix.abi }}/*
+            webserver/build/intermediates/ndkBuild/debug/obj/local/${{ matrix.abi }}/libandroidx.graphics.path.so
           if-no-files-found: warn
 
   runtime:

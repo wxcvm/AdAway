@@ -183,6 +183,12 @@ dependencies {
     implementation platform(libs.androidx.compose.bom)
     implementation libs.androidx.compose.ui
     implementation libs.androidx.compose.ui.graphics
+    if (rootProject.ext.adawayNativeAbi == 'riscv64') {
+        // The separately built RISC-V JNI implementation must match its Java API.
+        implementation('androidx.graphics:graphics-path') {
+            version { strictly '1.0.1' }
+        }
+    }
     implementation libs.androidx.compose.ui.tooling.preview
     implementation libs.androidx.compose.material3
     implementation libs.androidx.compose.material.icons.extended
@@ -193,6 +199,8 @@ dependencies {
     implementation libs.androidx.lifecycle.process
     debugImplementation libs.androidx.compose.ui.tooling
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
+    // The instrumentation calls this transitive runtime API directly.
+    androidTestImplementation 'androidx.graphics:graphics-path:1.0.1'
 
     // Test related
     testImplementation libs.junit

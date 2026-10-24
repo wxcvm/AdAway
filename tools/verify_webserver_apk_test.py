@@ -62,6 +62,16 @@ class ApkExecutableTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_segments(executable()[:200])
 
+    def test_shared_graphics_library_requires_correct_machine_code_and_zero_entry(self):
+        blob = executable()
+        struct.pack_into('<H', blob, 18, 243)
+        struct.pack_into('<Q', blob, 24, 0)
+        load_segments(blob, 'riscv64', require_entry=False)
+        with self.assertRaises(ValueError): load_segments(blob, 'riscv64')
+        with self.assertRaises(ValueError): load_segments(blob, 'x86_64', require_entry=False)
+        struct.pack_into('<I', blob, 68, 4)
+        with self.assertRaises(ValueError): load_segments(blob, 'riscv64', require_entry=False)
+
     def test_riscv_strip_may_relocate_only_nonloaded_attributes(self):
         built = executable()
         struct.pack_into('<H', built, 18, 243)

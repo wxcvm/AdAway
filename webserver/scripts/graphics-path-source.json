@@ -1,0 +1,26 @@
+{
+  "version": "1.0.1",
+  "commit": "8a05a22af450d589ef911d772a001a49dcb05b71",
+  "releaseNotes": "https://developer.android.com/jetpack/androidx/releases/graphics#graphics-path-1.0.1",
+  "releaseRange": "https://android.googlesource.com/platform/frameworks/support/+log/4fcd99eacd92d7c73fb1d3580fd423ed7704a98a..8a05a22af450d589ef911d772a001a49dcb05b71/graphics/graphics-path",
+  "sourceBase": "https://android.googlesource.com/platform/frameworks/support/+/8a05a22af450d589ef911d772a001a49dcb05b71/graphics/graphics-path/",
+  "files": {
+    "build.gradle": "dc6b0dfaa8393825da05eac9f6cd2ace91e7a85e6bcf6e80adb256caa25a339a",
+    "src/main/cpp/CMakeLists.txt": "87a8967586e828d2b1cc6c5745d09f30466036bffbcd780b378c75239d90b173",
+    "src/main/cpp/Conic.cpp": "49b3da93aa43480cf9cd481590be48705cb9340c52e5d09635efbd0ece07be83",
+    "src/main/cpp/Conic.h": "cd315ad7c8d030c72e96893e9a0feec463d72d2066209a203dedcf0925398a6f",
+    "src/main/cpp/Path.h": "4ee841338063d8c6f71ff4c655ecf52559f6c6df9af79835388dae1ebcd8b982",
+    "src/main/cpp/PathIterator.cpp": "3705946b43bf894e013f46ccc940f9923f43285340f8fc2128f95c59238ec7f8",
+    "src/main/cpp/PathIterator.h": "a16e99b0273fb7205607eb0cf51fc7be518a55f3446a304f92ecab353e77be6f",
+    "src/main/cpp/libandroidx.graphics.path.map": "bc338abd36eeb27059572903ad167cf4231a36ca92be4eae3574501aa83f0d8c",
+    "src/main/cpp/math/TVecHelpers.h": "1b0d6b06c5bbd6b438f9d8440ac78cf93fb8a713761badc59a4412b6457c1014",
+    "src/main/cpp/math/compiler.h": "d53e85383580e5dbf81cbcb24426b0fe1bf419b4837540242dbdca3f1df4cf66",
+    "src/main/cpp/math/vec2.h": "09e1a8eb3f8fdf9c1071500f1a4933f67caeb6d0f765d5c44ba968370de9fcb1",
+    "src/main/cpp/pathway.cpp": "4be68d6fdb6376e95560f7c49a79aa0cd97218d758cf11ea3230ac9124485800",
+    "src/main/cpp/scalar.h": "b1d2bba80a4c9272d84473b6f09f700972b016f7579842d3a87bdbbdb2af1edc",
+    "src/main/java/androidx/graphics/path/ConicConverter.kt": "893e703254f470e8d871d8526e3866d72eef2b92d9dd2062d003c77c1cc1a5c1",
+    "src/main/java/androidx/graphics/path/PathIterator.kt": "3f5844485df19b8c0e19c74ef1d0bdcbb742d3ca9048e76d7f30e8d89682a64a",
+    "src/main/java/androidx/graphics/path/PathIteratorImpl.kt": "d9e22763b3a66d547d595c7ea4d949b28656a8f27297c68022dd76806cf7555c",
+    "src/main/java/androidx/graphics/path/PathSegment.kt": "8115fe1671249e3580562f44e3c41346f462ce5c69d9afd8ec48b5dfd0234eaa"
+  }
+}

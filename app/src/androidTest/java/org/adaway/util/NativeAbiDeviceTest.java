@@ -28,6 +28,32 @@ import static org.junit.Assert.*;
 /** Actual packaged executables on a disposable emulator; no root, route or trust-store changes. */
 @RunWith(AndroidJUnit4.class)
 public class NativeAbiDeviceTest {
+    @Test public void packagedGraphicsPathSupportsNativeConicConversion() {
+        assertGraphicsPathSupport();
+    }
+
+    /** Shared by API30/API35 tests; exercises JNI, including API34+ conic conversion. */
+    public static void assertGraphicsPathSupport() {
+        android.graphics.Path path = new android.graphics.Path();
+        path.addOval(1f, 2f, 101f, 52f, android.graphics.Path.Direction.CW);
+        for (androidx.graphics.path.PathIterator.ConicEvaluation evaluation :
+                androidx.graphics.path.PathIterator.ConicEvaluation.values()) {
+            androidx.graphics.path.PathIterator iterator = new androidx.graphics.path.PathIterator(path, evaluation, 0.25f);
+            int commands = 0, conics = 0, quadratics = 0;
+            float[] points = new float[8];
+            while (iterator.hasNext()) {
+                assertTrue("Native path iterator did not terminate", ++commands < 1000);
+                androidx.graphics.path.PathSegment.Type type = iterator.next(points, 0);
+                if (type == androidx.graphics.path.PathSegment.Type.Conic) conics++;
+                if (type == androidx.graphics.path.PathSegment.Type.Quadratic) quadratics++;
+                for (float point : points) assertTrue("Native conversion returned invalid coordinates", Float.isFinite(point));
+            }
+            assertTrue(commands >= 6);
+            if (evaluation == androidx.graphics.path.PathIterator.ConicEvaluation.AsConic) assertTrue(conics >= 4);
+            else { assertEquals(0, conics); assertTrue(quadratics >= 4); }
+        }
+    }
+
     @Test public void networkPolicyAllowsBothLoopbacksAndKeepsPublicHttpDisabled() {
         android.security.NetworkSecurityPolicy policy = android.security.NetworkSecurityPolicy.getInstance();
         assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"));
