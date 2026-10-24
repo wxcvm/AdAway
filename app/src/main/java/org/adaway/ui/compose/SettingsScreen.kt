@@ -1350,175 +1350,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
             }
                     }
                     3 -> {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {// ===== [C9-GROUP-4 of 7] 内容与规则 =====
-// 目标顺序：第 4 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
-// 归入分区：可见型占位；F5 去重 / 重试护栏；决策缓存 / 按域熔断；按域覆盖响应
-// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
-                    // ── 可见型占位（默认关；关闭时行为与历史版本一致）──
-                    Spacer(Modifier.height(8.dp))
-                    var visibleReply by remember {
-                        mutableStateOf(org.adaway.util.WebServerUtils.isBlockReplyVisible(context))
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_visible_reply),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_visible_reply_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = visibleReply,
-                            onCheckedChange = { v ->
-                                visibleReply = v
-                                org.adaway.util.WebServerUtils.setBlockReplyVisible(context, v)
-                            },
-                        )
-                    }
-                    // ── F5：请求去重 / 重试护栏（各自独立，默认都关）──
-                    Spacer(Modifier.height(8.dp))
-                    var dedupOn by remember {
-                        mutableStateOf(org.adaway.util.WebServerUtils.isDedupEnabled(context))
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_dedup),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_dedup_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = dedupOn,
-                            onCheckedChange = { v ->
-                                dedupOn = v
-                                org.adaway.util.WebServerUtils.setDedupEnabled(context, v)
-                            },
-                        )
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    var guardOn by remember {
-                        mutableStateOf(org.adaway.util.WebServerUtils.isRetryGuardEnabled(context))
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_retry_guard),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_retry_guard_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = guardOn,
-                            onCheckedChange = { v ->
-                                guardOn = v
-                                org.adaway.util.WebServerUtils.setRetryGuardEnabled(context, v)
-                            },
-                        )
-                    }
-                    // The old shortcut did not replay responses and is retired.
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_cache_reuse),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_cache_reuse_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    var breakerOn by remember {
-                        mutableStateOf(org.adaway.util.WebServerUtils.isCircuitBreakerEnabled(context))
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_circuit_breaker),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_circuit_breaker_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = breakerOn,
-                            onCheckedChange = { v ->
-                                breakerOn = v
-                                org.adaway.util.WebServerUtils.setCircuitBreakerEnabled(context, v)
-                            },
-                        )
-                    }
-                    // ── F4 续：按域覆盖响应策略（默认关）──
-                    Spacer(Modifier.height(8.dp))
-                    var overrideOn by remember {
-                        mutableStateOf(org.adaway.util.WebServerUtils.isRuleOverrideEnabled(context))
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.compose_settings_rule_override),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                stringResource(R.string.compose_settings_rule_override_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = overrideOn,
-                            onCheckedChange = { v ->
-                                overrideOn = v
-                                org.adaway.util.WebServerUtils.setRuleOverrideEnabled(context, v)
-                            },
-                        )
-                    }
-
-                }
-            }
+                        ContentResponseSettingsCard()
                     }
                     4 -> {
             // ── Statistics chart settings ──
@@ -2492,6 +2324,10 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                             },
                     )
                     Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.content_native_abi, org.adaway.BuildConfig.NATIVE_ABI),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     Text(
                         stringResource(R.string.compose_settings_about_license),
                         style = MaterialTheme.typography.bodySmall,

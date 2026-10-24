@@ -629,4 +629,32 @@
     <string name="compose_logs_unknown_app">Unknown app</string>
     <string name="compose_stats_mode_empty">Empty response</string>
     <string name="compose_stats_history_empty">No activity records in this period</string>
+    <string name="content_scope">Only changes HTTP responses for requests that reach this web server. Does not add blocking rules or change DNS / Hosts. HTTPS needs a completed, trusted TLS connection; QUIC is not handled here.</string>
+    <string name="content_status_loading">Reading saved response settings…</string>
+    <string name="content_status_saved_unknown">Saved on disk · running server has not confirmed this configuration. It will be read on the next successful start.</string>
+    <string name="content_status_draft">Unsaved draft · switches do not take effect until you save.</string>
+    <string name="content_status_confirmed">Saved · server confirmed loading this configuration generation. Domain response text is saved separately.</string>
+    <string name="content_status_load_failed">Cannot read saved settings. The existing file has been preserved; retry after checking storage.</string>
+    <string name="content_status_save_failed">Save failed. The previous published configuration is unchanged; your draft is kept for retry.</string>
+    <string name="content_types_title">Response categories</string>
+    <string name="content_types_hint">On: use the category policy (for example a placeholder image, empty script or JSON). Off: answer matching requests with an empty HTTP 204. This does not allow the domain. Categories may already use 204.</string>
+    <string name="content_type_structures">Structured assets (XML / text / WASM)</string>
+    <string name="content_protection_title">Response behaviour and retry protection</string>
+    <string name="content_rules_hint">Each line: domain = status. Up to 64 rules; ASCII domains shorter than 128 characters. Status: 204, 403, 404, 410, 503 or 200. Non-204 overrides return a short plain-text block message. A domain matches itself and subdomains at label boundaries; first matching line wins. Paths, wildcards and filter conditions are rejected. Changes HTTP replies only, not DNS blocking rules.</string>
+    <string name="content_rules_legacy">Saved text contains legacy or unsupported syntax. Correct it in the editor before enabling or saving these settings.</string>
+    <string name="content_rules_count">%1$d / 64 saved domain response rules. With no rules, the override cannot be enabled.</string>
+    <string name="content_rules_edit">Edit domain responses</string>
+    <string name="content_save">Save and request reload</string>
+    <string name="content_verify">Confirm saved configuration</string>
+    <string name="content_retry_load">Retry reading settings</string>
+    <string name="content_rules_format">example.com = 204</string>
+    <string name="content_rules_invalid">Not saved. Check the format, domain lengths, 64-rule limit and storage. The previous file is preserved.</string>
+    <string name="content_rules_saved">Rule file saved atomically; this did not enable overrides. When enabled, the server refreshes it on the next matching request (at most once a second). No runtime acknowledgement is claimed for this file.</string>
+    <string name="content_rules_save">Save rule file</string>
+    <string name="content_close">Close</string>
+    <string name="content_native_abi">Installed native architecture: %1$s</string>
+    <string name="content_status_ready">Saved or default values loaded · running server state is unconfirmed. Save to publish and request confirmation.</string>
+    <string name="content_rules_missing">No domain response file yet. Save at least one valid rule before enabling overrides.</string>
+    <string name="content_legacy_save_failed">Save failed. Previous response settings have been kept.</string>
+    <string name="content_rules_inactive">Override is selected, but this file has no usable editor rules. Correct the file, or turn the override off before saving configuration.</string>
 </resources>

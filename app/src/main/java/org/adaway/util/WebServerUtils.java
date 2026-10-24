@@ -1322,64 +1322,56 @@ private static String computeSubjectHashOld(Path certFile)
     private static final String REPLY_CIRCUIT_BREAKER = "circuit_breaker";
     private static final String REPLY_RULE_OVERRIDE = "rule_override";
 
-    private static boolean blockReplyEnabled(Context context, String type) {
-        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(PREFS_BLOCK_REPLY_PREFIX + type, true);
+    private static final Object CONTENT_SETTINGS_LOCK = new Object();
+
+    public static ContentResponseSettings loadContentResponseSettings(Context context) throws IOException {
+        synchronized (CONTENT_SETTINGS_LOCK) {
+            return ContentResponseSettings.read(getResourcePath(context).resolve(ContentResponseSettings.FILE_NAME).toFile(),
+                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).getAll());
+        }
     }
 
-    /**
-     * Write the block-reply policy to block_config.json and hot-reload it.
-     * Harmless when the server is not running (read on next start).
-     * Values are emitted with explicit char codes (no backslash escapes).
-     */
-    public static void applyBlockReplyConfig(Context context) {
-        try {
-            Path dir = getResourcePath(context);
-            if (!Files.isDirectory(dir)) {
-                Files.createDirectories(dir);
+    /** The atomically published file is authoritative; preferences mirror legacy public keys. */
+    public static ContentResponseSettings.Saved saveContentResponseSettings(Context context,
+            ContentResponseSettings settings) throws IOException {
+        synchronized (CONTENT_SETTINGS_LOCK) {
+            if (settings.enabled(REPLY_RULE_OVERRIDE)) {
+                String rules = ContentResponseRules.read(getResourcePath(context).resolve(ContentResponseRules.FILE_NAME).toFile());
+                if (ContentResponseRules.validate(rules).isEmpty()) throw new IOException("Save at least one domain response rule first");
             }
-            StringBuilder sb = new StringBuilder();
-            sb.append((char) 0x7b).append((char) 0x0a);
-            appendBlockReplyField(sb, "reply_images", blockReplyEnabled(context, "images"));
-            appendBlockReplyField(sb, "reply_scripts", blockReplyEnabled(context, "scripts"));
-            appendBlockReplyField(sb, "reply_styles", blockReplyEnabled(context, "styles"));
-            appendBlockReplyField(sb, "reply_fonts", blockReplyEnabled(context, "fonts"));
-            appendBlockReplyField(sb, "reply_media", blockReplyEnabled(context, "media"));
-            appendBlockReplyField(sb, "reply_structures", blockReplyEnabled(context, "structures"));
-            appendBlockReplyField(sb, "reply_api", blockReplyEnabled(context, "api"));
-            appendBlockReplyField(sb, "reply_telemetry", blockReplyEnabled(context, "telemetry"));
-            appendBlockReplyField(sb, "reply_config", blockReplyEnabled(context, "config"));
-            appendBlockReplyField(sb, "reply_ws_sse", blockReplyEnabled(context, "ws_sse"));
-            /*
-             * 可见型占位（页面 / iframe 被拦时也回占位图，页面不塌陷）：默认**关**。
-             * 这里不能用 blockReplyEnabled()，它的默认值是 true —— 那会让老用户一升级
-             * 就被打开，违背"新功能默认关闭"。
-             */
-            boolean visibleReply = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                    .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_VISIBLE, false);
-            appendBlockReplyField(sb, "reply_visible", visibleReply);
-            /* F5：请求去重与重试护栏 —— 同样默认关（用链式读取，避免在这里引入
-               SharedPreferences 的类型导入）。 */
-            appendBlockReplyField(sb, "dedup_enabled",
-                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_DEDUP, false));
-            appendBlockReplyField(sb, "retry_guard_enabled",
-                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RETRY_GUARD, false));
-            /* Retired shortcut: never export a saved true value as active. */
-            appendBlockReplyField(sb, "cache_reuse_enabled", false);
-            appendBlockReplyField(sb, "circuit_breaker_enabled",
-                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CIRCUIT_BREAKER, false));
-            /* F4 续：按域覆盖响应策略 —— 默认关（关闭时服务端连 rule_overrides.txt 都不读） */
-            appendBlockReplyField(sb, "rule_override_enabled",
-                    context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                            .getBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RULE_OVERRIDE, false));
-            sb.append((char) 0x7d).append((char) 0x0a);
-            Files.write(dir.resolve("block_config.json"), sb.toString().getBytes("UTF-8"));
-            WebServerControl.sendControlCommand("reload_config");
-        } catch (Exception e) {
-            Timber.w(e, "Failed to write block_config.json");
+            ContentResponseSettings.Saved saved = settings.publish(
+                    getResourcePath(context).resolve(ContentResponseSettings.FILE_NAME).toFile(), WebServerControl::reloadConfig);
+            SharedPreferences.Editor editor = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).edit();
+            settings.values().forEach((key, value) -> editor.putBoolean(PREFS_BLOCK_REPLY_PREFIX + key, value));
+            editor.putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CACHE_REUSE, false);
+            if (!editor.commit()) Timber.w("Response file saved; legacy preference mirror was not persisted");
+            return saved;
+        }
+    }
+
+    public static String loadContentResponseRules(Context context) throws IOException {
+        synchronized (CONTENT_SETTINGS_LOCK) {
+            return ContentResponseRules.read(getResourcePath(context).resolve(ContentResponseRules.FILE_NAME).toFile());
+        }
+    }
+
+    /** Rules are a separate saved document, not part of the configuration-generation acknowledgement. */
+    public static String saveContentResponseRules(Context context, String input) throws IOException {
+        synchronized (CONTENT_SETTINGS_LOCK) {
+            return ContentResponseRules.save(getResourcePath(context).resolve(ContentResponseRules.FILE_NAME).toFile(), input);
+        }
+    }
+
+    /** Compatibility entry point used at startup; it preserves a previously published settings file. */
+    public static void applyBlockReplyConfig(Context context) {
+        try { saveContentResponseSettings(context, loadContentResponseSettings(context)); }
+        catch (IOException error) { Timber.w(error, "Response settings publication failed; keeping previous file"); }
+    }
+
+    private static void setContentResponseSetting(Context context, String key, boolean enabled) {
+        synchronized (CONTENT_SETTINGS_LOCK) {
+            try { saveContentResponseSettings(context, loadContentResponseSettings(context).with(key, enabled)); }
+            catch (IOException error) { Timber.w(error, "Response settings publication failed; keeping previous file"); }
         }
     }
 
@@ -1396,9 +1388,7 @@ private static String computeSubjectHashOld(Path certFile)
      * "这里被拦了"，而不是整片空白或破图。默认关闭，关闭时行为与历史版本完全一致。</p>
      */
     public static void setBlockReplyVisible(Context context, boolean enabled) {
-        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_VISIBLE, enabled).apply();
-        applyBlockReplyConfig(context);
+        setContentResponseSetting(context, REPLY_VISIBLE, enabled);
     }
 
     /** F5：请求去重是否开启（默认关）。 */
@@ -1414,9 +1404,7 @@ private static String computeSubjectHashOld(Path certFile)
      * 这会改变图片、脚本等资源的响应，可能隐藏占位图；不是内容缓存。</p>
      */
     public static void setDedupEnabled(Context context, boolean enabled) {
-        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_DEDUP, enabled).apply();
-        applyBlockReplyConfig(context);
+        setContentResponseSetting(context, REPLY_DEDUP, enabled);
     }
 
     /** F5：重试护栏是否开启（默认关）。 */
@@ -1432,9 +1420,7 @@ private static String computeSubjectHashOld(Path certFile)
      * 失败并记录日志；冷却结束自动恢复探测。</p>
      */
     public static void setRetryGuardEnabled(Context context, boolean enabled) {
-        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RETRY_GUARD, enabled).apply();
-        applyBlockReplyConfig(context);
+        setContentResponseSetting(context, REPLY_RETRY_GUARD, enabled);
     }
 
     /** Retired: the legacy shortcut replaced real responses with an empty 204. */
@@ -1462,9 +1448,7 @@ private static String computeSubjectHashOld(Path certFile)
      * 多个应用一起打成死循环时，只有熔断能兜住。</p>
      */
     public static void setCircuitBreakerEnabled(Context context, boolean enabled) {
-        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_CIRCUIT_BREAKER, enabled).apply();
-        applyBlockReplyConfig(context);
+        setContentResponseSetting(context, REPLY_CIRCUIT_BREAKER, enabled);
     }
 
     /** F4：按域覆盖响应策略是否开启（默认关）。 */
@@ -1481,19 +1465,9 @@ private static String computeSubjectHashOld(Path certFile)
      * 只是回法由用户决定。旧的 unclassified 请求不受影响。</p>
      */
     public static void setRuleOverrideEnabled(Context context, boolean enabled) {
-        context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(PREFS_BLOCK_REPLY_PREFIX + REPLY_RULE_OVERRIDE, enabled).apply();
-        applyBlockReplyConfig(context);
+        setContentResponseSetting(context, REPLY_RULE_OVERRIDE, enabled);
     }
 
-    private static void appendBlockReplyField(StringBuilder sb, String key, boolean value) {
-        if (sb.length() > 2) {  // fields after the opening brace + newline need a comma
-            sb.append((char) 0x2c).append((char) 0x0a);
-        }
-        sb.append((char) 0x20).append((char) 0x20).append((char) 0x22)
-          .append(key).append((char) 0x22).append((char) 0x3a).append((char) 0x20)
-          .append(value ? 1 : 0);
-    }
     public static Path getResourcePath(Context context) {
         return context.getFilesDir().toPath().resolve(WEB_SERVER_EXECUTABLE);
     }

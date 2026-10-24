@@ -117,14 +117,8 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
 
     @Override
     public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
-        // Intentionally left without special handling: the only entry that
-        // used to live here (webserverIcon) was removed - see
-        // PreferenceHelper.getWebServerIcon() removal for why.
-        if (key != null && key.startsWith("block_reply_")) {
-            final Context ctx = requireContext();
-            AppExecutors.getInstance().diskIO().execute(() ->
-                    org.adaway.util.WebServerUtils.applyBlockReplyConfig(ctx));
-        }
+        // Response controls publish explicitly before preferences change. A preference
+        // mirror notification must never republish an older configuration generation.
     }
 
     private void registerForOpenHostActivity() {
@@ -410,57 +404,95 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         });
     }
 
-    /**
-     * Bind the "Web server statistics" preference: fetch the native
-     * server's /internal-stats snapshot off the main thread (OkHttp
-     * blocks on network I/O) and show it in a dialog.
-     */
+    private static final String[] LEGACY_RESPONSE_TYPES = {
+            "images", "scripts", "styles", "fonts", "media", "api", "telemetry", "structures", "ws_sse"
+    };
+
+    /** Legacy preferences use the same atomic publication as the Compose editor. */
     private void bindBlockReplyPolicy() {
         Context context = requireContext();
-        androidx.preference.PreferenceCategory category = findPreference(
-                getString(R.string.pref_block_reply_category_key));
+        androidx.preference.PreferenceCategory category = findPreference(getString(R.string.pref_block_reply_category_key));
         if (category == null) return;
-        boolean unlocked = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(getString(R.string.pref_advanced_features_unlocked_key), false);
-        category.setVisible(unlocked);
-        androidx.preference.ListPreference modePref = (androidx.preference.ListPreference)
-                findPreference(getString(R.string.pref_block_reply_mode_key));
-        if (modePref == null) return;
-        modePref.setOnPreferenceChangeListener((preference, newValue) -> {
-            String mode = String.valueOf(newValue);
-            boolean[] flags;
-            if ("smart".equals(mode)) {
-                flags = new boolean[]{true, true, true, true, true, true, true, true, true, true};
-            } else if ("strict".equals(mode)) {
-                flags = new boolean[]{false, false, false, false, false, false, false, false, false, false};
-            } else {
-                return true;  // custom: 由下方开关决定
-            }
-            String[] keys = {
-                    getString(R.string.pref_block_reply_images_key),
-                    getString(R.string.pref_block_reply_scripts_key),
-                    getString(R.string.pref_block_reply_styles_key),
-                    getString(R.string.pref_block_reply_fonts_key),
-                    getString(R.string.pref_block_reply_media_key),
-                    getString(R.string.pref_block_reply_api_key),
-                    getString(R.string.pref_block_reply_telemetry_key),
-                    getString(R.string.pref_block_reply_structures_key),
-                    getString(R.string.pref_block_reply_ws_sse_key)
-            };
-            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            SharedPreferences.Editor editor = prefs.edit();
-            for (int i = 0; i < keys.length; i++) {
-                editor.putBoolean(keys[i], flags[i]);
-                SwitchPreferenceCompat sp = findPreference(keys[i]);
-                if (sp != null) sp.setChecked(flags[i]);
-            }
-            editor.apply();
-            AppExecutors.getInstance().diskIO().execute(() ->
-                    org.adaway.util.WebServerUtils.applyBlockReplyConfig(context));
-            return true;
+        category.setVisible(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(getString(R.string.pref_advanced_features_unlocked_key), false));
+        for (String type : LEGACY_RESPONSE_TYPES) {
+            SwitchPreferenceCompat toggle = findPreference(org.adaway.util.ContentResponseSettings.PREFIX + type);
+            if (toggle == null) continue;
+            toggle.setOnPreferenceChangeListener((preference, value) -> {
+                publishLegacyContent(context, category, settings -> settings.with(type, Boolean.TRUE.equals(value)), "custom");
+                return false;
+            });
+        }
+        bindLegacyContentMode(context, category);
+        loadLegacyContent(context, category);
+    }
+
+    private void bindLegacyContentMode(Context context, androidx.preference.PreferenceCategory category) {
+        androidx.preference.ListPreference mode = findPreference(getString(R.string.pref_block_reply_mode_key));
+        if (mode != null) mode.setOnPreferenceChangeListener((preference, value) -> {
+            String selection = String.valueOf(value);
+            if (!"smart".equals(selection) && !"strict".equals(selection)) return true;
+            publishLegacyContent(context, category, settings -> settings.withCategories("smart".equals(selection)), selection);
+            return false;
         });
     }
-        private void bindWebServerStats() {
+
+    private void loadLegacyContent(Context context, androidx.preference.PreferenceCategory category) {
+        category.setEnabled(false);
+        AppExecutors.getInstance().diskIO().execute(() -> {
+            try {
+                org.adaway.util.ContentResponseSettings loaded = org.adaway.util.WebServerUtils.loadContentResponseSettings(context);
+                AppExecutors.getInstance().mainThread().execute(() -> {
+                    if (isAdded() && getView() != null) { renderLegacyContent(loaded); category.setEnabled(true); }
+                });
+            } catch (IOException error) {
+                Timber.w(error, "Unable to read response settings");
+                AppExecutors.getInstance().mainThread().execute(() -> {
+                    if (isAdded() && getView() != null) {
+                        category.setEnabled(true);
+                        Toast.makeText(context, R.string.content_status_load_failed, LENGTH_SHORT).show();
+                    }
+                });
+            }
+        });
+    }
+
+    private void renderLegacyContent(org.adaway.util.ContentResponseSettings settings) {
+        for (String type : LEGACY_RESPONSE_TYPES) {
+            SwitchPreferenceCompat toggle = findPreference(org.adaway.util.ContentResponseSettings.PREFIX + type);
+            if (toggle != null) toggle.setChecked(settings.enabled(type));
+        }
+    }
+
+    private void publishLegacyContent(Context context, androidx.preference.PreferenceCategory category,
+            java.util.function.UnaryOperator<org.adaway.util.ContentResponseSettings> edit, String mode) {
+        category.setEnabled(false);
+        AppExecutors.getInstance().diskIO().execute(() -> {
+            try {
+                org.adaway.util.ContentResponseSettings.Saved result = org.adaway.util.WebServerUtils.saveContentResponseSettings(
+                        context, edit.apply(org.adaway.util.WebServerUtils.loadContentResponseSettings(context)));
+                AppExecutors.getInstance().mainThread().execute(() -> {
+                    if (!isAdded() || getView() == null) return;
+                    renderLegacyContent(result.settings);
+                    androidx.preference.ListPreference selection = findPreference(getString(R.string.pref_block_reply_mode_key));
+                    if (selection != null) selection.setValue(mode);
+                    category.setEnabled(true);
+                    Toast.makeText(context, result.confirmed ? R.string.content_status_confirmed : R.string.content_status_saved_unknown, LENGTH_SHORT).show();
+                });
+            } catch (IOException error) {
+                Timber.w(error, "Response settings publication failed");
+                AppExecutors.getInstance().mainThread().execute(() -> {
+                    if (isAdded() && getView() != null) {
+                        category.setEnabled(true);
+                        Toast.makeText(context, R.string.content_legacy_save_failed, LENGTH_SHORT).show();
+                    }
+                });
+            }
+        });
+    }
+
+    /** Fetch server statistics off the main thread. */
+    private void bindWebServerStats() {
         Preference statsPref = findPreference(getString(R.string.pref_webserver_stats_key));
         assert statsPref != null : PREFERENCE_NOT_FOUND;
         statsPref.setOnPreferenceClickListener(preference -> {

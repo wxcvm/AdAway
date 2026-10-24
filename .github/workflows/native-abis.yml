@@ -48,9 +48,10 @@ jobs:
         env:
           ANDROID_ABI: ${{ matrix.abi }}
         run: |
+          set -euo pipefail
           chmod +x gradlew
           ./gradlew :app:assembleDebug --no-daemon --max-workers=2 -PnativeAbi="$ANDROID_ABI" -Pandroid.injected.build.abi="$ANDROID_ABI"
-          python3 tools/verify_webserver_apk.py --variant debug --abi "$ANDROID_ABI" --executable "webserver/build/generated/webserverJniLibs/debug/$ANDROID_ABI/libwebserver_exec.so" | tee native-abi-result.txt
+          python3 tools/verify_webserver_apk.py --variant debug --abi "$ANDROID_ABI" --executable "webserver/build/generated/webserverJniLibs/debug/$ANDROID_ABI/libwebserver_exec.so" 2>&1 | tee native-abi-result.txt
           printf '%s\n' "$GITHUB_SHA" > NATIVE-SOURCE-COMMIT.txt
       - name: Preserve exact ABI package and provenance
         if: always()
@@ -63,6 +64,8 @@ jobs:
             native-abi-result.txt
             NATIVE-SOURCE-COMMIT.txt
             webserver/build/official-openssl/${{ matrix.abi }}/BUILD-IDENTITY
+            webserver/build/generated/webserverJniLibs/debug/${{ matrix.abi }}/*
+            tcpdump/build/generated/tcpdumpJniLibs/debug/${{ matrix.abi }}/*
           if-no-files-found: warn
 
   runtime:

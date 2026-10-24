@@ -356,6 +356,7 @@ static struct webstats s_stats = {0};
    costs real CPU and flash I/O. Enabled by --debug only. */
 static bool s_verbose;
 /* Block-reply policy gates - loaded from block_config.json, hot-reloadable. */
+static char s_block_cfg_generation[33];
 static bool cfg_images = true;
 static bool cfg_scripts = true;
 static bool cfg_styles = true;
@@ -1895,32 +1896,52 @@ static bool uri_contains_ci(const struct mg_str uri, const char *needle) {
     return false;
 }
 
-/* Minimal JSON bool reader: looks for quoted key, then colon, then 0/1. */
-static bool jbool(const char *s, const char *k, bool d) {
-    char p[88];
-    size_t n = strlen(k);
-    if (n > 80) return d;
-    p[0] = 0x22;
-    memcpy(p + 1, k, n);
-    p[1 + n] = 0x22;
-    p[2 + n] = 0;
-    const char *q = strstr(s, p);
-    if (!q) return d;
-    q += 2 + n;
-    while (*q && *q != 0x3a) q++;
-    if (*q != 0x3a) return d;
-    q++;
-    while (*q == 0x20 || *q == 0x09 || *q == 0x0a || *q == 0x0d) q++;
-    if (*q == 0x30) return false;
-    if (*q == 0x31) return true;
-    return d;
+/* Numeric 0/1 flags at the JSON root; nested strings cannot masquerade as keys. */
+static bool jbool(const char *json, const char *key, bool fallback) {
+    char path[88];
+    int count = snprintf(path, sizeof(path), "$.%s", key);
+    if (count < 0 || (size_t) count >= sizeof(path)) return fallback;
+    int length = 0;
+    int offset = mg_json_get(mg_str(json), path, &length);
+    if (offset < 0 || length != 1) return fallback;
+    if (json[offset] == '0') return false;
+    if (json[offset] == '1') return true;
+    return fallback;
 }
 
-static void load_block_cfg(const char *dir) {
+static void block_cfg_generation(const char *json, char generation[33]) {
+    generation[0] = '\0';
+    char *value = mg_json_get_str(mg_str(json), "$.generation");
+    if (value != NULL) {
+        bool valid = strlen(value) == 32;
+        for (size_t i = 0; valid && i < 32; i++)
+            valid = (value[i] >= '0' && value[i] <= '9') || (value[i] >= 'a' && value[i] <= 'f');
+        if (valid) memcpy(generation, value, 33);
+        free(value);
+    }
+}
+
+static bool block_cfg_flags_valid(const char *json) {
+    static const char *paths[] = {
+        "$.reply_images", "$.reply_scripts", "$.reply_styles", "$.reply_fonts", "$.reply_media",
+        "$.reply_structures", "$.reply_api", "$.reply_telemetry", "$.reply_config", "$.reply_ws_sse",
+        "$.reply_visible", "$.dedup_enabled", "$.retry_guard_enabled", "$.cache_reuse_enabled",
+        "$.circuit_breaker_enabled", "$.rule_override_enabled"
+    };
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        int length = 0;
+        int offset = mg_json_get(mg_str(json), paths[i], &length);
+        if (offset >= 0 && (length != 1 || (json[offset] != '0' && json[offset] != '1'))) return false;
+    }
+    return true;
+}
+
+static bool load_block_cfg(const char *dir) {
     char path[512];
     snprintf(path, sizeof(path), "%s/block_config.json", dir);
     FILE *f = fopen(path, "r");
     if (!f) {
+        if (errno != ENOENT) return false;
         cfg_images = true; cfg_scripts = true; cfg_styles = true; cfg_fonts = true;
     cfg_visible = false;   /* 可见型占位默认关：关闭时行为与历史版本一致 */
     cfg_dedup = false;     /* F5 请求去重默认关 */
@@ -1929,12 +1950,21 @@ static void load_block_cfg(const char *dir) {
     cfg_rule_override = false;   /* F4 按域覆盖默认关（关闭时连文件都不读） */
         cfg_media = true; cfg_struct = true; cfg_api = true; cfg_tele = true;
         cfg_conf = true; cfg_ws = true;
-        return;
+        s_block_cfg_generation[0] = '\0';
+        return true;
     }
     char b[2048];
     size_t n = fread(b, 1, sizeof(b) - 1, f);
     b[n] = 0;
+    bool complete = !ferror(f) && n < sizeof(b) - 1;
     fclose(f);
+    int token_length = 0;
+    int root = mg_json_get(mg_str(b), "$", &token_length);
+    if (!complete || root < 0 || b[root] != '{') return false;
+    for (size_t i = (size_t) root + (size_t) token_length; i < n; i++)
+        if (b[i] != ' ' && b[i] != '\r' && b[i] != '\n' && b[i] != '\t') return false;
+    if (!block_cfg_flags_valid(b)) return false;
+    block_cfg_generation(b, s_block_cfg_generation);
     cfg_images = jbool(b, "reply_images", true);
     /* 可见型占位：默认 false（缺键即关闭），所以老配置文件的语义不变 */
     cfg_visible = jbool(b, "reply_visible", false);
@@ -1954,6 +1984,17 @@ static void load_block_cfg(const char *dir) {
     cfg_tele = jbool(b, "reply_telemetry", true);
     cfg_conf = jbool(b, "reply_config", true);
     cfg_ws = jbool(b, "reply_ws_sse", true);
+    return true;
+}
+
+/* ACK only the generation actually read from the complete published file. */
+static void reply_block_config_ack(struct mg_connection *c) {
+    char headers[128];
+    if (s_block_cfg_generation[0])
+        snprintf(headers, sizeof(headers), "Content-Type: text/plain\r\nX-AdAway-Config-Generation: %s\r\n", s_block_cfg_generation);
+    else
+        snprintf(headers, sizeof(headers), "Content-Type: text/plain\r\n");
+    mg_http_reply(c, 200, headers, "OK: block config reloaded");
 }
 
 /* Fast 204 rejection used when a reply policy is turned OFF. */
@@ -2438,6 +2479,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/ad") || uri_contains_ci(u, "/ads") ||
         uri_contains_ci(u, "/banner") || uri_contains_ci(u, "/feed") ||
         uri_contains_ci(u, "/recommend")) {
+        RB_TYPE(LT_API, cfg_api);
         if (!cfg_api) return deny_quick(&s_stats.blocked_api, c);
         s_stats.blocked_api++;
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
@@ -2450,6 +2492,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
     if (uri_contains_ci(u, "/track") || uri_contains_ci(u, "/event") ||
         uri_contains_ci(u, "/log") || uri_contains_ci(u, "/collect") ||
         uri_contains_ci(u, "/pixel")) {
+        RB_TYPE(LT_TELEMETRY, cfg_tele);
         if (!cfg_tele) return deny_quick(&s_stats.blocked_telemetry, c);
         s_stats.blocked_telemetry++;
         mg_http_reply(c, 204, CORS_HDR
@@ -2472,6 +2515,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         uri_contains_ci(u, "/wlan/userip") || uri_contains_ci(u, "/wlan/ac_portal") ||
         uri_contains_ci(u, "/wlan/login") || uri_contains_ci(u, "/portal/") ||
         uri_contains_ci(u, "/eportal/") || uri_contains_ci(u, "/cmcc/")) {
+        RB_TYPE(LT_TELEMETRY, cfg_tele);
         if (!cfg_tele) return deny_quick(&s_stats.blocked_heartbeat, c);
         s_stats.blocked_heartbeat++;
         mg_http_reply(c, 204, CORS_HDR
@@ -2481,6 +2525,7 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
 
     /* Config endpoints: empty JSON, HTTP 200. */
     if (uri_contains_ci(u, "/config") || uri_contains_ci(u, "/settings")) {
+        RB_TYPE(LT_CONFIG, cfg_conf);
         if (!cfg_conf) return deny_quick(&s_stats.blocked_config, c);
         s_stats.blocked_config++;
         mg_http_reply(c, 200, "Content-Type: application/json\r\n"
@@ -3696,7 +3741,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
     /* The management port only answers the internal endpoints. */
-    if (s->stats_port != 0 && c->loc.port == (uint16_t) s->stats_port) {
+    if (s->stats_port != 0 && mg_ntohs(c->loc.port) == (uint16_t) s->stats_port) {
         bool internal = mg_match(hm->uri, mg_str("/internal-stats"), NULL) ||
                         mg_match(hm->uri, mg_str("/internal-reset"), NULL) ||
                         mg_match(hm->uri, mg_str("/internal-qlog"), NULL) ||
@@ -4184,7 +4229,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
          * comes from a web page (any Origin header).
          */
         if (mg_http_get_header(hm, "Origin") != NULL ||
-            s->stats_port == 0 || c->loc.port != (uint16_t) s->stats_port) {
+            s->stats_port == 0 || mg_ntohs(c->loc.port) != (uint16_t) s->stats_port) {
             mg_http_reply(c, 403, "Content-Type: text/plain\r\n", "forbidden");
             return;
         }
@@ -4192,17 +4237,17 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         mg_http_get_var(&hm->body, "cmd", cmd_buf, sizeof(cmd_buf));
         struct mg_str cmd = mg_str(cmd_buf);
         if (mg_strcmp(cmd, mg_str("reload_config")) == 0) {
-            load_block_cfg(s->resource_dir);
+            if (!load_block_cfg(s->resource_dir)) {
+                mg_http_reply(c, 503, "Content-Type: text/plain\r\n", "Block config reload failed");
+                return;
+            }
             /* Rules changed: refresh the transparent-proxy block set too. */
             if (s->proxy_filter) {
                 block_set_load(s->resource_dir);
                 load_cosmetic_css(s->resource_dir);
                 load_cosmetic_rules(s->resource_dir);
             }
-            char hdr[96];
-            int hl = snprintf(hdr, sizeof(hdr), "Content-Type: text/plain%c%c", 0x0d, 0x0a);
-            (void) hl;
-            mg_http_reply(c, 200, hdr, "OK: block config reloaded");
+            reply_block_config_ack(c);
         } else if (mg_strcmp(cmd, mg_str("reload_images")) == 0) {
             s->block_image_count = scan_block_images(s->resource_dir, s->block_images);
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: reloaded %d images", s->block_image_count);

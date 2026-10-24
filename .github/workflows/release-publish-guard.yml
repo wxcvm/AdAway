@@ -55,21 +55,25 @@ jobs:
               "secrets.SIGNING_KEY_ALIAS",
               "secrets.SIGNING_KEY_PASSWORD",
               "sign --ks",
-              "release-assets/AdAway-preview-arm64.apk",
+              "PREVIEW_ABIS: 'arm64-v8a x86_64 riscv64'",
+              "arm64-v8a) slug=arm64; suffix='' ;;",
+              'apk="release-assets/AdAway-preview-$slug.apk"',
               "tools/compare_apk_signers.py",
               "gh release download",
-              "release-assets/APK-SIGNATURE.txt",
+              'signature="release-assets/APK-SIGNATURE$suffix.txt"',
               "--prerelease --latest=false",
           ):
               assert required in preview, 'Preview signer/publish guard missing: ' + required
           assert "-PprogressPreview=true" not in preview, 'Preview must upgrade the production package'
           assert "package: name='com.wxcvm.Adaway'" in preview
-          assert 'test "$preview_code" -gt "$stable_code"' in preview
+          assert 'test "$PREVIEW_VERSION_CODE" -gt "$stable_code"' in preview
           assert "1577836800" in data and "1577836800" in preview
           assert "debug signing key" not in preview.lower()
           assert preview.count("      - name: Publish signed, in-place inspection prerelease") == 1, 'duplicated preview publish steps'
           assert preview.count("      - name: Sign preview using SAME production Android keystore and verify fingerprint") == 1, 'duplicated signer stage'
-          assert preview.count("mapfile -t release_apks") == 1, 'duplicated APK selector'
+          assert preview.count('for abi in $PREVIEW_ABIS; do') == 2, 'ABI build and signing loops must both be present'
+          assert preview.count('python3 tools/verify_webserver_apk.py --apk-root app/build --variant release --abi "$abi"') == 1, 'ABI-specific source executable validation missing'
+          assert preview.count('python3 tools/verify_webserver_apk.py --apk "$apk" --variant release --abi "$abi"') == 1, 'Signed ABI-specific package validation missing'
           assert preview.count("          gh release create ") == 2, 'unexpected release publication paths'
 
           print('PASS: ordinary main branch merges do not publish an APK and preview must match production signing key')

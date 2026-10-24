@@ -107,6 +107,21 @@ public class NativeAbiDeviceTest {
                 assertEquals(ip + ": native OpenSSL failed encrypted receipt", ListenerTlsCheck.State.RECEIPT, receipt.state);
             }
             try (Response response = client.newCall(new Request.Builder()
+                    .url("http://127.0.0.1:" + http + "/control")
+                    .post(new FormBody.Builder().add("cmd", "shutdown").build()).build()).execute()) {
+                assertEquals("Response port must reject control commands", 403, response.code());
+            }
+            try (Response response = client.newCall(new Request.Builder()
+                    .url("http://127.0.0.1:" + stats + "/control")
+                    .header("Origin", "https://ads.native-abi.invalid")
+                    .post(new FormBody.Builder().add("cmd", "shutdown").build()).build()).execute()) {
+                assertEquals("Web origins must not control the server", 403, response.code());
+            }
+            try (Response response = client.newCall(new Request.Builder()
+                    .url("http://127.0.0.1:" + stats + "/tile.png").build()).execute()) {
+                assertEquals("Management port must not serve arbitrary resources", 404, response.code());
+            }
+            try (Response response = client.newCall(new Request.Builder()
                     .url("http://127.0.0.1:" + stats + "/control")
                     .post(new FormBody.Builder().add("cmd", "shutdown").build()).build()).execute()) {
                 assertEquals(200, response.code());
