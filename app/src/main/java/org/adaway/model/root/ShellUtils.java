@@ -33,31 +33,40 @@ public final class ShellUtils {
     }
 
     public static boolean isBundledExecutableRunning(String executable) {
-        // Bracket trick: '[l]ib<exe>_exec.so' never matches its own command
-        // line (the su -> sh -c wrapper would otherwise report a false
-        // positive and isWebServerRunning() would be always true even when
-        // the web server is dead). Strategy chain, any hit => true:
-        //   1. pgrep -f            fast path (busybox/toybox)
-        //   2. ps -A -o ARGS=      full cmdline (no 15-char comm truncation)
-        //   3. grep /proc cmdline  most reliable last resort
-        String name = EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
-        String pattern = "[" + name.substring(0, 1) + "]" + name.substring(1);
-        // 1) pgrep
         try {
-            Shell.Result r = Shell.cmd("pgrep -f '" + pattern + "' >/dev/null 2>&1").exec();
-            if (r.isSuccess()) return true;
-        } catch (Exception ignored) {}
-        // 2) ps with full ARGS column (avoids comm truncation at 15 chars)
+            Shell.Result result = identityCommand(org.adaway.util.BundledExecutableIdentity.scanCommand(
+                    stagedExecutablePath(executable), false));
+            return result.isSuccess() && result.getOut().stream()
+                    .anyMatch(line -> line.matches("[0-9]+\\|[0-9]+:[0-9]+:[0-9]+\\|present"));
+        } catch (Exception exception) {
+            Timber.w(exception, "Unable to identify bundled process %s", executable);
+            return false;
+        }
+    }
+
+    private static String stagedExecutablePath(String executable) {
+        if (!executable.matches("[a-zA-Z0-9_]+")) throw new IllegalArgumentException("Invalid executable name");
+        return "/data/local/tmp/" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
+    }
+
+    private static Shell.Result identityCommand(String script) {
+        // A failing staging script uses exit; keep that inside its own shell, away from libsu's session.
+        return Shell.cmd("sh -c " + escapedString(script)).exec();
+    }
+
+    /** Hash the kernel's mapped image, not the pathname which may already have been replaced. */
+    public static boolean isBundledExecutableCurrent(Context context, String executable) {
         try {
-            Shell.Result r = Shell.cmd("ps -A -o ARGS= 2>/dev/null | grep -E '" + pattern + "' >/dev/null 2>&1").exec();
-            if (r.isSuccess()) return true;
-        } catch (Exception ignored) {}
-        // 3) /proc scan: match the executable name in any process cmdline
-        try {
-            Shell.Result r = Shell.cmd("grep -alE '" + pattern + "' /proc/[0-9]*/cmdline >/dev/null 2>&1").exec();
-            if (r.isSuccess()) return true;
-        } catch (Exception ignored) {}
-        return false;
+            File packaged = new File(context.getApplicationInfo().nativeLibraryDir,
+                    EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX);
+            String expected = org.adaway.util.BundledExecutableIdentity.sha256(packaged);
+            Shell.Result result = identityCommand(org.adaway.util.BundledExecutableIdentity.scanCommand(
+                    stagedExecutablePath(executable), true));
+            return result.isSuccess() && org.adaway.util.BundledExecutableIdentity.allImagesMatch(result.getOut(), expected);
+        } catch (Exception exception) {
+            Timber.w(exception, "Unable to verify running %s against installed APK", executable);
+            return false;
+        }
     }
 
     /**
@@ -75,9 +84,8 @@ public final class ShellUtils {
      * process outside the app's own (zygote-forked) domain, even when that
      * process is root.
      * <p>
-     * Stage the executable into /data/local/tmp (same filename, so the
-     * existing pgrep/ps pattern matching in isBundledExecutableRunning()/
-     * killBundledExecutable() keeps working unmodified) before every run.
+     * Stage the executable into /data/local/tmp by atomic rename. Process
+     * ownership checks use the complete argv[0] and actual /proc/PID/exe.
      * Shared libraries (libssl.so/libcrypto.so) are left in place and
      * still reached via LD_LIBRARY_PATH pointing at nativeLibraryDir.
      *
@@ -86,17 +94,18 @@ public final class ShellUtils {
     private static String stageExecutable(Context context, String executable) {
         String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
         String srcPath = nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
-        String stagedPath = "/data/local/tmp/" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
-
-        Shell.Result result = Shell.cmd(
-                "cp -f " + escapedString(srcPath) + " " + escapedString(stagedPath) +
-                        " && chmod 755 " + escapedString(stagedPath)
-        ).exec();
+        String stagedPath = stagedExecutablePath(executable);
+        Shell.Result result = identityCommand(org.adaway.util.BundledExecutableIdentity.stageCommand(srcPath, stagedPath));
         if (!result.isSuccess()) {
             Timber.e("Failed to stage %s to %s: %s", srcPath, stagedPath, mergeAllLines(result.getErr()));
             return null;
         }
         return stagedPath;
+    }
+
+    /** Stage and verify before a caller stops any healthy previous image. */
+    public static boolean prepareBundledExecutable(Context context, String executable) {
+        return stageExecutable(context, executable) != null;
     }
 
     public static boolean runBundledExecutable(Context context, String executable, String parameters) {
@@ -126,7 +135,7 @@ public final class ShellUtils {
         String logPath = "/data/local/tmp/" + executable + "_start.log";
 
         // Start in background, redirect stdout/stderr to the (fixed) log file
-        String cmd = "LD_LIBRARY_PATH=" + nativeLibraryDir + " " + binPath + " " + parameters +
+        String cmd = "LD_LIBRARY_PATH=" + escapedString(nativeLibraryDir) + " " + escapedString(binPath) + " " + parameters +
                 " > " + escapedString(logPath) + " 2>&1 &";
         
         Timber.d("Executing: %s", cmd);
@@ -246,8 +255,9 @@ public final class ShellUtils {
     }
 
     public static void killBundledExecutable(String executable) {
-        // Try pkill/pkill -f then killall as fallback; ignore errors
-        Shell.cmd("pkill -f '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' || killall '" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX + "' || true").exec();
+        Shell.Result result = identityCommand(org.adaway.util.BundledExecutableIdentity.stopCommand(
+                stagedExecutablePath(executable)));
+        if (!result.isSuccess()) Timber.w("Could not stop owned executable %s", executable);
     }
     /**
      * Read the last lines of the bundled executable launch log (written by

@@ -24,7 +24,9 @@ internal data class QueryLogBrowserState(
         get() = entries.filter {
             (filter == -1 || it.action == filter) && (uid == null || it.uid == uid) &&
                 (family == null || it.family == family) && (type == null || it.type == type) &&
-                it.host.contains(query.trim(), ignoreCase = true)
+                (it.host.contains(query.trim(), ignoreCase = true) ||
+                    it.path.contains(query.trim(), ignoreCase = true) ||
+                    (it.httpStatus != 0 && it.httpStatus.toString().contains(query.trim())))
         }
 }
 
@@ -40,7 +42,7 @@ internal class QueryLogBrowser(
     private var lastRefreshAt: Long? = null
 
     fun setFilter(value: Int) {
-        if (value !in -1..2 || value == mutable.value.filter) return
+        if (value !in -1..3 || value == mutable.value.filter) return
         pauseForFiltering()
         mutable.value = mutable.value.copy(filter = value)
     }

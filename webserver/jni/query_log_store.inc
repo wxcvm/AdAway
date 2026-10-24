@@ -1,5 +1,6 @@
 /* Shared bounded query log implementation. Included after req_host_of/top_host_add. */
-enum { QLOG_PROXY = 0, QLOG_BLOCK = 1, QLOG_ALLOW = 2 };
+#include "response_log.h"
+enum { QLOG_PROXY = 0, QLOG_BLOCK = 1, QLOG_ALLOW = 2, QLOG_DENY = 3 };
 struct qlog_entry {
     uint64_t ts;          /* epoch seconds */
     uint32_t uid;         /* 0xFFFFFFFF when unknown */
@@ -13,6 +14,7 @@ static struct qlog_entry s_qlog[QLOG_MAX];
 /* Keep the legacy record ABI and its response-mode byte intact. The separate
    byte follows the same ring slot through clear, compaction and publication. */
 static uint8_t s_qlog_family[QLOG_MAX];
+static struct response_log_metadata s_qlog_metadata[QLOG_MAX];
 static uint32_t s_qlog_pos;    /* next slot to write */
 static uint64_t s_qlog_sequence;
 static char s_qlog_generation[33];
@@ -21,6 +23,7 @@ static uint32_t s_qlog_count;  /* valid entries (<= QLOG_MAX) */
    are written, laid out from slot 0 so the loader rebuilds a contiguous ring. */
 static struct qlog_entry s_qlog_persist[QLOG_PERSIST_MAX];
 static uint8_t s_qlog_persist_family[QLOG_PERSIST_MAX];
+static struct response_log_metadata s_qlog_persist_metadata[QLOG_PERSIST_MAX];
 
 static void qlog_clear(void) {
     s_qlog_sequence = 0;
@@ -29,6 +32,7 @@ static void qlog_clear(void) {
     s_qlog_count = 0;
     memset(s_qlog, 0, sizeof(s_qlog));
     memset(s_qlog_family, 0, sizeof(s_qlog_family));
+    memset(s_qlog_metadata, 0, sizeof(s_qlog_metadata));
 }
 
 /* Describe the observed client transport, never the spelling of its Host. A
@@ -40,7 +44,7 @@ static uint8_t qlog_connection_family(const struct mg_connection *connection) {
     return 6;
 }
 
-static void qlog_add(uid_t uid, int action, struct mg_http_message *hm, const struct mg_connection *connection) {
+static void qlog_add_status(uid_t uid, int action, struct mg_http_message *hm, const struct mg_connection *connection, uint16_t status) {
     time_t observed = time(NULL);
     /* Zero timestamps are the legacy empty-slot sentinel. Do not publish a
        counted but unreadable row, or poison a previously valid disk snapshot,
@@ -48,6 +52,10 @@ static void qlog_add(uid_t uid, int action, struct mg_http_message *hm, const st
     if (observed <= 0) return;
     struct qlog_entry *e = &s_qlog[s_qlog_pos % QLOG_MAX];
     s_qlog_family[s_qlog_pos % QLOG_MAX] = qlog_connection_family(connection);
+    struct response_log_metadata *metadata = &s_qlog_metadata[s_qlog_pos % QLOG_MAX];
+    memset(metadata, 0, sizeof(*metadata));
+    response_log_path(metadata, hm ? hm->uri.buf : NULL, hm ? hm->uri.len : 0);
+    metadata->status = status >= 100 && status <= 599 ? status : 0;
     memset(e, 0, sizeof(*e));
     e->ts = (uint64_t) observed;
     e->uid = (uid == (uid_t) -1) ? 0xFFFFFFFFu : (uint32_t) uid;
@@ -67,6 +75,20 @@ static void qlog_add(uid_t uid, int action, struct mg_http_message *hm, const st
     s_qlog_sequence++;
 }
 
+static void qlog_add(uid_t uid, int action, struct mg_http_message *hm, const struct mg_connection *connection) {
+    qlog_add_status(uid, action, hm, connection, 0);
+}
+
+/* Paths are already validated UTF-8; only JSON quotation needs escaping. */
+static void qlog_path_json(char *out, const char *path) {
+    size_t written = 0;
+    for (size_t i = 0; path[i]; i++) {
+        if (path[i] == '"' || path[i] == '\\') out[written++] = '\\';
+        out[written++] = path[i];
+    }
+    out[written] = 0;
+}
+
 /* Newest first, bounded (QLOG_RENDER_MAX entries / QLOG_JSON_MAX bytes). */
 static void qlog_render(char *out, size_t cap) {
     size_t off = 0;
@@ -76,18 +98,21 @@ static void qlog_render(char *out, size_t cap) {
     for (uint32_t k = 0; k < total; k++) {
         uint32_t idx = (s_qlog_pos + QLOG_MAX - 1 - k) % QLOG_MAX;
         struct qlog_entry *e = &s_qlog[idx];
-        char host[400];
+        char host[400], path[RESPONSE_LOG_PATH_CAP * 2];
         int n;
         if (e->ts == 0) continue;
         json_safe_copy(host, sizeof(host), e->host);
+        qlog_path_json(path, s_qlog_metadata[idx].path);
         n = snprintf(out + off, cap - off,
                      "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"type\":%d,"
-                     "\"mode\":%d,\"family\":%u,\"host\":\"%s\"}",
+                     "\"mode\":%d,\"family\":%u,\"host\":\"%s\",\"path\":\"%s\",\"status\":%u,\"pathTruncated\":%s}",
                      off ? "," : "", (unsigned long long) e->ts,
                      (e->uid == 0xFFFFFFFFu) ? -1 : (int) e->uid,
                      (int) e->action,
                      (e->rtype == 0xFFFF) ? -1 : (int) e->rtype,
-                     (int) e->pad, (unsigned) s_qlog_family[idx], host);
+                     (int) e->pad, (unsigned) s_qlog_family[idx], host, path,
+                     (unsigned)s_qlog_metadata[idx].status,
+                     s_qlog_metadata[idx].flags & RESPONSE_LOG_TRUNCATED ? "true" : "false");
         if (n <= 0 || off + (size_t) n >= cap) { out[off] = '\0'; break; }
         off += (size_t) n;
     }
@@ -107,18 +132,21 @@ static uint32_t qlog_render_page(uint32_t offset, uint32_t limit, char *out, siz
     for (uint32_t k = offset; k < offset + limit && k < total; k++) {
         uint32_t idx = (s_qlog_pos + QLOG_MAX - 1 - k) % QLOG_MAX;
         struct qlog_entry *e = &s_qlog[idx];
-        char host[400];
+        char host[400], path[RESPONSE_LOG_PATH_CAP * 2];
         int n;
         if (e->ts == 0) continue;
         json_safe_copy(host, sizeof(host), e->host);
+        qlog_path_json(path, s_qlog_metadata[idx].path);
         n = snprintf(out + off, cap - off,
                      "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"type\":%d,"
-                     "\"mode\":%d,\"family\":%u,\"host\":\"%s\"}",
+                     "\"mode\":%d,\"family\":%u,\"host\":\"%s\",\"path\":\"%s\",\"status\":%u,\"pathTruncated\":%s}",
                      off ? "," : "", (unsigned long long) e->ts,
                      (e->uid == 0xFFFFFFFFu) ? -1 : (int) e->uid,
                      (int) e->action,
                      (e->rtype == 0xFFFF) ? -1 : (int) e->rtype,
-                     (int) e->pad, (unsigned) s_qlog_family[idx], host);
+                     (int) e->pad, (unsigned) s_qlog_family[idx], host, path,
+                     (unsigned)s_qlog_metadata[idx].status,
+                     s_qlog_metadata[idx].flags & RESPONSE_LOG_TRUNCATED ? "true" : "false");
         if (n <= 0 || off + (size_t) n >= cap) { out[off] = '\0'; break; }
         off += (size_t) n;
         rendered++;
@@ -128,6 +156,7 @@ static uint32_t qlog_render_page(uint32_t offset, uint32_t limit, char *out, siz
 
 #define QLOG_MAGIC 0x514C4F47u   /* "QLOG" */
 #define QLOG_MAGIC_V2 0x514C4732u /* "QLG2": legacy records followed by count family bytes */
+#define QLOG_MAGIC_V3 0x514C4733u /* "QLG3": QLG2 layout followed by count metadata records */
 static void qlog_save(const char *resource_dir) {
     char path[PATH_MAX];
     if (resource_dir == NULL || resource_dir[0] == '\0') return;
@@ -137,8 +166,8 @@ static void qlog_save(const char *resource_dir) {
     FILE *fp = open_atomic_write(path, atomic_tmp, sizeof(atomic_tmp));
     if (fp == NULL) return;
     /*
-     * The ring holds QLOG_MAX (10k, ~2 MB) so the app can page through the
-     * history, but flushing all of it on every save would write ~2 MB to flash
+     * The ring holds QLOG_MAX (10k, ~3.6 MiB with response metadata) so the app
+     * can page through history, but flushing all of it would write ~3.6 MiB
      * each time. Persist only the newest QLOG_PERSIST_MAX entries, compacted
      * from slot 0; the loader stores pos=0 and derives count from the header,
      * so it rebuilds a full contiguous ring.
@@ -149,14 +178,16 @@ static void qlog_save(const char *resource_dir) {
         uint32_t idx = (s_qlog_pos + QLOG_MAX - persist + k) % QLOG_MAX;
         s_qlog_persist[k] = s_qlog[idx];
         s_qlog_persist_family[k] = s_qlog_family[idx];
+        s_qlog_persist_metadata[k] = s_qlog_metadata[idx];
     }
     uint32_t zero = 0;
-    uint32_t magic = QLOG_MAGIC_V2;
+    uint32_t magic = QLOG_MAGIC_V3;
     if (fwrite(&magic, sizeof(magic), 1, fp) != 1 ||
         fwrite(&zero, sizeof(zero), 1, fp) != 1 ||
         fwrite(&persist, sizeof(persist), 1, fp) != 1 ||
         fwrite(s_qlog_persist, sizeof(s_qlog_persist[0]), persist, fp) != persist ||
-        fwrite(s_qlog_persist_family, 1, persist, fp) != persist) {
+        fwrite(s_qlog_persist_family, 1, persist, fp) != persist ||
+        fwrite(s_qlog_persist_metadata, sizeof(s_qlog_persist_metadata[0]), persist, fp) != persist) {
         fclose(fp);
         remove(atomic_tmp);
         return;
@@ -171,31 +202,43 @@ static void qlog_load(const char *resource_dir) {
     FILE *fp = fopen(path, "rb");
     if (fp == NULL) return;
     uint32_t magic = 0, pos = 0, count = 0;
-    if (fread(&magic, sizeof(magic), 1, fp) == 1 && (magic == QLOG_MAGIC || magic == QLOG_MAGIC_V2) &&
+    if (fread(&magic, sizeof(magic), 1, fp) == 1 && (magic == QLOG_MAGIC || magic == QLOG_MAGIC_V2 || magic == QLOG_MAGIC_V3) &&
         fread(&pos, sizeof(pos), 1, fp) == 1 &&
         fread(&count, sizeof(count), 1, fp) == 1 &&
         count <= QLOG_MAX && pos < QLOG_MAX &&
-        (magic != QLOG_MAGIC_V2 || (pos == 0 && count <= QLOG_PERSIST_MAX))) {
+        (magic == QLOG_MAGIC || (pos == 0 && count <= QLOG_PERSIST_MAX))) {
         /* Validate in staging: a corrupt/truncated file cannot replace live rows.
            Full legacy rings may start at any position; compact files use zero. */
         struct qlog_entry *staged = calloc(count ? count : 1, sizeof(*staged));
         uint8_t *families = calloc(count ? count : 1, 1);
-        if (staged != NULL && families != NULL) {
+        struct response_log_metadata *metadata = calloc(count ? count : 1, sizeof(*metadata));
+        if (staged != NULL && families != NULL && metadata != NULL) {
             bool valid = (pos == 0 || count == QLOG_MAX || pos == count) &&
                 fread(staged, sizeof(*staged), count, fp) == count;
             /* Legacy syntax never recorded the socket family. Zero-initialized
                staging keeps it unknown; no inference from a literal/domain. */
-            if (valid && magic == QLOG_MAGIC_V2) valid = fread(families, 1, count, fp) == count;
+            if (valid && magic != QLOG_MAGIC) valid = fread(families, 1, count, fp) == count;
+            if (valid && magic == QLOG_MAGIC_V3) valid = fread(metadata, sizeof(*metadata), count, fp) == count;
             valid = valid && fgetc(fp) == EOF && !ferror(fp);
             for (uint32_t i = 0; valid && i < count; i++) {
-                valid = staged[i].ts != 0 && staged[i].action <= QLOG_ALLOW &&
+                valid = staged[i].ts != 0 && staged[i].action <= (magic == QLOG_MAGIC_V3 ? QLOG_DENY : QLOG_ALLOW) &&
                     memchr(staged[i].host, 0, sizeof(staged[i].host)) != NULL &&
                     (families[i] == 0 || families[i] == 4 || families[i] == 6);
+                const struct response_log_metadata *m = &metadata[i];
+                const char *end = memchr(m->path, 0, sizeof(m->path));
+                valid = valid && end != NULL && m->reserved == 0 && m->flags <= RESPONSE_LOG_TRUNCATED &&
+                    (m->status == 0 || (m->status >= 100 && m->status <= 599));
+                if (valid) {
+                    struct response_log_metadata checked = {0};
+                    response_log_path(&checked, m->path, (size_t)(end - m->path));
+                    valid = !strcmp(checked.path, m->path) && (!m->flags || m->path[0] == '/');
+                }
             }
             if (valid) {
                 qlog_clear();
                 memcpy(s_qlog, staged, count * sizeof(*staged));
                 memcpy(s_qlog_family, families, count);
+                memcpy(s_qlog_metadata, metadata, count * sizeof(*metadata));
                 s_qlog_pos = pos ? pos : (uint32_t) (count % QLOG_MAX);
                 s_qlog_count = count;
                 s_qlog_sequence = count;
@@ -203,6 +246,7 @@ static void qlog_load(const char *resource_dir) {
         }
         free(staged);
         free(families);
+        free(metadata);
     }
     fclose(fp);
 }

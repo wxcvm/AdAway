@@ -80,7 +80,7 @@ public class ServerStartWorker extends Worker {
         }
         WebServerUtils.ensureWebServer(context);
         sleep(START_VERIFY_MS);
-        return WebServerUtils.isWebServerRunning();
+        return WebServerUtils.isCurrentWebServerReady(context);
     }
 
     /**

@@ -100,7 +100,8 @@ data class BlockedHost(
 
 /**
  * One entry of the server's query log: what was requested and what the filter
- * did with it (0 = proxied to the real server, 1 = blocked, 2 = allowed).
+ * did with it (0 = forwarding started, 1 = filtered, 2 = local exemption,
+ * 3 = access rejected). A queued response is not proof of client receipt.
  */
 data class QueryLogEntry(
     val ts: Long = 0,
@@ -113,6 +114,11 @@ data class QueryLogEntry(
     val host: String = "",
     /** Observed socket family; 0 means not recorded, including legacy rows. */
     val family: Int = 0,
+    /** Origin-form path only, without query/fragment. Empty means not recorded. */
+    val path: String = "",
+    /** Local HTTP response queued by the server; 0 means not recorded/pending. */
+    val httpStatus: Int = 0,
+    val pathTruncated: Boolean = false,
 )
 
 /** One time bucket of web server activity (hourly or daily series). */
@@ -246,17 +252,8 @@ data class ServerStats(
             if (qlogArray != null) {
                 for (i in 0 until qlogArray.length()) {
                     val o = qlogArray.optJSONObject(i) ?: continue
-                    queryLog += QueryLogEntry(
-                        ts = o.optLong("ts", 0),
-                        uid = o.optInt("uid", -1),
-                        action = o.optInt("action", 0),
-                        // An older server publishes neither field: keep -1 so the
-                        // UI shows "unknown" rather than guessing "图片".
-                        type = if (o.has("type")) o.optInt("type", -1) else -1,
-                        mode = o.optInt("mode", 0),
-                        host = o.optString("host", ""),
-                        family = o.optInt("family", 0).takeIf { it == 4 || it == 6 } ?: 0,
-                    )
+                    // A corrupt optional recent row must not discard valid counters.
+                    runCatching { QueryLogPage.parseEntry(o) }.getOrNull()?.let(queryLog::add)
                 }
             }
             val topBlocked = mutableListOf<BlockedHost>()

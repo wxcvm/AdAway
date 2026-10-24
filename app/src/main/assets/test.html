@@ -1,13 +1,26 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Web server test page</title>
+    <meta name="color-scheme" content="light dark">
+    <link rel="icon" href="data:,">
+    <style>
+        body { margin: 0; padding: 24px; font: 16px/1.7 system-ui, sans-serif; }
+        main { max-width: 640px; margin: 8vh auto; padding: 28px; border: 1px solid #80808055; border-radius: 20px; }
+        h1 { font-size: 1.5rem; line-height: 1.3; }
+        code { overflow-wrap: anywhere; }
+    </style>
 </head>
 <body>
-<h1>Web server works fine</h1>
-<img width="60%" src="icon.png" alt="AdAway logo when option is enabled" style="display: block; margin: auto;">
-<p>If you can see this page, that means the web server is working fine and its certificate is installed.</p>
+<main>
+    <h1>AdAway 本地响应检查</h1>
+    <p>已收到本地服务器返回的测试页面。</p>
+    <p>这只确认当前页面可访问，不证明其他监听地址可达，也不证明 HTTPS 证书已被浏览器或应用信任。</p>
+    <p><code>/internal-test</code> 是内部测试入口。查看占位图时，请打开已配置的 HTTP 监听地址根路径，不附加这个内部路径。</p>
+    <p>各监听地址、HTTPS 证书与加密回执，请使用 AdAway 设置中的检测功能核对。</p>
+    <p lang="en">This page confirms this local response only. Use the app diagnostics to verify other listeners and HTTPS trust separately.</p>
+</main>
 </body>
 </html>

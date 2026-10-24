@@ -33,6 +33,42 @@ import org.junit.Test
 class RuleWorkflowUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
+    @Test fun deniedDocumentAndPlaceholderImageHaveDifferentPathsAndStatuses() {
+        val rows = listOf(
+            QueryLogEntry(ts = 1234, host = "fd00:7::2", family = 6, action = 3, path = "/internal-test", httpStatus = 403),
+            QueryLogEntry(ts = 1234, host = "fd00:7::2", family = 6, action = 1, type = 0, mode = 0,
+                path = "/favicon.ico", httpStatus = 200),
+        )
+        val filter = androidx.compose.runtime.mutableIntStateOf(-1)
+        compose.setContent { AdAwayTheme(dynamicColor = false) { Surface {
+            QueryLogContent(rows.filter { filter.intValue == -1 || it.action == filter.intValue },
+                2, 2, filter.intValue, false, false, false, { filter.intValue = it }, {}, {})
+        } } }
+        compose.onNodeWithTag("query-log-list").performScrollToNode(hasText("/internal-test"))
+        compose.onNodeWithText("HTTP 403").assertExists()
+        compose.onNodeWithTag("query-log-list").performScrollToNode(hasText("/favicon.ico"))
+        compose.onNodeWithText("HTTP 200").assertExists()
+        saveScreenshot("logs-same-host-different-response")
+        compose.onNodeWithTag("query-log-list").performScrollToIndex(0)
+        compose.onAllNodesWithText(compose.activity.getString(R.string.compose_logs_access_denied))[0]
+            .performScrollTo().performClick()
+        compose.onNodeWithText("/favicon.ico").assertDoesNotExist()
+        compose.onNodeWithTag("query-log-list").performScrollToNode(hasText("/internal-test"))
+        compose.onNodeWithText("/internal-test").performClick()
+        compose.onNode(hasText("HTTP 403") and hasAnyAncestor(isDialog())).assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_rejection_detail)).assertExists()
+        saveScreenshot("logs-access-denied-details", dialog = true)
+    }
+
+    @Test fun oldLogDoesNotInventRequestPathOrSuccessfulHttpStatus() {
+        compose.setContent { AdAwayTheme(dynamicColor = false) {
+            QueryLogDetailsDialog(QueryLogEntry(ts = 1234, host = "legacy.example", action = 1), {}, {})
+        } }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_path_unknown)).assertExists()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_status_unknown)).assertExists()
+        compose.onNodeWithText("HTTP 200").assertDoesNotExist()
+    }
+
     private class ContentBackend : ContentResponseBackend {
         @Volatile var policy = org.adaway.util.ContentResponseSettings.fromPreferences(emptyMap<String, Any>())
         var ruleText = ""

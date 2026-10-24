@@ -611,7 +611,7 @@
     <string name="compose_logs_paused">历史已暂停</string>
     <string name="compose_logs_pause">暂停</string>
     <string name="compose_logs_resume">恢复实时</string>
-    <string name="compose_logs_search">搜索域名</string>
+    <string name="compose_logs_search">搜索域名、路径或状态</string>
     <string name="compose_logs_search_scope">仅筛选已加载记录；读取更早请求可扩大查找范围。</string>
     <string name="compose_logs_local_exemption">本地豁免</string>
     <string name="compose_logs_uid_filter">UID %1$d · 点此取消筛选</string>
@@ -622,7 +622,7 @@
     <string name="compose_logs_exemption_detail">本地服务器返回无内容（HTTP 204）。此豁免不代表已访问原站；上游 DNS 拦截仍可能生效。</string>
     <string name="compose_logs_proxy_detail">已交给本地转发路径；此记录不代表上游请求已成功完成。</string>
     <string name="compose_logs_block_detail">本地服务器替换或抑制了响应。资源类型由请求推测，不能据此认定它属于广告。</string>
-    <string name="compose_logs_details_scope">这些是 Web 响应记录。此日志未采集 DNS 决策、命中的订阅规则、HTTPS 内容和上游完成结果；无法归属的应用保持未知。</string>
+    <string name="compose_logs_details_scope">这是服务器处理记录。HTTP 状态表示本地已生成应答，不证明客户端已收到。路径省略查询参数和片段；旧记录缺少的信息不补猜。此日志不采集 DNS 决策、订阅命中来源、HTTPS 内容或上游完成结果。</string>
     <string name="compose_settings_update_automatic">自动下载应用更新</string>
     <string name="compose_settings_update_automatic_hint">发现所选渠道的新版本后自动下载并校验；安装仍需系统确认，后台完成时通知继续安装。</string>
     <string name="compose_logs_unknown_code">未知（%1$d）</string>
@@ -660,4 +660,11 @@
     <string name="content_rules_read_failed">无法读取已保存的按域响应文件。其他设置仍可使用；可关闭覆盖后保存，原规则文件不会被替换。</string>
     <string name="content_rules_retry">重新读取按域响应</string>
     <string name="content_log_domain_response">按域响应</string>
+    <string name="compose_logs_access_denied">访问拒绝</string>
+    <string name="compose_logs_status_unknown">HTTP 状态未记录</string>
+    <string name="compose_logs_path_unknown">请求路径未记录</string>
+    <string name="compose_logs_path_truncated">%1$s…（已截断）</string>
+    <string name="compose_logs_placeholder_policy">占位图策略</string>
+    <string name="compose_logs_category_policy">分类应答策略</string>
+    <string name="compose_logs_rejection_detail">此请求被访问检查拒绝，例如受保护的管理接口、网页 Origin 或证书锁定策略。这类拒绝不计入广告过滤统计。请结合路径和 HTTP 状态，与同域名的图片等其他请求区分。</string>
 </resources>

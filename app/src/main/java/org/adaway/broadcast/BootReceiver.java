@@ -167,7 +167,7 @@ public class BootReceiver extends BroadcastReceiver {
      * @param action     The broadcast action (diagnostics only).
      */
     private static void immediateStartAttempt(Context appContext, String action) {
-        if (org.adaway.util.WebServerUtils.isWebServerReachable(appContext)) {
+        if (org.adaway.util.WebServerUtils.isCurrentWebServerReady(appContext)) {
             Timber.d("BootReceiver: web server already reachable.");
             PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
                     "服务器已在运行", true);
@@ -181,7 +181,7 @@ public class BootReceiver extends BroadcastReceiver {
                 /* Confirm it really came up: "dispatched" is not "running"
                    (the port can be taken, the CA missing). */
                 sleep(1_500L);
-                boolean started = org.adaway.util.WebServerUtils.isWebServerReachable(appContext);
+                boolean started = org.adaway.util.WebServerUtils.isCurrentWebServerReady(appContext);
                 PreferenceHelper.recordBootEvent(appContext, action, MECHANISM,
                         started ? "开机后立即启动成功" : "已发出启动命令，正在确认", started);
                 return;

@@ -1,6 +1,7 @@
 """Extract production response functions for real private dual-stack HTTP tests.
 
-Only UID attribution and bookkeeping are fixtures.
+UID attribution and bookkeeping are fixtures. The protected-path regression
+also supplies a non-loopback policy identity over private loopback sockets.
 The classifier, config reader, fast-fail paths, image selection and Mongoose
 file response are production code, not a rewritten response implementation.
 """
@@ -19,6 +20,8 @@ PREAMBLE = r'''
 #include "f5_guard.h"
 #include "request_host.h"
 #include "rule_norm.h"
+#include "listen_address.h"
+#include "response_log.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,18 +39,38 @@ typedef unsigned int uid_t;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); exit(1); } } while (0)
 #define LOG_WARN(...) ((void)0)
 #define CORS_HDR "Access-Control-Allow-Origin: *\r\n"
-struct settings { const char *resource_dir; int block_image_count; char block_images[1][128]; };
+struct settings { const char *resource_dir; int block_image_count; char block_images[1][128]; bool proxy_filter; };
 static const char *s_pin_resource_dir;
 static uid_t conn_load_uid(struct mg_connection *c) { (void)c; return 42; }
-enum { HIST_BLOCKED, QLOG_BLOCK };
+enum { HIST_BLOCKED };
 static void hist_add(int kind) { (void)kind; }
 struct appstat { uint64_t blocked; };
 static struct appstat fixture_app;
 static struct appstat *app_find_or_add(uid_t uid) { (void)uid; return &fixture_app; }
 static void top_host_add(const char *host) { (void)host; }
 static void app_note_host(struct appstat *app, const char *host) { (void)app; (void)host; }
-static void qlog_add(uid_t uid,int action,struct mg_http_message *hm,const struct mg_connection *c) { (void)uid; (void)action; (void)hm; (void)c; }
 static void ws_push_broadcast(struct settings *s) { (void)s; }
+#define QLOG_MAX 10000
+#define QLOG_PERSIST_MAX 4096
+#define QLOG_RENDER_MAX 400
+#define QLOG_JSON_MAX 49152
+static FILE *open_atomic_write(const char *path,char *tmp,size_t cap) {
+    int length=snprintf(tmp,cap,"%s.tmp",path); if(length<0 || (size_t)length>=cap) return NULL;
+    return fopen(tmp,"wb");
+}
+static void finish_atomic_write(FILE *file,const char *path,const char *tmp) {
+    CHECK(!fclose(file));
+#ifdef _WIN32
+    remove(path); /* Disposable fixture only; production uses its atomic helper. */
+#endif
+    CHECK(!rename(tmp,path));
+}
+static bool fixture_remote_peer;
+static int fixture_loopback_peer(const uint8_t *ip,int ipv6) {
+    /* Identity injection tests the production LAN refusal while all test
+       traffic remains on ephemeral loopback sockets, with no host changes. */
+    return !fixture_remote_peer && la_loopback_peer(ip,ipv6);
+}
 '''
 
 TAIL = r'''
@@ -57,6 +80,8 @@ static void fixture_server(struct mg_connection *c,int event,void *data) {
     if (event==MG_EV_HTTP_MSG) {
         struct mg_http_message *hm=(struct mg_http_message *)data;
         struct settings *s=&fixture_settings;
+        size_t response_offset=c->send.len;
+        PROTECTED_PATH_BODY
 #ifdef FIXTURE_CONFIG_GENERATION
         if (mg_match(hm->uri, mg_str("/control"), NULL)) {
             if (load_block_cfg(s->resource_dir)) reply_block_config_ack(c);
@@ -68,6 +93,9 @@ static void fixture_server(struct mg_connection *c,int event,void *data) {
         server_family=c->rem.is_ip6 ? 6u : 4u;
         if (!reply_blocked_by_type(c,hm)) {
             PLACEHOLDER_BODY
+        } else {
+            qlog_add_status(conn_load_uid(c),QLOG_BLOCK,hm,c,
+                            response_log_status(c->send.buf,c->send.len,response_offset));
         }
     }
 }
@@ -109,6 +137,29 @@ static struct receipt request(struct mg_mgr *manager,const char *url,const char 
     CHECK(result.done==1);
     mg_mgr_poll(manager,0); // Deliver close while this callback's result is alive.
     return result;
+}
+static void check_pipeline(unsigned family) {
+    qlog_clear(); fixture_remote_peer=true;
+    struct mg_connection connection; memset(&connection,0,sizeof(connection));
+    connection.fn_data=&fixture_settings; connection.rem.is_ip6=family==6;
+    connection.rem.addr.ip[0]=family==6 ? 0xfd : 192;
+    const char *requests[]={
+        "GET /internal-test?token=secret HTTP/1.1\r\nHost: pipeline.fixture.invalid\r\n\r\n",
+        "GET /asset.js?password=secret HTTP/1.1\r\nHost: pipeline.fixture.invalid\r\n\r\n"
+    };
+    size_t second_offset=0;
+    for(unsigned index=0;index<2;index++) {
+        struct mg_http_message hm; CHECK(mg_http_parse(requests[index],strlen(requests[index]),&hm)>0);
+        if(index) second_offset=connection.send.len;
+        fixture_server(&connection,MG_EV_HTTP_MSG,&hm);
+    }
+    CHECK(response_log_status(connection.send.buf,connection.send.len,0)==403);
+    CHECK(response_log_status(connection.send.buf,connection.send.len,second_offset)==200);
+    CHECK(s_qlog_count==2 && s_qlog_metadata[0].status==403 && s_qlog_metadata[1].status==200);
+    CHECK(!strcmp(s_qlog_metadata[0].path,"/internal-test") && !strcmp(s_qlog_metadata[1].path,"/asset.js"));
+    CHECK(s_qlog[0].action==QLOG_DENY && s_qlog[1].action==QLOG_BLOCK);
+    fixture_remote_peer=false; mg_iobuf_free(&connection.send);
+    printf("family%u production handler queued pipeline statuses=403,200 independent metadata=ok\n",family);
 }
 static void configure(const char *directory,int cache,int dedup,int images) {
     char path[PATH_MAX]; snprintf(path,sizeof(path),"%s/block_config.json",directory);
@@ -213,6 +264,30 @@ static void run_family(const char *directory,const char *binding,unsigned family
     if(!baseline) check_generation_ack(&manager,url,directory);
 #endif
     configure(directory,1,0,1);
+    if(!baseline) {
+        qlog_clear();
+        fixture_remote_peer=true;
+        uint64_t blocked_before=fixture_app.blocked;
+        struct receipt forbidden=request(&manager,url,"/internal-test?token=secret",host,"");
+        CHECK(forbidden.status==403 && fixture_app.blocked==blocked_before);
+        struct receipt favicon=request(&manager,url,"/favicon.ico?credential=secret",host,"");
+        image_is_complete(&favicon);
+        fixture_remote_peer=false;
+        CHECK(s_qlog_count==2 && s_qlog[0].action==QLOG_DENY && s_qlog[1].action==QLOG_BLOCK);
+        CHECK(s_qlog_metadata[0].status==403 && !strcmp(s_qlog_metadata[0].path,"/internal-test"));
+        CHECK(s_qlog_metadata[1].status==200 && !strcmp(s_qlog_metadata[1].path,"/favicon.ico"));
+        CHECK(s_qlog_family[0]==family && s_qlog_family[1]==family);
+        qlog_save(directory); qlog_clear(); qlog_load(directory);
+        CHECK(s_qlog_count==2 && s_qlog_metadata[0].status==403 && s_qlog_metadata[1].status==200);
+        char summary[QLOG_JSON_MAX]; qlog_render(summary,sizeof(summary));
+        CHECK(strstr(summary,"/internal-test") && strstr(summary,"/favicon.ico") && !strstr(summary,"secret"));
+        printf("family%u protected-path /internal-test=403 action=3 /favicon.ico=200 action=1 QLG3=ok peer-identity=fixture\n",family);
+        /* Exercise the public unknown-status proxy helper and bounded page. */
+        struct mg_http_message hm; memset(&hm,0,sizeof(hm)); hm.uri=mg_str("/proxy");
+        qlog_add(42,QLOG_PROXY,&hm,NULL); CHECK(s_qlog_metadata[2].status==0);
+        struct mg_connection page; memset(&page,0,sizeof(page)); qlog_reply(&page,&hm); CHECK(page.send.len>0); mg_iobuf_free(&page.send);
+        check_pipeline(family);
+    }
     struct receipt first=request(&manager,url,"/same.png",host,"Accept: image/png\r\n");
     struct receipt second=request(&manager,url,"/same.png",host,"Accept: image/png\r\n");
     image_is_complete(&first); CHECK(server_family==family);
@@ -229,6 +304,13 @@ static void run_family(const char *directory,const char *binding,unsigned family
         char conditional[192]; snprintf(conditional,sizeof(conditional),"Accept: image/png\r\nIf-None-Match: %s\r\n",first.etag);
         struct receipt unchanged=request(&manager,url,"/same.png",host,conditional);
         CHECK(first.etag[0] && unchanged.status==304 && unchanged.length==0);
+        CHECK(s_qlog_metadata[(s_qlog_pos+QLOG_MAX-1)%QLOG_MAX].status==304);
+        struct receipt ranged=request(&manager,url,"/range.png",host,"Range: bytes=0-3\r\n");
+        CHECK(ranged.status==206 && ranged.length==4 && s_qlog_metadata[(s_qlog_pos+QLOG_MAX-1)%QLOG_MAX].status==206);
+        snprintf(fixture_settings.block_images[0],sizeof(fixture_settings.block_images[0]),"missing-image.webp");
+        struct receipt missing=request(&manager,url,"/",host,"");
+        CHECK(missing.status==404 && s_qlog_metadata[(s_qlog_pos+QLOG_MAX-1)%QLOG_MAX].status==404);
+        snprintf(fixture_settings.block_images[0],sizeof(fixture_settings.block_images[0]),"response-fixture.webp");
     }
     configure(directory,0,1,1);
     snprintf(host,sizeof(host),"explicit-dedup-%u.fixture.invalid",family);
@@ -283,11 +365,14 @@ def generate(source):
         helper = '#define FIXTURE_CONFIG_GENERATION 1\n' + blocks.block(source, 'static void block_cfg_generation(') + '\n' + blocks.block(source, 'static bool block_cfg_flags_valid(') + '\n' + helper
         helper += '\n' + blocks.block(source, 'static void reply_block_config_ack(')
     start = source.index('    uint64_t t; memcpy(&t, c->data, sizeof(t));', source.index('/* Random block image'))
-    end = source.index('    mg_http_serve_file(c, hm, img_path, &o);', start) + len('    mg_http_serve_file(c, hm, img_path, &o);')
-    tail = TAIL.replace('PLACEHOLDER_BODY', source[start:end])
+    end = source.index('\n}', start)
+    guard_start = source.index('    bool local_peer =', source.index('static void fn('))
+    guard_end = source.index('    /* The management port', guard_start)
+    guard = source[guard_start:guard_end].replace('la_loopback_peer(', 'fixture_loopback_peer(')
+    tail = TAIL.replace('PLACEHOLDER_BODY', source[start:end]).replace('PROTECTED_PATH_BODY', guard)
     return PREAMBLE + pre + gates + f5 + helper + '\n' + blocks.block(source,
         'static void req_host_of(struct mg_http_message *hm, char *out, size_t cap) {') + '\n' + blocks.block(source,
-        'static bool reply_blocked_by_type(') + '\n' + tail
+        'static bool reply_blocked_by_type(') + '\n' + blocks.block(source, 'static void json_safe_copy(') + '\n#include "query_log_store.inc"\n' + tail
 
 
 if __name__ == '__main__':

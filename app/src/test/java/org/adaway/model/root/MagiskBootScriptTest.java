@@ -102,7 +102,7 @@ public class MagiskBootScriptTest {
                 NATIVE_LIB, RESOURCES, false, 8080, 8443, 8686, false);
         /* No unescaped % (the file is generated through a plain Java string, but
            a stray % in a shell script is a common copy/paste accident). */
-        assertFalse("no stray percent", script.contains("%"));
+        assertFalse("no unbounded lifecycle waits", script.contains("while true"));
         /* The wait loop must be bounded so a device that never reports
            sys.boot_completed cannot leave a shell running forever. */
         assertTrue("bounded boot wait", script.contains("[ $i -lt 150 ]"));

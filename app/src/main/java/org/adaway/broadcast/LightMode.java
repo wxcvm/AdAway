@@ -47,7 +47,7 @@ public final class LightMode {
     private static final String MECHANISM = "轻量模式";
 
     /** Only one pending exit check per process. */
-    private static boolean armed;
+    private static volatile boolean armed;
 
     private LightMode() {
     }
@@ -67,7 +67,7 @@ public final class LightMode {
             return;
         }
         armed = true;
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+        new Handler(Looper.getMainLooper()).postDelayed(() -> new Thread(() -> {
             armed = false;
             try {
                 if (!isEnabled(app)) {
@@ -77,7 +77,7 @@ public final class LightMode {
                     Timber.d("LightMode: an activity is visible, staying resident (%s)", reason);
                     return;
                 }
-                if (!WebServerUtils.isWebServerReachable(app)) {
+                if (!WebServerUtils.isCurrentWebServerReady(app)) {
                     // Blocking is not up: the watchdog must keep the process
                     // around to fix that first.
                     Timber.d("LightMode: server not reachable, staying resident (%s)", reason);
@@ -90,7 +90,7 @@ public final class LightMode {
             } catch (Throwable throwable) {
                 Timber.w(throwable, "LightMode: exit check failed");
             }
-        }, GRACE_MS);
+        }, "light-mode-identity").start(), GRACE_MS);
     }
 
     /**
