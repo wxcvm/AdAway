@@ -199,6 +199,8 @@ dependencies {
     implementation libs.androidx.lifecycle.process
     debugImplementation libs.androidx.compose.ui.tooling
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
+    // The instrumentation calls this transitive runtime API directly.
+    androidTestImplementation 'androidx.graphics:graphics-path:1.0.1'
 
     // Test related
     testImplementation libs.junit
