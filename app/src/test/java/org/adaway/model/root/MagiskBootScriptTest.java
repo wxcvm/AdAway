@@ -20,6 +20,41 @@ import java.util.List;
  * unfiltered). Both are asserted here.</p>
  */
 public class MagiskBootScriptTest {
+    @Test public void upgradedApkDirectoryResolvesEveryPackagedAbiInsteadOfStalePath() throws Exception {
+        org.junit.Assume.assumeTrue(new java.io.File("/bin/sh").canExecute());
+        String script = MagiskBootScript.buildScript("/previous-install/lib/arm64", "/resources",
+                false, 8080, 8443, 8686, false);
+        // Execute the actual generated discovery block without running boot/root/network commands.
+        String discovery = script.substring(script.indexOf("  if [ -n \"$APK\" ]; then"),
+                script.indexOf("  GUARD="));
+        for (String abi : new String[]{"arm64", "x86_64", "riscv64"}) {
+            java.nio.file.Path apk = java.nio.file.Files.createTempDirectory("adaway-boot-abi-");
+            java.nio.file.Path lib = java.nio.file.Files.createDirectories(apk.resolve("lib").resolve(abi));
+            java.nio.file.Path binary = lib.resolve("libwebserver_exec.so");
+            try {
+                java.nio.file.Files.write(binary, new byte[]{1});
+                String prefix = "APK='" + apk + "/base.apk'; SRC=previous; APP_LIB=previous\n";
+                assertEquals(binary + "\n" + lib + "\n", discover(prefix + discovery));
+                java.nio.file.Files.delete(binary);
+                assertEquals("previous\nprevious\n", discover(prefix + discovery));
+            } finally {
+                java.nio.file.Files.deleteIfExists(binary);
+                java.nio.file.Files.delete(lib);
+                java.nio.file.Files.delete(apk.resolve("lib"));
+                java.nio.file.Files.delete(apk);
+            }
+        }
+    }
+
+    private static String discover(String script) throws Exception {
+        Process shell = new ProcessBuilder("/bin/sh", "-c", script + "\nprintf '%s\\n' \"$SRC\" \"$APP_LIB\"\n")
+                .redirectErrorStream(true).start();
+        assertTrue("ABI discovery timed out", shell.waitFor(5, java.util.concurrent.TimeUnit.SECONDS));
+        String output = new String(shell.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(output, 0, shell.exitValue());
+        return output;
+    }
+
     @Test public void firstBootRestoresSelectedUlaBeforeLaunchingWithoutPriorOwnership() {
         org.adaway.util.ListenerSettings settings = new org.adaway.util.ListenerSettings(
                 "127.0.0.2", "fd6b:2a91:84f0::2", 80, 443);

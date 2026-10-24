@@ -311,7 +311,7 @@ public final class MagiskBootScript {
                 + "  APK=$(pm path \"$PKG\" 2>/dev/null | head -n1 | cut -d: -f2)\n"
                 + "  if [ -n \"$APK\" ]; then\n"
                 + "    APKDIR=$(dirname \"$APK\")\n"
-                + "    for abi in arm64 arm; do\n"
+                + "    for abi in arm64 x86_64 riscv64 arm x86; do\n"
                 + "      if [ -f \"$APKDIR/lib/$abi/" + libName + "\" ]; then\n"
                 + "        SRC=\"$APKDIR/lib/$abi/" + libName + "\"\n"
                 + "        APP_LIB=\"$APKDIR/lib/$abi\"\n"
