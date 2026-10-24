@@ -40,8 +40,12 @@ class RuleWorkflowUiTest {
         val ruleSaves = java.util.concurrent.atomic.AtomicInteger()
         @Volatile var fail = false
         @Volatile var acknowledged = false
+        @Volatile var failRules = false
         override fun load() = policy
-        override fun loadRules() = ruleText
+        override fun loadRules(): String {
+            if (failRules) throw java.io.IOException("fixture rule file unreadable")
+            return ruleText
+        }
         override fun save(settings: org.adaway.util.ContentResponseSettings): Boolean {
             saves.incrementAndGet()
             if (fail) throw java.io.IOException("fixture storage unavailable")
@@ -76,6 +80,32 @@ class RuleWorkflowUiTest {
         compose.waitUntil(5_000) { backend.saves.get() == 1 && !backend.policy.enabled("images") }
         compose.waitForIdle()
         compose.onNodeWithTag("content-status").assertTextEquals(compose.activity.getString(R.string.content_status_saved_unknown))
+        compose.onNodeWithTag("content-toggle-images").performScrollTo()
+        saveScreenshot("content-response-categories")
+    }
+
+    @Test fun unreadableRulesDoNotPreventDisablingOverrideOrOverwriteTheFile() {
+        val backend = ContentBackend().apply {
+            failRules = true
+            policy = policy.with("rule_override", true)
+            ruleText = "unreadable legacy rules retained"
+        }
+        showContentSettings(backend)
+        compose.onNodeWithTag("content-rules-load-error").assertExists()
+        compose.onNodeWithTag("content-edit-rules").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("content-toggle-rule_override").performScrollTo().performClick().assertIsOff()
+        compose.onNodeWithTag("content-save").performScrollTo().performClick()
+        compose.waitUntil(5_000) { backend.saves.get() == 1 && !backend.policy.enabled("rule_override") }
+        assertEquals(0, backend.ruleSaves.get())
+        assertEquals("unreadable legacy rules retained", backend.ruleText)
+    }
+
+    @Test fun domainResponseLogDoesNotClaim204OrAStructuredResource() {
+        compose.setContent { AdAwayTheme(dynamicColor = false) {
+            androidx.compose.material3.Text(queryActionSummary(QueryLogEntry(action = 1, type = -1, mode = 4)))
+        } }
+        compose.onNodeWithText(compose.activity.getString(R.string.content_log_domain_response), substring = true).assertExists()
+        compose.onNodeWithText("204", substring = true).assertDoesNotExist()
     }
 
     @Test fun contentSaveFailureKeepsDraftAndRetryRequiresMatchingServerAck() {

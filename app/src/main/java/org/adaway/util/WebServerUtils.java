@@ -1364,15 +1364,21 @@ private static String computeSubjectHashOld(Path certFile)
 
     /** Compatibility entry point used at startup; it preserves a previously published settings file. */
     public static void applyBlockReplyConfig(Context context) {
-        try { saveContentResponseSettings(context, loadContentResponseSettings(context)); }
+        try { updateContentResponseSettings(context, settings -> settings); }
         catch (IOException error) { Timber.w(error, "Response settings publication failed; keeping previous file"); }
     }
 
-    private static void setContentResponseSetting(Context context, String key, boolean enabled) {
+    /** Serialize read/modify/publication across startup and both settings interfaces. */
+    public static ContentResponseSettings.Saved updateContentResponseSettings(Context context,
+            java.util.function.UnaryOperator<ContentResponseSettings> edit) throws IOException {
         synchronized (CONTENT_SETTINGS_LOCK) {
-            try { saveContentResponseSettings(context, loadContentResponseSettings(context).with(key, enabled)); }
-            catch (IOException error) { Timber.w(error, "Response settings publication failed; keeping previous file"); }
+            return saveContentResponseSettings(context, edit.apply(loadContentResponseSettings(context)));
         }
+    }
+
+    private static void setContentResponseSetting(Context context, String key, boolean enabled) {
+        try { updateContentResponseSettings(context, settings -> settings.with(key, enabled)); }
+        catch (IOException error) { Timber.w(error, "Response settings publication failed; keeping previous file"); }
     }
 
     /** 当前是否开启「可见型占位」（默认关）。 */

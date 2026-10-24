@@ -106,6 +106,26 @@ public class NativeAbiDeviceTest {
                 ListenerTlsCheck.Result receipt = ListenerTlsCheck.check(ip, https, "localhost", address -> true, tls.getSocketFactory());
                 assertEquals(ip + ": native OpenSSL failed encrypted receipt", ListenerTlsCheck.State.RECEIPT, receipt.state);
             }
+            ContentResponseSettings policy = ContentResponseSettings.fromPreferences(java.util.Collections.emptyMap());
+            File config = new File(resources, ContentResponseSettings.FILE_NAME);
+            ContentResponseSettings.Saved saved = policy.with("images", false).publish(config,
+                    generation -> WebServerControl.reloadConfig(generation, stats));
+            assertTrue("Production control must acknowledge exactly the published generation", saved.confirmed);
+            for (String host : new String[]{"127.0.0.1", "[::1]"}) {
+                try (Response response = client.newCall(new Request.Builder()
+                        .url("http://" + host + ":" + http + "/tile.png")
+                        .header("Host", "ads.native-abi.invalid").build()).execute()) {
+                    assertEquals("Published image-off policy did not reach native server", 204, response.code());
+                }
+            }
+            Files.write(config.toPath(), "{\"reply_images\":2}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            assertFalse("Damaged config must not acknowledge another generation", WebServerControl.reloadConfig(saved.generation, stats));
+            try (Response response = client.newCall(new Request.Builder()
+                    .url("http://127.0.0.1:" + http + "/tile.png")
+                    .header("Host", "ads.native-abi.invalid").build()).execute()) {
+                assertEquals("Rejected config must preserve the last running policy", 204, response.code());
+            }
+            assertTrue(policy.publish(config, generation -> WebServerControl.reloadConfig(generation, stats)).confirmed);
             try (Response response = client.newCall(new Request.Builder()
                     .url("http://127.0.0.1:" + http + "/control")
                     .post(new FormBody.Builder().add("cmd", "shutdown").build()).build()).execute()) {

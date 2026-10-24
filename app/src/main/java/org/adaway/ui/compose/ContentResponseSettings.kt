@@ -47,6 +47,7 @@ internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null
     var draft by remember(service) { mutableStateOf<ContentResponseSettings?>(null) }
     var rules by remember(service) { mutableStateOf("") }
     var rulesExist by remember(service) { mutableStateOf(false) }
+    var rulesReadable by remember(service) { mutableStateOf(false) }
     var busy by remember(service) { mutableStateOf(true) }
     var status by remember(service) { mutableIntStateOf(R.string.content_status_loading) }
     var reload by remember { mutableIntStateOf(0) }
@@ -54,13 +55,15 @@ internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null
     LaunchedEffect(service, reload) {
         busy = true
         try {
-            val loaded = withContext(Dispatchers.IO) { Triple(service.load(), service.loadRules(), service.rulesExist()) }
-            saved = loaded.first
-            draft = loaded.first
-            rules = loaded.second
-            rulesExist = loaded.third
+            val loaded = withContext(Dispatchers.IO) { service.load() }
+            saved = loaded
+            draft = loaded
             status = R.string.content_status_ready
         } catch (_: IOException) { status = R.string.content_status_load_failed }
+        try {
+            val loaded = withContext(Dispatchers.IO) { service.loadRules() to service.rulesExist() }
+            rules = loaded.first; rulesExist = loaded.second; rulesReadable = true
+        } catch (_: IOException) { rulesReadable = false }
         finally { busy = false }
     }
     val edited = draft != saved
@@ -76,8 +79,20 @@ internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             val current = draft
             if (current != null) {
-                ContentPolicyOptions(current, !busy, validCount, rulesExist,
+                ContentPolicyOptions(current, !busy, validCount, rulesExist, rulesReadable,
                     onToggle = { key, enabled -> draft = current.with(key, enabled) }, onEditRules = { showRules = true })
+                if (!rulesReadable) {
+                    Text(stringResource(R.string.content_rules_read_failed), color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("content-rules-load-error"))
+                    OutlinedButton(onClick = { scope.launch {
+                        busy = true
+                        try {
+                            val loaded = withContext(Dispatchers.IO) { service.loadRules() to service.rulesExist() }
+                            rules = loaded.first; rulesExist = loaded.second; rulesReadable = true
+                        } catch (_: IOException) { rulesReadable = false }
+                        finally { busy = false }
+                    } }, enabled = !busy) { Text(stringResource(R.string.content_rules_retry)) }
+                }
                 Button(onClick = {
                     val proposed = draft ?: return@Button
                     scope.launch {
@@ -106,7 +121,7 @@ internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null
 }
 
 @Composable
-private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Boolean, validCount: Int, rulesExist: Boolean,
+private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Boolean, validCount: Int, rulesExist: Boolean, rulesReadable: Boolean,
                                  onToggle: (String, Boolean) -> Unit, onEditRules: () -> Unit) {
                 Text(stringResource(R.string.content_types_title), style = MaterialTheme.typography.titleMedium)
                 Text(stringResource(R.string.content_types_hint), style = MaterialTheme.typography.bodySmall)
@@ -132,16 +147,17 @@ private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Bool
                 }
                 HorizontalDivider()
                 Text(stringResource(R.string.content_rules_hint), style = MaterialTheme.typography.bodySmall)
-                Text(if (!rulesExist) stringResource(R.string.content_rules_missing)
+                Text(if (!rulesReadable) stringResource(R.string.content_rules_read_failed)
+                    else if (!rulesExist) stringResource(R.string.content_rules_missing)
                     else if (validCount < 0) stringResource(R.string.content_rules_legacy)
                     else stringResource(R.string.content_rules_count, validCount), Modifier.testTag("content-rule-count"))
                 if (current.enabled("rule_override") && validCount <= 0)
                     Text(stringResource(R.string.content_rules_inactive), color = MaterialTheme.colorScheme.error)
-                OutlinedButton(onClick = { onEditRules() }, enabled = enabled, modifier = Modifier.testTag("content-edit-rules")) {
+                OutlinedButton(onClick = { onEditRules() }, enabled = enabled && rulesReadable, modifier = Modifier.testTag("content-edit-rules")) {
                     Text(stringResource(R.string.content_rules_edit))
                 }
                 ContentSwitch("rule_override", stringResource(R.string.compose_settings_rule_override), null,
-                    current.enabled("rule_override"), enabled && (validCount > 0 || current.enabled("rule_override"))) {
+                    current.enabled("rule_override"), enabled && ((rulesReadable && validCount > 0) || current.enabled("rule_override"))) {
                     onToggle("rule_override", it)
                 }
 }

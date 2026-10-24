@@ -405,6 +405,7 @@ enum {
 };
 #define RB_REPLY 0
 #define RB_DENY  1
+#define RB_DOMAIN_RESPONSE 4
 static int s_last_type = -1;
 static int s_last_mode = RB_REPLY;
 #define RB_TYPE(t, enabled) \
@@ -2271,8 +2272,8 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
         if (cfg_rule_override) {
             int ov = rule_override_status(f5_host, s_pin_resource_dir);
             if (ov > 0) {
-                s_last_type = LT_STRUCT;
-                s_last_mode = RB_DENY;
+                s_last_type = -1;  /* Domain policy does not classify the resource. */
+                s_last_mode = RB_DOMAIN_RESPONSE;
                 return deny_status(&s_f5_override_hits, c, ov);
             }
         }

@@ -168,6 +168,7 @@ static void check_domain_responses(struct mg_mgr *manager,const char *url,const 
         s_override_loaded_ms=0;
         struct receipt result=request(manager,url,"/domain.png","child.example.com","");
         CHECK(result.status==statuses[index]);
+        CHECK(s_last_type==-1 && s_last_mode==RB_DOMAIN_RESPONSE);
         if(statuses[index]==204) CHECK(result.length==0);
         else CHECK(!strcmp(result.text,"blocked by rule override\n") && !strcmp(result.type,"text/plain"));
     }

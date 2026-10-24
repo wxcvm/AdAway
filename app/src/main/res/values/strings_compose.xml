@@ -657,4 +657,7 @@
     <string name="content_rules_missing">No domain response file yet. Save at least one valid rule before enabling overrides.</string>
     <string name="content_legacy_save_failed">Save failed. Previous response settings have been kept.</string>
     <string name="content_rules_inactive">Override is selected, but this file has no usable editor rules. Correct the file, or turn the override off before saving configuration.</string>
+    <string name="content_rules_read_failed">Cannot read the saved domain response file. Other settings remain available; turn off domain overrides to save without replacing that file.</string>
+    <string name="content_rules_retry">Retry reading domain responses</string>
+    <string name="content_log_domain_response">Domain response</string>
 </resources>

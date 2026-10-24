@@ -26,6 +26,24 @@ def load_segments(blob, abi='arm64-v8a', minimum_page_size=None):
     size, count = struct.unpack_from('<HH', blob, 54)
     if kind != 3 or machine != ABI_MACHINES[abi] or not entry or size != 56 or not count or phoff + size * count > len(blob):
         raise ValueError(f'Server is not a {abi} PIE executable; shared-library placeholder rejected')
+    headers = [(offset, struct.unpack_from('<IIQQQQQQ', blob, offset))
+               for offset in range(phoff, phoff + size * count, size)]
+    canonical = bytearray(blob)
+    attributes = []
+    for offset, header in headers:
+        ptype, flags, file_offset, address, physical, file_size, mem_size, alignment = header
+        if abi != 'riscv64' or ptype != 0x70000003:  # PT_RISCV_ATTRIBUTES
+            continue
+        # llvm-strip relocates this non-allocated attribute section. Only its
+        # file offset may vary; retain all header fields and compare its bytes.
+        if (address or physical or flags != 4 or alignment != 1 or not file_size
+                or file_size != mem_size or file_offset + file_size > len(blob)):
+            raise ValueError('Invalid RISC-V attribute segment')
+        for _, load in headers:
+            if load[0] == 1 and file_offset < load[2] + load[5] and load[2] < file_offset + file_size:
+                raise ValueError('RISC-V attributes overlap a loaded segment')
+        struct.pack_into('<Q', canonical, offset + 8, 0)
+        attributes.append(blob[file_offset:file_offset + file_size])
     segments = []
     entry_executable = False
     for offset in range(phoff, phoff + size * count, size):
@@ -37,7 +55,7 @@ def load_segments(blob, abi='arm64-v8a', minimum_page_size=None):
         if minimum_page_size and (alignment < minimum_page_size or address % minimum_page_size != file_offset % minimum_page_size):
             raise ValueError(f'ELF load segment is not aligned for {minimum_page_size}-byte pages')
         entry_executable |= bool(flags & 1 and address <= entry < address + file_size)
-        payload = bytearray(blob[file_offset:file_offset + file_size])
+        payload = canonical[file_offset:file_offset + file_size]
         if file_offset == 0:
             # llvm-strip updates only ELF section-table metadata in the loaded header.
             payload[40:48] = bytes(8)
@@ -45,7 +63,7 @@ def load_segments(blob, abi='arm64-v8a', minimum_page_size=None):
         segments.append((address, flags, mem_size, bytes(payload)))
     if not entry_executable:
         raise ValueError('Server entry point is outside executable load segments')
-    return entry, segments
+    return entry, segments, attributes
 
 
 def main():

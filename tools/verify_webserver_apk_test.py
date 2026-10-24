@@ -62,6 +62,23 @@ class ApkExecutableTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_segments(executable()[:200])
 
+    def test_riscv_strip_may_relocate_only_nonloaded_attributes(self):
+        built = executable()
+        struct.pack_into('<H', built, 18, 243)
+        struct.pack_into('<H', built, 56, 2)
+        struct.pack_into('<IIQQQQQQ', built, 120, 0x70000003, 4, 256, 0, 0, 8, 8, 1)
+        built.extend(b'ATTRtest')
+        stripped = bytearray(built)
+        stripped.extend(b'ATTRtest')
+        struct.pack_into('<Q', stripped, 128, 264)
+        self.assertEqual(load_segments(built, 'riscv64'), load_segments(stripped, 'riscv64'))
+        stripped[270] ^= 1
+        self.assertNotEqual(load_segments(built, 'riscv64'), load_segments(stripped, 'riscv64'))
+        stripped[200] ^= 1
+        self.assertNotEqual(load_segments(built, 'riscv64'), load_segments(stripped, 'riscv64'))
+        struct.pack_into('<Q', stripped, 128, 200)
+        with self.assertRaises(ValueError): load_segments(stripped, 'riscv64')
+
 
 if __name__ == '__main__':
     unittest.main()

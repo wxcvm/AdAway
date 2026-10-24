@@ -657,4 +657,7 @@
     <string name="content_rules_missing">尚无按域响应文件。请先保存至少一条有效规则，再启用覆盖。</string>
     <string name="content_legacy_save_failed">保存失败，保留之前的响应设置。</string>
     <string name="content_rules_inactive">覆盖开关已选中，但文件中没有可用的编辑器规则。请修正规则，或先关闭覆盖再保存配置。</string>
+    <string name="content_rules_read_failed">无法读取已保存的按域响应文件。其他设置仍可使用；可关闭覆盖后保存，原规则文件不会被替换。</string>
+    <string name="content_rules_retry">重新读取按域响应</string>
+    <string name="content_log_domain_response">按域响应</string>
 </resources>

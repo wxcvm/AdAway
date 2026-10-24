@@ -419,7 +419,7 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
             SwitchPreferenceCompat toggle = findPreference(org.adaway.util.ContentResponseSettings.PREFIX + type);
             if (toggle == null) continue;
             toggle.setOnPreferenceChangeListener((preference, value) -> {
-                publishLegacyContent(context, category, settings -> settings.with(type, Boolean.TRUE.equals(value)), "custom");
+                publishLegacyContent(context, category, settings -> settings.with(type, Boolean.TRUE.equals(value)));
                 return false;
             });
         }
@@ -432,7 +432,7 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
         if (mode != null) mode.setOnPreferenceChangeListener((preference, value) -> {
             String selection = String.valueOf(value);
             if (!"smart".equals(selection) && !"strict".equals(selection)) return true;
-            publishLegacyContent(context, category, settings -> settings.withCategories("smart".equals(selection)), selection);
+            publishLegacyContent(context, category, settings -> settings.withCategories("smart".equals(selection)));
             return false;
         });
     }
@@ -462,20 +462,23 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
             SwitchPreferenceCompat toggle = findPreference(org.adaway.util.ContentResponseSettings.PREFIX + type);
             if (toggle != null) toggle.setChecked(settings.enabled(type));
         }
+        boolean all = true, any = false;
+        for (String type : new String[]{"images", "scripts", "styles", "fonts", "media", "structures", "api", "telemetry", "config", "ws_sse"}) {
+            all &= settings.enabled(type); any |= settings.enabled(type);
+        }
+        androidx.preference.ListPreference mode = findPreference(getString(R.string.pref_block_reply_mode_key));
+        if (mode != null) mode.setValue(all ? "smart" : any ? "custom" : "strict");
     }
 
     private void publishLegacyContent(Context context, androidx.preference.PreferenceCategory category,
-            java.util.function.UnaryOperator<org.adaway.util.ContentResponseSettings> edit, String mode) {
+            java.util.function.UnaryOperator<org.adaway.util.ContentResponseSettings> edit) {
         category.setEnabled(false);
         AppExecutors.getInstance().diskIO().execute(() -> {
             try {
-                org.adaway.util.ContentResponseSettings.Saved result = org.adaway.util.WebServerUtils.saveContentResponseSettings(
-                        context, edit.apply(org.adaway.util.WebServerUtils.loadContentResponseSettings(context)));
+                org.adaway.util.ContentResponseSettings.Saved result = org.adaway.util.WebServerUtils.updateContentResponseSettings(context, edit);
                 AppExecutors.getInstance().mainThread().execute(() -> {
                     if (!isAdded() || getView() == null) return;
                     renderLegacyContent(result.settings);
-                    androidx.preference.ListPreference selection = findPreference(getString(R.string.pref_block_reply_mode_key));
-                    if (selection != null) selection.setValue(mode);
                     category.setEnabled(true);
                     Toast.makeText(context, result.confirmed ? R.string.content_status_confirmed : R.string.content_status_saved_unknown, LENGTH_SHORT).show();
                 });
