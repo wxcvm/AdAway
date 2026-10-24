@@ -21,6 +21,8 @@ public final class ListenerArrivalCheck {
     public interface Resolver { String[] resolve(String domain) throws IOException; }
     public interface Prover { boolean received(String address, int port) throws IOException; }
     public interface LocalAddresses { boolean contains(String address) throws IOException; }
+    private static final int DNS_SCAN_LIMIT = 128;
+    private static final int ENDPOINT_LIMIT = 16;
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final ThreadPoolExecutor DNS = new ThreadPoolExecutor(0, 1, 30, TimeUnit.SECONDS,
             new SynchronousQueue<>(), task -> { Thread thread = new Thread(task, "listener-check-dns"); thread.setDaemon(true); return thread; });
@@ -54,7 +56,9 @@ public final class ListenerArrivalCheck {
         catch (java.util.concurrent.RejectedExecutionException exception) { throw new IOException("上次系统 DNS 查询仍未结束，请稍后重试", exception); }
         try {
             InetAddress[] addresses = session.await(pending, 2000, "系统 DNS 未返回有效结果（2 秒预算）");
-            return java.util.Arrays.stream(addresses).limit(16).map(InetAddress::getHostAddress).toArray(String[]::new);
+            // Keep one overflow marker so domainResult can report that the scan was incomplete.
+            return java.util.Arrays.stream(addresses).limit(DNS_SCAN_LIMIT + 1L)
+                    .map(InetAddress::getHostAddress).toArray(String[]::new);
         } finally { pending.cancel(true); }
     }
 
@@ -62,7 +66,7 @@ public final class ListenerArrivalCheck {
         InetAddress value = InetAddress.getByName(address);
         boolean ipv4 = value.getAddress().length == 4;
         String listener = ipv4 ? settings.ipv4 : settings.ipv6;
-        return !listener.isEmpty() && (listener.equals(ipv4 ? "0.0.0.0" : "::") || value.equals(InetAddress.getByName(listener)));
+        return !listener.isEmpty() && (ListenerSettings.isAnyAddress(listener) || value.equals(InetAddress.getByName(listener)));
     }
 
     /** DNS is observed separately. Only a matching, locally assigned address is ever contacted. */
@@ -82,17 +86,46 @@ public final class ListenerArrivalCheck {
             session.checkCancelled();
             if (answers.length == 0) return "DNS 没有 A/AAAA 应答；没有发送连接。";
             List<String> detail = new ArrayList<>();
-            for (int index = 0; index < Math.min(answers.length, 16); index++) {
+            java.util.Set<String> visited = new java.util.LinkedHashSet<>();
+            List<String> eligible4 = new ArrayList<>(), eligible6 = new ArrayList<>();
+            List<String> other4 = new ArrayList<>(), other6 = new ArrayList<>();
+            int invalid = 0;
+            for (int index = 0; index < Math.min(answers.length, DNS_SCAN_LIMIT); index++) {
                 session.checkCancelled();
                 String address = answers[index];
-                if (!ListenerSettings.isLiteral(address)) continue;
-                detail.add(answerResult(settings, address, prover, local, session));
+                if (!ListenerSettings.isLiteral(address)) { invalid++; continue; }
+                // InetAddress canonicalizes IPv6 spelling and mapped IPv4 to the same byte identity.
+                InetAddress parsed = InetAddress.getByName(address);
+                address = parsed.getHostAddress();
+                if (!visited.add(address)) continue;
+                boolean assigned = matches(settings, address) && local.contains(address);
+                session.checkCancelled();
+                if (parsed.getAddress().length == 4) (assigned ? eligible4 : other4).add(address);
+                else (assigned ? eligible6 : other6).add(address);
             }
+            List<String> selected = new ArrayList<>();
+            selectBalanced(eligible4, eligible6, selected);
+            selectBalanced(other4, other6, selected);
+            for (String address : selected) detail.add(answerResult(settings, address, prover, local, session));
+            if (selected.isEmpty()) detail.add("DNS 没有有效的字面 A/AAAA 应答；没有发送连接");
+            if (invalid > 0) detail.add("已忽略 " + invalid + " 条无效地址应答");
+            if (visited.size() > selected.size())
+                detail.add("本轮最多检测 " + ENDPOINT_LIMIT + " 个唯一地址；其余已扫描地址未测试，不能判定全部路径");
+            if (answers.length > DNS_SCAN_LIMIT)
+                detail.add("DNS 应答超出 " + DNS_SCAN_LIMIT + " 条候选扫描预算；未扫描部分未测试，不能判定全部路径");
             session.checkCancelled();
             return String.join("；", detail);
         } catch (IOException exception) {
             session.checkCancelled();
             return "检测未完成：" + exception.getMessage();
+        }
+    }
+
+    /** Prefer locally eligible endpoints, alternating families within the existing 16-address budget. */
+    private static void selectBalanced(List<String> ipv4, List<String> ipv6, List<String> selected) {
+        for (int index = 0; selected.size() < ENDPOINT_LIMIT && (index < ipv4.size() || index < ipv6.size()); index++) {
+            if (index < ipv4.size()) selected.add(ipv4.get(index));
+            if (selected.size() < ENDPOINT_LIMIT && index < ipv6.size()) selected.add(ipv6.get(index));
         }
     }
 
