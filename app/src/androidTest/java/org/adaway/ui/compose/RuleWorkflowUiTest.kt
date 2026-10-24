@@ -546,6 +546,109 @@ class RuleWorkflowUiTest {
         compose.onNodeWithTag("arrival-report").assertTextEquals("上次有效检测结果")
     }
 
+    @Test fun lateAutomaticProbeCannotOverwriteAnAppliedConfigurationResult() {
+        val started = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val finished = java.util.concurrent.CountDownLatch(1)
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    ListenerSettingsCard(
+                        checkSettings = { _, _ ->
+                            started.countDown()
+                            check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                            finished.countDown()
+                            "过期自动检测结果"
+                        },
+                        applySettings = { _, _, _, _ -> "已应用本轮监听配置" },
+                        rootGranted = { true }
+                    )
+                }
+            } }
+        }
+        try {
+            compose.waitUntil(5000) { started.count == 0L }
+            compose.onNodeWithText("应用并重启").performScrollTo().performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithText("已应用本轮监听配置").fetchSemanticsNodes().isNotEmpty() }
+            release.countDown()
+            compose.waitUntil(5000) { finished.count == 0L }
+            compose.waitForIdle()
+            compose.onNodeWithTag("listener-message").assertTextEquals("已应用本轮监听配置")
+            compose.onNodeWithText("过期自动检测结果").assertDoesNotExist()
+        } finally { release.countDown() }
+    }
+
+    @Test fun applyingListenerConfigurationCancelsOldSessionAndMarksPreservedReportHistorical() {
+        val revision = androidx.compose.runtime.mutableStateOf(0L)
+        val enabled = androidx.compose.runtime.mutableStateOf(true)
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val started = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val sessionRef = java.util.concurrent.atomic.AtomicReference<org.adaway.util.ListenerDiagnosticSession>()
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    AdGuardArrivalCard(enabled.value, revision.value) { _, _, _, session ->
+                        if (calls.incrementAndGet() == 1) "应用前已完成的报告"
+                        else {
+                            sessionRef.set(session)
+                            started.countDown()
+                            check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                            "旧配置任务的迟到结果"
+                        }
+                    }
+                }
+            } }
+        }
+        try {
+            compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithText("应用前已完成的报告").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+            compose.waitUntil(5000) { started.count == 0L }
+            compose.runOnIdle { enabled.value = false; revision.value++ }
+            compose.waitUntil(5000) { sessionRef.get()?.isCancelled == true }
+            compose.onNodeWithTag("arrival-report").assertTextEquals("应用前已完成的报告")
+            compose.onNodeWithText("历史结果（应用操作或配置变更后未复核）").assertExists()
+            release.countDown()
+            compose.waitUntil(5000) { compose.onAllNodesWithText("旧目标检测已取消", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("旧配置任务的迟到结果").assertDoesNotExist()
+            compose.runOnIdle { enabled.value = true }
+            compose.onNodeWithTag("arrival-start").performScrollTo().assertIsEnabled()
+            saveScreenshot("listener-arrival-configuration-history")
+        } finally { release.countDown() }
+    }
+
+    @Test fun committedListenerPortChangeInvalidatesHistoryButDomainDraftDoesNot() {
+        val preferences = compose.activity.getSharedPreferences("compose_webserver", android.content.Context.MODE_PRIVATE)
+        val hadPort = preferences.contains("http_port")
+        val previousPort = org.adaway.util.WebServerUtils.getHttpPort(compose.activity)
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { Surface {
+                Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    AdGuardArrivalCard(true) { _, _, _, _ -> "原保存目标的报告" }
+                }
+            } }
+        }
+        try {
+            compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithText("原保存目标的报告").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("广告规则测试域名（可修改或留空）").performScrollTo().performTextReplacement("other.example.test")
+            compose.onNodeWithText("历史结果（应用操作或配置变更后未复核）").assertDoesNotExist()
+            compose.runOnIdle { check(preferences.edit().putInt("http_port", if (previousPort == 28080) 28081 else 28080).commit()) }
+            compose.waitUntil(5000) { compose.onAllNodesWithText("历史结果（应用操作或配置变更后未复核）").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("arrival-report").assertTextEquals("原保存目标的报告")
+            compose.onNodeWithTag("arrival-start").performScrollTo().performClick()
+            compose.waitUntil(5000) { compose.onAllNodesWithText("历史结果（应用操作或配置变更后未复核）").fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithTag("arrival-report").assertTextEquals("原保存目标的报告")
+        } finally {
+            compose.runOnIdle {
+                val edit = preferences.edit()
+                if (hadPort) edit.putInt("http_port", previousPort) else edit.remove("http_port")
+                check(edit.commit())
+            }
+        }
+    }
+
     @Test fun listenerDraftDoesNotSaveOrRestartBeforeApplyAndRejectsHostnames() {
         val previous = org.adaway.util.WebServerUtils.getHttpPort(compose.activity)
         compose.setContent {

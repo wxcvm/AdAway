@@ -19,6 +19,7 @@ public final class ListenerDiagnosticSession {
     private final AtomicBoolean claimed = new AtomicBoolean();
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final Set<Socket> sockets = new HashSet<>();
+    private java.util.function.BooleanSupplier configurationCurrent = () -> true;
 
     public ListenerDiagnosticSession() { this(message -> { }); }
     public ListenerDiagnosticSession(Observer observer) { this.observer = java.util.Objects.requireNonNull(observer); }
@@ -29,7 +30,17 @@ public final class ListenerDiagnosticSession {
         closeSockets();
     }
 
+    /** Bind the saved target without holding the lifecycle lock during network IO. */
+    void requireCurrentConfiguration(java.util.function.BooleanSupplier current) throws InterruptedIOException {
+        configurationCurrent = java.util.Objects.requireNonNull(current);
+        checkCancelled();
+    }
+
     public void checkCancelled() throws InterruptedIOException {
+        if (!configurationCurrent.getAsBoolean()) {
+            cancel();
+            throw new InterruptedIOException("监听配置已改变，请重新检测");
+        }
         if (isCancelled() || Thread.currentThread().isInterrupted()) throw new InterruptedIOException("检测已取消");
     }
 

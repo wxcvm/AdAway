@@ -81,10 +81,16 @@ public final class ListenerSettings {
         return probeAddresses()[0];
     }
 
+    static boolean isAnyAddress(String value) {
+        if (!isLiteral(value)) return false;
+        try { return InetAddress.getByName(value).isAnyLocalAddress(); }
+        catch (UnknownHostException exception) { return false; }
+    }
+
     public String[] probeAddresses() {
         java.util.ArrayList<String> result = new java.util.ArrayList<>();
-        if (!ipv4.isEmpty()) result.add(ipv4.equals("0.0.0.0") ? "127.0.0.1" : ipv4);
-        if (!ipv6.isEmpty() && (explicitPair || ipv4.isEmpty())) result.add(ipv6.equals("::") ? "::1" : ipv6);
+        if (!ipv4.isEmpty()) result.add(isAnyAddress(ipv4) ? "127.0.0.1" : ipv4);
+        if (!ipv6.isEmpty() && (explicitPair || ipv4.isEmpty())) result.add(isAnyAddress(ipv6) ? "::1" : ipv6);
         return result.toArray(new String[0]);
     }
 
@@ -92,7 +98,7 @@ public final class ListenerSettings {
     public String[] diagnosticAddresses() {
         java.util.ArrayList<String> result = new java.util.ArrayList<>(java.util.Arrays.asList(probeAddresses()));
         if (!ipv6.isEmpty()) {
-            String address6 = ipv6.equals("::") ? "::1" : ipv6;
+            String address6 = isAnyAddress(ipv6) ? "::1" : ipv6;
             if (!result.contains(address6)) result.add(address6);
         }
         return result.toArray(new String[0]);

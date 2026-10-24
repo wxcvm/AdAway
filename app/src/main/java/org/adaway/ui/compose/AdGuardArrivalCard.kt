@@ -1,6 +1,7 @@
 package org.adaway.ui.compose
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -37,6 +38,7 @@ import org.adaway.util.ListenerDiagnosticSession
 @OptIn(ExperimentalLayoutApi::class)
 internal fun AdGuardArrivalCard(
     enabled: Boolean,
+    configurationRevision: Long = 0L,
     runDiagnostic: (Context, String, String, ListenerDiagnosticSession) -> String = WebServerUtils::checkArrivalDiagnostics
 ) {
     val context = LocalContext.current
@@ -48,10 +50,36 @@ internal fun AdGuardArrivalCard(
     var cancelling by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var hasResult by remember { mutableStateOf(false) }
+    var resultStale by remember { mutableStateOf(false) }
+    var configurationInvalidated by remember { mutableStateOf(false) }
+    var savedTarget by remember { mutableStateOf(WebServerUtils.getListenerSettings(context).arguments()) }
     var generation by remember { mutableStateOf(0L) }
     var activeSession by remember { mutableStateOf<ListenerDiagnosticSession?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
     var result by remember { mutableStateOf("按已保存的监听地址与端口检查 HTTP、HTTPS 与系统 DNS；回执确认本次检测路径，不代表所有应用。不会保存草稿或更改 AdGuard。") }
+    // A draft edit is not an applied target change. Also observe commits made outside this card.
+    DisposableEffect(context) {
+        val preferences = context.getSharedPreferences("compose_webserver", Context.MODE_PRIVATE)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key in setOf("listen_ipv4", "listen_ipv6", "bind_ip", "bind_all", "http_port", "https_port")) {
+                val target = WebServerUtils.getListenerSettings(context).arguments()
+                scope.launch(Dispatchers.Main.immediate) { savedTarget = target }
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        savedTarget = WebServerUtils.getListenerSettings(context).arguments()
+        onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    DisposableEffect(savedTarget, configurationRevision) {
+        if (hasResult) resultStale = true
+        if (activeSession != null) {
+            configurationInvalidated = true
+            cancelling = true
+            status = "监听配置正在应用或已改变；正在取消旧目标检测…"
+            activeSession?.cancel()
+        } else if (hasResult) status = "监听配置发生应用操作或变更；保留的旧结果未复核当前服务，请重新检测。"
+        onDispose { }
+    }
     DisposableEffect(Unit) {
         onDispose {
             generation++
@@ -74,8 +102,10 @@ internal fun AdGuardArrivalCard(
                 val id = ++generation
                 val adblockInput = adblock
                 val hostsInput = hosts
+                val targetAtStart = WebServerUtils.getListenerSettings(context).arguments()
                 running = true
                 cancelling = false
+                configurationInvalidated = false
                 status = "正在准备检测…"
                 val session = ListenerDiagnosticSession { message ->
                     scope.launch(Dispatchers.Main.immediate) {
@@ -88,20 +118,28 @@ internal fun AdGuardArrivalCard(
                         val report = withContext(Dispatchers.IO) {
                             runDiagnostic(context.applicationContext, adblockInput, hostsInput, session)
                         }
-                        if (generation == id && !session.isCancelled) {
+                        if (generation == id && !session.isCancelled && targetAtStart == WebServerUtils.getListenerSettings(context).arguments()) {
                             result = report
                             hasResult = true
+                            resultStale = false
                             status = "检测完成；结果仅对应本次测试路径。"
+                        } else if (generation == id && !cancelling) {
+                            resultStale = hasResult
+                            status = "监听配置已改变；旧目标结果未发布，请重新检测。"
                         }
                     } catch (exception: CancellationException) {
                         throw exception
                     } catch (exception: Exception) {
                         if (generation == id && !session.isCancelled)
                             status = "检测未完成：${exception.message ?: "请稍后重试"}"
+                        else if (generation == id && !cancelling)
+                            status = "检测已取消或监听配置已改变，请重新检测。"
                     } finally {
                         session.cancel()
                         if (generation == id) {
-                            if (cancelling) status = "检测已取消，可重新检测；上次完成的结果保留。"
+                            if (cancelling) status = if (configurationInvalidated)
+                                "监听配置发生应用操作或变更；旧目标检测已取消，请重新检测。旧结果仅作历史记录。"
+                            else "检测已取消，可重新检测；上次完成的结果保留。"
                             running = false
                             cancelling = false
                             activeSession = null
@@ -120,14 +158,16 @@ internal fun AdGuardArrivalCard(
                 }, enabled = !cancelling, modifier = Modifier.testTag("arrival-cancel")) { Text("取消检测") }
             }
             if (hasResult) {
-                OutlinedButton({ clipboard.setText(AnnotatedString(result)) }, modifier = Modifier.testTag("arrival-copy")) {
+                OutlinedButton({ clipboard.setText(AnnotatedString(if (resultStale)
+                    "历史结果：应用操作或配置变更后未复核，不代表当前服务。\n$result" else result)) }, modifier = Modifier.testTag("arrival-copy")) {
                     Text("复制结果")
                 }
             }
         }
         if (running) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().testTag("arrival-progress"))
         if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("arrival-status"))
-        if (hasResult) Text(if (running) "上次完成的结果" else "检测结果", style = MaterialTheme.typography.labelMedium)
+        if (hasResult) Text(if (resultStale) "历史结果（应用操作或配置变更后未复核）"
+            else if (running) "上次完成的结果" else "检测结果", style = MaterialTheme.typography.labelMedium)
         SelectionContainer { Text(result, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("arrival-report")) }
     }
 }
