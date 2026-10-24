@@ -24,14 +24,15 @@ public class BundledExecutableIdentityDeviceTest {
         assertTrue("Packaged native lock CLI is missing", helper.isFile());
         File lock = File.createTempFile("adaway-lifecycle-", ".lock", context.getCacheDir());
         String invoke = "LD_LIBRARY_PATH=" + quote(library.getAbsolutePath()) + " " + quote(helper.getAbsolutePath());
-        String acquire = "exec 9>" + quote(lock.getAbsolutePath()) + "; " + invoke + " --lifecycle-lock 9";
+        String acquire = "exec 9>" + quote(lock.getAbsolutePath()) + "; " + invoke + " --lifecycle-lock 9 9>&9";
         Process owner = null;
         try {
             owner = new ProcessBuilder("/system/bin/sh", "-c", acquire
-                    + " || exit $?; (exec 9>&-; echo DAEMON_READY; exec sleep 5) & echo HELD:$!; read ignored").start();
+                    + " || exit $?; (exec 9>&-; echo DAEMON_READY; exec sleep 5) & echo HELD:$!; read ignored")
+                    .redirectErrorStream(true).start();
             BufferedReader receipts = new BufferedReader(new InputStreamReader(owner.getInputStream(), StandardCharsets.UTF_8));
             String first = receipts.readLine(), second = receipts.readLine();
-            assertNotNull("Daemon did not acknowledge closing inherited FD 9", second);
+            assertNotNull("Daemon did not acknowledge closing inherited FD 9; first output=" + first, second);
             assertTrue("Missing daemon readiness receipt", "DAEMON_READY".equals(first) || "DAEMON_READY".equals(second));
             String held = "DAEMON_READY".equals(first) ? second : first;
             assertNotNull("Native helper did not acquire the inherited descriptor", held);
@@ -45,7 +46,8 @@ public class BundledExecutableIdentityDeviceTest {
                     shellExit("kill -0 " + daemon));
             assertEquals("Daemon inherited FD 9 or the exited owner retained the lock", 0, shellExit(acquire));
 
-            owner = new ProcessBuilder("/system/bin/sh", "-c", acquire + " || exit $?; echo HELD; read ignored").start();
+            owner = new ProcessBuilder("/system/bin/sh", "-c", acquire + " || exit $?; echo HELD; read ignored")
+                    .redirectErrorStream(true).start();
             assertEquals("HELD", new BufferedReader(new InputStreamReader(owner.getInputStream(), StandardCharsets.UTF_8)).readLine());
             owner.destroy();
             assertTrue("Terminated owner did not exit", owner.waitFor(3, TimeUnit.SECONDS));

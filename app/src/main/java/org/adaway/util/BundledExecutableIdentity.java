@@ -36,7 +36,7 @@ public final class BundledExecutableIdentity {
         return "if exec 9>" + quote(path) + "; then\n"
                 + "  lock_attempt=0\n"
                 + "  while [ \"$lock_attempt\" -lt " + attempts + " ]; do\n"
-                + "    if " + nativeHelperCommand + " --lifecycle-lock 9; then break; fi\n"
+                + "    if " + nativeHelperCommand + " --lifecycle-lock 9 9>&9; then break; fi\n"
                 + "    sleep 0.1; lock_attempt=$((lock_attempt+1))\n"
                 + "  done\n"
                 + "  if [ \"$lock_attempt\" -lt " + attempts + " ]; then echo LOCKED:$$; else exec 9>&-; false; fi\n"

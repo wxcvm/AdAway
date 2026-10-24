@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #ifndef _WIN32
 #include <sys/file.h>
 #endif
@@ -19,7 +20,9 @@ static inline int lifecycle_lock_cli(int argc, char **argv) {
     if (errno || !end || *end || end == argv[2] || fd < 3 || fd > 1023) return 2;
     int operation = !strcmp(argv[1], "--lifecycle-lock") ? LOCK_EX | LOCK_NB : LOCK_UN;
     if (!flock((int) fd, operation)) return 0;
-    return errno == EWOULDBLOCK || errno == EAGAIN ? 75 : 2;
+    if (errno == EWOULDBLOCK || errno == EAGAIN) return 75;
+    perror("lifecycle lock");
+    return 2;
 #else
     return 2;
 #endif
