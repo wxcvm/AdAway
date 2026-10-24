@@ -84,6 +84,8 @@ public class NativeAbiDeviceTest {
         Files.write(new File(resources, "img_01.webp").toPath(), image);
         Files.write(new File(resources, "test.html").toPath(), "native ABI fixture".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         File library = new File(context.getApplicationInfo().nativeLibraryDir);
+        // Use the same selected-ABI guard as the app's real launch and listener-probe paths.
+        NativeServerExecutable.verify(new File(library, "libwebserver_exec.so"), BuildConfig.NATIVE_ABI);
         File captureLog = new File(resources, "tcpdump.log");
         Process capture = new ProcessBuilder(new File(library, "libtcpdump_exec.so").getAbsolutePath(), "--version")
                 .redirectErrorStream(true).redirectOutput(captureLog).start();

@@ -20,6 +20,9 @@ import timber.log.Timber;
 public final class ShellUtils {
     private static final String EXECUTABLE_PREFIX = "lib";
     private static final String EXECUTABLE_SUFFIX = "_exec.so";
+    private static final String WEB_SERVER_LIBRARY = "libwebserver_exec.so";
+    private static volatile String lifecycleShellPid;
+    private static String lifecycleHelper;
 
     /**
      * Private constructor.
@@ -37,7 +40,7 @@ public final class ShellUtils {
             Shell.Result result = identityCommand(org.adaway.util.BundledExecutableIdentity.scanCommand(
                     stagedExecutablePath(executable), false));
             return result.isSuccess() && result.getOut().stream()
-                    .anyMatch(line -> line.matches("[0-9]+\\|[0-9]+:[0-9]+:[0-9]+\\|present"));
+                    .anyMatch(line -> line.matches("\\d+\\|\\d+:\\d+:\\d+\\|present"));
         } catch (Exception exception) {
             Timber.w(exception, "Unable to identify bundled process %s", executable);
             return false;
@@ -45,13 +48,61 @@ public final class ShellUtils {
     }
 
     private static String stagedExecutablePath(String executable) {
-        if (!executable.matches("[a-zA-Z0-9_]+")) throw new IllegalArgumentException("Invalid executable name");
+        if (!executable.matches("\\w+")) throw new IllegalArgumentException("Invalid executable name");
         return "/data/local/tmp/" + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
     }
 
     private static Shell.Result identityCommand(String script) {
         // A failing staging script uses exit; keep that inside its own shell, away from libsu's session.
-        return Shell.cmd("sh -c " + escapedString(script)).exec();
+        return Shell.cmd(lifecycleShellGuard() + " && sh -c " + escapedString(script)).exec();
+    }
+
+    private static String lifecycleShellGuard() {
+        String owner = lifecycleShellPid;
+        return owner == null ? "true" : "[ \"$$\" = " + escapedString(owner) + " ] && [ \"$(readlink /proc/$$/fd/9)\" = "
+                + escapedString(org.adaway.util.BundledExecutableIdentity.LIFECYCLE_LOCK) + " ]";
+    }
+
+    /** Called only by the outermost Java listener transaction. The kernel owns crash cleanup. */
+    public static boolean acquireWebServerLifecycleLock(Context context) {
+        String library = context.getApplicationInfo().nativeLibraryDir;
+        File source = new File(library, WEB_SERVER_LIBRARY);
+        try { org.adaway.util.NativeServerExecutable.verify(source, org.adaway.BuildConfig.NATIVE_ABI); }
+        catch (java.io.IOException exception) { Timber.w(exception, "Invalid lifecycle helper"); return false; }
+        lifecycleHelper = "/data/local/tmp/adblock_lifecycle_guard." + android.os.Process.myPid() + "." + System.nanoTime();
+        String temporary = lifecycleHelper + ".new";
+        String copy = "cp " + escapedString(source.getAbsolutePath()) + " " + escapedString(temporary)
+                + " && chmod 755 " + escapedString(temporary)
+                + " && cmp -s " + escapedString(source.getAbsolutePath()) + " " + escapedString(temporary)
+                + " && mv -f " + escapedString(temporary) + " " + escapedString(lifecycleHelper);
+        if (!Shell.cmd(copy).exec().isSuccess()) { clearLifecycleHelper(); return false; }
+        String helperCommand = "LD_LIBRARY_PATH=" + escapedString(library) + " " + escapedString(lifecycleHelper);
+        Shell.Result result = Shell.cmd(org.adaway.util.BundledExecutableIdentity.acquireLockCommand(
+                org.adaway.util.BundledExecutableIdentity.LIFECYCLE_LOCK, helperCommand, 100)).exec();
+        if (!result.isSuccess()) { clearLifecycleHelper(); return false; }
+        for (String line : result.getOut()) {
+            if (line.matches("LOCKED:\\d+")) {
+                lifecycleShellPid = line.substring("LOCKED:".length());
+                return true;
+            }
+        }
+        Shell.cmd("exec 9>&-").exec();
+        clearLifecycleHelper();
+        return false;
+    }
+
+    private static void clearLifecycleHelper() {
+        if (lifecycleHelper != null) {
+            Shell.cmd("rm -f " + escapedString(lifecycleHelper) + " " + escapedString(lifecycleHelper + ".new")).exec();
+            lifecycleHelper = null;
+        }
+    }
+
+    public static void releaseWebServerLifecycleLock() {
+        try {
+            if (lifecycleShellPid != null)
+                Shell.cmd(lifecycleShellGuard() + " && exec 9>&-").exec();
+        } finally { lifecycleShellPid = null; clearLifecycleHelper(); }
     }
 
     /** Hash the kernel's mapped image, not the pathname which may already have been replaced. */
@@ -92,6 +143,10 @@ public final class ShellUtils {
      * @return the staged, executable path, or {@code null} if staging failed.
      */
     private static String stageExecutable(Context context, String executable) {
+        if (executable.equals("webserver") && lifecycleShellPid == null) {
+            Timber.e("Refusing webserver staging without its lifecycle lock");
+            return null;
+        }
         String nativeLibraryDir = context.getApplicationInfo().nativeLibraryDir;
         String srcPath = nativeLibraryDir + File.separator + EXECUTABLE_PREFIX + executable + EXECUTABLE_SUFFIX;
         String stagedPath = stagedExecutablePath(executable);
@@ -135,8 +190,9 @@ public final class ShellUtils {
         String logPath = "/data/local/tmp/" + executable + "_start.log";
 
         // Start in background, redirect stdout/stderr to the (fixed) log file
-        String cmd = "LD_LIBRARY_PATH=" + escapedString(nativeLibraryDir) + " " + escapedString(binPath) + " " + parameters +
-                " > " + escapedString(logPath) + " 2>&1 &";
+        String cmd = lifecycleShellGuard() + " && { LD_LIBRARY_PATH=" + escapedString(nativeLibraryDir)
+                + " " + escapedString(binPath) + " " + parameters
+                + " 9>&- > " + escapedString(logPath) + " 2>&1 & }";
         
         Timber.d("Executing: %s", cmd);
         Shell.Result result = Shell.cmd(cmd).exec();
@@ -241,8 +297,8 @@ public final class ShellUtils {
     /** Use a separate file: overwriting the running executable would fail with ETXTBSY. */
     public static List<String> checkBundledListener(Context context, String parameters) throws java.io.IOException {
         String libDir = context.getApplicationInfo().nativeLibraryDir;
-        String source = libDir + "/libwebserver_exec.so";
-        org.adaway.util.NativeServerExecutable.verify(new File(source));
+        String source = libDir + "/" + WEB_SERVER_LIBRARY;
+        org.adaway.util.NativeServerExecutable.verify(new File(source), org.adaway.BuildConfig.NATIVE_ABI);
         String target = "/data/local/tmp/adblock_listener_probe";
         Shell.Result result = Shell.cmd("cp -f " + escapedString(source) + " " + escapedString(target)
                 + " && chmod 755 " + escapedString(target) + " && LD_LIBRARY_PATH=" + escapedString(libDir)
@@ -255,6 +311,10 @@ public final class ShellUtils {
     }
 
     public static void killBundledExecutable(String executable) {
+        if (executable.equals("webserver") && lifecycleShellPid == null) {
+            Timber.e("Refusing to stop webserver without its lifecycle lock");
+            return;
+        }
         Shell.Result result = identityCommand(org.adaway.util.BundledExecutableIdentity.stopCommand(
                 stagedExecutablePath(executable)));
         if (!result.isSuccess()) Timber.w("Could not stop owned executable %s", executable);

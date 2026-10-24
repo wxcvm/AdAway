@@ -230,10 +230,12 @@ internal fun QueryLogDetailsDialog(entry: QueryLogEntry, onDismiss: () -> Unit, 
                     Text(queryLogFamily(entry.family), style = MaterialTheme.typography.bodySmall)
                     if (appLabel != uidFallback) Text(appLabel, style = MaterialTheme.typography.bodySmall)
                     if (entry.uid >= 0) Text("UID ${entry.uid}", style = MaterialTheme.typography.labelSmall)
-                    Text(stringResource(if (entry.action == ACTION_ALLOW) R.string.compose_logs_exemption_detail
-                        else if (entry.action == ACTION_PROXY) R.string.compose_logs_proxy_detail
-                        else if (entry.action == ACTION_REJECT) R.string.compose_logs_rejection_detail
-                        else R.string.compose_logs_block_detail), style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(when (entry.action) {
+                        ACTION_ALLOW -> R.string.compose_logs_exemption_detail
+                        ACTION_PROXY -> R.string.compose_logs_proxy_detail
+                        ACTION_REJECT -> R.string.compose_logs_rejection_detail
+                        else -> R.string.compose_logs_block_detail
+                    }), style = MaterialTheme.typography.bodySmall)
                     Text(stringResource(R.string.compose_logs_details_scope), style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(stringResource(R.string.compose_logs_classification_scope), style = MaterialTheme.typography.bodySmall,
@@ -363,7 +365,9 @@ internal fun queryLogCsvRow(entry: QueryLogEntry, formatter: SimpleDateFormat): 
         else -> "unknown"
     }
     return listOf(time, result, if (entry.type >= 0) entry.type.toString() else "", csvTypeName(entry.type),
-        entry.mode.toString(), csvModeName(entry.mode), if (entry.uid >= 0) entry.uid.toString() else "", entry.host,
+        if (entry.action == ACTION_BLOCK) entry.mode.toString() else "",
+        if (entry.action == ACTION_BLOCK) csvModeName(entry.mode) else "",
+        if (entry.uid >= 0) entry.uid.toString() else "", entry.host,
         if (entry.family == 4 || entry.family == 6) "IPv${entry.family}" else "unknown", entry.path,
         if (entry.httpStatus in 100..599) entry.httpStatus.toString() else "", entry.pathTruncated.toString())
         .joinToString(",") { csvField(it) } + "\n"

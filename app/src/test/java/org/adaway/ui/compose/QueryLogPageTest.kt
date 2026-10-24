@@ -53,6 +53,7 @@ class QueryLogPageTest {
         assertTrue(row.contains(",access_denied,"))
         assertTrue(row.endsWith(",IPv6,\"/item,\"\"x\"\"\",403,false\n"))
         assertFalse(row.contains("forwarding_started"))
+        assertFalse("A rejected endpoint has no placeholder policy", row.contains("placeholder"))
     }
 
     @Test fun familyIsValidatedAndLegacyMissingFamilyStaysUnknown() {

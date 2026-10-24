@@ -319,6 +319,16 @@ public final class MagiskBootScript {
                 + "      fi\n"
                 + "    done\n"
                 + "  fi\n"
+                + "  GUARD=\"$BIN.lifecycle-guard.$$\"\n"
+                + "  trap 'rm -f \"$GUARD\" \"$GUARD.new\"; exec 9>&-' EXIT\n"
+                + "  if cp \"$SRC\" \"$GUARD.new\" && chmod 755 \"$GUARD.new\" && cmp -s \"$SRC\" \"$GUARD.new\" && mv -f \"$GUARD.new\" \"$GUARD\"; then :; else\n"
+                + "    echo 'could not prepare lifecycle guard; keeping existing server' >> \"$LOG\"; exit 1\n"
+                + "  fi\n"
+                + "  if {\n"
+                + org.adaway.util.BundledExecutableIdentity.acquireLockCommand(
+                        org.adaway.util.BundledExecutableIdentity.LIFECYCLE_LOCK,
+                        "LD_LIBRARY_PATH=\"$APP_LIB\" \"$GUARD\"", 100)
+                + "  }; then :; else echo 'lifecycle lock unavailable; keeping existing server' >> \"$LOG\"; exit 1; fi\n"
                 + org.adaway.util.BundledExecutableIdentity.ownershipFunctions(bin)
                 + "  owned_count=0; current_count=0\n"
                 + "  for owned_proc in $(owned_candidates); do\n"
@@ -345,7 +355,7 @@ public final class MagiskBootScript {
                 + "  LD_LIBRARY_PATH=\"$APP_LIB\" \"$BIN\" --resources \"$RES\""
                 + settings.arguments().replace("--stats-port 8686", "--stats-port " + statsPort)
                 + (proxyFilter ? " --proxy-filter" : "")
-                + " >> \"$LOG\" 2>&1 &\n"
+                + " 9>&- >> \"$LOG\" 2>&1 &\n"
                 + ") &\n"
                 + "exit 0\n";
     }

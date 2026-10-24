@@ -249,11 +249,5 @@ public class ServerWatchdogWorker extends Worker {
                 UNIQUE_IMMEDIATE, ExistingWorkPolicy.REPLACE, now);
     }
 
-    private static void sleep(long ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
+
 }

@@ -14,6 +14,7 @@
 #include "cosmetic_scope.h"
 #include "lt_map.h"
 #include "listener_pair.h"
+#include "lifecycle_lock.h"
 
 
 /*
@@ -4457,6 +4458,8 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
 
 /* ── main ─────────────────────────────────────────────────────── */
 int main(int argc, char *argv[]) {
+    int lifecycle = lifecycle_lock_cli(argc, argv);
+    if (lifecycle >= 0) return lifecycle;
     int check=lp_check_cli(argc,argv,80,443,8686);
     if (check>=0) return check;
     setsid();

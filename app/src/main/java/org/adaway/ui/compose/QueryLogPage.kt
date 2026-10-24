@@ -33,7 +33,7 @@ data class QueryLogPage(
                 if (row.has("family")) row.getInt("family") else 0,
                 if (row.has("path")) row.get("path").also { require(it is String) } as String else "",
                 responseStatus(row),
-                if (row.has("pathTruncated")) row.get("pathTruncated").also { require(it is Boolean) } as Boolean else false).also {
+                pathTruncated(row)).also {
                 // Unknown persisted policy codes remain inspectable, never guessed.
                 require(it.ts >= 0 && it.uid >= -1 && it.action in 0..3 &&
                     it.type in -1..65534 && it.mode in 0..255)
@@ -55,6 +55,12 @@ data class QueryLogPage(
             val value = (status as Number).toLong()
             require(value == 0L || value in 100L..599L)
             return value.toInt()
+        }
+
+        private fun pathTruncated(row: JSONObject): Boolean = when (val value = row.opt("pathTruncated")) {
+            null -> false
+            is Boolean -> value
+            else -> throw IllegalArgumentException("Invalid path truncation metadata")
         }
 
         private fun validateSurrogates(host: String) {

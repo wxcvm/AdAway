@@ -35,7 +35,7 @@ write adapter continues to publish the complete file together.
 
 The limits remain Android 10,000 in-memory rows, newest 4,096 persisted rows,
 400 summary rows and a 49,152-byte summary/page buffer. Windows keeps its
-4,096-row ring and persistence caps when using this shared include. The family
+4,096-row ring and persistence caps when using this shared include. The
 family metadata adds one byte per retained/persisted row without expanding the legacy
 record. JSON entries cost additional bytes, so an existing byte cap can return
 a shorter complete page; `returned`, `nextOffset` and `hasMore` describe that

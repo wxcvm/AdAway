@@ -37,11 +37,11 @@ public class BundledExecutableLifecycleTest {
             assertTrue(staged.toFile().setExecutable(true));
             Files.move(staged, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 
-            List<String> actual = output(BundledExecutableIdentity.scanPidCommand(target.toString(), old.pid(), true));
+            List<String> actual = output(BundledExecutableIdentity.scanPidCommand(target.toString(), pid(old), true));
             assertTrue(actual.toString(), BundledExecutableIdentity.allImagesMatch(actual, oldHash));
             assertFalse(BundledExecutableIdentity.allImagesMatch(actual, currentHash));
-            assertTrue(output(BundledExecutableIdentity.scanPidCommand(target.toString(), foreign.pid(), true)).isEmpty());
-            run(BundledExecutableIdentity.stopPidCommand(target.toString(), foreign.pid()), 0);
+            assertTrue(output(BundledExecutableIdentity.scanPidCommand(target.toString(), pid(foreign), true)).isEmpty());
+            run(BundledExecutableIdentity.stopPidCommand(target.toString(), pid(foreign)), 0);
             assertTrue("substring argument process must survive", foreign.isAlive());
 
             run(BundledExecutableIdentity.stageCommand(source.toString(), target.toString()), 0);
@@ -59,7 +59,7 @@ public class BundledExecutableLifecycleTest {
             run(BundledExecutableIdentity.stageCommand(source.toString(), target.toString()), 1);
             assertTrue("ambiguous mappings must not be stopped", old.isAlive() && second.isAlive());
             assertEquals(oldHash, BundledExecutableIdentity.sha256(previous.toFile()));
-            run(BundledExecutableIdentity.stopPidCommand(target.toString(), old.pid()), 0);
+            run(BundledExecutableIdentity.stopPidCommand(target.toString(), pid(old)), 0);
             assertTrue(old.waitFor(3, TimeUnit.SECONDS));
             assertTrue(foreign.isAlive());
         } finally {
@@ -70,6 +70,10 @@ public class BundledExecutableLifecycleTest {
             }
             Files.deleteIfExists(directory);
         }
+    }
+
+    private static long pid(Process process) throws Exception {
+        return ((Number) Process.class.getMethod("pid").invoke(process)).longValue();
     }
 
     private static List<String> output(String command) throws Exception {

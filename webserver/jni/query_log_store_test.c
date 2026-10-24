@@ -278,7 +278,8 @@ static void host_authorities(void) {
 }
 
 static void add_with_family(unsigned number, unsigned family) {
-    char host[192], path[64];
+    char host[192];
+    char path[64];
     struct mg_http_message request;
     struct mg_connection connection;
     memset(&request, 0, sizeof(request));
@@ -456,6 +457,24 @@ static void live_family(const char *bind, unsigned expected) {
     mg_mgr_free(&manager);
 }
 
+static void long_path_pages(void) {
+    uint32_t offset=0;
+    char generation[33]={0};
+    while (offset<1000) {
+        char query[180];
+        if (!offset) snprintf(query,sizeof(query),"offset=0&limit=1000");
+        else snprintf(query,sizeof(query),"offset=%u&limit=1000&generation=%s&anchor=1000",offset,generation);
+        struct mg_str body=reply(query,200);
+        if (!offset) memcpy(generation,s_qlog_generation,sizeof(generation));
+        long returned=mg_json_get_long(body,"$.returned",-1);
+        long next=mg_json_get_long(body,"$.nextOffset",-1);
+        assert(returned>0 && next==(long)offset+returned && next<=1000);
+        int length=0; assert(mg_json_get(body,"$",&length)==0 && (size_t)length==body.len);
+        bool truncated=false; assert(mg_json_get_bool(body,"$.entries[0].pathTruncated",&truncated) && truncated);
+        offset=(uint32_t)next;
+    }
+}
+
 static void response_metadata(const char *directory) {
     const char *uris[] = {"/internal-test?password=secret#fragment", "/favicon.ico", "https://secret.example/path",
                           "authority:443", "*", "/bad\001path", "/bad\xc0\xaf", "/bad\xed\xa0\x80", "/bad\xf4\x90\x80\x80", "/quote\"and\\slash"};
@@ -496,19 +515,7 @@ static void response_metadata(const char *directory) {
     }
     qlog_save(directory); qlog_clear(); qlog_load(directory);
     assert(s_qlog_count==1000 && s_qlog_metadata[999].flags==1 && s_qlog_metadata[999].status==304);
-    uint32_t offset=0; char generation[33]={0};
-    while (offset<1000) {
-        char query[180];
-        if (!offset) snprintf(query,sizeof(query),"offset=0&limit=1000");
-        else snprintf(query,sizeof(query),"offset=%u&limit=1000&generation=%s&anchor=1000",offset,generation);
-        body=reply(query,200);
-        if (!offset) memcpy(generation,s_qlog_generation,sizeof(generation));
-        long returned=mg_json_get_long(body,"$.returned",-1), next=mg_json_get_long(body,"$.nextOffset",-1);
-        assert(returned>0 && next==(long)offset+returned && next<=1000);
-        int length=0; assert(mg_json_get(body,"$",&length)==0 && (size_t)length==body.len);
-        bool truncated=false; assert(mg_json_get_bool(body,"$.entries[0].pathTruncated",&truncated) && truncated);
-        offset=(uint32_t)next;
-    }
+    long_path_pages();
     /* Parser sees only this request's newly queued response. */
     const char responses[]="HTTP/1.1 403 Forbidden\r\n\r\nHTTP/1.1 200 OK\r\n\r\n";
     size_t second=strlen("HTTP/1.1 403 Forbidden\r\n\r\n");
@@ -545,7 +552,7 @@ static void v2_migration_and_corrupt_v3(const char *directory) {
             case 2: broken[2].flags=2; break;
             case 3: broken[2].reserved=1; break;
             case 4: memset(broken[2].path,'a',sizeof(broken[2].path)); break;
-            case 5: snprintf(broken[2].path,sizeof(broken[2].path),"http://absolute/path"); break;
+            case 5: snprintf(broken[2].path,sizeof(broken[2].path),"http://absolute/path"); break; // NOSONAR: Invalid persisted metadata fixture, never fetched or opened; production TLS is unchanged.
             case 6: snprintf(broken[2].path,sizeof(broken[2].path),"/path?secret=value"); break;
             case 7: snprintf(broken[2].path,sizeof(broken[2].path),"/path#fragment"); break;
             case 8: broken[2].path[1]=1; break;

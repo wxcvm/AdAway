@@ -9,6 +9,7 @@ import java.util.List;
 
 /** Identity checks belong to lifecycle entry points, never the statistics polling path. */
 public final class BundledExecutableIdentity {
+    public static final String LIFECYCLE_LOCK = "/data/local/tmp/adaway-webserver.lifecycle.lock";
     private BundledExecutableIdentity() { }
 
     public static String sha256(File file) throws IOException {
@@ -28,6 +29,19 @@ public final class BundledExecutableIdentity {
     }
 
     private static String quote(String value) { return "'" + value.replace("'", "'\\''") + "'"; }
+
+    /** FD 9 stays in the invoking persistent shell; descendants serving requests must close it. */
+    public static String acquireLockCommand(String path, String nativeHelperCommand, int attempts) {
+        if (attempts < 1 || attempts > 100) throw new IllegalArgumentException("Invalid lock budget");
+        return "if exec 9>" + quote(path) + "; then\n"
+                + "  lock_attempt=0\n"
+                + "  while [ \"$lock_attempt\" -lt " + attempts + " ]; do\n"
+                + "    if " + nativeHelperCommand + " --lifecycle-lock 9; then break; fi\n"
+                + "    sleep 0.1; lock_attempt=$((lock_attempt+1))\n"
+                + "  done\n"
+                + "  if [ \"$lock_attempt\" -lt " + attempts + " ]; then echo LOCKED:$$; else exec 9>&-; false; fi\n"
+                + "else false; fi\n";
+    }
 
     /** Require BOTH the complete first argv and the kernel's actual executable path. */
     public static String ownershipFunctions(String executablePath) {
@@ -76,8 +90,8 @@ public final class BundledExecutableIdentity {
         if (lines.isEmpty() || expectedHash == null || !expectedHash.matches("[0-9a-f]{64}")) return false;
         for (String line : lines) {
             String[] fields = line.split("\\|", -1);
-            if (fields.length != 3 || !fields[0].matches("[0-9]+")
-                    || !fields[1].matches("[0-9]+:[0-9]+:[0-9]+") || !expectedHash.equals(fields[2])) return false;
+            if (fields.length != 3 || !fields[0].matches("\\d+")
+                    || !fields[1].matches("\\d+:\\d+:\\d+") || !expectedHash.equals(fields[2])) return false;
         }
         return true;
     }

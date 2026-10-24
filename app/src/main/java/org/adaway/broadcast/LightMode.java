@@ -67,8 +67,8 @@ public final class LightMode {
             return;
         }
         armed = true;
-        new Handler(Looper.getMainLooper()).postDelayed(() -> new Thread(() -> {
-            armed = false;
+        Handler mainHandler = new Handler(Looper.getMainLooper());
+        mainHandler.postDelayed(() -> new Thread(() -> {
             try {
                 if (!isEnabled(app)) {
                     return;
@@ -83,14 +83,30 @@ public final class LightMode {
                     Timber.d("LightMode: server not reachable, staying resident (%s)", reason);
                     return;
                 }
-                PreferenceHelper.recordBootEvent(app, PreferenceHelper.getLastBootAction(app),
-                        MECHANISM, "服务器已就绪，退出应用进程以节省内存", true);
-                Timber.i("LightMode: exiting the app process to free ~180 MB (%s)", reason);
-                Process.killProcess(Process.myPid());
+                // Hash/root/socket work can outlast the user's return to the app.
+                // Final eligibility and exit run together on the UI thread.
+                mainHandler.post(() -> exitIfStillIdle(app, reason));
             } catch (Throwable throwable) {
                 Timber.w(throwable, "LightMode: exit check failed");
+            } finally {
+                mainHandler.post(() -> armed = false);
             }
         }, "light-mode-identity").start(), GRACE_MS);
+    }
+
+    private static void exitIfStillIdle(Context app, String reason) {
+        try {
+            if (!isEnabled(app) || !isInBackground()) {
+                Timber.d("LightMode: exit cancelled after readiness check (%s)", reason);
+                return;
+            }
+            PreferenceHelper.recordBootEvent(app, PreferenceHelper.getLastBootAction(app),
+                    MECHANISM, "服务器已就绪，退出应用进程以节省内存", true);
+            Timber.i("LightMode: exiting the app process to free ~180 MB (%s)", reason);
+            Process.killProcess(Process.myPid());
+        } catch (Throwable throwable) {
+            Timber.w(throwable, "LightMode: final exit check failed");
+        }
     }
 
     /**

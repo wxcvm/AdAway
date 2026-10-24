@@ -15,13 +15,19 @@ static inline uint16_t response_log_status(const void *buffer, size_t length, si
     return (uint16_t)((line[9] - '0') * 100 + (line[10] - '0') * 10 + line[11] - '0');
 }
 
+static inline size_t response_log_utf8_width(unsigned first) {
+    if (first >= 0xc2 && first <= 0xdf) return 2;
+    if (first >= 0xe0 && first <= 0xef) return 3;
+    if (first >= 0xf0 && first <= 0xf4) return 4;
+    return 0;
+}
+
 /* Returns zero for controls, overlong sequences, surrogates and invalid UTF-8. */
 static inline size_t response_log_utf8(const unsigned char *s, size_t length) {
     if (!length) return 0;
     unsigned first = s[0];
     if (first < 0x80) return first >= 0x20 && first != 0x7f ? 1 : 0;
-    size_t width = first >= 0xc2 && first <= 0xdf ? 2 : first >= 0xe0 && first <= 0xef ? 3 :
-                   first >= 0xf0 && first <= 0xf4 ? 4 : 0;
+    size_t width = response_log_utf8_width(first);
     if (!width || width > length) return 0;
     for (size_t i = 1; i < width; i++) if ((s[i] & 0xc0) != 0x80) return 0;
     if (first == 0xc2 && s[1] < 0xa0) return 0; /* Unicode C1 controls. */

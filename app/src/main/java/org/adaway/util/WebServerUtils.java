@@ -57,6 +57,7 @@ public class WebServerUtils {
     private static final String CA_KEY_FILE  = "localhost-2410.key";
     private static final String PREFS_WS = "compose_webserver";
     private static final java.util.concurrent.locks.ReentrantLock LISTENER_LOCK = new java.util.concurrent.locks.ReentrantLock();
+    private static volatile Context lifecycleContext;
     private static final String PROBE_HTTPS = "https";
     private static final String PREF_HTTPS_PORT = "https_port";
     private static final String PREF_HTTP_PORT = "http_port";
@@ -201,12 +202,19 @@ public class WebServerUtils {
 
     public static String applyListenerSettings(Context context, ListenerSettings settings, boolean createMissing, boolean autoCreate) {
         LISTENER_LOCK.lock();
-        try { return applyListenerSettingsLocked(context, settings, createMissing || autoCreate, autoCreate); }
-        finally { LISTENER_LOCK.unlock(); }
+        boolean rootLocked = false;
+        try {
+            rootLocked = acquireRootLifecycle(context);
+            if (!rootLocked) return "未应用：服务器生命周期锁获取失败。原服务与配置保持不变。";
+            return applyListenerSettingsLocked(context, settings, createMissing || autoCreate, autoCreate);
+        } finally {
+            if (rootLocked) releaseRootLifecycle();
+            LISTENER_LOCK.unlock();
+        }
     }
 
     private static String applyListenerSettingsLocked(Context context, ListenerSettings settings, boolean createMissing, boolean autoCreate) {
-        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so")); }
+        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so"), org.adaway.BuildConfig.NATIVE_ABI); }
         catch (IOException exception) { return "未应用：" + exception.getMessage() + "。原服务与配置保持不变。"; }
         if ((BlockMode.current(context) == BlockMode.HIJACK || org.adaway.model.root.HijackModel.isEnabled())
                 && !settings.supportsRootRedirect())
@@ -334,6 +342,7 @@ public class WebServerUtils {
 
     /** Load persisted ports into the static cache (called at app start). */
     public static void initPortCache(Context context) {
+        lifecycleContext = context.getApplicationContext();
         sHttpPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
                 .getInt(PREF_HTTP_PORT, 80);
         sHttpsPortCached = context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
@@ -637,6 +646,7 @@ public class WebServerUtils {
     /** Serial, bounded reconciliation: a reachable old image cannot pass as this APK. */
     public static boolean ensureCurrentWebServer(Context context) {
         boolean locked = false;
+        boolean rootLocked = false;
         try {
             locked = LISTENER_LOCK.tryLock(10, TimeUnit.SECONDS);
             if (!locked) {
@@ -644,24 +654,50 @@ public class WebServerUtils {
                 return false;
             }
             if (!org.adaway.helper.PreferenceHelper.getWebServerEnabled(context)) return false;
+            // Healthy background checks only read identity/listeners: no helper copy or root lock file write.
+            if (isCurrentWebServerReady(context)) return true;
+            rootLocked = acquireRootLifecycle(context);
+            if (!rootLocked) { Timber.w("Could not acquire cross-process server lifecycle lock"); return false; }
             if (isCurrentWebServerReady(context)) return true;
             startWebServerLocked(context);
             return isCurrentWebServerReady(context);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return false;
-        } finally { if (locked) LISTENER_LOCK.unlock(); }
+        } finally {
+            if (rootLocked) releaseRootLifecycle();
+            if (locked) LISTENER_LOCK.unlock();
+        }
     }
 
-public static void startWebServer(Context context) {
+    private static boolean acquireRootLifecycle(Context context) {
+        if (LISTENER_LOCK.getHoldCount() > 1) return true;
+        if (context == null) return false;
+        lifecycleContext = context.getApplicationContext();
+        return org.adaway.model.root.ShellUtils.acquireWebServerLifecycleLock(context);
+    }
+
+    private static void releaseRootLifecycle() {
+        if (LISTENER_LOCK.getHoldCount() == 1)
+            org.adaway.model.root.ShellUtils.releaseWebServerLifecycleLock();
+    }
+
+    public static void startWebServer(Context context) {
         LISTENER_LOCK.lock();
-        try { startWebServerLocked(context); }
-        finally { LISTENER_LOCK.unlock(); }
+        boolean rootLocked = false;
+        try {
+            rootLocked = acquireRootLifecycle(context);
+            if (rootLocked) startWebServerLocked(context);
+            else showToast(context, R.string.pref_webserver_start_failed);
+        } finally {
+            if (rootLocked) releaseRootLifecycle();
+            LISTENER_LOCK.unlock();
+        }
     }
 
     private static void startWebServerLocked(Context context) {
         Timber.d("Starting web server…");
-        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so")); }
+        try { NativeServerExecutable.verify(new File(context.getApplicationInfo().nativeLibraryDir, "libwebserver_exec.so"), org.adaway.BuildConfig.NATIVE_ABI); }
         catch (IOException exception) {
             Timber.e(exception, "Invalid packaged webserver");
             showToast(context, exception.getMessage());
@@ -782,8 +818,15 @@ public static void startWebServer(Context context) {
 
     public static void stopWebServer() {
         LISTENER_LOCK.lock();
-        try { stopWebServerLocked(); }
-        finally { LISTENER_LOCK.unlock(); }
+        boolean rootLocked = false;
+        try {
+            rootLocked = acquireRootLifecycle(lifecycleContext);
+            if (rootLocked) stopWebServerLocked();
+            else Timber.w("Could not acquire cross-process server lifecycle lock; not stopping server");
+        } finally {
+            if (rootLocked) releaseRootLifecycle();
+            LISTENER_LOCK.unlock();
+        }
     }
 
     private static void stopWebServerLocked() {
