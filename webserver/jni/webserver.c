@@ -1388,6 +1388,8 @@ static void harden_process(void) {
 
 /* ── Signal handling ──────────────────────────────────────────── */
 static volatile sig_atomic_t s_sig_num = 0;
+static unsigned long s_shutdown_connection;
+static uint64_t s_shutdown_deadline;
 static void signal_handler(int n) { s_sig_num = n; }
 static void setup_signal_handler(void) {
     struct sigaction sa; memset(&sa, 0, sizeof(sa));
@@ -3608,6 +3610,12 @@ static bool proxy_start(struct mg_connection *c, struct settings *s,
 }
 
 static void fn(struct mg_connection *c, int ev, void *ev_data) {
+    /* Queueing an HTTP reply does not send it. Finish the shutdown receipt
+       before freeing the manager, with a deadline for a stalled peer. */
+    if (s_shutdown_connection != 0 && c->id == s_shutdown_connection &&
+        (ev == MG_EV_CLOSE || (ev == MG_EV_WRITE && c->send.len == 0))) {
+        s_sig_num = SIGTERM;
+    }
     if (ev == MG_EV_ACCEPT) {
         /* Atomic cap check + increment (see the note on
            s_active_connections above — defensive, not a live race). */
@@ -4257,7 +4265,11 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: stats flushed");
         } else if (mg_strcmp(cmd, mg_str("shutdown")) == 0) {
             mg_http_reply(c, 200, "Content-Type: text/plain\r\n", "OK: shutting down");
-            s_sig_num = SIGTERM;  /* trigger main loop exit */
+            c->is_draining = 1;
+            if (s_shutdown_connection == 0) {
+                s_shutdown_connection = c->id;
+                s_shutdown_deadline = mg_millis() + 2000;
+            }
         } else {
             mg_http_reply(c, 400, "Content-Type: text/plain\r\n", "Usage: cmd=reload_images|flush_stats|shutdown");
         }
@@ -4539,7 +4551,7 @@ int main(int argc, char *argv[]) {
     /* Stay alive under memory pressure and log native crashes. */
     setup_crash_handler(s.resource_dir);
     harden_process();
-    LOG_INFO("ADBlock webserver ready — arm64, Mongoose " MG_VERSION
+    LOG_INFO("ADBlock webserver ready — Mongoose " MG_VERSION
         ", SNI cert issuance enabled. HTTP IPv4 %s; HTTPS IPv4 %s; HTTP IPv6 %s; HTTPS IPv6 %s.",
         lp_ready_state(http_primary->loc.is_ip6 ? 6 : 4, http_url6[0] != 0, http_extra != NULL, 4),
         lp_ready_state(https_primary->loc.is_ip6 ? 6 : 4, https_url6[0] != 0, https_extra != NULL, 4),
@@ -4555,6 +4567,7 @@ int main(int argc, char *argv[]) {
     while (s_sig_num == 0) {
         mg_mgr_poll(&mgr, 1000);
         uint64_t now_ms = mg_millis();
+        if (s_shutdown_connection != 0 && now_ms >= s_shutdown_deadline) s_sig_num = SIGTERM;
         uint64_t counter = s_stats.total_requests + s_stats.total_connections;
         if (now_ms - last_json_ms > 300000 ||
             (counter != last_json_counter && now_ms - last_json_ms > 20000)) {
