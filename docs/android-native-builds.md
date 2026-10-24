@@ -40,3 +40,26 @@ Build/ELF/signing checks do not establish operation on arbitrary RISC-V images.
 Actual RISC-V Android device/emulator acceptance must be recorded separately.
 See [preview package contract](android-abi-preview-contract.md) and
 [architecture-aware updates](android-abi-updates.md).
+
+## RISC-V AndroidX Graphics Path dependency
+
+Compose's pinned ui-graphics 1.8.3 uses graphics-path 1.0.1. Its shared
+PathIteratorImpl initializes JNI even on API35; selecting the platform iterator
+does not remove the native conic-conversion dependency. The AAR lacks RISC-V.
+This is a confirmed unsupported path API, not evidence of a first-screen crash.
+
+RISC-V builds therefore compile libandroidx.graphics.path.so from unmodified
+AndroidX 1.0.1 release-endpoint commit
+8a05a22af450d589ef911d772a001a49dcb05b71. The source lock records 17 file hashes;
+four Kotlin API sources match Google's published 1.0.1 sources jar byte for byte.
+The Gradle Java dependency is strictly pinned to that same version for RISC-V.
+Other ABIs retain Google's AAR library, so no duplicate library is introduced.
+
+The RISC-V native target retains official C++/visibility/version-script options
+and uses static C++ linkage instead of packaging the NDK's 4KB prebuilt shared
+C++ runtime. APK verification requires the actual generated shared library,
+correct machine, 16KB load alignment and matching stripped load bytes; it rejects
+the shared C++ runtime and graphics binaries referring to it. Release assets
+include GRAPHICS-PATH-SOURCE.json. API30/API35 tests exercise preserved conics and
+native quadratic conversion; production x86 tests repeat that path. These are
+not RISC-V runtime acceptance. A RISC-V Android device/image is still required.

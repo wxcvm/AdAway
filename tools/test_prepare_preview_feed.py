@@ -49,7 +49,7 @@ class PreviewFeedTest(unittest.TestCase):
 
     def test_riscv_preview_rejects_missing_or_invalid_graphics_native_library(self):
         self.package('arm64-v8a')
-        for failure in ('missing', 'wrong_machine', 'pie_placeholder', 'unaligned'):
+        for failure in ('missing', 'wrong_machine', 'pie_placeholder', 'unaligned', 'shared_cpp', 'bundled_cpp'):
             self.package('riscv64')
             apk = self.assets / 'AdAway-preview-riscv64.apk'
             with zipfile.ZipFile(apk) as archive:
@@ -59,6 +59,8 @@ class PreviewFeedTest(unittest.TestCase):
             if failure == 'wrong_machine': struct.pack_into('<H', library, 18, 183)
             elif failure == 'pie_placeholder': struct.pack_into('<Q', library, 24, 128)
             elif failure == 'unaligned': struct.pack_into('<Q', library, 112, 4096)
+            elif failure == 'shared_cpp': library.extend(b'libc++_shared.so\0')
+            elif failure == 'bundled_cpp': entries['lib/riscv64/libc++_shared.so'] = library
             if failure != 'missing': entries[name] = library
             with zipfile.ZipFile(apk, 'w') as archive:
                 for entry, data in entries.items(): archive.writestr(entry, data)
