@@ -8,8 +8,8 @@
 
 #define QLF_QUERY_CAP 192
 struct qlog_filter {
-    bool has_action, has_family, has_type, has_uid;
-    int action, family, type, uid;
+    bool has_action; bool has_family; bool has_type; bool has_uid;
+    int action; int family; int type; int uid;
     char query[QLF_QUERY_CAP];
     char key[65];
 };
@@ -29,7 +29,7 @@ static inline bool qlf_decode(const char *input, size_t size, char *out, size_t 
         unsigned char c = (unsigned char)input[i];
         if (c == '%') {
             if (size - i < 3) return false;
-            int hi = qlf_hex((unsigned char)input[i+1]), lo = qlf_hex((unsigned char)input[i+2]);
+            int hi = qlf_hex((unsigned char)input[i+1]); int lo = qlf_hex((unsigned char)input[i+2]);
             if (hi < 0 || lo < 0) return false;
             c = (unsigned char)(hi * 16 + lo); i += 2;
         } else if (c == '+') c = ' ';
@@ -48,7 +48,7 @@ static inline int qlf_parameter(struct mg_str query, const char *name, char *out
     size_t start = 0;
     if (cap) out[0] = 0;
     while (start < query.len) {
-        size_t end = start, equal;
+        size_t end = start; size_t equal;
         while (end < query.len && query.buf[end] != '&') end++;
         equal = start;
         while (equal < end && query.buf[equal] != '=') equal++;
@@ -81,7 +81,7 @@ static inline unsigned char qlf_fold(unsigned char c) {
 }
 
 static inline bool qlf_contains(const char *text, const char *needle) {
-    size_t size = strlen(text), length = strlen(needle);
+    size_t size = strlen(text); size_t length = strlen(needle);
     if (length > size) return false;
     for (size_t start = 0; start <= size - length; start++) {
         size_t i = 0;
@@ -98,7 +98,7 @@ static inline bool qlf_lower_hex(const char *s, size_t length) {
 }
 
 static inline void qlf_key(struct qlog_filter *f) {
-    char action[16] = "*", family[16] = "*", type[16] = "*", uid[16] = "*", canonical[384];
+    char action[16] = "*"; char family[16] = "*"; char type[16] = "*"; char uid[16] = "*"; char canonical[384];
     if (f->has_action) snprintf(action, sizeof(action), "%d", f->action);
     if (f->has_family) snprintf(family, sizeof(family), "%d", f->family);
     if (f->has_type) snprintf(type, sizeof(type), "%d", f->type);
@@ -116,6 +116,40 @@ static inline void qlf_key(struct qlog_filter *f) {
 
 /* 0 legacy, 1 v1, -1 invalid. New conditions never silently become an
  * unfiltered legacy request when filterVersion is missing or unsupported. */
+static inline bool qlf_query_text(const char *text, char *out) {
+    size_t length = strlen(text);
+    size_t pos = 0;
+    while (pos < length) {
+        size_t width = response_log_utf8((const unsigned char *)text + pos, length - pos);
+        if (!width) return false;
+        pos += width;
+    }
+    for (size_t k = 0; k <= length; k++) out[k] = (char)qlf_fold((unsigned char)text[k]);
+    return true;
+}
+
+static inline bool qlf_field(struct qlog_filter *f, size_t field, const char *text) {
+    switch (field) {
+        case 0: f->has_action = true; return qlf_integer(text, 3, false, &f->action);
+        case 1:
+            f->has_family = true;
+            return qlf_integer(text, 6, false, &f->family) &&
+                (f->family == 0 || f->family == 4 || f->family == 6);
+        case 2: f->has_type = true; return qlf_integer(text, 65534, true, &f->type);
+        case 3: f->has_uid = true; return qlf_integer(text, INT_MAX, true, &f->uid);
+        default: return qlf_query_text(text, f->query);
+    }
+}
+
+static inline bool qlf_page_parameters(struct mg_str query) {
+    static const char *const names[] = {"offset", "limit", "generation", "anchor", "queryKey"};
+    char text[QLF_QUERY_CAP];
+    for (size_t i = 0; i < sizeof(names)/sizeof(names[0]); i++) {
+        if (qlf_parameter(query, names[i], text, sizeof(text)) < 0) return false;
+    }
+    return true;
+}
+
 static inline int qlf_parse(struct mg_str query, struct qlog_filter *f) {
     static const char *const names[] = {"action", "family", "type", "uid", "q"};
     char text[QLF_QUERY_CAP];
@@ -125,25 +159,10 @@ static inline int qlf_parse(struct mg_str query, struct qlog_filter *f) {
     for (size_t i = 0; i < sizeof(names)/sizeof(names[0]); i++) {
         int present = qlf_parameter(query, names[i], text, sizeof(text));
         if (present < 0 || (present && !version)) return -1;
-        if (!present) continue;
-        if (i == 0) { f->has_action = true; if (!qlf_integer(text, 3, false, &f->action)) return -1; }
-        if (i == 1) { f->has_family = true; if (!qlf_integer(text, 6, false, &f->family) || (f->family != 0 && f->family != 4 && f->family != 6)) return -1; }
-        if (i == 2) { f->has_type = true; if (!qlf_integer(text, 65534, true, &f->type)) return -1; }
-        if (i == 3) { f->has_uid = true; if (!qlf_integer(text, INT_MAX, true, &f->uid)) return -1; }
-        if (i == 4) {
-            size_t length = strlen(text);
-            for (size_t k = 0; k < length;) {
-                size_t width = response_log_utf8((const unsigned char *)text+k, length-k);
-                if (!width) return -1;
-                k += width;
-            }
-            for (size_t k = 0; k <= length; k++) f->query[k] = (char)qlf_fold((unsigned char)text[k]);
-        }
+        if (present && !qlf_field(f, i, text)) return -1;
     }
     if (version) {
-        static const char *const page_names[] = {"offset", "limit", "generation", "anchor", "queryKey"};
-        for (size_t i = 0; i < sizeof(page_names)/sizeof(page_names[0]); i++)
-            if (qlf_parameter(query, page_names[i], text, sizeof(text)) < 0) return -1;
+        if (!qlf_page_parameters(query)) return -1;
         qlf_key(f);
     } else if (qlf_parameter(query, "queryKey", text, sizeof(text))) return -1;
     return version;

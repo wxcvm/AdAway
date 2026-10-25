@@ -746,14 +746,14 @@ static void live_filtered_history(const char *bind, unsigned family) {
     qlog_clear();
     for (unsigned phase = 0; phase < 2; phase++) {
         struct filtered_http_client test = {phase != 0, family, 0};
-        assert(mg_http_connect(&manager, url, filtered_http_client, &test));
+        assert(mg_http_connect(&manager, url, &filtered_http_client, &test));
         uint64_t deadline = mg_millis()+3000;
         while (!test.done && mg_millis() < deadline) mg_mgr_poll(&manager, 5);
         assert(test.done == 1 && s_qlog_count == 1 && s_qlog_sequence == 1);
         /* Closing the client before the stack test context goes away avoids
          * a late close callback retaining the previous phase's context. */
         for (struct mg_connection *c = manager.conns; c; c = c->next)
-            if (!c->is_listening && c->fn == filtered_http_client) c->is_closing = 1;
+            if (!c->is_listening && c->fn == &filtered_http_client) c->is_closing = 1;
         mg_mgr_poll(&manager, 0);
     }
     mg_mgr_free(&manager);

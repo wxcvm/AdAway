@@ -29,6 +29,13 @@ data class QueryLogPage(
             val array = json.getJSONArray("entries")
             require(array.length() <= 1000 && integer(json, "returned", 0, 1000) == array.length().toLong() &&
                 next == offset + array.length() && next <= total)
+            val entries = readEntries(array, version, cursor)
+            val more = json.get("hasMore").also { require(it is Boolean) } as Boolean
+            require(more == (next < total) && (!more || entries.isNotEmpty()))
+            return QueryLogPage(entries, total, next, more, cursor, retained, version)
+        }
+
+        private fun readEntries(array: org.json.JSONArray, version: Int, cursor: QueryLogCursor): List<QueryLogEntry> {
             val entries = (0 until array.length()).map { index ->
                 parseEntry(array.getJSONObject(index)).let { entry ->
                     if (version == 1) {
@@ -40,9 +47,7 @@ data class QueryLogPage(
             if (version == 1) entries.zipWithNext().forEach { (a, b) ->
                 require(compareSequence(a.sequence, b.sequence) > 0) { "Repeated or reordered observations" }
             }
-            val more = json.get("hasMore").also { require(it is Boolean) } as Boolean
-            require(more == (next < total) && (!more || entries.isNotEmpty()))
-            return QueryLogPage(entries, total, next, more, cursor, retained, version)
+            return entries
         }
 
         internal fun parseEntry(row: JSONObject): QueryLogEntry =

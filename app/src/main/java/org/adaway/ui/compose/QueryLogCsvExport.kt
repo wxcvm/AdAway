@@ -41,8 +41,9 @@ internal suspend fun withQueryLogCsvExport(cacheDirectory: File, entries: List<Q
         shared = true
     } finally {
         withContext(NonCancellable + Dispatchers.IO) {
-            temporary?.delete()
-            if (published && !shared) completed?.delete()
+            val stageRemoved = temporary?.let { !it.exists() || it.delete() } ?: true
+            val completedRemoved = if (published && !shared) completed?.let { !it.exists() || it.delete() } ?: true else true
+            check(stageRemoved && completedRemoved) { "Could not remove incomplete export" }
         }
     }
 }

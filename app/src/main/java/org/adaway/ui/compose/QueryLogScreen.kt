@@ -114,6 +114,49 @@ internal fun QueryLogContent(
     LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("query-log-list"), state = listState, contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
+            QueryLogHeader(filter, onFilter, query, onQuery, uid, onUid, family, onFamily,
+                type, onType, total, retainedTotal, loaded, previousConditions, invalidQuery,
+                upgradeRequired, exporting, exported, exportTotal, exportFailed, failed, busy,
+                onRefresh, onCancelExport)
+        }
+        if (shown.isEmpty() && !busy && !failed && !invalidQuery && !upgradeRequired && !previousConditions) item {
+            Text(stringResource(if (loaded > 0) R.string.compose_logs_no_match else R.string.compose_logs_empty),
+                Modifier.padding(24.dp), style = MaterialTheme.typography.bodyMedium)
+        }
+        items(shown) { entry -> QueryLogRow(entry) { selected = entry; onInspect() } }
+        if (hasMore && !failed && !previousConditions && !invalidQuery) item {
+            TextButton(enabled = !busy, onClick = onMore, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(if (busy) R.string.compose_rules_loading else R.string.compose_logs_more))
+            }
+        }
+    }
+    }
+    selected?.let { entry -> QueryLogDetailsDialog(entry, { selected = null }, {
+        onUid(entry.uid); selected = null
+    }) }
+}
+
+@Composable
+private fun QueryLogFilters(filter: Int, onFilter: (Int) -> Unit) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((value, label) in listOf(FILTER_ALL to R.string.compose_logs_filter_all,
+            ACTION_BLOCK to R.string.compose_stats_recent_action_blocked,
+            ACTION_ALLOW to R.string.compose_logs_local_exemption,
+            ACTION_PROXY to R.string.compose_stats_recent_action_proxied,
+            ACTION_REJECT to R.string.compose_logs_access_denied)) {
+            FilterChip(selected = filter == value, onClick = { onFilter(value) }, label = { Text(stringResource(label)) })
+        }
+    }
+}
+
+@Composable
+private fun QueryLogHeader(filter: Int, onFilter: (Int) -> Unit, query: String, onQuery: (String) -> Unit,
+    uid: Int?, onUid: (Int?) -> Unit, family: Int?, onFamily: (Int?) -> Unit,
+    type: Int?, onType: (Int?) -> Unit, total: Int?, retainedTotal: Int?, loaded: Int,
+    previousConditions: Boolean, invalidQuery: Boolean, upgradeRequired: Boolean,
+    exporting: Boolean, exported: Int, exportTotal: Int, exportFailed: Boolean,
+    failed: Boolean, busy: Boolean, onRefresh: () -> Unit, onCancelExport: () -> Unit) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.compose_logs_scope),
@@ -146,36 +189,6 @@ internal fun QueryLogContent(
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
-        }
-        if (shown.isEmpty() && !busy && !failed && !invalidQuery && !upgradeRequired && !previousConditions) item {
-            Text(stringResource(if (loaded > 0) R.string.compose_logs_no_match else R.string.compose_logs_empty),
-                Modifier.padding(24.dp), style = MaterialTheme.typography.bodyMedium)
-        }
-        items(shown) { entry -> QueryLogRow(entry) { selected = entry; onInspect() } }
-        if (hasMore && !failed && !previousConditions && !invalidQuery) item {
-            TextButton(enabled = !busy, onClick = onMore, modifier = Modifier.fillMaxWidth()) {
-                Text(stringResource(if (busy) R.string.compose_rules_loading else R.string.compose_logs_more))
-            }
-        }
-    }
-    }
-    selected?.let { entry -> QueryLogDetailsDialog(entry, { selected = null }, {
-        onUid(entry.uid); selected = null
-    }) }
-}
-
-@Composable
-private fun QueryLogFilters(filter: Int, onFilter: (Int) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for ((value, label) in listOf(FILTER_ALL to R.string.compose_logs_filter_all,
-            ACTION_BLOCK to R.string.compose_stats_recent_action_blocked,
-            ACTION_ALLOW to R.string.compose_logs_local_exemption,
-            ACTION_PROXY to R.string.compose_stats_recent_action_proxied,
-            ACTION_REJECT to R.string.compose_logs_access_denied)) {
-            FilterChip(selected = filter == value, onClick = { onFilter(value) }, label = { Text(stringResource(label)) })
-        }
-    }
 }
 
 private const val ACTION_PROXY = 0

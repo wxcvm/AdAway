@@ -10,21 +10,9 @@ public final class QueryLogRequest {
                               Integer action, Integer family, Integer type, Integer uid, String query) {
         if (offset < 0 || offset > 10000 || limit < 1 || limit > 1000 || query == null ||
             query.getBytes(StandardCharsets.UTF_8).length > 191) throw new IllegalArgumentException("Invalid history query");
-        for (int i=0;i<query.length();i++) {
-            char c=query.charAt(i);
-            if (c < 32 || (c >= 127 && c <= 159)) throw new IllegalArgumentException("Invalid query text");
-            if (Character.isHighSurrogate(c)) {
-                if (++i >= query.length() || !Character.isLowSurrogate(query.charAt(i))) throw new IllegalArgumentException("Invalid UTF-8 text");
-            } else if (Character.isLowSurrogate(c)) throw new IllegalArgumentException("Invalid UTF-8 text");
-        }
-        if ((action != null && (action < 0 || action > 3)) ||
-            (family != null && family != 0 && family != 4 && family != 6) ||
-            (type != null && (type < -1 || type > 65534)) || (uid != null && uid < -1))
-            throw new IllegalArgumentException("Invalid history filter");
-        boolean cursor = generation != null || anchor != null || key != null;
-        if (cursor && (generation == null || !generation.matches("[0-9a-f]{32}") ||
-            anchor == null || !anchor.matches("[0-9]{1,20}") || key == null || !key.matches("[0-9a-f]{64}")))
-            throw new IllegalArgumentException("Incomplete history cursor");
+        validateText(query);
+        validateNumbers(action, family, type, uid);
+        boolean cursor = validateCursor(generation, anchor, key);
         StringBuilder path = new StringBuilder("/internal-qlog?filterVersion=1&offset=").append(offset).append("&limit=").append(limit);
         if (action != null) path.append("&action=").append(action);
         if (family != null) path.append("&family=").append(family);
@@ -37,4 +25,28 @@ public final class QueryLogRequest {
         if (cursor) path.append("&generation=").append(generation).append("&anchor=").append(anchor).append("&queryKey=").append(key);
         return path.toString();
     }
+    private static void validateText(String query) {
+        int i = 0;
+        while (i < query.length()) {
+            char c = query.charAt(i++);
+            if (c < 32 || (c >= 127 && c <= 159)) throw new IllegalArgumentException("Invalid query text");
+            if (Character.isHighSurrogate(c)) {
+                if (i >= query.length() || !Character.isLowSurrogate(query.charAt(i++))) throw new IllegalArgumentException("Invalid UTF-8 text");
+            } else if (Character.isLowSurrogate(c)) throw new IllegalArgumentException("Invalid UTF-8 text");
+        }
+    }
+    private static void validateNumbers(Integer action, Integer family, Integer type, Integer uid) {
+        if ((action != null && (action < 0 || action > 3)) ||
+            (family != null && family != 0 && family != 4 && family != 6) ||
+            (type != null && (type < -1 || type > 65534)) || (uid != null && uid < -1))
+            throw new IllegalArgumentException("Invalid history filter");
+    }
+    private static boolean validateCursor(String generation, String anchor, String key) {
+        boolean cursor = generation != null || anchor != null || key != null;
+        if (cursor && (generation == null || !generation.matches("[0-9a-f]{32}") ||
+            anchor == null || !anchor.matches("[0-9]{1,20}") || key == null || !key.matches("[0-9a-f]{64}")))
+            throw new IllegalArgumentException("Incomplete history cursor");
+        return cursor;
+    }
+
 }
