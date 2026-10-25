@@ -331,8 +331,8 @@ struct settings {
  */
 struct webstats {
     uint64_t start_time_ms;      /* mg_millis() at startup          */
-    uint64_t total_requests;     /* every MG_EV_HTTP_MSG seen       */
-    uint64_t total_connections;  /* MG_EV_ACCEPT count              */
+    uint64_t total_requests;     /* observed non-diagnostic HTTP requests */
+    uint64_t total_connections;  /* connections carrying such a request  */
     uint64_t tls_handshakes;     /* TLS handshakes completed        */
     uint64_t tls_failures;       /* TLS handshake failures          */
     uint64_t blocked_images;     /* placeholder image served        */
@@ -2437,10 +2437,8 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
              mg_strcasecmp(*dest, mg_str("iframe")) == 0 ||
              mg_strcasecmp(*dest, mg_str("embed")) == 0 ||
              mg_strcasecmp(*dest, mg_str("object")) == 0)) {
-            s_stats.blocked_other++;
-            s_last_type = LT_STRUCT;    /* 不计入任何单一类型，避免 App 策略表错位 */
-            s_last_mode = RB_REPLY;
-            /* false = 交给调用方回占位图（与"无扩展名的图片请求"同一条路径）。 */
+            /* The common placeholder path records exactly one image response
+               and its counters. Counting "other" here too doubled one request. */
             return false;
         }
         if (mg_strcasecmp(*dest, mg_str("image")) == 0) {
@@ -3961,6 +3959,18 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         hist_add(HIST_REQ);
     }
 
+    /* Attribute every observed user request before forwarding, exemptions or
+       portal handling can return. These are request observations, not a claim
+       that forwarding or client receipt completed. Unknown UIDs stay unknown. */
+    struct appstat *ra = internal_path ? NULL : app_find_or_add(req_uid);
+    if (ra) {
+        if (!c->data[REC_OFFSET]) {
+            ra->connections++;
+            c->data[REC_OFFSET] = 1;
+        }
+        ra->requests++;
+    }
+
     /*
      * TRANSPARENT FILTERING PROXY (hijack mode, --proxy-filter):
      * the app redirects the whole TCP 80/443 traffic here, so a request for
@@ -4095,23 +4105,15 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                               "<p>This is a carrier portal domain. The page should load normally.</p>"
                               "<p>If you see this, the portal page resources are being allowed through.</p>"
                               "</body></html>");
+                qlog_add_status(req_uid, QLOG_ALLOW, hm, c,
+                                response_log_status(c->send.buf, c->send.len, response_offset));
                 return;
             }
         }
     }
 
-    /* Management traffic is not user traffic: attributing the app's own
-       /internal-stats polls to its uid made the app itself show up as the
-       busiest entry in the per-app statistics. */
-    struct appstat *ra = internal_path ? NULL : app_find_or_add(req_uid);
-    if (ra) {
-        if (!c->data[REC_OFFSET]) {
-            ra->connections++;
-            c->data[REC_OFFSET] = 1;
-        }
-        ra->requests++;
-    }
-    if (c->is_tls && c->tls) {
+    /* Management polling must not add per-app SNI observations either. */
+    if (!internal_path && c->is_tls && c->tls) {
         SSL *ssl = ((struct mg_tls_openssl *)c->tls)->ssl;
         if (ssl) {
             const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
@@ -4139,6 +4141,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
                       "Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin\r\n"
                       "Access-Control-Max-Age: 86400\r\n"
                       "Cache-Control: public, max-age=86400\r\n", "");
+        qlog_add_status(req_uid, QLOG_ALLOW, hm, c,
+                        response_log_status(c->send.buf, c->send.len, response_offset));
         return;
     }
 

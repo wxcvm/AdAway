@@ -2,7 +2,6 @@ package org.adaway.ui.compose
 
 import android.content.Context
 import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +21,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -51,7 +56,8 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
             actions = {
                 IconButton(enabled = !state.busy, onClick = browser::refresh) { Icon(Icons.Outlined.Refresh,
                     contentDescription = stringResource(R.string.compose_logs_refresh)) }
-                IconButton(enabled = shown.isNotEmpty(), onClick = { shareQueryLogCsv(context, shown) }) {
+                IconButton(enabled = state.page != null && !state.busy && !state.previousConditions && !state.invalidQuery && !state.exporting,
+                    onClick = { browser.exportAll { rows -> shareQueryLogCsv(context, rows) } }) {
                     Icon(Icons.Outlined.Share, contentDescription = stringResource(R.string.compose_logs_export))
                 }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow))
@@ -62,7 +68,11 @@ fun QueryLogScreen(viewModel: StatsViewModel, onBack: () -> Unit) {
             query = state.query, onQuery = browser::setQuery, live = state.live,
             onLive = browser::setLive, uid = state.uid, onUid = browser::setUid,
             family = state.family, onFamily = browser::setFamily, type = state.type, onType = browser::setType,
-            onInspect = { browser.setLive(false) })
+            onInspect = { browser.setLive(false) }, retainedTotal = state.page?.retainedTotal,
+            previousConditions = state.previousConditions, invalidQuery = state.invalidQuery,
+            upgradeRequired = state.upgradeRequired, exporting = state.exporting,
+            exported = state.exported, exportTotal = state.exportTotal, exportFailed = state.exportFailed,
+            onCancelExport = browser::cancelExport)
     }
 }
 
@@ -76,6 +86,10 @@ internal fun QueryLogContent(
     onInspect: () -> Unit = {},
     family: Int? = null, onFamily: (Int?) -> Unit = {},
     type: Int? = null, onType: (Int?) -> Unit = {},
+    retainedTotal: Int? = total, previousConditions: Boolean = false,
+    invalidQuery: Boolean = false, upgradeRequired: Boolean = false,
+    exporting: Boolean = false, exported: Int = 0, exportTotal: Int = 0,
+    exportFailed: Boolean = false, onCancelExport: () -> Unit = {},
 ) {
     var selected by remember { mutableStateOf<QueryLogEntry?>(null) }
     val listState = rememberLazyListState()
@@ -100,33 +114,17 @@ internal fun QueryLogContent(
     LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("query-log-list"), state = listState, contentPadding = PaddingValues(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(R.string.compose_logs_scope),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.compose_logs_search)) }, singleLine = true,
-                    supportingText = { Text(stringResource(R.string.compose_logs_search_scope)) })
-                QueryLogFilters(filter, onFilter)
-                QueryLogClassification(family, onFamily, type, onType)
-                if (uid != null) InputChip(selected = true, onClick = { onUid(null) },
-                    label = { Text(stringResource(R.string.compose_logs_uid_filter, uid)) })
-                Text(stringResource(R.string.compose_logs_loaded_count, shown.size, loaded, total ?: loaded),
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (failed) {
-                    Text(stringResource(R.string.compose_logs_read_failed), color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall)
-                    TextButton(enabled = !busy, onClick = onRefresh) { Text(stringResource(R.string.compose_logs_refresh)) }
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
+            QueryLogHeader(filter, onFilter, query, onQuery, uid, onUid, family, onFamily,
+                type, onType, total, retainedTotal, loaded, previousConditions, invalidQuery,
+                upgradeRequired, exporting, exported, exportTotal, exportFailed, failed, busy,
+                onRefresh, onCancelExport)
         }
-        if (shown.isEmpty()) item {
+        if (shown.isEmpty() && !busy && !failed && !invalidQuery && !upgradeRequired && !previousConditions) item {
             Text(stringResource(if (loaded > 0) R.string.compose_logs_no_match else R.string.compose_logs_empty),
                 Modifier.padding(24.dp), style = MaterialTheme.typography.bodyMedium)
         }
         items(shown) { entry -> QueryLogRow(entry) { selected = entry; onInspect() } }
-        if (hasMore && !failed) item {
+        if (hasMore && !failed && !previousConditions && !invalidQuery) item {
             TextButton(enabled = !busy, onClick = onMore, modifier = Modifier.fillMaxWidth()) {
                 Text(stringResource(if (busy) R.string.compose_rules_loading else R.string.compose_logs_more))
             }
@@ -150,6 +148,47 @@ private fun QueryLogFilters(filter: Int, onFilter: (Int) -> Unit) {
             FilterChip(selected = filter == value, onClick = { onFilter(value) }, label = { Text(stringResource(label)) })
         }
     }
+}
+
+@Composable
+private fun QueryLogHeader(filter: Int, onFilter: (Int) -> Unit, query: String, onQuery: (String) -> Unit,
+    uid: Int?, onUid: (Int?) -> Unit, family: Int?, onFamily: (Int?) -> Unit,
+    type: Int?, onType: (Int?) -> Unit, total: Int?, retainedTotal: Int?, loaded: Int,
+    previousConditions: Boolean, invalidQuery: Boolean, upgradeRequired: Boolean,
+    exporting: Boolean, exported: Int, exportTotal: Int, exportFailed: Boolean,
+    failed: Boolean, busy: Boolean, onRefresh: () -> Unit, onCancelExport: () -> Unit) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.compose_logs_scope),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.compose_logs_search)) }, singleLine = true, isError = invalidQuery,
+                    supportingText = { Text(stringResource(if (invalidQuery) R.string.compose_logs_query_invalid else R.string.compose_logs_search_scope)) })
+                QueryLogFilters(filter, onFilter)
+                QueryLogClassification(family, onFamily, type, onType)
+                if (uid != null) InputChip(selected = true, onClick = { onUid(null) },
+                    label = { Text(stringResource(R.string.compose_logs_uid_filter, uid)) })
+                Text(if (total == null) stringResource(R.string.compose_logs_count_unknown)
+                    else stringResource(R.string.compose_logs_loaded_count, loaded, total, retainedTotal ?: loaded),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (previousConditions) Text(stringResource(R.string.compose_logs_previous_conditions),
+                    color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
+                if (upgradeRequired) Text(stringResource(R.string.compose_logs_upgrade_required),
+                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (exporting) {
+                    Text(stringResource(R.string.compose_logs_export_progress, exported, exportTotal),
+                        style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onCancelExport) { Text(stringResource(R.string.compose_logs_export_cancel)) }
+                }
+                if (exportFailed) Text(stringResource(R.string.compose_logs_export_incomplete),
+                    color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                if (failed) {
+                    Text(stringResource(R.string.compose_logs_read_failed), color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall)
+                    TextButton(enabled = !busy, onClick = onRefresh) { Text(stringResource(R.string.compose_logs_refresh)) }
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
 }
 
 private const val ACTION_PROXY = 0
@@ -215,6 +254,8 @@ private fun QueryLogRow(entry: QueryLogEntry, onClick: () -> Unit) {
 
 @Composable
 internal fun QueryLogDetailsDialog(entry: QueryLogEntry, onDismiss: () -> Unit, onUid: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    val identity = if (entry.generation.isNotEmpty() && entry.sequence.isNotEmpty()) "${entry.generation}:${entry.sequence}" else ""
     val appLabel = appNameForUid(entry.uid)
     val uidFallback = stringResource(R.string.compose_stats_app_unknown, entry.uid)
     AlertDialog(onDismissRequest = onDismiss, title = { Text(stringResource(R.string.compose_logs_details)) },
@@ -224,6 +265,14 @@ internal fun QueryLogDetailsDialog(entry: QueryLogEntry, onDismiss: () -> Unit, 
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(entry.host.ifEmpty { "-" }, style = MaterialTheme.typography.titleMedium)
                     Text(queryLogTime(entry.ts, true), style = MaterialTheme.typography.bodySmall)
+                    Text(if (identity.isEmpty()) stringResource(R.string.compose_logs_identity_unknown)
+                        else stringResource(R.string.compose_logs_identity, identity),
+                        style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(listOf(identity, entry.host,
+                        entry.path, "IPv${entry.family.takeIf { it == 4 || it == 6 } ?: "?"}",
+                        "HTTP ${entry.httpStatus.takeIf { it in 100..599 } ?: "?"}").filter { it.isNotEmpty() }.joinToString("\n"))) }) {
+                        Text(stringResource(R.string.compose_logs_copy_evidence))
+                    }
                     Text(queryActionSummary(entry), style = MaterialTheme.typography.bodyMedium)
                     Text(queryLogHttpStatus(entry.httpStatus), style = MaterialTheme.typography.bodyMedium)
                     Text(queryLogPath(entry), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
@@ -296,85 +345,16 @@ private fun queryLogType(type: Int): String = when (type) {
         else -> stringResource(R.string.compose_logs_unknown_code, type)
     }
 
-private fun csvTypeName(type: Int): String = when (type) {
-    0 -> "images"
-    1 -> "scripts"
-    2 -> "styles"
-    3 -> "fonts"
-    4 -> "media"
-    5 -> "structure"
-    6 -> "api"
-    7 -> "telemetry"
-    8 -> "config"
-    9 -> "ws_sse"
-    else -> ""
-}
-
-private fun csvModeName(mode: Int): String = when (mode) {
-    0 -> "placeholder"
-    1 -> "204"
-    2 -> "allowed"
-    3 -> "empty_response"
-    4 -> "domain_response"
-    else -> "unknown"
-}
-
-private fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
-    if (entries.isEmpty()) return
-    try {
-        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val file = java.io.File(context.cacheDir, "adblock-query-log-$stamp.csv")
-        val timeFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        file.bufferedWriter(Charsets.UTF_8).use { out ->
-            /* 同时给可读名与机器用的编码，两个受众都不吃亏 */
-            out.write("time,result,type_code,type_name,mode_code,mode_name,uid,host,ip_family,path,http_status,path_truncated\n")
-            entries.forEach { entry ->
-                out.write(queryLogCsvRow(entry, timeFmt))
-            }
-        }
-        val uri = androidx.core.content.FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            file,
-        )
+private suspend fun shareQueryLogCsv(context: Context, entries: List<QueryLogEntry>) {
+    withQueryLogCsvExport(context.cacheDir, entries) { file ->
+        coroutineContext.ensureActive()
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, file.name)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(
-            Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    } catch (e: Exception) {
-        Toast.makeText(
-            context,
-            context.getString(R.string.compose_logs_export_failed, e.message ?: ""),
-            Toast.LENGTH_LONG,
-        ).show()
+        context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
-}
-
-internal fun queryLogCsvRow(entry: QueryLogEntry, formatter: SimpleDateFormat): String {
-    val time = if (entry.ts in 1..Long.MAX_VALUE / 1000) formatter.format(Date(entry.ts * 1000L)) else ""
-    val result = when (entry.action) {
-        ACTION_BLOCK -> "blocked"
-        ACTION_ALLOW -> "local_exemption"
-        ACTION_PROXY -> "forwarding_started"
-        ACTION_REJECT -> "access_denied"
-        else -> "unknown"
-    }
-    return listOf(time, result, if (entry.type >= 0) entry.type.toString() else "", csvTypeName(entry.type),
-        if (entry.action == ACTION_BLOCK) entry.mode.toString() else "",
-        if (entry.action == ACTION_BLOCK) csvModeName(entry.mode) else "",
-        if (entry.uid >= 0) entry.uid.toString() else "", entry.host,
-        if (entry.family == 4 || entry.family == 6) "IPv${entry.family}" else "unknown", entry.path,
-        if (entry.httpStatus in 100..599) entry.httpStatus.toString() else "", entry.pathTruncated.toString())
-        .joinToString(",") { csvField(it) } + "\n"
-}
-
-/** CSV 里引号、逗号和换行都要转义，否则主机名带逗号就会错列。 */
-private fun csvField(value: String): String {
-    if (value.none { it == ',' || it == '"' || it == '\n' || it == '\r' }) return value
-    return '"' + value.replace("\"", "\"\"") + '"'
 }

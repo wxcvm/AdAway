@@ -575,6 +575,190 @@ static void v2_migration_and_corrupt_v3(const char *directory) {
     }
 }
 
+static void filtered_add(unsigned number) {
+    struct mg_http_message hm;
+    struct mg_connection connection;
+    memset(&hm, 0, sizeof(hm)); memset(&connection, 0, sizeof(connection));
+    hm.headers[0].name = mg_str("Host");
+    hm.headers[0].value = mg_str("same.example.test");
+    hm.uri = mg_str(number <= 10 ? "/Needle/Path?private=never-store" : "/noise/path");
+    if (number % 2) { connection.rem.is_ip6 = 1; connection.rem.addr.ip[15] = 1; }
+    s_last_type = 2;
+    s_last_mode = 0;
+    qlog_add_status(number <= 10 ? 42 : 43, number <= 10 ? QLOG_BLOCK : QLOG_ALLOW,
+                    &hm, &connection, number <= 10 ? 200 : 204);
+}
+
+static void filtered_history(const char *directory) {
+    qlog_clear(); test_clock_enabled = true; test_clock_value = 1700000000;
+    for (unsigned i = 1; i <= 600; i++) filtered_add(i);
+    struct mg_str body = reply("limit=10", 200);
+    assert(mg_json_get_long(body, "$.filterVersion", -1) == -1);
+    assert(mg_json_get_long(body, "$.retainedTotal", -1) == -1);
+    assert(mg_json_get_str(body, "$.entries[0].sequence") == NULL);
+    body = reply("filterVersion=1&q=NEEDLE&limit=2", 200);
+    assert(mg_json_get_long(body, "$.filterVersion", -1) == 1);
+    assert(mg_json_get_long(body, "$.total", -1) == 10);
+    assert(mg_json_get_long(body, "$.retainedTotal", -1) == 600);
+    assert(mg_json_get_long(body, "$.returned", -1) == 2);
+    char *key = mg_json_get_str(body, "$.queryKey");
+    char *sequence = mg_json_get_str(body, "$.entries[0].sequence");
+    assert(key && strlen(key) == 64 && sequence && !strcmp(sequence, "10")); free(sequence);
+    char generation[33], query[600]; memcpy(generation, s_qlog_generation, sizeof(generation));
+    for (unsigned i = 601; i <= 620; i++) filtered_add(i);
+    snprintf(query, sizeof(query), "filterVersion=1&q=needle&offset=2&limit=2&generation=%s&anchor=600&queryKey=%s", generation, key);
+    body = reply(query, 200);
+    assert(mg_json_get_long(body, "$.retainedTotal", -1) == 600);
+    assert(mg_json_get_long(body, "$.total", -1) == 10);
+    sequence = mg_json_get_str(body, "$.entries[0].sequence"); assert(sequence && !strcmp(sequence, "8")); free(sequence);
+    body = reply("filterVersion=1&q=needle&family=6&type=2&uid=42&action=1", 200);
+    assert(mg_json_get_long(body, "$.total", -1) == 5);
+    assert(mg_json_get_long(body, "$.entries[0].family", -1) == 6);
+    sequence = mg_json_get_str(body, "$.entries[0].sequence"); assert(sequence && !strcmp(sequence, "9")); free(sequence);
+    struct mg_http_message hm; memset(&hm, 0, sizeof(hm));
+    hm.headers[0].name = mg_str("Host"); hm.headers[0].value = mg_str("denied.example.test");
+    hm.uri = mg_str("/local/+space \xe6\xb1\x89");
+    qlog_add_status((uid_t)-1, QLOG_DENY, &hm, NULL, 403);
+    body = reply("filterVersion=1&family=0&type=-1&uid=-1&q=403", 200);
+    assert(mg_json_get_long(body, "$.total", -1) == 1);
+    assert(mg_json_get_long(body, "$.entries[0].action", -1) == QLOG_DENY);
+    body = reply("filterVersion=1&q=%2BSPACE+%E6%B1%89", 200);
+    assert(mg_json_get_long(body, "$.total", -1) == 1);
+    body = reply("filterVersion=1&q=private", 200);
+    assert(mg_json_get_long(body, "$.total", -1) == 0); /* URL query never stored/searched. */
+    struct qlog_filter f1, f2;
+    assert(qlf_parse(mg_str("filterVersion=1"), &f1) == 1);
+    assert(qlf_parse(mg_str("q=&filterVersion=1"), &f2) == 1 && !strcmp(f1.key, f2.key));
+    assert(!strcmp(f1.key, "6335df49c049a260eb4077f1cf319a66e88a8114bbed41877060d3ddcb1a9ac9"));
+    assert(qlf_parse(mg_str("filterVersion=1&uid=00042&q=Needle"), &f1) == 1);
+    assert(qlf_parse(mg_str("filterVersion=1&q=needle&uid=42"), &f2) == 1 && !strcmp(f1.key, f2.key));
+    assert(qlf_parse(mg_str("filterVersion=1&q=+needle+&uid=42"), &f2) == 1 && strcmp(f1.key, f2.key));
+    static const char *const invalid[] = {
+        "filterVersion=2", "filterVersion=", "filterVersion=1&filterVersion=1", "q=needle",
+        "filterVersion=1&action=1&%61ction=2", "filterVersion=1&family=5", "filterVersion=1&uid=2147483648",
+        "filterVersion=1&type=65535", "filterVersion=1&action=-1", "filterVersion=1&q=%00",
+        "filterVersion=1&q=%", "filterVersion=1&q=%GG", "filterVersion=1&q=%c0%af", "filterVersion=1&q=%ed%a0%80",
+        "filterVersion=1&q=%c2%80", "filterVersion=1&q=%7f", "filterVersion=1&q=%0a", "filterVersion=1&q=%f4%90%80%80",
+        "filterVersion=1&offset=0&offset=0", "filterVersion=1&limit=1&limit=2", "filterVersion=1&offset=1",
+        "filterVersion=1&generation=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "filterVersion=1&anchor=600",
+        "filterVersion=1&queryKey=0000000000000000000000000000000000000000000000000000000000000000"
+    };
+    for (size_t i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++) reply(invalid[i], 400);
+    char long_query[850]; snprintf(long_query, sizeof(long_query), "filterVersion=1&q=");
+    size_t prefix = strlen(long_query); memset(long_query+prefix, 'a', 191); long_query[prefix+191] = 0;
+    reply(long_query, 200); long_query[prefix+191] = 'a'; long_query[prefix+192] = 0; reply(long_query, 400);
+    snprintf(long_query, sizeof(long_query), "filterVersion=1&q=");
+    for (size_t i = 0; i < 63; i++) strcat(long_query, "%E6%B1%89");
+    strcat(long_query, "ab"); reply(long_query, 200); /* 191 bytes. */
+    snprintf(long_query, sizeof(long_query), "filterVersion=1&q=");
+    for (size_t i = 0; i < 64; i++) strcat(long_query, "%E6%B1%89");
+    reply(long_query, 400); /* 192 valid UTF-8 bytes, never a prefix. */
+    /* Percent expansion is not silently truncated, including valid >191-byte Unicode. */
+    assert(qlf_parse(mg_str("filterVersion=1&q=%e6%b1%89"), &f1) == 1);
+    snprintf(query, sizeof(query), "filterVersion=1&q=noise&generation=%s&anchor=600&queryKey=%s", generation, key);
+    body = reply(query, 400); assert(strstr(body.buf, "query_mismatch"));
+    snprintf(query, sizeof(query), "filterVersion=1&q=needle&generation=%s&anchor=600&queryKey=%s", generation, key);
+    for (unsigned i = 622; i <= 10020; i++) filtered_add(i);
+    reply(query, 409); /* Even an unreturned tail overwrite expires the fixed history. */
+    qlog_save(directory); qlog_clear(); qlog_load(directory); reply(query, 409);
+    body = reply("filterVersion=1", 200);
+    assert(mg_json_get_long(body, "$.retainedTotal", -1) == QLOG_PERSIST_MAX);
+    free(key); test_clock_enabled = false;
+}
+
+static void filtered_byte_budget_and_benchmark(void) {
+    qlog_clear();
+    struct mg_http_message hm; memset(&hm, 0, sizeof(hm));
+    char host[192], path[160]; memset(host, 'a', sizeof(host)-1); host[191] = 0;
+    memset(path, 'p', sizeof(path)-1); path[0] = '/'; path[159] = 0;
+    hm.headers[0].name = mg_str("Host"); hm.headers[0].value = mg_str(host); hm.uri = mg_str(path);
+    for (unsigned i = 0; i < QLOG_MAX; i++) qlog_add_status(42, QLOG_BLOCK, &hm, NULL, 200);
+    char generation[33], key[65], query[300];
+    uint32_t offset = 0, previous = QLOG_MAX+1;
+    unsigned pages_count = 0;
+    do {
+        if (!offset) snprintf(query, sizeof(query), "filterVersion=1&limit=1000");
+        else snprintf(query, sizeof(query), "filterVersion=1&limit=1000&offset=%u&generation=%s&anchor=%u&queryKey=%s", offset, generation, QLOG_MAX, key);
+        struct mg_str body = reply(query, 200);
+        assert(body.len <= QLOG_JSON_MAX);
+        if (!offset) {
+            memcpy(generation, s_qlog_generation, sizeof(generation));
+            char *value = mg_json_get_str(body, "$.queryKey"); assert(value); memcpy(key, value, sizeof(key)); free(value);
+        }
+        long returned = mg_json_get_long(body, "$.returned", -1);
+        assert(returned > 0 && returned < 1000);
+        assert(mg_json_get_long(body, "$.total", -1) == QLOG_MAX);
+        for (long n = 0; n < returned; n++) {
+            char expression[80]; snprintf(expression, sizeof(expression), "$.entries[%ld].sequence", n);
+            char *value = mg_json_get_str(body, expression); assert(value);
+            unsigned sequence = (unsigned)strtoul(value, NULL, 10); free(value);
+            assert(sequence + 1 == previous); previous = sequence;
+        }
+        offset = (uint32_t)mg_json_get_long(body, "$.nextOffset", -1);
+        bool more; assert(mg_json_get_bool(body, "$.hasMore", &more) && more == (offset < QLOG_MAX));
+        pages_count++;
+    } while (offset < QLOG_MAX);
+    assert(previous == 1 && pages_count > 1);
+    uint64_t started = mg_millis();
+    for (unsigned i = 0; i < 30; i++) {
+        struct mg_str body = reply("filterVersion=1&q=absent", 200);
+        assert(mg_json_get_long(body, "$.total", -1) == 0);
+    }
+    printf("{\"fixture\":\"full-history-filter\",\"retained\":%u,\"pages\":%u,\"maxScanPerQuery\":%u,\"benchmarkQueries\":30,\"benchmarkTotalMs\":%llu}\n",
+        QLOG_MAX, pages_count, QLOG_MAX, (unsigned long long)(mg_millis()-started));
+}
+
+struct filtered_http_client { bool query; unsigned family; int done; };
+static void filtered_http_server(struct mg_connection *c, int event, void *data) {
+    if (event != MG_EV_HTTP_MSG) return;
+    struct mg_http_message *hm = data;
+    if (mg_match(hm->uri, mg_str("/internal-qlog"), NULL)) qlog_reply(c, hm);
+    else {
+        qlog_add_status(42, QLOG_BLOCK, hm, c, 200);
+        mg_http_reply(c, 200, "Content-Type: image/test\r\n", "image-fixture");
+    }
+}
+static void filtered_http_client(struct mg_connection *c, int event, void *data) {
+    struct filtered_http_client *test = c->fn_data;
+    if (event == MG_EV_CONNECT) {
+        if (test->query) mg_printf(c, "GET /internal-qlog?filterVersion=1&family=%u&q=NEEDLE HTTP/1.1\r\nHost: same.example.test\r\nConnection: close\r\n\r\n", test->family);
+        else mg_printf(c, "GET /Needle/Proof HTTP/1.1\r\nHost: same.example.test\r\nConnection: close\r\n\r\n");
+    }
+    if (event == MG_EV_HTTP_MSG) {
+        struct mg_http_message *hm = data;
+        if (test->query) {
+            assert(mg_json_get_long(hm->body, "$.filterVersion", -1) == 1);
+            assert(mg_json_get_long(hm->body, "$.total", -1) == 1);
+            assert(mg_json_get_long(hm->body, "$.entries[0].family", -1) == (long)test->family);
+            assert(mg_json_get_long(hm->body, "$.entries[0].status", -1) == 200);
+            char *sequence = mg_json_get_str(hm->body, "$.entries[0].sequence");
+            assert(sequence && !strcmp(sequence, "1")); free(sequence);
+        } else assert(hm->body.len == strlen("image-fixture") && !memcmp(hm->body.buf, "image-fixture", hm->body.len));
+        test->done = 1; c->is_closing = 1;
+    }
+    if (event == MG_EV_ERROR) test->done = -1;
+}
+static void live_filtered_history(const char *bind, unsigned family) {
+    struct mg_mgr manager; mg_mgr_init(&manager);
+    struct mg_connection *listener = mg_http_listen(&manager, bind, filtered_http_server, NULL);
+    assert(listener);
+    char url[128]; mg_snprintf(url, sizeof(url), "%s:%c%c%M", "http", '/', '/', mg_print_ip_port, &listener->loc);
+    qlog_clear();
+    for (unsigned phase = 0; phase < 2; phase++) {
+        struct filtered_http_client test = {phase != 0, family, 0};
+        assert(mg_http_connect(&manager, url, &filtered_http_client, &test));
+        uint64_t deadline = mg_millis()+3000;
+        while (!test.done && mg_millis() < deadline) mg_mgr_poll(&manager, 5);
+        assert(test.done == 1 && s_qlog_count == 1 && s_qlog_sequence == 1);
+        /* Closing the client before the stack test context goes away avoids
+         * a late close callback retaining the previous phase's context. */
+        for (struct mg_connection *c = manager.conns; c; c = c->next)
+            if (!c->is_listening && c->fn == &filtered_http_client) c->is_closing = 1;
+        mg_mgr_poll(&manager, 0);
+    }
+    mg_mgr_free(&manager);
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2); /* Existing disposable directory supplied by the test runner. */
     mg_log_set(MG_LL_NONE);
@@ -590,9 +774,13 @@ int main(int argc, char **argv) {
     corrupt_family_keeps_live_state(argv[1]);
     response_metadata(argv[1]);
     v2_migration_and_corrupt_v3(argv[1]);
+    filtered_history(argv[1]);
+    filtered_byte_budget_and_benchmark();
     live_family("http://127.0.0.1:0", 4);
+    live_filtered_history("http://127.0.0.1:0", 4);
 #if MG_ENABLE_IPV6
     live_family("http://[::1]:0", 6);
+    live_filtered_history("http://[::1]:0", 6);
 #endif
     puts("PASS: production query log persistence, rollback, bounded pages, stable cursor, family metadata/mapped peers, QLOG/QLG2 migration, QLG3 metadata/corruption, private UTF-8 bounded paths, response offsets and actual IPv4/IPv6 HTTP round trips");
     return 0;

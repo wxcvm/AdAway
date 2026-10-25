@@ -83,7 +83,7 @@ def prepare(assets, tag, source):
            for entry in entries.values()):
         raise ValueError('ABI packages do not share the same release version')
     return dict(channel='preview', tag=tag, **legacy, artifacts=entries,
-                changelog='修复监听配置变化后的旧诊断结果与迟到探测反馈；双栈 DNS 去重、优先本机监听并均衡取样，明确历史结果及未检查应答。覆盖原安装的 ARM64/x86_64/RISC-V 预览；RISC-V 运行仍待验收。')
+                changelog='日志改为全部保留历史筛选与固定快照完整导出；补齐请求编号、IPv6实际状态说明，修复可见占位重复计数与应用放行/转发漏计。覆盖原安装的三架构预览；真机与RISC-V运行仍待验收。')
 
 
 def main():

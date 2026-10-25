@@ -68,6 +68,119 @@ public class NativeAbiDeviceTest {
         }
     }
 
+    private static org.json.JSONObject readJson(OkHttpClient client, int stats, String path) throws Exception {
+        try (Response response = client.newCall(new Request.Builder()
+                .url("http://127.0.0.1:" + stats + path).build()).execute()) {
+            assertEquals("Management read failed: " + path, 200, response.code());
+            assertNotNull(response.body());
+            return new org.json.JSONObject(response.body().string());
+        }
+    }
+
+    private static void counterDelta(org.json.JSONObject before, org.json.JSONObject after,
+            long requests, long blocks) throws Exception {
+        assertEquals("Web request accounting", requests,
+                after.getLong("total_requests") - before.getLong("total_requests"));
+        assertEquals("Local policy accounting", blocks,
+                after.getLong("total_blocked") - before.getLong("total_blocked"));
+    }
+
+    /** Real packaged service, not reconstructed response/classification functions. */
+    private static void verifyResponseEvidence(OkHttpClient client, File resources, int http,
+            int stats, byte[] image, ContentResponseSettings policy) throws Exception {
+        File config = new File(resources, ContentResponseSettings.FILE_NAME);
+        org.json.JSONObject before = readJson(client, stats, "/internal-stats");
+        String etag = null;
+        assertTrue(policy.with("visible", true).publish(config,
+                generation -> WebServerControl.reloadConfig(generation, stats)).confirmed);
+        for (String host : new String[]{"127.0.0.1", "[::1]"}) {
+            try (Response response = client.newCall(new Request.Builder()
+                    .url("http://" + host + ":" + http + "/")
+                    .header("Accept", "text/html").header("Sec-Fetch-Dest", "document").build()).execute()) {
+                assertEquals("Browser document must reach the same placeholder path", 200, response.code());
+                assertEquals("image/webp", response.header("Content-Type"));
+                assertNotNull(response.body()); assertArrayEquals(image, response.body().bytes());
+                etag = response.header("ETag");
+            }
+        }
+        org.json.JSONObject after = readJson(client, stats, "/internal-stats");
+        counterDelta(before, after, 2, 2);
+        assertEquals("Visible placeholders must not double-count the other category",
+                before.getLong("blocked_other"), after.getLong("blocked_other"));
+        assertEquals(2, after.getLong("blocked_images") - before.getLong("blocked_images"));
+        assertNotNull("Actual placeholder must expose a cache validator", etag);
+        before = after;
+        for (String host : new String[]{"127.0.0.1", "[::1]"}) {
+            try (Response response = client.newCall(new Request.Builder()
+                    .url("http://" + host + ":" + http + "/cached.png")
+                    .header("If-None-Match", etag).build()).execute()) {
+                assertEquals("Conditional placeholder response", 304, response.code());
+            }
+        }
+        after = readJson(client, stats, "/internal-stats"); counterDelta(before, after, 2, 2);
+        // Diagnostic receipts and polling must not manufacture traffic.
+        before = after;
+        assertTrue(ListenerArrivalCheck.received("127.0.0.1", http, "evidence.native.invalid"));
+        assertTrue(ListenerArrivalCheck.received("::1", http, "evidence.native.invalid"));
+        readJson(client, stats, "/internal-stats");
+        after = readJson(client, stats, "/internal-stats"); counterDelta(before, after, 0, 0);
+        before = after;
+        for (String host : new String[]{"127.0.0.1", "[::1]"}) {
+            try (Response response = client.newCall(new Request.Builder()
+                    .url("http://" + host + ":" + http + "/evidence-preflight")
+                    .method("OPTIONS", null).header("Access-Control-Request-Method", "POST").build()).execute()) {
+                assertEquals(204, response.code());
+            }
+        }
+        after = readJson(client, stats, "/internal-stats"); counterDelta(before, after, 2, 0);
+        org.json.JSONObject preflight = readJson(client, stats,
+                "/internal-qlog?filterVersion=1&offset=0&limit=5&action=2&q=evidence-preflight");
+        assertEquals(2, preflight.getInt("total"));
+        for (int i = 0; i < 2; i++) assertEquals(204, preflight.getJSONArray("entries").getJSONObject(i).getInt("status"));
+        before = after;
+        assertTrue(policy.with("images", false).publish(config,
+                generation -> WebServerControl.reloadConfig(generation, stats)).confirmed);
+        try (Response response = client.newCall(new Request.Builder()
+                .url("http://[::1]:" + http + "/evidence-old-needle.png?private=not-recorded").build()).execute()) {
+            assertEquals(204, response.code());
+        }
+        for (int i = 0; i < 320; i++) {
+            try (Response response = client.newCall(new Request.Builder()
+                    .url("http://127.0.0.1:" + http + "/evidence-new-" + i + ".png").build()).execute()) {
+                assertEquals(204, response.code());
+            }
+        }
+        org.json.JSONObject page = readJson(client, stats,
+                "/internal-qlog?filterVersion=1&offset=0&limit=1&family=6&action=1&q=EVIDENCE-OLD-NEEDLE");
+        assertEquals(1, page.getInt("filterVersion"));
+        assertEquals("Matching history beyond page one was hidden", 1, page.getInt("total"));
+        assertTrue(page.getInt("retainedTotal") > 300);
+        assertTrue(page.getString("queryKey").matches("[0-9a-f]{64}"));
+        org.json.JSONObject row = page.getJSONArray("entries").getJSONObject(0);
+        assertEquals(6, row.getInt("family")); assertEquals(204, row.getInt("status"));
+        assertEquals("/evidence-old-needle.png", row.getString("path"));
+        assertTrue(row.getString("sequence").matches("[0-9]{1,20}"));
+        assertFalse("Query values must never enter retained paths", row.toString().contains("not-recorded"));
+        after = readJson(client, stats, "/internal-stats"); counterDelta(before, after, 321, 321);
+        assertTrue(policy.publish(config, generation -> WebServerControl.reloadConfig(generation, stats)).confirmed);
+        // A missing image is not a successful rendered placeholder, even if policy chose it.
+        File picture = new File(resources, "img_01.webp"); assertTrue(picture.delete());
+        try {
+            for (String host : new String[]{"127.0.0.1", "[::1]"}) {
+                try (Response response = client.newCall(new Request.Builder()
+                        .url("http://" + host + ":" + http + "/missing-image.png").build()).execute()) {
+                    assertEquals(404, response.code());
+                }
+            }
+        } finally { Files.write(picture.toPath(), image); }
+        page = readJson(client, stats,
+                "/internal-qlog?filterVersion=1&offset=0&limit=5&q=missing-image.png");
+        assertEquals(2, page.getInt("total"));
+        for (int i = 0; i < 2; i++) assertEquals(404, page.getJSONArray("entries").getJSONObject(i).getInt("status"));
+        System.out.println("Actual native evidence: v4/v6 browser bytes, single-count visible responses, 304, "
+                + "diagnostic exclusion, retained-history filtering, missing-image status passed");
+    }
+
     @Test public void packagedX86ExecutablesServeRealDualStackImagesAndTrustedTls() throws Exception {
         assertEquals("This job must build real x86 natives, not omit the webserver", "x86_64", BuildConfig.NATIVE_ABI);
         Context context = ApplicationProvider.getApplicationContext();
@@ -209,6 +322,7 @@ public class NativeAbiDeviceTest {
                 assertTrue("Actual IPv6 image response metadata missing", image6);
                 assertTrue("Policy-off response must record its actual 204", noContent);
             }
+            verifyResponseEvidence(client, resources, http, stats, image, policy);
             try (Response response = client.newCall(new Request.Builder()
                     .url("http://127.0.0.1:" + stats + "/control")
                     .post(new FormBody.Builder().add("cmd", "shutdown").build()).build()).execute()) {

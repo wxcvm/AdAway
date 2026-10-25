@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -32,6 +33,72 @@ import org.junit.Test
 /** Actual production components with fixed data; never launches root or network operations. */
 class RuleWorkflowUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun fullHistoryFamilyFilterFindsAnOlderRequestAndItsObservationIdentity() {
+        var browser: QueryLogBrowser? = null
+        val generation = "0123456789abcdef0123456789abcdef"
+        compose.setContent {
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            val history = androidx.compose.runtime.remember {
+                QueryLogBrowser(scope, { _, _, _, filter ->
+                    val row = if (filter.family == 6) QueryLogEntry(host = "older-ipv6.example", family = 6,
+                        action = 1, path = "/banner.webp", httpStatus = 200, generation = generation, sequence = "44")
+                    else QueryLogEntry(host = "newest-ipv4.example", family = 4, generation = generation, sequence = "900")
+                    QueryLogPage(listOf(row), 1, 1, false,
+                        QueryLogCursor(generation, "900", filter.queryKey()), 900, 1)
+                }).also { browser = it }
+            }
+            val state = history.state.collectAsState().value
+            androidx.compose.runtime.LaunchedEffect(Unit) { history.refresh() }
+            AdAwayTheme(dynamicColor = false) { Surface {
+                QueryLogContent(state.shown, state.entries.size, state.page?.total, state.filter,
+                    state.busy, state.failed, state.page?.hasMore == true, history::setFilter,
+                    history::more, history::refresh, family = state.family, onFamily = history::setFamily,
+                    retainedTotal = state.page?.retainedTotal, previousConditions = state.previousConditions)
+            } }
+        }
+        compose.waitUntil { browser?.state?.value?.page != null }
+        compose.onNodeWithTag("query-family-6").performScrollTo().performClick()
+        compose.waitUntil { browser?.state?.value?.entries?.singleOrNull()?.host == "older-ipv6.example" }
+        compose.onNodeWithTag("query-log-list").performScrollToNode(hasText("older-ipv6.example"))
+        compose.onNodeWithText("older-ipv6.example").performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_identity, "$generation:44"))
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_copy_evidence)).assertExists()
+        saveScreenshot("logs-full-history-ipv6-identity", dialog = true)
+    }
+
+    @Test fun previousConditionsAndSnapshotExportCancellationAreVisibleAtLargeText() {
+        var cancelled = 0
+        compose.setContent {
+            val density = LocalDensity.current.density
+            CompositionLocalProvider(LocalDensity provides Density(density, 1.5f)) {
+                AdAwayTheme(darkTheme = true, dynamicColor = false) { Surface(Modifier.widthIn(max = 320.dp)) {
+                    QueryLogContent(listOf(QueryLogEntry(host = "previous-filter.example")), 1, 12, 3,
+                        false, false, true, {}, {}, {}, retainedTotal = 4096, previousConditions = true,
+                        exporting = true, exported = 300, exportTotal = 900, onCancelExport = { cancelled++ })
+                } }
+            }
+        }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_previous_conditions))
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_export_progress, 300, 900))
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_export_cancel)).performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1, cancelled) }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_more)).assertDoesNotExist()
+        saveScreenshot("logs-history-filter-export-state")
+    }
+
+    @Test fun oldServerUpgradeRequirementIsNotHiddenAsEmptyMatchingHistory() {
+        compose.setContent { AdAwayTheme(dynamicColor = false) { Surface {
+            QueryLogContent(emptyList(), 0, null, -1, false, true, false, {}, {}, {}, upgradeRequired = true)
+        } } }
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_upgrade_required))
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(compose.activity.getString(R.string.compose_logs_empty)).assertDoesNotExist()
+        saveScreenshot("logs-history-server-upgrade-required")
+    }
 
     @Test fun deniedDocumentAndPlaceholderImageHaveDifferentPathsAndStatuses() {
         val rows = listOf(

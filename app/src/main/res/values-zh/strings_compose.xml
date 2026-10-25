@@ -5,7 +5,7 @@
     <string name="compose_logs_type_all">全部响应类型</string>
     <string name="compose_logs_type_structure">页面结构／通用策略</string>
     <string name="compose_logs_type_unknown">类型未知／未记录</string>
-    <string name="compose_logs_classification_scope">连接协议与响应分类仅筛选已加载的 HTTP 记录，不代表 DNS A／AAAA 或订阅规则来源。旧记录未采集的信息保留为未知。</string>
+    <string name="compose_logs_classification_scope">连接协议与响应分类筛选全部保留的 Web 历史，不代表 DNS A／AAAA 或 AdGuard 规则来源。未采集的信息保留为未知。</string>
     <!-- 新 Compose UI 字符串（中文） -->
 
     <!-- 导航 -->
@@ -47,8 +47,8 @@
 
     <!-- 统计 -->
     <string name="compose_stats_title">统计</string>
-    <string name="compose_stats_kpi_requests">请求</string>
-    <string name="compose_stats_kpi_blocked">拦截</string>
+    <string name="compose_stats_kpi_requests">Web 请求</string>
+    <string name="compose_stats_kpi_blocked">本地拦截</string>
     <string name="compose_stats_kpi_rate">拦截率</string>
     <string name="compose_stats_kpi_certs">证书</string>
     <string name="compose_stats_hosts_list">规则列表</string>
@@ -57,12 +57,12 @@
     <string name="compose_stats_total">合计</string>
     <string name="compose_stats_details">网络服务器详情</string>
     <string name="compose_stats_uptime">运行时间</string>
-    <string name="compose_stats_requests">请求总数</string>
+    <string name="compose_stats_requests">累计 Web 请求</string>
     <string name="compose_stats_connections">连接数</string>
     <string name="compose_stats_connections_active">%1$d（%2$d 活跃）</string>
     <string name="compose_stats_sni">SNI证书签发</string>
     <string name="compose_stats_images">占位图数量</string>
-    <string name="compose_stats_block_rate">拦截率</string>
+    <string name="compose_stats_block_rate">本地拦截比例</string>
     <string name="compose_stats_sni_hit_rate">SNI 缓存命中率</string>
     <string name="compose_stats_uptime_days">运行时长</string>
     <string name="compose_stats_daily_peak">每日峰值拦截</string>
@@ -71,10 +71,10 @@
     <string name="compose_stats_app_unknown">UID %1$d</string>
     <string name="compose_stats_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
     <string name="compose_stats_app_storm">重试风暴 %1$d 次/秒</string>
-    <string name="compose_stats_app_tls_rejected">证书被拒 %1$d 次（固定证书）</string>
+    <string name="compose_stats_app_tls_rejected">TLS 失败 %1$d 次（原因未确认）</string>
     <string name="compose_stats_app_allowed">已放行（不拦截）</string>
     <string name="compose_stats_storm_title">请求风暴（%1$d 个应用）</string>
-    <string name="compose_stats_storm_hint">速率 ≥ %1$d 次/秒：几乎都是"被拦下后立即重试"的循环。放行整个应用，或只放行它死磕的那个域即可止血。</string>
+    <string name="compose_stats_storm_hint">速率 ≥ %1$d 次 Web 请求/秒表示请求频繁，不等于已确认重试循环；请结合请求详情决定是否调整豁免。</string>
     <string name="compose_stats_storm_rate">%1$d 次/秒</string>
     <string name="compose_stats_storm_blocked">拦截率 %1$d%%</string>
     <string name="compose_stats_storm_allow_app">放行应用</string>
@@ -109,7 +109,7 @@
     <string name="compose_settings_adguard_copy">复制这两个地址</string>
     <string name="compose_settings_adguard_copied">地址已复制</string>
     <string name="compose_settings_adguard_dismiss">不再提示</string>
-    <string name="compose_stats_app_pin_refused">已改为廉价拒绝（固定证书）</string>
+    <string name="compose_stats_app_pin_refused">按已配置的 TLS 重试策略拒绝</string>
     <string name="compose_stats_recent_certs">最近签发的证书</string>
     <string name="compose_stats_certs_hint">各应用请求签发的域名（SNI）</string>
     <string name="compose_stats_recent_requests">最近请求</string>
@@ -337,6 +337,7 @@
     <string name="compose_settings_update_wifi">仅 Wi-Fi 更新</string>
     <string name="compose_settings_update_wifi_hint">避免消耗移动数据</string>
     <string name="compose_stats_status_title">统计状态</string>
+    <string name="compose_stats_inconsistent_history">保留的分类累计大于报告总量。原始数据未清除；这些计数不能证明响应已成功送达。</string>
     <string name="compose_stats_status_ok">正常 · 更新于 %1$s</string>
     <string name="compose_stats_status_stale">最后更新 %1$s（可能已过期）</string>
     <string name="compose_stats_status_waiting">规则统计不受影响 · 等待 web 服务器数据</string>
@@ -591,7 +592,7 @@
     <string name="compose_tcp_failed">连接或保护失败</string>
     <string name="compose_logs_refresh">刷新日志</string>
     <string name="compose_logs_scope">Web 响应日志；不包含未到达本服务器的 DNS／Hosts 拦截。</string>
-    <string name="compose_logs_loaded_count">当前筛选 %1$d 条 · 已读 %2$d / 可读 %3$d 条</string>
+    <string name="compose_logs_loaded_count">已读 %1$d / 匹配 %2$d 条 · 历史保留 %3$d 条</string>
     <string name="compose_logs_read_failed">明细读取失败或历史已过期，已保留当前记录；刷新可重试。</string>
     <string name="compose_logs_more">读取更早请求</string>
     <string name="compose_rules_browser">规则明细</string>
@@ -612,14 +613,24 @@
     <string name="compose_logs_pause">暂停</string>
     <string name="compose_logs_resume">恢复实时</string>
     <string name="compose_logs_search">搜索域名、路径或状态</string>
-    <string name="compose_logs_search_scope">仅筛选已加载记录；读取更早请求可扩大查找范围。</string>
-    <string name="compose_logs_local_exemption">本地豁免</string>
+    <string name="compose_logs_search_scope">搜索全部保留历史的域名、已记录路径或 HTTP 状态码。普通文本，最多 191 个 UTF-8 字节；ASCII 不区分大小写。</string>
+    <string name="compose_logs_query_invalid">请输入无控制字符的有效文本，最多 191 个 UTF-8 字节；输入未被截断。</string>
+    <string name="compose_logs_count_unknown">尚未取得完整历史应答，匹配数量未知。</string>
+    <string name="compose_logs_previous_conditions">当前记录属于之前的筛选条件，尚未取得本次条件的完整结果。</string>
+    <string name="compose_logs_upgrade_required">当前运行的服务器不支持全历史筛选，请更新或重启服务器；不会退回当前页筛选。</string>
+    <string name="compose_logs_export_progress">正在导出固定历史：%1$d / %2$d 条匹配记录</string>
+    <string name="compose_logs_export_cancel">取消导出</string>
+    <string name="compose_logs_export_incomplete">导出失败或历史已过期，未分享不完整文件；刷新后重试。</string>
+    <string name="compose_logs_identity">记录编号：%1$s</string>
+    <string name="compose_logs_identity_unknown">旧记录未提供编号。</string>
+    <string name="compose_logs_copy_evidence">复制记录证据</string>
+    <string name="compose_logs_local_exemption">本地处理／放行</string>
     <string name="compose_logs_uid_filter">UID %1$d · 点此取消筛选</string>
     <string name="compose_logs_no_match">已加载记录中没有匹配项；可清除筛选或读取更早请求。</string>
     <string name="compose_logs_details">请求详情</string>
     <string name="compose_logs_close">关闭</string>
     <string name="compose_logs_only_app">仅此应用</string>
-    <string name="compose_logs_exemption_detail">本地服务器返回无内容（HTTP 204）。此豁免不代表已访问原站；上游 DNS 拦截仍可能生效。</string>
+    <string name="compose_logs_exemption_detail">本地处理且未记录拦截动作，具体应答见 HTTP 状态。这可能是本地应答或豁免，不证明命中用户例外或已访问原站；历史记录未采集的具体原因不补猜。</string>
     <string name="compose_logs_proxy_detail">已交给本地转发路径；此记录不代表上游请求已成功完成。</string>
     <string name="compose_logs_block_detail">本地服务器替换或抑制了响应。资源类型由请求推测，不能据此认定它属于广告。</string>
     <string name="compose_logs_details_scope">这是服务器处理记录。HTTP 状态表示本地已生成应答，不证明客户端已收到。路径省略查询参数和片段；旧记录缺少的信息不补猜。此日志不采集 DNS 决策、订阅命中来源、HTTPS 内容或上游完成结果。</string>
