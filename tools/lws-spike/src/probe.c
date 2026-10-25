@@ -8,8 +8,13 @@
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32
+#ifdef _MSC_VER
+#include <WS2tcpip.h>
+#include <WinSock2.h>
+#else
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#endif
 typedef SOCKET socket_type;
 #define close_socket closesocket
 #else
@@ -71,6 +76,8 @@ static int connect_to(struct client *c, const char *ip, int port,
   c->context = SSL_CTX_new(TLS_client_method());
   if (!c->context)
     return 0;
+  if (!SSL_CTX_set_min_proto_version(c->context, TLS1_2_VERSION))
+    return 0;
   SSL_CTX_set_verify(c->context, SSL_VERIFY_PEER, NULL);
   if (ca) {
     if (SSL_CTX_load_verify_locations(c->context, ca, NULL) != 1)
@@ -80,11 +87,14 @@ static int connect_to(struct client *c, const char *ip, int port,
   c->tls = SSL_new(c->context);
   if (!c->tls)
     return 0;
-  SSL_set_fd(c->tls, (int)c->socket);
+  if (SSL_set_fd(c->tls, (int)c->socket) != 1 ||
+      SSL_set1_host(c->tls, identity) != 1)
+    return 0;
   unsigned char binary[16];
   if (inet_pton(AF_INET, identity, binary) == 1 ||
       inet_pton(AF_INET6, identity, binary) == 1) {
-    if (X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(c->tls), identity) != 1)
+    if (X509_VERIFY_PARAM_set1_host(SSL_get0_param(c->tls), NULL, 0) != 1 ||
+        X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(c->tls), identity) != 1)
       return 0;
   } else if (SSL_set_tlsext_host_name(c->tls, identity) != 1 ||
              SSL_set1_host(c->tls, identity) != 1)
@@ -109,12 +119,16 @@ static int request(struct client *c, const char *path, unsigned expected) {
                      : recv(c->socket, buffer + used, (int)(262144 - used), 0);
     if (got <= 0)
       break;
+    if ((size_t)got > 262144 - used) {
+      free(buffer);
+      return 0;
+    }
     used += (size_t)got;
   }
   buffer[used] = 0;
-  unsigned status = 0;
-  int ok = sscanf(buffer, "HTTP/1.%*d %u", &status) == 1 &&
-           status == expected && strstr(buffer, "\r\n\r\n") != NULL;
+  unsigned long status = used >= 12 ? strtoul(buffer + 9, NULL, 10) : 0;
+  int ok = used >= 12 && !strncmp(buffer, "HTTP/1.", 7) && status == expected &&
+           strstr(buffer, "\r\n\r\n") != NULL;
   free(buffer);
   return ok;
 }
@@ -126,7 +140,8 @@ int main(int argc, char **argv) {
 #endif
   if (argc != 4)
     return 2;
-  int http = atoi(argv[1]), https = atoi(argv[2]);
+  int http = atoi(argv[1]);
+  int https = atoi(argv[2]);
   const char *ca = argv[3];
   if (http < 1 || http > 65535 || https < 1 || https > 65535)
     return 2;

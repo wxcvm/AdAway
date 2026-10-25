@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #ifndef ADAWAY_SPIKE_H
 #define ADAWAY_SPIKE_H
+#include "platform.h"
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #include <signal.h>
@@ -13,8 +14,14 @@
 #define SPIKE_CHUNK 4096
 #define SPIKE_BUFFER 16384
 struct spike_options {
-  const char *ipv4, *ipv6, *directory, *image;
-  unsigned http, https, lifetime, cert_age_ms;
+  const char *ipv4;
+  const char *ipv6;
+  const char *directory;
+  const char *image;
+  unsigned http;
+  unsigned https;
+  unsigned lifetime;
+  unsigned cert_age_ms;
   bool logging;
 };
 struct spike_leaf {
@@ -23,10 +30,17 @@ struct spike_leaf {
   uint64_t born;
 };
 struct spike_certificates {
-  X509 *ca, *fallback;
-  EVP_PKEY *ca_key, *leaf_key;
+  X509 *ca;
+  X509 *fallback;
+  EVP_PKEY *ca_key;
+  EVP_PKEY *leaf_key;
   struct spike_leaf leaves[SPIKE_CERTS];
-  unsigned next, hits, misses, evictions, renewals, age_ms;
+  unsigned next;
+  unsigned hits;
+  unsigned misses;
+  unsigned evictions;
+  unsigned renewals;
+  unsigned age_ms;
 };
 struct spike_app {
   struct spike_options options;
@@ -35,8 +49,11 @@ struct spike_app {
   size_t image_length;
   unsigned char text[4096];
   FILE *log;
-  uint64_t requests, ws_messages;
-  unsigned active, peak, rejected;
+  uint64_t requests;
+  uint64_t ws_messages;
+  unsigned active;
+  unsigned peak;
+  unsigned rejected;
   volatile sig_atomic_t stop;
 };
 struct spike_reply {

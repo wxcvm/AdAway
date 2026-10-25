@@ -9,12 +9,14 @@
 struct connection {
   struct spike_reply reply;
   size_t sent;
-  bool pending, tracked;
+  bool pending;
+  bool tracked;
   uint64_t born;
 };
 struct baseline {
   struct spike_app *app;
-  struct mg_str cert, key;
+  struct mg_str cert;
+  struct mg_str key;
 };
 static void send_body(struct mg_connection *c, struct connection *state) {
   if (!state->pending || c->send.len > SPIKE_CHUNK)
@@ -30,66 +32,75 @@ static void send_body(struct mg_connection *c, struct connection *state) {
     c->is_resp = 0;
   }
 }
+static void accepted(struct mg_connection *c, struct baseline *base) {
+  struct spike_app *app = base->app;
+  struct connection *state;
+  if (app->active >= SPIKE_CONNECTIONS) {
+    app->rejected++;
+    c->is_closing = 1;
+    return;
+  }
+  state = calloc(1, sizeof(*state));
+  if (!state) {
+    c->is_closing = 1;
+    return;
+  }
+  memcpy(c->data, &state, sizeof(state));
+  state->tracked = true;
+  state->born = spike_now();
+  app->active++;
+  if (app->active > app->peak)
+    app->peak = app->active;
+  if (c->is_tls) {
+    struct mg_tls_opts options = {0};
+    options.cert = base->cert;
+    options.key = base->key;
+    mg_tls_init(c, &options);
+    struct mg_tls *tls = c->tls;
+    if (!tls || !spike_configure_tls(app, tls->ctx))
+      c->is_closing = 1;
+    else
+      spike_configure_ssl(app, tls->ssl);
+  }
+}
+static void handle_http(struct mg_connection *c, struct spike_app *app,
+                        struct connection *state, void *data) {
+  struct mg_http_message *message = data;
+  if (mg_match(message->uri, mg_str("/ws"), NULL)) {
+    mg_ws_upgrade(c, message, "Sec-WebSocket-Protocol: spike\r\n");
+    return;
+  }
+  char path[256];
+  if (message->uri.len >= sizeof(path)) {
+    c->is_closing = 1;
+    return;
+  }
+  memcpy(path, message->uri.buf, message->uri.len);
+  path[message->uri.len] = 0;
+  struct mg_str *etag = mg_http_get_header(message, "If-None-Match");
+  bool conditional = etag && mg_strcmp(*etag, mg_str("\"spike-v1\"")) == 0;
+  spike_reply(app, path, conditional, &state->reply);
+  state->sent = 0;
+  state->pending = state->reply.length > 0;
+  state->born = spike_now();
+  mg_printf(c,
+            "HTTP/1.1 %u Fixture\r\nContent-Type: %s\r\nContent-Length: "
+            "%zu\r\n%s\r\n",
+            state->reply.status, state->reply.type, state->reply.length,
+            !strcmp(path, "/image") ? "ETag: \"spike-v1\"\r\n" : "");
+  send_body(c, state);
+  if (!state->pending)
+    c->is_resp = 0;
+}
 static void callback(struct mg_connection *c, int event, void *data) {
   struct baseline *base = c->fn_data;
   struct spike_app *app = base->app;
   struct connection *state;
   memcpy(&state, c->data, sizeof(state));
   if (event == MG_EV_ACCEPT) {
-    if (app->active >= SPIKE_CONNECTIONS) {
-      app->rejected++;
-      c->is_closing = 1;
-      return;
-    }
-    state = calloc(1, sizeof(*state));
-    if (!state) {
-      c->is_closing = 1;
-      return;
-    }
-    memcpy(c->data, &state, sizeof(state));
-    state->tracked = true;
-    state->born = spike_now();
-    app->active++;
-    if (app->active > app->peak)
-      app->peak = app->active;
-    if (c->is_tls) {
-      struct mg_tls_opts options = {0};
-      options.cert = base->cert;
-      options.key = base->key;
-      mg_tls_init(c, &options);
-      struct mg_tls *tls = c->tls;
-      if (!tls || !spike_configure_tls(app, tls->ctx))
-        c->is_closing = 1;
-      else
-        spike_configure_ssl(app, tls->ssl);
-    }
+    accepted(c, base);
   } else if (event == MG_EV_HTTP_MSG && state) {
-    struct mg_http_message *message = data;
-    if (mg_match(message->uri, mg_str("/ws"), NULL)) {
-      mg_ws_upgrade(c, message, "Sec-WebSocket-Protocol: spike\r\n");
-      return;
-    }
-    char path[256];
-    if (message->uri.len >= sizeof(path)) {
-      c->is_closing = 1;
-      return;
-    }
-    memcpy(path, message->uri.buf, message->uri.len);
-    path[message->uri.len] = 0;
-    struct mg_str *etag = mg_http_get_header(message, "If-None-Match");
-    bool conditional = etag && mg_strcmp(*etag, mg_str("\"spike-v1\"")) == 0;
-    spike_reply(app, path, conditional, &state->reply);
-    state->sent = 0;
-    state->pending = state->reply.length > 0;
-    state->born = spike_now();
-    mg_printf(c,
-              "HTTP/1.1 %u Fixture\r\nContent-Type: %s\r\nContent-Length: "
-              "%zu\r\n%s\r\n",
-              state->reply.status, state->reply.type, state->reply.length,
-              !strcmp(path, "/image") ? "ETag: \"spike-v1\"\r\n" : "");
-    send_body(c, state);
-    if (!state->pending)
-      c->is_resp = 0;
+    handle_http(c, app, state, data);
   } else if (event == MG_EV_WS_MSG) {
     struct mg_ws_message *message = data;
     if (message->data.len > SPIKE_CHUNK) {
@@ -121,7 +132,8 @@ static bool listen_on(struct mg_mgr *mgr, struct baseline *base,
   return mg_http_listen(mgr, url, callback, base) != NULL;
 }
 int spike_backend(struct spike_app *app) {
-  BIO *cert = BIO_new(BIO_s_mem()), *key = BIO_new(BIO_s_mem());
+  BIO *cert = BIO_new(BIO_s_mem());
+  BIO *key = BIO_new(BIO_s_mem());
   if (!cert || !key) {
     BIO_free(cert);
     BIO_free(key);
@@ -134,9 +146,10 @@ int spike_backend(struct spike_app *app) {
     BIO_free(key);
     return 4;
   }
-  char *cert_data, *key_data;
-  long cert_size = BIO_get_mem_data(cert, &cert_data),
-       key_size = BIO_get_mem_data(key, &key_data);
+  char *cert_data;
+  char *key_data;
+  long cert_size = BIO_get_mem_data(cert, &cert_data);
+  long key_size = BIO_get_mem_data(key, &key_data);
   struct baseline base = {app, mg_str_n(cert_data, (size_t)cert_size),
                           mg_str_n(key_data, (size_t)key_size)};
   struct mg_mgr mgr;

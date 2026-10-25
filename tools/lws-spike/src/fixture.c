@@ -4,7 +4,11 @@
 #include <string.h>
 #include <time.h>
 #ifdef _WIN32
+#ifdef _MSC_VER
+#include <Windows.h>
+#else
 #include <windows.h>
+#endif
 #else
 #include <unistd.h>
 #endif
@@ -19,7 +23,7 @@ uint64_t spike_now(void) {
 }
 int spike_init(struct spike_app *app) {
   memset(app->text, 'x', sizeof(app->text));
-  FILE *image = fopen(app->options.image, "rb");
+  FILE *image = spike_open(app->options.image, "rb");
   if (!image)
     return 0;
   bool ok = fseek(image, 0, SEEK_END) == 0;
@@ -40,7 +44,7 @@ int spike_init(struct spike_app *app) {
   if (app->options.logging) {
     char path[1024];
     snprintf(path, sizeof(path), "%s/requests.log", app->options.directory);
-    app->log = fopen(path, "ab");
+    app->log = spike_open(path, "ab");
     if (!app->log)
       return 0;
   }

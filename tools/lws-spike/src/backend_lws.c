@@ -4,9 +4,56 @@
 #include <string.h>
 struct session {
   struct spike_reply reply;
-  size_t sent, ws_length;
+  size_t sent;
+  size_t ws_length;
   unsigned char websocket[SPIKE_CHUNK];
 };
+static int handle_http(struct lws *wsi, struct spike_app *app,
+                       struct session *session, void *in) {
+  if (!session)
+    return -1;
+  char etag[64] = {0};
+  lws_hdr_copy(wsi, etag, sizeof(etag), WSI_TOKEN_HTTP_IF_NONE_MATCH);
+  spike_reply(app, (const char *)in, !strcmp(etag, "\"spike-v1\""),
+              &session->reply);
+  session->sent = 0;
+  unsigned char buffer[LWS_PRE + 1024];
+  unsigned char *start = buffer + LWS_PRE;
+  unsigned char *p = start;
+  unsigned char *end = buffer + sizeof(buffer);
+  if (lws_add_http_common_headers(
+          wsi, session->reply.status, session->reply.type,
+          (lws_filepos_t)session->reply.length, &p, end))
+    return -1;
+  if (!strcmp((const char *)in, "/image") &&
+      lws_add_http_header_by_name(wsi, (const unsigned char *)"etag:",
+                                  (const unsigned char *)"\"spike-v1\"", 10, &p,
+                                  end))
+    return -1;
+  if (lws_finalize_write_http_header(wsi, start, &p, end))
+    return -1;
+  if (!session->reply.length)
+    return lws_http_transaction_completed(wsi) ? -1 : 0;
+  lws_callback_on_writable(wsi);
+  return 0;
+}
+static int write_http(struct lws *wsi, struct session *session) {
+  if (!session || session->sent >= session->reply.length)
+    return 0;
+  unsigned char buffer[LWS_PRE + SPIKE_CHUNK];
+  size_t remaining = session->reply.length - session->sent;
+  size_t n = remaining > SPIKE_CHUNK ? SPIKE_CHUNK : remaining;
+  memcpy(buffer + LWS_PRE, session->reply.body + session->sent, n);
+  int sent = lws_write(wsi, buffer + LWS_PRE, n,
+                       n == remaining ? LWS_WRITE_HTTP_FINAL : LWS_WRITE_HTTP);
+  if (sent != (int)n)
+    return -1;
+  session->sent += n;
+  if (session->sent == session->reply.length)
+    return lws_http_transaction_completed(wsi) ? -1 : 0;
+  lws_callback_on_writable(wsi);
+  return 0;
+}
 static int callback(struct lws *wsi, enum lws_callback_reasons reason,
                     void *user, void *in, size_t length) {
   struct spike_app *app = lws_context_user(lws_get_context(wsi));
@@ -34,50 +81,10 @@ static int callback(struct lws *wsi, enum lws_callback_reasons reason,
       lws_set_opaque_user_data(wsi, NULL);
     }
     return 0;
-  case LWS_CALLBACK_HTTP: {
-    if (!session)
-      return -1;
-    char etag[64] = {0};
-    lws_hdr_copy(wsi, etag, sizeof(etag), WSI_TOKEN_HTTP_IF_NONE_MATCH);
-    spike_reply(app, (const char *)in, !strcmp(etag, "\"spike-v1\""),
-                &session->reply);
-    session->sent = 0;
-    unsigned char buffer[LWS_PRE + 1024], *start = buffer + LWS_PRE, *p = start,
-                                          *end = buffer + sizeof(buffer);
-    if (lws_add_http_common_headers(
-            wsi, session->reply.status, session->reply.type,
-            (lws_filepos_t)session->reply.length, &p, end))
-      return -1;
-    if (!strcmp((const char *)in, "/image") &&
-        lws_add_http_header_by_name(wsi, (const unsigned char *)"etag:",
-                                    (const unsigned char *)"\"spike-v1\"", 10,
-                                    &p, end))
-      return -1;
-    if (lws_finalize_write_http_header(wsi, start, &p, end))
-      return -1;
-    if (!session->reply.length)
-      return lws_http_transaction_completed(wsi) ? -1 : 0;
-    lws_callback_on_writable(wsi);
-    return 0;
-  }
-  case LWS_CALLBACK_HTTP_WRITEABLE: {
-    if (!session || session->sent >= session->reply.length)
-      return 0;
-    unsigned char buffer[LWS_PRE + SPIKE_CHUNK];
-    size_t remaining = session->reply.length - session->sent,
-           n = remaining > SPIKE_CHUNK ? SPIKE_CHUNK : remaining;
-    memcpy(buffer + LWS_PRE, session->reply.body + session->sent, n);
-    int sent =
-        lws_write(wsi, buffer + LWS_PRE, n,
-                  n == remaining ? LWS_WRITE_HTTP_FINAL : LWS_WRITE_HTTP);
-    if (sent != (int)n)
-      return -1;
-    session->sent += n;
-    if (session->sent == session->reply.length)
-      return lws_http_transaction_completed(wsi) ? -1 : 0;
-    lws_callback_on_writable(wsi);
-    return 0;
-  }
+  case LWS_CALLBACK_HTTP:
+    return handle_http(wsi, app, session, in);
+  case LWS_CALLBACK_HTTP_WRITEABLE:
+    return write_http(wsi, session);
   case LWS_CALLBACK_RECEIVE:
     if (!session || length > SPIKE_CHUNK - session->ws_length)
       return -1;
@@ -125,8 +132,10 @@ static bool listen_on(struct lws_context *context, struct spike_app *app,
   info.port = (int)(tls ? app->options.https : app->options.http);
   info.iface = address;
   info.protocols = protocols;
-  info.vhost_name = ipv6 ? (tls ? "tls6.spike.invalid" : "http6.spike.invalid")
-                         : (tls ? "tls4.spike.invalid" : "http4.spike.invalid");
+  if (ipv6)
+    info.vhost_name = tls ? "tls6.spike.invalid" : "http6.spike.invalid";
+  else
+    info.vhost_name = tls ? "tls4.spike.invalid" : "http4.spike.invalid";
   info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
   if (ipv6)
     info.options |= LWS_SERVER_OPTION_IPV6_V6ONLY_MODIFY |

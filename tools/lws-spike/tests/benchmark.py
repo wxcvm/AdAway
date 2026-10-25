@@ -133,14 +133,25 @@ def summarize(rows, quick):
     for row in rows:
         key = (row["logging"], row["case"], row["clients"])
         groups.setdefault(key, {}).setdefault(row["backend"], []).append(row)
+    expected = {
+        (logging, case, clients)
+        for logging in (False, True)
+        for case in ("empty", "text", "image", "https-keep", "tls-cold")
+        for clients in (1, 16, 64)
+    }
     comparisons = []
     unstable = False
     regressed = False
-    invalid = quick
+    invalid = quick or set(groups) != expected
     for key, backends in groups.items():
         if set(backends) != {"lws", "mongoose"}:
             invalid = True
             continue
+        if any(
+            len(values) != 5 or {row["round"] for row in values} != set(range(5))
+            for values in backends.values()
+        ):
+            invalid = True
         ratios = {}
         variations = {}
         for metric in ("p95_ms", "cpu_per_request_us", "peak_rss"):

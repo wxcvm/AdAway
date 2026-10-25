@@ -14,6 +14,12 @@ a = p.parse_args()
 directory = pathlib.Path(a.directory).resolve()
 source, fixture = fetch(directory / "inputs")
 build = directory / "build"
+prefix = pathlib.Path(a.openssl).resolve()
+if (
+    not a.preflight
+    and (prefix / "BUILD-COMMIT").read_text().strip() != LOCK["openssl"]["commit"]
+):
+    raise RuntimeError("Crypto prefix lacks the pinned build provenance")
 command = [
     a.cmake,
     "-S",
@@ -21,7 +27,10 @@ command = [
     "-B",
     str(build),
     "-DCMAKE_BUILD_TYPE=Release",
-    "-DOPENSSL_ROOT_DIR=" + str(pathlib.Path(a.openssl).resolve()),
+    "-DOPENSSL_ROOT_DIR=" + str(prefix),
+    "-DOPENSSL_INCLUDE_DIR=" + str(prefix / "include"),
+    "-DOPENSSL_SSL_LIBRARY=" + str(prefix / "lib/libssl.a"),
+    "-DOPENSSL_CRYPTO_LIBRARY=" + str(prefix / "lib/libcrypto.a"),
     "-DLWS_SOURCE=" + str(source),
     "-DMONGOOSE_SOURCE=" + str(fixture / "webserver/jni/mongoose"),
 ]

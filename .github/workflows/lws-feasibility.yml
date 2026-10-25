@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: lws-spike-${{ github.ref }}
+  group: lws-spike-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 jobs:
   host:
@@ -25,6 +25,8 @@ jobs:
       - name: Build and run actual processes
         run: |
           mkdir -p evidence
+          python3 -m pip install -r tools/lws-spike/tests/requirements.txt
+          python3 -m unittest discover -s tools/lws-spike/tests -p 'test_*.py'
           python3 tools/lws-spike/build.py --directory "$RUNNER_TEMP/lws-host" --openssl "$RUNNER_TEMP/spike-openssl/install" > evidence/build.log 2>&1
           image="$RUNNER_TEMP/lws-host/inputs/fixture/app/src/main/assets/img_01.webp"
           for backend in lws mongoose; do
@@ -103,6 +105,7 @@ jobs:
   performance:
     name: Paired Linux performance (no migration auto-switch)
     needs: host
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

@@ -21,16 +21,20 @@ static unsigned number(const char *value, unsigned max) {
 int main(int argc, char **argv) {
   app.options = (struct spike_options){"127.0.0.1", "::1", NULL,    NULL, 0,
                                        0,           3600,  3600000, false};
-  for (int i = 1; i < argc; ++i) {
+  int i = 1;
+  while (i < argc) {
     if (!strcmp(argv[i], "--logging")) {
       app.options.logging = true;
+      i++;
       continue;
     }
     if (i + 1 == argc) {
       fprintf(stderr, "missing argument\n");
       return 2;
     }
-    const char *key = argv[i++], *value = argv[i];
+    const char *key = argv[i];
+    const char *value = argv[i + 1];
+    i += 2;
     if (!strcmp(key, "--ipv4"))
       app.options.ipv4 = !strcmp(value, "-") ? NULL : value;
     else if (!strcmp(key, "--ipv6"))
