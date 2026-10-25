@@ -30,11 +30,12 @@ Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `tr
 
 ## 2. /internal-stats 的 JSON 字段
 
-权威来源：webserver/jni/webserver.c 与 query_log_store.inc 中构造 JSON 的代码；本清单涵盖统计、日志及控制响应，共 74 个字段。抽取 C 字符串中的转义 JSON 键（包括短键和大小写），不把条件表达式中的普通字符串当作字段。
+权威来源：webserver/jni/webserver.c 与 query_log_store.inc 中构造 JSON 的代码；本清单涵盖统计、日志及控制响应，共 78 个字段。抽取 C 字符串中的转义 JSON 键（包括短键和大小写），不把条件表达式中的普通字符串当作字段。
 客户端只读需要的字段，允许服务端新增字段（向后兼容），但不得改变既有字段的含义。
 
 - `action`
 - `active_connections`
+- `anchor`
 - `apps`
 - `block_image_count`
 - `block_rate`
@@ -63,6 +64,8 @@ Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `tr
 - `entries`
 - `error`
 - `family`
+- `filterVersion`
+- `generation`
 - `guard_hits`
 - `h`
 - `hasMore`
@@ -79,16 +82,17 @@ Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `tr
 - `pathTruncated`
 - `pin_refused`
 - `qlog`
+- `queryKey`
 - `query_log`
 - `recent_tls`
 - `requests`
+- `retainedTotal`
+- `returned`
+- `sequence`
+- `snapshot_ts`
 - `sni_cache_hits`
 - `sni_certs_issued`
 - `sni_hit_rate`
-- `anchor`
-- `generation`
-- `returned`
-- `snapshot_ts`
 - `stats`
 - `status`
 - `tls_fail`
@@ -107,8 +111,6 @@ Android M1 提供 `TrafficCoreContract`、`RuleSnapshotRepository` 与原生 `tr
 - `uid`
 - `uptime_days`
 - `uptime_seconds`
-
-family 表示实际接收 HTTP 连接的地址族：0 为未知，4 为 IPv4，6 为 IPv6。旧历史不补推地址族；不表示原始 DNS 查询类型或订阅来源。
 
 ## 3. 规则与策略文件（以源码为准）
 

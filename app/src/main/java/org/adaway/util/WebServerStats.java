@@ -60,6 +60,14 @@ public final class WebServerStats {
         return getJson("/internal-qlog?offset=" + Math.max(0, offset) + "&limit=" + Math.min(1000, Math.max(1, limit)) + cursor);
     }
 
+    /** V1 always requires server-side full retained-history filtering, even with empty conditions. */
+    @Nullable
+    public static JSONObject getFilteredQueryLogPage(int offset, int limit, String generation, String anchor,
+            String queryKey, Integer action, Integer family, Integer type, Integer uid, String query) {
+        return getJson(QueryLogRequest.path(offset, limit, generation, anchor, queryKey,
+                action, family, type, uid, query));
+    }
+
     /**
      * 按路径取 JSON：nc 子进程（保留 v4-mapped socket 的真实 uid）优先，OkHttp 兜底。
      * getStats()/getQueryLogPage() 都走这里，保证两者取数栈完全一致。

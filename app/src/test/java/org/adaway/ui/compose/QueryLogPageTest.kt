@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class QueryLogPageTest {
+    @Test fun numericOverflowFractionsAndStringsNeverBecomeValidObservations() {
+        for ((key,value) in listOf("family" to 4294967302L, "uid" to 4294967295L,
+                "action" to 1.9, "mode" to "1", "type" to 4294967295L)) {
+            val json = page()
+            json.getJSONArray("entries").getJSONObject(0).put(key,value)
+            assertThrows(IllegalArgumentException::class.java) { QueryLogPage.parse(json,300,null) }
+        }
+        for ((key,value) in listOf("total" to 4294967597L,"returned" to "1", "nextOffset" to 301.5)) {
+            val json=page().put(key,value)
+            assertThrows(IllegalArgumentException::class.java) { QueryLogPage.parse(json,300,null) }
+        }
+    }
+
     @Test fun localStatusAndPathDistinguishRejectedDocumentFromSameHostImage() {
         val json = page()
         val row = json.getJSONArray("entries").getJSONObject(0)
@@ -51,7 +64,7 @@ class QueryLogPageTest {
         val row = queryLogCsvRow(QueryLogEntry(action = 3, host = "local.example", family = 6,
             path = "/item,\"x\"", httpStatus = 403), java.text.SimpleDateFormat("yyyy-MM-dd"))
         assertTrue(row.contains(",access_denied,"))
-        assertTrue(row.endsWith(",IPv6,\"/item,\"\"x\"\"\",403,false\n"))
+        assertTrue(row.endsWith(",IPv6,\"/item,\"\"x\"\"\",403,false,,\n"))
         assertFalse(row.contains("forwarding_started"))
         assertFalse("A rejected endpoint has no placeholder policy", row.contains("placeholder"))
     }
@@ -136,4 +149,32 @@ class QueryLogPageTest {
             assertThrows(IllegalArgumentException::class.java) { QueryLogPage.parse(json, 300, null) }
         }
     }
+    private fun filteredPage(filter: QueryLogFilter = QueryLogFilter()) = page()
+        .put("filterVersion",1).put("queryKey",filter.queryKey()).put("retainedTotal",1000).also {
+            it.getJSONArray("entries").getJSONObject(0).put("sequence","300")
+        }
+    @Test fun filteredPageBindsConditionsAndIndividualObservationIdentity() {
+        val f=QueryLogFilter(family=6,query="FOO")
+        val parsed=QueryLogPage.parse(filteredPage(f),300,null,f)
+        assertEquals(1000,parsed.retainedTotal)
+        assertEquals("300",parsed.entries.single().sequence)
+        assertEquals(parsed.cursor.generation,parsed.entries.single().generation)
+        assertThrows(IllegalArgumentException::class.java){QueryLogPage.parse(filteredPage(f),300,null,QueryLogFilter())}
+        assertThrows(QueryLogUpgradeRequired::class.java){QueryLogPage.parse(page(),300,null,f)}
+        assertThrows(IllegalArgumentException::class.java){QueryLogPage.parse(filteredPage().put("retainedTotal",1),300,null,QueryLogFilter())}
+        for(value in listOf("0","01","18446744073709551616","601",123)) {
+            val p=filteredPage();p.getJSONArray("entries").getJSONObject(0).put("sequence",value)
+            assertThrows(IllegalArgumentException::class.java){QueryLogPage.parse(p,300,null,QueryLogFilter())}
+        }
+    }
+    @Test fun filterValidationUsesUtf8BytesAndOnlyAsciiCaseFolding() {
+        assertEquals(QueryLogFilter(query="ABC中").queryKey(),QueryLogFilter(query="abc中").queryKey())
+        assertNotEquals(QueryLogFilter(query="Ä").queryKey(),QueryLogFilter(query="ä").queryKey())
+        assertFalse(QueryLogFilter(query="中".repeat(63)+"ab").validationError)
+        assertTrue(QueryLogFilter(query="中".repeat(64)).validationError)
+        assertTrue(QueryLogFilter(query="bad\ud800").validationError)
+        assertTrue(QueryLogFilter(query="x\u0085").validationError)
+        assertNotEquals(QueryLogFilter(query=" x").queryKey(),QueryLogFilter(query="x").queryKey())
+    }
+
 }

@@ -138,6 +138,10 @@ jobs:
           "$RUNNER_TEMP/request-host-asan"
           python3 tools/verify_webserver_apk_test.py
           python3 tools/stats-json-bounds-fixture.py webserver/jni/webserver.c "$RUNNER_TEMP/stats-json-bounds.c"
+          python3 tools/request-accounting-fixture.py --source webserver/jni/webserver.c --output "$RUNNER_TEMP/request-accounting.c"
+          cc -std=c11 -O1 -g -D_GNU_SOURCE -DMG_TLS=0 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Iwebserver/jni -c "$RUNNER_TEMP/request-accounting.c" -o "$RUNNER_TEMP/request-accounting.o"
+          cc -std=c11 -O1 -g -D_GNU_SOURCE -DMG_TLS=0 -fsanitize=address,undefined -fno-omit-frame-pointer "$RUNNER_TEMP/request-accounting.o" webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/request-accounting"
+          "$RUNNER_TEMP/request-accounting"
           cc -std=c11 -O1 -g -D_GNU_SOURCE -DMG_TLS=0 -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Iwebserver/jni -c "$RUNNER_TEMP/stats-json-bounds.c" -o "$RUNNER_TEMP/stats-json-bounds.o"
           cc -std=c11 -O1 -g -D_GNU_SOURCE -DMG_TLS=0 -fsanitize=address,undefined -fno-omit-frame-pointer "$RUNNER_TEMP/stats-json-bounds.o" webserver/jni/mongoose/mongoose.c -pthread -o "$RUNNER_TEMP/stats-json-bounds"
           "$RUNNER_TEMP/stats-json-bounds"

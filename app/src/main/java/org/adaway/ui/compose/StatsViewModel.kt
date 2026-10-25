@@ -30,23 +30,21 @@ data class AppStat(
     val tlsHosts: Long = 0,
     /**
      * Completed / failed TLS handshakes for this uid (best effort: the server
-     * only attributes them when the connection already knew its uid). A client
-     * that pins certificates shows tlsFail >> tlsOk - that is the "who is
-     * ignoring the block page and retrying forever" signal.
+     * only attributes them when the connection already knew its uid).
+     * Failures alone do not identify certificate pinning or a retry cause.
      */
     val tlsOk: Long = 0,
     val tlsFail: Long = 0,
     /**
      * True while the server is refusing this uid's CONNECT requests without
-     * interception because it was detected pinning certificates (only ever set
-     * when the user enabled that policy in the settings).
+     * interception under the user-enabled TLS retry policy. Its heuristic
+     * does not prove which certificate or network condition caused failures.
      */
     val pinRefused: Boolean = false,
     /**
      * Requests per second measured by the server between two stats snapshots
-     * (i.e. the UI refresh period). This is the storm signal: a healthy app is
-     * far below [STORM_TPS], while an app that is blocked and retries in a loop
-     * sits far above it.
+     * (i.e. the observation window). A high rate is an activity signal, not
+     * proof of a blocked-request retry loop.
      */
     val tps: Int = 0,
     val hasMeasuredRate: Boolean = false,
@@ -119,6 +117,9 @@ data class QueryLogEntry(
     /** Local HTTP response queued by the server; 0 means not recorded/pending. */
     val httpStatus: Int = 0,
     val pathTruncated: Boolean = false,
+    /** Ephemeral observation identity; never inferred from host/time. */
+    val sequence: String = "",
+    val generation: String = "",
 )
 
 /** One time bucket of web server activity (hourly or daily series). */
@@ -544,10 +545,12 @@ private fun startPolling() {
     
 
     /** Cursor pins the original history; expired generations fail without clearing the UI. */
-    suspend fun loadQueryLogPage(offset: Int, limit: Int, cursor: QueryLogCursor?): QueryLogPage =
+    suspend fun loadQueryLogPage(offset: Int, limit: Int, cursor: QueryLogCursor?, filter: QueryLogFilter): QueryLogPage =
         withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val json = org.adaway.util.WebServerStats.getQueryLogPage(offset, limit, cursor?.generation, cursor?.anchor)
-            QueryLogPage.parse(json, offset, cursor)
+            filter.requireValid()
+            val json = org.adaway.util.WebServerStats.getFilteredQueryLogPage(offset, limit, cursor?.generation,
+                cursor?.anchor, cursor?.queryKey, filter.action, filter.family, filter.type, filter.uid, filter.query)
+            QueryLogPage.parse(json, offset, cursor, filter)
         }
 
     /**

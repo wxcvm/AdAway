@@ -5,7 +5,7 @@
     <string name="compose_logs_type_all">All response types</string>
     <string name="compose_logs_type_structure">Page structure / general policy</string>
     <string name="compose_logs_type_unknown">Type unknown / not recorded</string>
-    <string name="compose_logs_classification_scope">Connection family and response classification apply to loaded HTTP records. They do not identify DNS A/AAAA records or a subscription rule source. Older records remain unknown.</string>
+    <string name="compose_logs_classification_scope">Connection family and response classification filter the retained Web history. They do not identify DNS A/AAAA records or an AdGuard rule source. Missing observations remain unknown.</string>
     <!-- New Compose UI strings (default: English) -->
 
     <!-- Navigation -->
@@ -47,8 +47,8 @@
 
     <!-- Statistics -->
     <string name="compose_stats_title">Statistics</string>
-    <string name="compose_stats_kpi_requests">Requests</string>
-    <string name="compose_stats_kpi_blocked">Blocked</string>
+    <string name="compose_stats_kpi_requests">Web requests</string>
+    <string name="compose_stats_kpi_blocked">Local blocks</string>
     <string name="compose_stats_kpi_rate">Block rate</string>
     <string name="compose_stats_kpi_certs">Certs</string>
     <string name="compose_stats_hosts_list">Hosts list</string>
@@ -57,12 +57,12 @@
     <string name="compose_stats_total">total</string>
     <string name="compose_stats_details">Web server details</string>
     <string name="compose_stats_uptime">Uptime</string>
-    <string name="compose_stats_requests">Total requests</string>
+    <string name="compose_stats_requests">Cumulative Web requests</string>
     <string name="compose_stats_connections">Connections</string>
     <string name="compose_stats_connections_active">%1$d (%2$d active)</string>
     <string name="compose_stats_sni">SNI certs issued</string>
     <string name="compose_stats_images">Block images</string>
-    <string name="compose_stats_block_rate">Block rate</string>
+    <string name="compose_stats_block_rate">Local block rate</string>
     <string name="compose_stats_sni_hit_rate">SNI cache hit rate</string>
     <string name="compose_stats_uptime_days">Uptime</string>
     <string name="compose_stats_daily_peak">Daily peak blocked</string>
@@ -71,10 +71,10 @@
     <string name="compose_stats_app_unknown">UID %1$d</string>
     <string name="compose_stats_app_sub">%1$d conn · %2$d req · %3$d blocked</string>
     <string name="compose_stats_app_storm">retry storm %1$d/s</string>
-    <string name="compose_stats_app_tls_rejected">cert rejected %1$d× (pinning)</string>
+    <string name="compose_stats_app_tls_rejected">TLS failed %1$d× (cause unconfirmed)</string>
     <string name="compose_stats_app_allowed">allowed (not blocked)</string>
     <string name="compose_stats_storm_title">Retry storms (%1$d apps)</string>
-    <string name="compose_stats_storm_hint">Rate ≥ %1$d req/s: nearly always a "blocked, then retried immediately" loop. Allow the whole app, or just the host it keeps hitting.</string>
+    <string name="compose_stats_storm_hint">Rate ≥ %1$d Web req/s indicates frequent requests, not a confirmed retry loop. Check request details before changing exemptions.</string>
     <string name="compose_stats_storm_rate">%1$d req/s</string>
     <string name="compose_stats_storm_blocked">blocked %1$d%%</string>
     <string name="compose_stats_storm_allow_app">Allow app</string>
@@ -109,7 +109,7 @@
     <string name="compose_settings_adguard_copy">Copy the addresses</string>
     <string name="compose_settings_adguard_copied">Addresses copied</string>
     <string name="compose_settings_adguard_dismiss">Do not show again</string>
-    <string name="compose_stats_app_pin_refused">refused without interception (pinning)</string>
+    <string name="compose_stats_app_pin_refused">refused by configured TLS retry policy</string>
     <string name="compose_stats_recent_certs">Recently issued certs</string>
     <string name="compose_stats_certs_hint">Domains apps asked us to sign (SNI)</string>
     <string name="compose_stats_recent_requests">Recent requests</string>
@@ -336,6 +336,7 @@
     <string name="compose_settings_update_wifi">Updates on Wi-Fi only</string>
     <string name="compose_settings_update_wifi_hint">Avoid mobile data usage</string>
     <string name="compose_stats_status_title">Statistics</string>
+    <string name="compose_stats_inconsistent_history">Retained category totals exceed the reported block total. Original data is preserved; these counts do not prove successful response delivery.</string>
     <string name="compose_stats_status_ok">OK · updated %1$s</string>
     <string name="compose_stats_status_stale">Last update %1$s (may be stale)</string>
     <string name="compose_stats_status_waiting">Hosts statistics unaffected · waiting for web server data</string>
@@ -591,7 +592,7 @@
     <string name="compose_tcp_failed">Connection or protection failed</string>
     <string name="compose_logs_refresh">Refresh logs</string>
     <string name="compose_logs_scope">Web response logs. DNS or Hosts blocks that never reach this server are not included.</string>
-    <string name="compose_logs_loaded_count">Showing %1$d · loaded %2$d / %3$d available</string>
+    <string name="compose_logs_loaded_count">Loaded %1$d / %2$d matching · %3$d retained</string>
     <string name="compose_logs_read_failed">History could not be read or expired. Displayed records are preserved; refresh to retry.</string>
     <string name="compose_logs_more">Load older requests</string>
     <string name="compose_rules_browser">Rule details</string>
@@ -612,14 +613,24 @@
     <string name="compose_logs_pause">Pause</string>
     <string name="compose_logs_resume">Resume live</string>
     <string name="compose_logs_search">Search domain, path or status</string>
-    <string name="compose_logs_search_scope">Filters only loaded records. Read earlier requests to search more.</string>
-    <string name="compose_logs_local_exemption">Local exemption</string>
+    <string name="compose_logs_search_scope">Search all retained history by host, recorded path or HTTP status. Plain text, at most 191 UTF-8 bytes; ASCII ignores case.</string>
+    <string name="compose_logs_query_invalid">Search must be valid text without control characters, at most 191 UTF-8 bytes. The input has not been truncated.</string>
+    <string name="compose_logs_count_unknown">History counts are unavailable until a complete response is received.</string>
+    <string name="compose_logs_previous_conditions">Displayed records belong to the previous conditions; awaiting a complete result for the current filters.</string>
+    <string name="compose_logs_upgrade_required">This running server does not support full-history filters. Update or restart it; current-page filtering is not substituted.</string>
+    <string name="compose_logs_export_progress">Exporting fixed history: %1$d / %2$d matching records</string>
+    <string name="compose_logs_export_cancel">Cancel export</string>
+    <string name="compose_logs_export_incomplete">Export failed or history expired. No partial export was shared; refresh and retry.</string>
+    <string name="compose_logs_identity">Record ID: %1$s</string>
+    <string name="compose_logs_identity_unknown">Record ID unavailable in this older observation.</string>
+    <string name="compose_logs_copy_evidence">Copy recorded evidence</string>
+    <string name="compose_logs_local_exemption">Local handling / exemption</string>
     <string name="compose_logs_uid_filter">UID %1$d · tap to clear</string>
     <string name="compose_logs_no_match">No matches in the loaded records. Clear filters or read earlier requests.</string>
     <string name="compose_logs_details">Request details</string>
     <string name="compose_logs_close">Close</string>
     <string name="compose_logs_only_app">Only this app</string>
-    <string name="compose_logs_exemption_detail">The local server returned no content (HTTP 204). This exemption does not prove that the original site was reached; upstream DNS blocking may still apply.</string>
+    <string name="compose_logs_exemption_detail">Handled locally without a recorded blocking action; see the recorded HTTP status. This may be a local response or exemption, not proof of a user-created exception or successful origin access. The exact historical reason was not recorded.</string>
     <string name="compose_logs_proxy_detail">Handed to the local forwarding path. This entry does not prove that the upstream request completed successfully.</string>
     <string name="compose_logs_block_detail">The local server replaced or suppressed the response. Resource types are inferred from the request, not proof that it was an advertisement.</string>
     <string name="compose_logs_details_scope">These are server processing records. HTTP status describes a locally generated response, not confirmed client receipt. Paths omit query and fragment; missing legacy data stays unknown. DNS decisions, subscription matches, HTTPS content and upstream completion are not recorded.</string>

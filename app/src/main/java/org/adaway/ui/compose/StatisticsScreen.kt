@@ -226,6 +226,10 @@ fun StatisticsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             // Server counters and local rule counts describe different things.
             if (serverStats != null) {
+                if (serverStats!!.categorizedBlocked > serverStats!!.totalBlocked) {
+                    Text(stringResource(R.string.compose_stats_inconsistent_history),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
                 KpiCardRow(stats = serverStats!!)
             } else {
                 /*
@@ -1604,7 +1608,7 @@ private fun ActiveAppsCard(
                 Column {
                     Spacer(Modifier.height(8.dp))
                     monitoredApps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
-                        val rps = app.requestsPerSecond(uptimeSeconds)
+                        val rps = app.ratePerSecond(uptimeSeconds)
                         val storm = rps >= stormThreshold
                         val allowed = isAppAllowed(context, app.uid)
                         Column(
@@ -1637,10 +1641,8 @@ private fun ActiveAppsCard(
                             }
                             /*
                              * Second line, only when something needs explaining:
-                             *  - an app hammering us with blocked requests (it pins
-                             *    certificates or simply ignores the block page, so it
-                             *    retries forever - that is CPU and battery),
-                             *  - handshakes we failed (the pinning signal),
+                             *  - a high measured request rate (not proof of a retry loop),
+                             *  - failed TLS handshakes (not proof of certificate pinning),
                              *  - a uid on the allowlist, i.e. traffic we do not touch.
                              */
                             if (storm || app.tlsFail > 0 || allowed || app.pinRefused) {
