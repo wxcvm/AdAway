@@ -11,9 +11,9 @@
     "repository": "wxcvm/AdAway",
     "commit": "bfc8c7a3f5b11de8e738f3cfec09bb3d3c44ded8",
     "files": {
-      "webserver/jni/mongoose/mongoose.c": "a8cbe73f4de66547cda7ad546dde81b496745f26f3cda8a2c6cc8c8902b54250",
-      "webserver/jni/mongoose/mongoose.h": "b3af48738e6d739af9e873546ca1982bf2876b8bcfb9d5c6b4f03515b58a5ab1",
-      "webserver/jni/mongoose/LICENSE": "751042d0b3cfa807ebfa904dd4403b0bd408b98cc45d027ad97946e7470a2e1b",
+      "webserver/jni/mongoose/mongoose.c": "651d514ee52761c26af774d74e91346bf150c915120d967ec4332a69ea1600f5",
+      "webserver/jni/mongoose/mongoose.h": "0ee23157099964b7ca1c7bf3e02b1b8250cbd7838a6938fed63726e720f70b0b",
+      "webserver/jni/mongoose/LICENSE": "f0d9cfd6f7d92f6ec061a5fb2882f67d2521a151bf09a637c33ca6181834b048",
       "app/src/main/assets/img_01.webp": "bea27c9599dd85c22aa4fd94a08441015d74bb6f80e2ccfb0ca307dc02223976"
     }
   }

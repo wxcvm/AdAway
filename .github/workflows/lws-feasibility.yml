@@ -99,3 +99,31 @@ jobs:
             evidence/*.json
             evidence/*.log
           if-no-files-found: warn
+
+  performance:
+    name: Paired Linux performance (no migration auto-switch)
+    needs: host
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/spike-openssl/install
+          key: lws-spike-linux-openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb-v1
+      - name: Build the same pinned backends
+        run: |
+          mkdir -p evidence
+          bash tools/lws-spike/build-openssl-host.sh "$RUNNER_TEMP/spike-openssl" > evidence/openssl-build.log 2>&1
+          python3 tools/lws-spike/build.py --directory "$RUNNER_TEMP/lws-perf" --openssl "$RUNNER_TEMP/spike-openssl/install" > evidence/build.log 2>&1
+          python3 -m pip install -r tools/lws-spike/tests/requirements.txt
+      - name: Alternate five paired rounds with identical payloads and test logs
+        run: python3 tools/lws-spike/tests/benchmark.py --build "$RUNNER_TEMP/lws-perf/build" --image "$RUNNER_TEMP/lws-perf/inputs/fixture/app/src/main/assets/img_01.webp" --output evidence/performance > evidence/performance.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lws-linux-paired-performance
+          path: |
+            evidence/**/*.json
+            evidence/**/*.log
+          if-no-files-found: warn
