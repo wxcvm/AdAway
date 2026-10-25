@@ -22,6 +22,32 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class ListenerDiagnosticSessionTest {
+    @Test public void changedSavedTargetCancelsSocketsAndStopsFurtherDnsEndpoints() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> saved = new java.util.concurrent.atomic.AtomicReference<>("old");
+        ListenerDiagnosticSession session = new ListenerDiagnosticSession();
+        session.requireCurrentConfiguration(() -> "old".equals(saved.get()));
+        Socket socket = new Socket();
+        session.register(socket);
+        AtomicInteger probes = new AtomicInteger();
+        InterruptedIOException failure = assertThrows(InterruptedIOException.class, () -> ListenerArrivalCheck.domainResult(
+                new ListenerSettings("127.0.0.1", "::1", 80, 443), "ads.example.test",
+                domain -> new String[]{"127.0.0.1", "::1"},
+                (ip, port) -> { probes.incrementAndGet(); saved.set("new"); return true; }, ip -> true, session));
+        assertTrue(failure.getMessage().contains("监听配置已改变"));
+        assertTrue(socket.isClosed());
+        assertTrue(session.isCancelled());
+        assertEquals(1, probes.get());
+    }
+
+    @Test public void unchangedSavedTargetDoesNotCancelAnUnsavedDraft() throws Exception {
+        ListenerDiagnosticSession session = new ListenerDiagnosticSession();
+        String saved = new ListenerSettings("127.0.0.1", "::1", 80, 443).arguments();
+        session.requireCurrentConfiguration(() -> saved.equals(new ListenerSettings("127.0.0.1", "::1", 80, 443).arguments()));
+        new ListenerSettings("127.0.0.2", "", 28080, 28443); // Draft construction has no side effects.
+        session.checkCancelled();
+        assertFalse(session.isCancelled());
+    }
+
     @Test public void sessionIsSingleUseAndStopsPublishingAfterCancel() throws Exception {
         List<String> progress = new ArrayList<>();
         ListenerDiagnosticSession session = new ListenerDiagnosticSession(progress::add);

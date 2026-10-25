@@ -32,8 +32,15 @@ public final class AdGuardArrivalDiagnostics {
         if (!adblockDomain.trim().isEmpty()) ListenerArrivalCheck.normalizeDomain(adblockDomain);
         if (!hostsDomain.trim().isEmpty()) ListenerArrivalCheck.normalizeDomain(hostsDomain);
         ListenerSettings settings = WebServerUtils.getListenerSettings(context);
+        String target = settings.arguments();
+        session.requireCurrentConfiguration(() -> target.equals(WebServerUtils.getListenerSettings(context).arguments()));
         List<String> lines = new ArrayList<>();
+        lines.add("检测开始时间（UTC）：" + java.time.Instant.now());
         lines.add("检测目标：已保存的监听配置；回执仅确认本次测试的地址与端口，不证明全部应用的流量已到达。");
+        lines.add("保存目标：IPv4 " + (settings.ipv4.isEmpty() ? "关闭" : settings.ipv4)
+                + " / IPv6 " + (settings.ipv6.isEmpty() ? "关闭" : settings.ipv6)
+                + "；HTTP " + settings.http + " / HTTPS " + settings.https
+                + "。保存值不代表运行实例已应用，以下回执为独立观察。");
         if (settings.http != 80 || settings.https != 443)
             lines.add("当前使用非默认端口：HTTP " + settings.http + "／HTTPS " + settings.https
                     + "。DNS 记录不携带端口；本检测不证明普通域名访问的 80／443 路径有效。");

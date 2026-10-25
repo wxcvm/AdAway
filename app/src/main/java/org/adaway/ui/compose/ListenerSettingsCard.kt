@@ -21,6 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -30,7 +31,11 @@ import org.adaway.util.ListenerSettings
 import org.adaway.util.WebServerUtils
 
 @Composable
-internal fun ListenerSettingsCard() {
+internal fun ListenerSettingsCard(
+    checkSettings: (android.content.Context, ListenerSettings) -> String = WebServerUtils::checkListenerSettings,
+    applySettings: (android.content.Context, ListenerSettings, Boolean, Boolean) -> String = WebServerUtils::applyListenerSettings,
+    rootGranted: () -> Boolean = { com.topjohnwu.superuser.Shell.isAppGrantedRoot() == true }
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val saved = remember { WebServerUtils.getListenerSettings(context) }
@@ -41,31 +46,39 @@ internal fun ListenerSettingsCard() {
     LaunchedEffect(lan) {
         if (lan) suggestions = withContext(Dispatchers.IO) { listenerAddressSuggestions() }
     }
-    var http by remember { mutableStateOf(WebServerUtils.getHttpPort(context).toString()) }
-    var https by remember { mutableStateOf(WebServerUtils.getHttpsPort(context).toString()) }
+    var http by remember { mutableStateOf(saved.http.toString()) }
+    var https by remember { mutableStateOf(saved.https.toString()) }
     var busy by remember { mutableStateOf(false) }
+    var probeGeneration by remember { mutableStateOf(0L) }
+    var configurationRevision by remember { mutableStateOf(0L) }
     var autoCreate by remember { mutableStateOf(WebServerUtils.isListenerAutoCreate(context)) }
     var createConfirmation by remember { mutableStateOf<ListenerSettings?>(null) }
     var message by remember { mutableStateOf("推荐仅本机访问；IPv4、IPv6 可同时监听，留空关闭对应协议。") }
     // Probe automatically only when root is already granted; opening settings must not prompt for root.
     LaunchedEffect(ipv4, ipv6, http, https) {
+        val id = probeGeneration
         delay(400)
+        if (busy || id != probeGeneration) return@LaunchedEffect
         val candidate = runCatching { ListenerSettings(ipv4, ipv6, http.toInt(), https.toInt()) }
         message = candidate.exceptionOrNull()?.message ?: "配置尚未应用；正在检查监听地址。"
         if (candidate.isSuccess && !busy) {
-            message = if (com.topjohnwu.superuser.Shell.isAppGrantedRoot() == true) {
-                withContext(Dispatchers.IO) { WebServerUtils.checkListenerSettings(context, candidate.getOrThrow()) }
+            val report = if (rootGranted()) {
+                withContext(Dispatchers.IO) { checkSettings(context, candidate.getOrThrow()) }
             } else "配置尚未应用；点击检测可检查本机地址、权限及端口占用。管理端口固定为回环 8686。"
+            if (!busy && id == probeGeneration) message = report
         }
     }
     fun act(apply: Boolean, createMissing: Boolean = false, confirmed: ListenerSettings? = null) {
         val settings = confirmed ?: runCatching { ListenerSettings(ipv4, ipv6, http.toInt(), https.toInt()) }
             .getOrElse { message = it.message ?: "端口必须为数字。"; return }
+        probeGeneration++
+        // Applying may restart and roll back even when the saved values end up unchanged.
+        if (apply) configurationRevision++
         busy = true
         scope.launch {
             message = runCatching { withContext(Dispatchers.IO) {
-                if (apply) WebServerUtils.applyListenerSettings(context, settings, createMissing, autoCreate)
-                else WebServerUtils.checkListenerSettings(context, settings)
+                if (apply) applySettings(context, settings, createMissing, autoCreate)
+                else checkSettings(context, settings)
             } }.getOrElse { "操作失败：${it.message ?: "请检查 Root 授权"}" }
             busy = false
         }
@@ -120,11 +133,11 @@ internal fun ListenerSettingsCard() {
                 Text("应用后生效，需要 Root；只创建所填私有地址，不修改网关或 DNS。开机启动需另行启用开机脚本。", style = MaterialTheme.typography.bodySmall)
             }
         }
-        Text(message, style = MaterialTheme.typography.bodySmall)
+        Text(message, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("listener-message"))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton({ act(false) }, enabled = !busy) { Text("检测冲突") }
             Button({ act(true) }, enabled = !busy) { Text(if (busy) "正在处理…" else "应用并重启") }
         }
-        AdGuardArrivalCard(enabled = !busy)
+        AdGuardArrivalCard(enabled = !busy, configurationRevision = configurationRevision)
     }
 }

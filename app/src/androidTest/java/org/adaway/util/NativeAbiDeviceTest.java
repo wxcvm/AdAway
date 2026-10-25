@@ -113,6 +113,22 @@ public class NativeAbiDeviceTest {
                 } catch (java.io.IOException retry) { Thread.sleep(50); }
             }
             if (!ready) fail("Actual native server failed startup: " + new String(Files.readAllBytes(log.toPath()), java.nio.charset.StandardCharsets.UTF_8));
+            // Inject only DNS answers; selection, host-preserving HTTP exchange and native nonce
+            // handler are production code. Duplicated A rows must not hide the real AAAA path.
+            String[] answers = new String[21];
+            java.util.Arrays.fill(answers, "127.0.0.1"); answers[20] = "::1";
+            java.util.List<String> observed = new java.util.ArrayList<>();
+            String domainReport = ListenerArrivalCheck.domainResult(
+                    new ListenerSettings("127.0.0.1", "::1", http, https), "arrival.native-abi.invalid",
+                    domain -> answers, (address, port) -> {
+                        observed.add(address);
+                        return ListenerArrivalCheck.received(address, port, "arrival.native-abi.invalid");
+                    }, address -> InetAddress.getByName(address).isLoopbackAddress());
+            assertEquals("Duplicate DNS rows hid a native listener: " + domainReport, 2, observed.size());
+            assertTrue(observed.stream().anyMatch(address -> address.indexOf(':') >= 0));
+            assertTrue(observed.stream().anyMatch(address -> address.indexOf(':') < 0));
+            assertEquals("Both real HTTP exchanges must carry a fresh native receipt: " + domainReport,
+                    2, domainReport.split("HTTP 请求已到达 AdAway", -1).length - 1);
             for (String host : new String[]{"127.0.0.1", "[::1]"}) {
                 for (int i = 0; i < 2; i++) try (Response response = client.newCall(new Request.Builder()
                         .url("http://" + host + ":" + http + "/tile.png")
