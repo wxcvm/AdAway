@@ -1,0 +1,20 @@
+{
+  "lws": {
+    "repository": "https://github.com/warmcat/libwebsockets.git",
+    "commit": "a842936f881921b6462b3328cce8e700b7a7ecd2"
+  },
+  "openssl": {
+    "version": "3.5.9",
+    "commit": "45e844fa2a14ec92d146bd8f5778ac130b6625fb"
+  },
+  "fixture": {
+    "repository": "wxcvm/AdAway",
+    "commit": "bfc8c7a3f5b11de8e738f3cfec09bb3d3c44ded8",
+    "files": {
+      "webserver/jni/mongoose/mongoose.c": "a8cbe73f4de66547cda7ad546dde81b496745f26f3cda8a2c6cc8c8902b54250",
+      "webserver/jni/mongoose/mongoose.h": "b3af48738e6d739af9e873546ca1982bf2876b8bcfb9d5c6b4f03515b58a5ab1",
+      "webserver/jni/mongoose/LICENSE": "751042d0b3cfa807ebfa904dd4403b0bd408b98cc45d027ad97946e7470a2e1b",
+      "app/src/main/assets/img_01.webp": "bea27c9599dd85c22aa4fd94a08441015d74bb6f80e2ccfb0ca307dc02223976"
+    }
+  }
+}
