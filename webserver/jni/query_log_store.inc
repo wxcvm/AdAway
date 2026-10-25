@@ -1,5 +1,6 @@
 /* Shared bounded query log implementation. Included after req_host_of/top_host_add. */
 #include "response_log.h"
+#include "qlog_filter_contract.h"
 enum { QLOG_PROXY = 0, QLOG_BLOCK = 1, QLOG_ALLOW = 2, QLOG_DENY = 3 };
 struct qlog_entry {
     uint64_t ts;          /* epoch seconds */
@@ -281,7 +282,7 @@ static bool qlog_ensure_generation(void) {
     return true;
 }
 
-static void qlog_reply(struct mg_connection *connection, struct mg_http_message *hm) {
+static void qlog_reply_legacy(struct mg_connection *connection, struct mg_http_message *hm) {
     const char *headers = "Content-Type: application/json\r\nCache-Control: no-store\r\n";
     uint64_t offset = 0, limit = 200, anchor = s_qlog_sequence;
     char generation[34], anchor_text[24];
@@ -324,5 +325,123 @@ static void qlog_reply(struct mg_connection *connection, struct mg_http_message 
         "\"hasMore\":%s,\"generation\":\"%s\",\"anchor\":\"%llu\",\"entries\":[%s]}",
         (unsigned)offset, (unsigned)limit, total, returned, next, next < total ? "true" : "false",
         s_qlog_generation, (unsigned long long)anchor, page);
+}
+
+static bool qlog_filter_matches(const struct qlog_filter *f, uint32_t idx) {
+    const struct qlog_entry *e = &s_qlog[idx];
+    int uid = e->uid == 0xFFFFFFFFu ? -1 : (int)e->uid;
+    int type = e->rtype == 0xFFFF ? -1 : (int)e->rtype;
+    if (!e->ts || (f->has_action && e->action != f->action) ||
+        (f->has_family && s_qlog_family[idx] != f->family) ||
+        (f->has_type && type != f->type) || (f->has_uid && uid != f->uid)) return false;
+    if (!f->query[0] || qlf_contains(e->host, f->query) || qlf_contains(s_qlog_metadata[idx].path, f->query)) return true;
+    char status[6];
+    if (!s_qlog_metadata[idx].status) return false;
+    snprintf(status, sizeof(status), "%u", (unsigned)s_qlog_metadata[idx].status);
+    return qlf_contains(status, f->query);
+}
+
+/* Exactly one bounded pass over the fixed snapshot. Count every match even
+ * after the page byte budget fills; offsets count matches, never raw slots. */
+static uint32_t qlog_render_filtered(const struct qlog_filter *filter, uint32_t drift,
+                                    uint32_t retained, uint32_t offset, uint32_t limit,
+                                    char *out, size_t cap, uint32_t *matched_total) {
+    size_t written = 0;
+    uint32_t matched = 0, rendered = 0;
+    bool full = false;
+    out[0] = 0;
+    for (uint32_t k = 0; k < retained; k++) {
+        uint32_t age = drift + k;
+        uint32_t idx = (s_qlog_pos + QLOG_MAX - 1 - age) % QLOG_MAX;
+        if (!qlog_filter_matches(filter, idx)) continue;
+        matched++;
+        if (matched <= offset || rendered >= limit || full) continue;
+        const struct qlog_entry *e = &s_qlog[idx];
+        char host[400], path[RESPONSE_LOG_PATH_CAP * 2];
+        json_safe_copy(host, sizeof(host), e->host);
+        qlog_path_json(path, s_qlog_metadata[idx].path);
+        int n = snprintf(out + written, cap - written,
+            "%s{\"ts\":%llu,\"uid\":%d,\"action\":%d,\"type\":%d,\"mode\":%d,"
+            "\"family\":%u,\"host\":\"%s\",\"path\":\"%s\",\"status\":%u,\"pathTruncated\":%s,\"sequence\":\"%llu\"}",
+            written ? "," : "", (unsigned long long)e->ts,
+            e->uid == 0xFFFFFFFFu ? -1 : (int)e->uid, (int)e->action,
+            e->rtype == 0xFFFF ? -1 : (int)e->rtype, (int)e->pad,
+            (unsigned)s_qlog_family[idx], host, path, (unsigned)s_qlog_metadata[idx].status,
+            s_qlog_metadata[idx].flags & RESPONSE_LOG_TRUNCATED ? "true" : "false",
+            (unsigned long long)(s_qlog_sequence - age));
+        if (n <= 0 || (size_t)n >= cap - written) { out[written] = 0; full = true; continue; }
+        written += (size_t)n;
+        rendered++;
+    }
+    *matched_total = matched;
+    return rendered;
+}
+
+static bool qlog_v1_number(struct mg_http_message *hm, const char *name, uint64_t maximum, uint64_t *number) {
+    char text[24];
+    int present = qlf_parameter(hm->query, name, text, sizeof(text));
+    if (!present) return true;
+    if (present < 0 || !text[0]) return false;
+    uint64_t value = 0;
+    for (size_t i = 0; text[i]; i++) {
+        if (text[i] < '0' || text[i] > '9') return false;
+        unsigned digit = (unsigned)(text[i] - '0');
+        if (value > maximum / 10 || (value == maximum / 10 && digit > maximum % 10)) return false;
+        value = value * 10 + digit;
+    }
+    *number = value;
+    return true;
+}
+
+static void qlog_reply(struct mg_connection *connection, struct mg_http_message *hm) {
+    const char *headers = "Content-Type: application/json\r\nCache-Control: no-store\r\n";
+    struct qlog_filter filter;
+    int version = qlf_parse(hm->query, &filter);
+    if (!version) { qlog_reply_legacy(connection, hm); return; }
+    if (version < 0) {
+        mg_http_reply(connection, 400, headers, "{\"error\":\"invalid_filter\"}"); return;
+    }
+    uint64_t offset = 0, limit = 200, anchor = s_qlog_sequence;
+    char generation[34], anchor_text[24], key[66];
+    int gen = qlf_parameter(hm->query, "generation", generation, sizeof(generation));
+    int anch = qlf_parameter(hm->query, "anchor", anchor_text, sizeof(anchor_text));
+    int keyed = qlf_parameter(hm->query, "queryKey", key, sizeof(key));
+    if (!qlog_v1_number(hm, "offset", QLOG_MAX, &offset) ||
+        !qlog_v1_number(hm, "limit", 1000, &limit) || !limit ||
+        !qlog_v1_number(hm, "anchor", UINT64_MAX, &anchor) ||
+        gen < 0 || anch < 0 || keyed < 0 || gen != anch || gen != keyed ||
+        (gen && (!qlf_lower_hex(generation, 32) || !qlf_lower_hex(key, 64))) || (!gen && offset != 0)) {
+        mg_http_reply(connection, 400, headers, "{\"error\":\"invalid_page\"}"); return;
+    }
+    if (gen && strcmp(key, filter.key)) {
+        mg_http_reply(connection, 400, headers, "{\"error\":\"query_mismatch\"}"); return;
+    }
+    if (!qlog_ensure_generation()) {
+        mg_http_reply(connection, 503, headers, "{\"error\":\"generation_unavailable\"}"); return;
+    }
+    if ((gen && strcmp(generation, s_qlog_generation)) || anchor > s_qlog_sequence) {
+        mg_http_reply(connection, 409, headers, "{\"error\":\"cursor_expired\"}"); return;
+    }
+    uint64_t drift = s_qlog_sequence - anchor;
+    uint32_t retained = drift < s_qlog_count ? s_qlog_count - (uint32_t)drift : 0;
+    uint32_t original = anchor < QLOG_MAX ? (uint32_t)anchor : QLOG_MAX;
+    if (drift > s_qlog_count || retained != original) {
+        mg_http_reply(connection, 409, headers, "{\"error\":\"cursor_expired\"}"); return;
+    }
+    static char page[QLOG_JSON_MAX];
+    uint32_t total = 0;
+    /* Reserve room for the response envelope inside the existing byte cap. */
+    uint32_t returned = qlog_render_filtered(&filter, (uint32_t)drift, retained, (uint32_t)offset,
+        (uint32_t)limit, page, sizeof(page) - 1024, &total);
+    if (offset > total) {
+        mg_http_reply(connection, 409, headers, "{\"error\":\"cursor_expired\"}"); return;
+    }
+    uint32_t next = (uint32_t)offset + returned;
+    mg_http_reply(connection, 200, headers,
+        "{\"filterVersion\":1,\"queryKey\":\"%s\",\"retainedTotal\":%u,"
+        "\"offset\":%u,\"limit\":%u,\"total\":%u,\"returned\":%u,\"nextOffset\":%u,"
+        "\"hasMore\":%s,\"generation\":\"%s\",\"anchor\":\"%llu\",\"entries\":[%s]}",
+        filter.key, retained, (unsigned)offset, (unsigned)limit, total, returned, next,
+        next < total ? "true" : "false", s_qlog_generation, (unsigned long long)anchor, page);
 }
 
