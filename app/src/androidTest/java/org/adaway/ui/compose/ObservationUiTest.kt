@@ -67,10 +67,20 @@ class ObservationUiTest {
     private fun scroll(index: Int): Float = section(index).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
     private fun enter(index: Int) {
         // Lazy rows below the viewport do not exist in the semantics tree yet.
+        val advance = compose.mainClock.autoAdvance
+        compose.mainClock.autoAdvance = true
         compose.onNodeWithTag("settings-categories").performScrollToNode(hasTestTag("settings-category-$index"))
+        compose.mainClock.autoAdvance = advance
+        // Freeze again BEFORE selecting the detail: its first frame is not skipped.
         compose.onNodeWithTag("settings-category-$index").performClick()
     }
-    private fun back() { compose.onNodeWithTag("settings-section-back").performClick() }
+    private fun back() {
+        compose.onNodeWithTag("settings-section-back").performClick()
+        if (!compose.mainClock.autoAdvance) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+        }
+    }
     private fun vm() = StatsViewModel(ApplicationProvider.getApplicationContext<Application>(), false)
 
     @Test fun tenCertificateEntriesRetainKnownStateAndStableFirstFramesAcrossThemes() {

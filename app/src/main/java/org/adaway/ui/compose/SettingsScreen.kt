@@ -398,6 +398,12 @@ fun SettingsScreen(
     BackHandler(enabled = selectedSection >= 0) { selectedSection = -1 }
     // A section owns its scroll state. Restore during composition, never scroll after the first frame.
     val sectionStates = rememberSaveableStateHolder()
+    // ScrollState must outlive the conditional detail subtree: disposing an
+    // outgoing scrolling layout can clamp its saved position during navigation.
+    // Allocate one saveable state per fixed category before any first layout.
+    val sectionScrolls = (0..6).map { section ->
+        androidx.compose.runtime.key(section) { rememberScrollState() }
+    }
     val certificateState by certificateObservation.state.collectAsStateWithLifecycle()
     val certificateLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(selectedSection, certificateLifecycle, certificateObservation) {
@@ -515,7 +521,7 @@ fun SettingsScreen(
                 )
             } else {
                 sectionStates.SaveableStateProvider(selectedSection) {
-                val settingsScroll = rememberScrollState()
+                val settingsScroll = sectionScrolls[selectedSection]
                 Column(
                     modifier = Modifier
                         .weight(1f)
