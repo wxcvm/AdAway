@@ -18,9 +18,9 @@ enum {
 // The public Android log ABI requires variadic arguments. This host-only shim
 // does no va_arg traversal or formatting; changing the signature changes the
 // unmodified production translation unit's API.
-static inline int __android_log_print(
-    int priority, const char *tag, // NOSONAR - public Android variadic ABI
-    const char *format, ...) {     // NOSONAR - public Android variadic ABI
+static inline int __android_log_print( // NOSONAR - public Android variadic ABI
+    int priority, const char *tag,     // NOSONAR - public Android variadic ABI
+    const char *format, ...) {         // NOSONAR - public Android variadic ABI
   (void)priority;
   (void)tag;
   (void)format;

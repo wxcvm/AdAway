@@ -133,8 +133,12 @@ static int response_lengths(const char *buffer, size_t used, size_t *headers,
     while (prefix[i] && line + i < next &&
            tolower((unsigned char)line[i]) == prefix[i])
       i++;
-    if (!prefix[i] && (++found != 1 || !parse_length(line + i, next, body)))
-      return -1;
+    if (!prefix[i]) {
+      found++;
+      int valid = parse_length(line + i, next, body);
+      if (found != 1 || !valid)
+        return -1;
+    }
     line = next;
   }
   *headers = (size_t)(end + 4 - buffer);

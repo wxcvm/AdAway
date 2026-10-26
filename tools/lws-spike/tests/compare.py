@@ -20,6 +20,8 @@ def compare(left, right):
         )
     return {
         "passed": True,
+        "scope": "HTTP fixture responses only, not forwarding or migration acceptance",
+        "source_runs_complete": bool(left.get("complete") and right.get("complete")),
         "compared_responses": sum(map(len, a.values())),
         "fields": ["status", "type", "declared", "length", "sha256", "etag"],
     }

@@ -50,7 +50,7 @@ Both ordinary IP access and the native no-SNI/IP-verification path retain the de
 
 ## Evidence ledger and current decision
 
-**Current decision: INCONCLUSIVE / evidence insufficient. Do not switch production.**
+**Current decision: NO-GO for the present adaptation / 不建议当前方案迁移. Do not switch production. Performance evidence is separately incomplete/noisy; this is a correctness decision, not a claim that LWS is inherently slower or can never work.**
 
 The original default branches were Android `bfc8c7a3f5b11de8e738f3cfec09bb3d3c44ded8` and Windows `51e77155ad267bd0c1001c15286e089836bb2a80`, with default CI 40173416176 / 40173541018 successful. Independent `spike/lws-feasibility-v1` worktrees preserve the original dirty UI/export branches.
 
@@ -93,3 +93,13 @@ The native client now validates Content-Length framing and the exact pinned imag
 At shared source `554e4fc0fdde3b1a3e869c9d6a608a940c79e3f7`, [40253918889](https://github.com/wxcvm/AdAway/actions/runs/40253918889) passed the Linux full process suite, ASan/UBSan, separate production reference, arm64-v8a/riscv64 builds and actual x86_64 native clients inside **both API30 and API35** emulators. This is still not Android17 hardware acceptance. Host positive native-body checks and deliberately corrupted image rejection are included; Mongoose benchmark executables and CA private keys are not artifacts. Final quality-only changes still require their own rerun.
 
 The host reference logging shim retains Android's required public variadic log ABI. Its generic no-ellipsis recommendation has a single explicitly documented ABI exception at the shim declaration; there is no format/va_arg traversal. No protocol/TLS/lifetime defect or production warning is suppressed by this exception, and the application translation unit remains unchanged.
+
+## Windows full-process blocking finding (2026-10-26)
+
+At Windows `088c56ec676fe87f8309d4894ab1d3d3c73029bb` / shared `554e4fc0fdde3b1a3e869c9d6a608a940c79e3f7`, [40253927417](https://github.com/wxcvm/AdAway-Windows/actions/runs/40253927417) failed the actual forwarding assertion: Content-Length4096, IncompleteRead4018, missing78 bytes. The normal and explicit diagnostic runs at Windows `473ebf23afce385ae30901f2c6446043ee9a2fc5` / shared `20042a59204a700bbb3e014351e4216d9b2ccb34` reproduced it in [40254812604](https://github.com/wxcvm/AdAway-Windows/actions/runs/40254812604).
+
+The diagnostic identifies the FIRST route `/forward/text` over IPv4 plain HTTP, not an upstream TLS verification problem. The client-side log records 4013 bytes buffered after parsing headers, then `close_and_handled`, the public COMPLETED_CLIENT_HTTP callback from the h1 close path and downstream PROXY_TRANS_END/close, without the complete4096-byte body. The pinned public dummy's close path can append a five-byte terminator; this may explain4013 vs4018, but final tail bytes must be read from the new failure record before claiming that explanation as confirmed. We did not attribute the result to OpenSSL3.5 merely because the UCRT/OpenSSL3.6 preflight passed: the actual failing route is unencrypted.
+
+This is a blocking result for the **current minimal public-mount adapter**, not proof that every public LWS client/event-loop design is impossible. No private HUP/state-field patch, timeout inflation, buffer-limit increase, response padding or swallowed IncompleteRead is used to make it pass. A separate client adapter or a different supported event backend would be a further experiment, not an approved production switch. This round's critical complete-response criterion is unmet; the two PRs stay draft and automatic merge is NOT triggered while required correctness remains failed.
+
+The Windows workflow now continues independent baseline/native evidence collection after one backend fails and preserves partial records as `complete:false`. HTTP-only differential success explicitly reports incomplete source runs and is not full acceptance. Manual performance collection independently rebuilds non-diagnostic binaries, records the exact measured build and still leaves the workflow FAILED for the required correctness defect. Obtaining throughput data is not clearing that defect.

@@ -194,8 +194,8 @@ def websocket(server, address):
         assert exact(sock, len(payload)) == payload
 
 
-def check(exe, image, output, smoke=False):
-    events = []
+def check(exe, image, output, smoke=False, events=None):
+    events = [] if events is None else events
 
     def record(name, **values):
         events.append({"test": name, "passed": True, **values})
@@ -582,12 +582,14 @@ if __name__ == "__main__":
     a = p.parse_args()
     root = pathlib.Path(a.output).resolve()
     root.mkdir(parents=True, exist_ok=True)
+    events = []
     try:
         result = check(
             pathlib.Path(a.binary).resolve(),
             pathlib.Path(a.image).resolve(),
             root,
             a.local_smoke,
+            events,
         )
         (root / "failure.json").unlink(missing_ok=True)
         (root / "correctness.json").write_text(
@@ -596,6 +598,7 @@ if __name__ == "__main__":
                     "events": result,
                     "scope": "prototype only",
                     "local_smoke": a.local_smoke,
+                    "complete": True,
                 },
                 indent=2,
             )
@@ -604,7 +607,28 @@ if __name__ == "__main__":
         )
         print(json.dumps({"passed": len(result), "output": str(root)}))
     except BaseException as failure:
+        detail = {"error": repr(failure)}
+        if isinstance(failure, http.client.IncompleteRead):
+            detail.update(
+                received_bytes=len(failure.partial),
+                expected_remaining=failure.expected,
+                partial_sha256=hashlib.sha256(failure.partial).hexdigest(),
+                tail_hex=failure.partial[-16:].hex(),
+            )
+        (root / "partial-correctness.json").write_text(
+            json.dumps(
+                {
+                    "events": events,
+                    "complete": False,
+                    "error": repr(failure),
+                    "scope": "partial prototype evidence, not acceptance",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf8",
+        )
         (root / "failure.json").write_text(
-            json.dumps({"error": repr(failure)}, indent=2) + "\n", encoding="utf8"
+            json.dumps(detail, indent=2) + "\n", encoding="utf8"
         )
         raise
