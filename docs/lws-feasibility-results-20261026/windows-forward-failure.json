@@ -1,0 +1,16 @@
+{
+  "error": "IncompleteRead(4018 bytes read, 78 more expected)",
+  "received_bytes": 4018,
+  "expected_remaining": 78,
+  "partial_sha256": "dc3a7abd84046b4c4bca9059c6ec5580da546aaa244b973f1ae57ceea69853dd",
+  "tail_hex": "7878787878787878787878300d0a0d0a",
+  "payload_pattern_confirmed": true,
+  "actual_payload_bytes": 4013,
+  "missing_payload_bytes": 83,
+  "invalid_terminator_bytes": 5,
+  "route": "/forward/text",
+  "family": 4,
+  "transport": "plain HTTP",
+  "shared_source_commit": "d710dd89ff9e77204ec5815394a8757fba033ce4",
+  "windows_commit": "f1f0e116d57c00ea1f73dd94040cd2be69a25f85"
+}

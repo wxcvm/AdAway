@@ -50,7 +50,7 @@ Both ordinary IP access and the native no-SNI/IP-verification path retain the de
 
 ## Evidence ledger and current decision
 
-**Current decision: NO-GO for the present adaptation / ²»½¨Òéµ±Ç°·½°¸Ç¨ÒÆ. Do not switch production. Performance evidence is separately incomplete/noisy; this is a correctness decision, not a claim that LWS is inherently slower or can never work.**
+**Current decision: NO-GO for the present adaptation / ä¸å»ºè®®å½“å‰æ–¹æ¡ˆè¿ç§». Do not switch production. Performance evidence is separately incomplete/noisy; this is a correctness decision, not a claim that LWS is inherently slower or can never work.**
 
 The original default branches were Android `bfc8c7a3f5b11de8e738f3cfec09bb3d3c44ded8` and Windows `51e77155ad267bd0c1001c15286e089836bb2a80`, with default CI 40173416176 / 40173541018 successful. Independent `spike/lws-feasibility-v1` worktrees preserve the original dirty UI/export branches.
 

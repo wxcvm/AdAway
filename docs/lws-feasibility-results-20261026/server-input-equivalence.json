@@ -1,0 +1,34 @@
+{
+  "CMakeLists.txt": {
+    "sha256": "feb455d8296122fe52dce0faabe697d082d959630195904faa1bec2a883a8bc9",
+    "unchanged_from_linux_benchmark_source": true
+  },
+  "dependencies.lock.json": {
+    "sha256": "2fc59becf789d3104640268a685ad8f644251b1253a94537264adc3ff27d4651",
+    "unchanged_from_linux_benchmark_source": true
+  },
+  "src/backend_lws.c": {
+    "sha256": "9d0568e4f9406f47915537f62b27a719de7b6cc85c09627f4c58b0019534e7cf",
+    "unchanged_from_linux_benchmark_source": true
+  },
+  "src/backend_mongoose.c": {
+    "sha256": "f979c44f88f93afd06c2c91dd9899128790d24550404d6711978fbb3bec32253",
+    "unchanged_from_linux_benchmark_source": true
+  },
+  "src/main.c": {
+    "sha256": "656cc93337a0389495eb96292978eea48ffc9d6009566e622373b96047880000",
+    "unchanged_from_linux_benchmark_source": true
+  },
+  "src/spike.h": {
+    "sha256": "036454a9599049749d5e41d7877d8bc63a38711b08b6314935e20c23ac8f854b",
+    "unchanged_from_linux_benchmark_source": true
+  },
+  "src/fixture.c": {
+    "sha256": "74ea2ce2a208084046151f9d6efa566de10cb8a618d44a9a33ac812909fbda37",
+    "unchanged_from_linux_benchmark_source": true
+  },
+  "src/certificates.c": {
+    "sha256": "b6a14c0b022a11c772b237c4ba69e58e56b92f896b39cd86302ba8e733ce8f7a",
+    "unchanged_from_linux_benchmark_source": true
+  }
+}
