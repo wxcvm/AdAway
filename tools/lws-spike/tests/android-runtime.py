@@ -11,8 +11,14 @@ out = pathlib.Path(a.output).resolve()
 out.mkdir(parents=True, exist_ok=True)
 
 
-def adb(*args):
-    return subprocess.check_output(["adb", *args], text=True, encoding="utf8").strip()
+serial = None
+
+
+def adb(*args, timeout=20):
+    selected = ["-s", serial] if serial else []
+    return subprocess.check_output(
+        ["adb", *selected, *args], text=True, encoding="utf8", timeout=timeout
+    ).strip()
 
 
 serial = adb("get-serialno")
@@ -21,7 +27,7 @@ if (
     or adb("shell", "getprop", "ro.kernel.qemu") != "1"
 ):
     raise RuntimeError("Refusing to push/run on a real device")
-root = "/data/local/tmp/adaway-lws-spike"
+root = "/data/local/tmp/adaway-lws-spike-" + str(time.monotonic_ns())
 adb("shell", "mkdir", "-p", root)
 for name in ("spike_lws", "spike_mongoose", "spike_probe"):
     adb("push", str(pathlib.Path(a.build) / name), root + "/" + name)
@@ -32,8 +38,12 @@ for name in ("lws", "mongoose"):
     folder = root + "/" + name
     adb("shell", "mkdir", "-p", folder)
     cmd = f"{root}/spike_{name} --directory {folder} --image {root}/image.webp --http 18180 --https 18443 --lifetime 90"
-    shell = f"({cmd} > {folder}/stdout.log 2> {folder}/stderr.log; echo $? > {folder}/exit) < /dev/null &"
-    adb("shell", shell)
+    # Redirect the WHOLE wrapper, not just the server. Otherwise the waiting
+    # wrapper retains ADB stdout and the host cannot launch its client until
+    # the server's lifetime has already expired.
+    child = f"{cmd} & server=$!; echo $server > {folder}/pid; wait $server; echo $? > {folder}/exit"
+    shell = f"nohup sh -c {shlex.quote(child)} > {folder}/stdout.log 2> {folder}/stderr.log < /dev/null &"
+    adb("shell", shell, timeout=5)
     try:
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -45,7 +55,14 @@ for name in ("lws", "mongoose"):
         else:
             raise RuntimeError("Android startup timed out")
         result = json.loads(
-            adb("shell", root + "/spike_probe", "18180", "18443", folder + "/ca.pem")
+            adb(
+                "shell",
+                root + "/spike_probe",
+                "18180",
+                "18443",
+                folder + "/ca.pem",
+                timeout=45,
+            )
         )
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -62,6 +79,11 @@ for name in ("lws", "mongoose"):
         )
         results.append(result)
     finally:
+        pid = adb("shell", f"cat {folder}/pid 2>/dev/null || true")
+        if pid.isdecimal():
+            actual = adb("shell", f"cat /proc/{pid}/cmdline 2>/dev/null || true")
+            if actual.startswith(root + "/spike_" + name + "\x00"):
+                adb("shell", "kill", "-TERM", pid)
         for log in ("stdout.log", "stderr.log"):
             (out / (name + "-" + log)).write_text(
                 adb("shell", "cat", folder + "/" + log), encoding="utf8"

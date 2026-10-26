@@ -78,53 +78,42 @@ static int write_http(struct lws *wsi, struct session *session) {
   lws_callback_on_writable(wsi);
   return 0;
 }
-static int callback(struct lws *wsi, enum lws_callback_reasons reason,
-                    void *user, void *in, size_t length) {
-  struct spike_app *app = lws_context_user(lws_get_context(wsi));
-  struct session *session = user;
-  switch (reason) {
-  case LWS_CALLBACK_FILTER_HTTP_CONNECTION: {
-    char path[256] = {0};
-    lws_hdr_copy(wsi, path, sizeof(path), WSI_TOKEN_GET_URI);
-    if (!strncmp(path, "/forward", 8) &&
-        (app->options.upstream_http || app->options.upstream_https) &&
-        (strcmp(path, "/forward/text") && strcmp(path, "/forward-tls/text"))) {
-      lws_return_http_status(wsi, 404, "fixture route not supported");
+static int filter_http(struct lws *wsi, struct spike_app *app,
+                       struct session *session) {
+
+  char path[256] = {0};
+  lws_hdr_copy(wsi, path, sizeof(path), WSI_TOKEN_GET_URI);
+  if (!strncmp(path, "/forward", 8) &&
+      (app->options.upstream_http || app->options.upstream_https) &&
+      (strcmp(path, "/forward/text") && strcmp(path, "/forward-tls/text"))) {
+    lws_return_http_status(wsi, 404, "fixture route not supported");
+    return 1;
+  }
+  if (session &&
+      ((!strcmp(path, "/forward/text") && app->options.upstream_http) ||
+       (!strcmp(path, "/forward-tls/text") && app->options.upstream_https)) &&
+      !session->forward_counted) {
+    if (lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) ||
+        lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING))
+      return -1; /* This fixture deliberately supports bodyless GET only. */
+    if (app->forwarding >= SPIKE_FORWARDS) {
+      spike_forward_observed(app);
+      lws_return_http_status(wsi, 503, "forward cap reached");
       return 1;
     }
-    if (session &&
-        ((!strcmp(path, "/forward/text") && app->options.upstream_http) ||
-         (!strcmp(path, "/forward-tls/text") && app->options.upstream_https)) &&
-        !session->forward_counted) {
-      if (lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_CONTENT_LENGTH) ||
-          lws_hdr_total_length(wsi, WSI_TOKEN_HTTP_TRANSFER_ENCODING))
-        return -1; /* This fixture deliberately supports bodyless GET only. */
-      if (app->forwarding >= SPIKE_FORWARDS) {
-        spike_forward_observed(app);
-        lws_return_http_status(wsi, 503, "forward cap reached");
-        return 1;
-      }
-      session->forward_counted = true;
-      session->forward_failed = false;
-      session->forward_response_seen = false;
-      app->forwarding++;
-      if (app->forwarding > app->forwarding_peak)
-        app->forwarding_peak = app->forwarding;
-      spike_forward_observed(app);
-    }
-    return 0;
+    session->forward_counted = true;
+    session->forward_failed = false;
+    session->forward_response_seen = false;
+    app->forwarding++;
+    if (app->forwarding > app->forwarding_peak)
+      app->forwarding_peak = app->forwarding;
+    spike_forward_observed(app);
   }
-  case LWS_CALLBACK_CLOSED_HTTP:
-  case LWS_CALLBACK_HTTP_DROP_PROTOCOL:
-    if (session && session->forward_counted) {
-      if (app->forwarding)
-        app->forwarding--;
-      session->forward_counted = false;
-    }
-    return 0;
-
-  case LWS_CALLBACK_OPENSSL_LOAD_EXTRA_SERVER_VERIFY_CERTS:
-    return spike_configure_tls(app, (SSL_CTX *)user) ? 0 : 1;
+  return 0;
+}
+static int track_connection(struct lws *wsi, struct spike_app *app,
+                            enum lws_callback_reasons reason) {
+  switch (reason) {
   case LWS_CALLBACK_FILTER_NETWORK_CONNECTION:
     if (app->active >= SPIKE_CONNECTIONS) {
       app->rejected++;
@@ -151,6 +140,63 @@ static int callback(struct lws *wsi, enum lws_callback_reasons reason,
       lws_set_opaque_user_data(wsi, NULL);
     }
     return 0;
+  default:
+    return 0;
+  }
+}
+static int handle_websocket(struct lws *wsi, struct spike_app *app,
+                            struct session *session,
+                            enum lws_callback_reasons reason, void *in,
+                            size_t length) {
+  switch (reason) {
+  case LWS_CALLBACK_RECEIVE:
+    if (!session || length > SPIKE_CHUNK - session->ws_length)
+      return -1;
+    memcpy(session->websocket + session->ws_length, in, length);
+    session->ws_length += length;
+    if (lws_is_final_fragment(wsi) && !lws_remaining_packet_payload(wsi)) {
+      app->ws_messages++;
+      lws_callback_on_writable(wsi);
+    }
+    return 0;
+  case LWS_CALLBACK_SERVER_WRITEABLE: {
+    if (!session)
+      return -1;
+    unsigned char buffer[LWS_PRE + SPIKE_CHUNK];
+    memcpy(buffer + LWS_PRE, session->websocket, session->ws_length);
+    int n =
+        lws_write(wsi, buffer + LWS_PRE, session->ws_length, LWS_WRITE_TEXT);
+    if (n != (int)session->ws_length)
+      return -1;
+    session->ws_length = 0;
+    return 0;
+  }
+  default:
+    return 0;
+  }
+}
+static int callback(struct lws *wsi, enum lws_callback_reasons reason,
+                    void *user, void *in, size_t length) {
+  struct spike_app *app = lws_context_user(lws_get_context(wsi));
+  struct session *session = user;
+  switch (reason) {
+  case LWS_CALLBACK_FILTER_HTTP_CONNECTION:
+    return filter_http(wsi, app, session);
+  case LWS_CALLBACK_CLOSED_HTTP:
+  case LWS_CALLBACK_HTTP_DROP_PROTOCOL:
+    if (session && session->forward_counted) {
+      if (app->forwarding)
+        app->forwarding--;
+      session->forward_counted = false;
+    }
+    return 0;
+
+  case LWS_CALLBACK_OPENSSL_LOAD_EXTRA_SERVER_VERIFY_CERTS:
+    return spike_configure_tls(app, (SSL_CTX *)user) ? 0 : 1;
+  case LWS_CALLBACK_FILTER_NETWORK_CONNECTION:
+  case LWS_CALLBACK_SERVER_NEW_CLIENT_INSTANTIATED:
+  case LWS_CALLBACK_WSI_DESTROY:
+    return track_connection(wsi, app, reason);
   case LWS_CALLBACK_HTTP:
     return handle_http(wsi, app, session, in);
   case LWS_CALLBACK_HTTP_WRITEABLE:
@@ -176,27 +222,8 @@ static int callback(struct lws *wsi, enum lws_callback_reasons reason,
       return fail_forward(wsi);
     return lws_callback_http_dummy(wsi, reason, user, in, length);
   case LWS_CALLBACK_RECEIVE:
-    if (!session || length > SPIKE_CHUNK - session->ws_length)
-      return -1;
-    memcpy(session->websocket + session->ws_length, in, length);
-    session->ws_length += length;
-    if (lws_is_final_fragment(wsi) && !lws_remaining_packet_payload(wsi)) {
-      app->ws_messages++;
-      lws_callback_on_writable(wsi);
-    }
-    return 0;
-  case LWS_CALLBACK_SERVER_WRITEABLE: {
-    if (!session)
-      return -1;
-    unsigned char buffer[LWS_PRE + SPIKE_CHUNK];
-    memcpy(buffer + LWS_PRE, session->websocket, session->ws_length);
-    int n =
-        lws_write(wsi, buffer + LWS_PRE, session->ws_length, LWS_WRITE_TEXT);
-    if (n != (int)session->ws_length)
-      return -1;
-    session->ws_length = 0;
-    return 0;
-  }
+  case LWS_CALLBACK_SERVER_WRITEABLE:
+    return handle_websocket(wsi, app, session, reason, in, length);
   default:
     return lws_callback_http_dummy(wsi, reason, user, in, length);
   }

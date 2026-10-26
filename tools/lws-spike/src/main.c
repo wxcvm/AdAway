@@ -18,6 +18,38 @@ static unsigned number(const char *value, unsigned max) {
   }
   return (unsigned)n;
 }
+static bool value_option(struct spike_options *options, const char *key,
+                         const char *value) {
+  if (!strcmp(key, "--ipv4"))
+    options->ipv4 = !strcmp(value, "-") ? NULL : value;
+  else if (!strcmp(key, "--ipv6"))
+    options->ipv6 = !strcmp(value, "-") ? NULL : value;
+  else if (!strcmp(key, "--directory"))
+    options->directory = value;
+  else if (!strcmp(key, "--image"))
+    options->image = value;
+  else if (!strcmp(key, "--http"))
+    options->http = number(value, 65535);
+  else if (!strcmp(key, "--https"))
+    options->https = number(value, 65535);
+  else if (!strcmp(key, "--lifetime"))
+    options->lifetime = number(value, 86400);
+  else if (!strcmp(key, "--upstream-http"))
+    options->upstream_http = number(value, 65535);
+  else if (!strcmp(key, "--upstream-https"))
+    options->upstream_https = number(value, 65535);
+  else if (!strcmp(key, "--upstream-ca"))
+    options->upstream_ca = value;
+  else if (!strcmp(key, "--cert-age-ms"))
+    options->cert_age_ms = number(value, 86400000);
+  else if (!strcmp(key, "--leaf-seconds"))
+    options->leaf_seconds = number(value, 86400 * 30);
+  else if (!strcmp(key, "--timeout-seconds"))
+    options->timeout_seconds = number(value, 30);
+  else
+    return false;
+  return true;
+}
 int main(int argc, char **argv) {
   app.options = (struct spike_options){.ipv4 = "127.0.0.1",
                                        .ipv6 = "::1",
@@ -44,33 +76,7 @@ int main(int argc, char **argv) {
     const char *key = argv[i];
     const char *value = argv[i + 1];
     i += 2;
-    if (!strcmp(key, "--ipv4"))
-      app.options.ipv4 = !strcmp(value, "-") ? NULL : value;
-    else if (!strcmp(key, "--ipv6"))
-      app.options.ipv6 = !strcmp(value, "-") ? NULL : value;
-    else if (!strcmp(key, "--directory"))
-      app.options.directory = value;
-    else if (!strcmp(key, "--image"))
-      app.options.image = value;
-    else if (!strcmp(key, "--http"))
-      app.options.http = number(value, 65535);
-    else if (!strcmp(key, "--https"))
-      app.options.https = number(value, 65535);
-    else if (!strcmp(key, "--lifetime"))
-      app.options.lifetime = number(value, 86400);
-    else if (!strcmp(key, "--upstream-http"))
-      app.options.upstream_http = number(value, 65535);
-    else if (!strcmp(key, "--upstream-https"))
-      app.options.upstream_https = number(value, 65535);
-    else if (!strcmp(key, "--upstream-ca"))
-      app.options.upstream_ca = value;
-    else if (!strcmp(key, "--cert-age-ms"))
-      app.options.cert_age_ms = number(value, 86400000);
-    else if (!strcmp(key, "--leaf-seconds"))
-      app.options.leaf_seconds = number(value, 86400 * 30);
-    else if (!strcmp(key, "--timeout-seconds"))
-      app.options.timeout_seconds = number(value, 30);
-    else {
+    if (!value_option(&app.options, key, value)) {
       fprintf(stderr, "unknown argument\n");
       return 2;
     }

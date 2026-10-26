@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Loopback-only native client: used inside disposable Android emulators (no adb
 // forwarding).
+#include <ctype.h>
+#include <errno.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #include <stdbool.h>
@@ -101,6 +103,71 @@ static int connect_to(struct client *c, const char *ip, int port,
     return 0;
   return SSL_connect(c->tls) == 1 && SSL_get_verify_result(c->tls) == X509_V_OK;
 }
+static int parse_length(const char *value, const char *end, size_t *length) {
+  while (*value == ' ' || *value == '\t')
+    value++;
+  char *tail;
+  errno = 0;
+  unsigned long number = strtoul(value, &tail, 10);
+  if (value == tail || tail != end || errno || number > 262144)
+    return 0;
+  *length = (size_t)number;
+  return 1;
+}
+static int response_lengths(const char *buffer, size_t used, size_t *headers,
+                            size_t *body) {
+  const char *end = strstr(buffer, "\r\n\r\n");
+  if (!end)
+    return 0;
+  unsigned found = 0;
+  const char *line = strstr(buffer, "\r\n");
+  while (line && line < end) {
+    line += 2;
+    const char *next = strstr(line, "\r\n");
+    if (!next || next > end)
+      return -1;
+    const char *prefix = "content-length:";
+    size_t i = 0;
+    while (prefix[i] && line + i < next &&
+           tolower((unsigned char)line[i]) == prefix[i])
+      i++;
+    if (!prefix[i]) {
+      if (++found != 1 || !parse_length(line + i, next, body))
+        return -1;
+    }
+    line = next;
+  }
+  *headers = (size_t)(end + 4 - buffer);
+  return found == 1 && used >= *headers ? 1 : -1;
+}
+static int verify_body(const char *body, size_t length, const char *path,
+                       unsigned expected) {
+  if (expected == 204 || !strcmp(path, "/stop"))
+    return length == 0;
+  if (expected == 403)
+    return length == 9 && !memcmp(body, "forbidden", 9);
+  if (expected == 404)
+    return length == 7 && !memcmp(body, "missing", 7);
+  if (!strcmp(path, "/image")) {
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned count = 0;
+    char hex[65];
+    if (!EVP_Digest(body, length, digest, &count, EVP_sha256(), NULL) ||
+        count != 32)
+      return 0;
+    for (unsigned i = 0; i < count; i++)
+      snprintf(hex + 2 * i, 3, "%02x", digest[i]);
+    return !strcmp(
+        hex,
+        "bea27c9599dd85c22aa4fd94a08441015d74bb6f80e2ccfb0ca307dc02223976");
+  }
+  if (length != 4096)
+    return 0;
+  for (size_t i = 0; i < length; i++)
+    if (body[i] != 'x')
+      return 0;
+  return 1;
+}
 static int request(struct client *c, const char *path, unsigned expected) {
   char request[256];
   int n = snprintf(
@@ -114,6 +181,8 @@ static int request(struct client *c, const char *path, unsigned expected) {
   if (!buffer)
     return 0;
   size_t used = 0;
+  size_t headers = 0;
+  size_t body = 0;
   while (used < 262144) {
     int got = c->tls ? SSL_read(c->tls, buffer + used, (int)(262144 - used))
                      : recv(c->socket, buffer + used, (int)(262144 - used), 0);
@@ -124,11 +193,18 @@ static int request(struct client *c, const char *path, unsigned expected) {
       return 0;
     }
     used += (size_t)got;
+    buffer[used] = 0;
+    int parsed = response_lengths(buffer, used, &headers, &body);
+    if (parsed < 0)
+      break;
+    if (parsed && used >= headers + body)
+      break;
   }
   buffer[used] = 0;
   unsigned long status = used >= 12 ? strtoul(buffer + 9, NULL, 10) : 0;
   int ok = used >= 12 && !strncmp(buffer, "HTTP/1.", 7) && status == expected &&
-           strstr(buffer, "\r\n\r\n") != NULL;
+           headers && used == headers + body &&
+           verify_body(buffer + headers, body, path, expected);
   free(buffer);
   return ok;
 }
@@ -155,8 +231,11 @@ int main(int argc, char **argv) {
       int ok = connect_to(&c, ips[family], http, NULL, NULL) &&
                request(&c, paths[i], codes[i]);
       finish(&c);
-      if (!ok)
+      if (!ok) {
+        fprintf(stderr, "native HTTP failed: address=%s path=%s\n", ips[family],
+                paths[i]);
         return 3;
+      }
       checks++;
     }
     for (unsigned i = 0; i < 3; ++i) {
@@ -185,7 +264,8 @@ int main(int argc, char **argv) {
   if (connect_to(&stopping, "127.0.0.1", http, NULL, NULL))
     request(&stopping, "/stop", 200);
   finish(&stopping);
-  printf("{\"native_loopback_checks\":%u,\"families\":[4,6],\"strict_tls\":"
+  printf("{\"native_loopback_checks\":%u,\"families\":[4,6],\"body_hashes_"
+         "verified\":true,\"strict_tls\":"
          "true,\"openssl\":\"%s\"}\n",
          checks, OpenSSL_version(OPENSSL_VERSION));
 #ifdef _WIN32

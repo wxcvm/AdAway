@@ -31,6 +31,7 @@ jobs:
           image="$RUNNER_TEMP/lws-host/inputs/fixture/app/src/main/assets/img_01.webp"
           for backend in lws mongoose; do
             python3 tools/lws-spike/tests/correctness.py --binary "$RUNNER_TEMP/lws-host/build/spike_$backend" --image "$image" --output "evidence/$backend"
+            python3 tools/lws-spike/tests/native_probe.py --binary "$RUNNER_TEMP/lws-host/build/spike_$backend" --probe "$RUNNER_TEMP/lws-host/build/spike_probe" --image "$image" --output "evidence/native-$backend"
           done
           python3 tools/lws-spike/tests/compare.py evidence/lws/correctness.json evidence/mongoose/correctness.json evidence/http-comparison.json
           cp "$RUNNER_TEMP/lws-host/build-evidence.json" evidence/

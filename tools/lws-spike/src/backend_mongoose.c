@@ -60,7 +60,7 @@ static void send_headers(struct mg_connection *c, struct connection *state,
   if (!state->pending)
     c->is_resp = 0;
 }
-static struct connection *client_state(struct mg_connection *c) {
+static struct connection *client_state(const struct mg_connection *c) {
   struct connection *state = NULL;
   memcpy(&state, c->data, sizeof(state));
   return state;
@@ -294,7 +294,7 @@ int spike_backend(struct spike_app *app) {
   char *trust = NULL;
   if (app->options.upstream_ca) {
     struct mg_str data = mg_file_read(&mg_fs_posix, app->options.upstream_ca);
-    trust = (char *)data.buf;
+    trust = data.buf;
     trust_length = data.len;
   }
   struct baseline base = {.app = app,
