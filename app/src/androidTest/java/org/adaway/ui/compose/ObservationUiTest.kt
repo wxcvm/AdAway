@@ -81,6 +81,15 @@ class ObservationUiTest {
             compose.waitForIdle()
         }
     }
+    private fun awaitContentForm() {
+        // A deep-scroll fixture must start after initial asynchronous loading,
+        // not while status/error/rules rows are still changing its height.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("content-save").fetchSemanticsNodes().singleOrNull()
+                ?.config?.contains(SemanticsProperties.Disabled) == false
+        }
+        compose.waitForIdle()
+    }
     private fun vm() = StatsViewModel(ApplicationProvider.getApplicationContext<Application>(), false)
 
     @Test fun tenCertificateEntriesRetainKnownStateAndStableFirstFramesAcrossThemes() {
@@ -92,6 +101,7 @@ class ObservationUiTest {
         var dark by mutableStateOf(false)
         compose.setContent { AdAwayTheme(dynamicColor = false, darkTheme = dark) { SettingsScreen(model, observation) } }
         enter(3)
+        awaitContentForm()
         section(3).performTouchInput { swipeUp() }
         assertTrue("Deep category fixture must actually scroll", scroll(3) > 0)
         back()
@@ -122,7 +132,7 @@ class ObservationUiTest {
         val observation = CertificateObservation(scope, { CertificateSnapshot(R.string.observation_unknown, 1, null) })
         val restore = StateRestorationTester(compose)
         restore.setContent { AdAwayTheme(dynamicColor = false) { SettingsScreen(model, observation) } }
-        enter(3); section(3).performTouchInput { swipeUp() }
+        enter(3); awaitContentForm(); section(3).performTouchInput { swipeUp() }
         val moved = scroll(3); assertTrue(moved > 0)
         back(); enter(2); assertEquals(0f, scroll(2), 1f)
         back(); enter(3); assertEquals(moved, scroll(3), 1f)
