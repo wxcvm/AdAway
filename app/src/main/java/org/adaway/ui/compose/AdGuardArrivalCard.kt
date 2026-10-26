@@ -39,6 +39,8 @@ import org.adaway.util.ListenerDiagnosticSession
 internal fun AdGuardArrivalCard(
     enabled: Boolean,
     configurationRevision: Long = 0L,
+    claimDiagnostic: (Any) -> Boolean = { true },
+    releaseDiagnostic: (Any) -> Unit = {},
     runDiagnostic: (Context, String, String, ListenerDiagnosticSession) -> String = WebServerUtils::checkArrivalDiagnostics
 ) {
     val context = LocalContext.current
@@ -56,6 +58,7 @@ internal fun AdGuardArrivalCard(
     var generation by remember { mutableStateOf(0L) }
     var activeSession by remember { mutableStateOf<ListenerDiagnosticSession?>(null) }
     var job by remember { mutableStateOf<Job?>(null) }
+    var activeClaim by remember { mutableStateOf<Any?>(null) }
     var result by remember { mutableStateOf("按已保存的监听地址与端口检查 HTTP、HTTPS 与系统 DNS；回执确认本次检测路径，不代表所有应用。不会保存草稿或更改 AdGuard。") }
     // A draft edit is not an applied target change. Also observe commits made outside this card.
     DisposableEffect(context) {
@@ -85,6 +88,7 @@ internal fun AdGuardArrivalCard(
             generation++
             activeSession?.cancel()
             job?.cancel()
+            activeClaim?.let(releaseDiagnostic)
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -98,7 +102,10 @@ internal fun AdGuardArrivalCard(
         OutlinedTextField(hosts, { hosts = it.take(254) }, enabled = enabled && !running, singleLine = true,
             label = { Text("Hosts 规则测试域名（可选）") }, modifier = Modifier.fillMaxWidth())
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton({
+            OutlinedButton(start@{
+                val claim = Any()
+                if (!claimDiagnostic(claim)) return@start
+                activeClaim = claim
                 val id = ++generation
                 val adblockInput = adblock
                 val hostsInput = hosts
@@ -136,7 +143,9 @@ internal fun AdGuardArrivalCard(
                             status = "检测已取消或监听配置已改变，请重新检测。"
                     } finally {
                         session.cancel()
+                        releaseDiagnostic(claim)
                         if (generation == id) {
+                            activeClaim = null
                             if (cancelling) status = if (configurationInvalidated)
                                 "监听配置发生应用操作或变更；旧目标检测已取消，请重新检测。旧结果仅作历史记录。"
                             else "检测已取消，可重新检测；上次完成的结果保留。"

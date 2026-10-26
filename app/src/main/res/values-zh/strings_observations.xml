@@ -1,0 +1,14 @@
+<resources>
+    <string name="observation_checking">正在检查…</string>
+    <string name="observation_unknown">暂不可用，尚无有效观察结果</string>
+    <string name="observation_refresh">重新检查</string>
+    <string name="observation_observed_at">观察时间：%1$s</string>
+    <string name="observation_unverified_at">尚未复核，上次观察：%1$s</string>
+    <string name="observation_cert_untrusted">本次观察未在信任库中发现此 CA</string>
+    <string name="observation_cert_trust_unknown">证书信任状态尚未确定</string>
+    <string name="observation_cert_expiry_unknown">证书有效期尚未确定</string>
+    <string name="observation_rank_scope">本次 Web 服务运行的有界排行，不代表全部历史域名累计。</string>
+    <string name="observation_rank_empty">本次服务暂无排行</string>
+    <string name="observation_rank_stale">仅为历史观测，当前排行暂不可用</string>
+    <string name="observation_rank_loading">正在读取本次服务排行…</string>
+</resources>

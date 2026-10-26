@@ -1,0 +1,14 @@
+<resources>
+    <string name="observation_checking">Checking…</string>
+    <string name="observation_unknown">Unavailable — no verified observation</string>
+    <string name="observation_refresh">Check again</string>
+    <string name="observation_observed_at">Observed %1$s</string>
+    <string name="observation_unverified_at">Not reverified — last observation %1$s</string>
+    <string name="observation_cert_untrusted">The CA was not found in the observed trust stores</string>
+    <string name="observation_cert_trust_unknown">Certificate trust is not yet known</string>
+    <string name="observation_cert_expiry_unknown">Certificate expiry is not yet known</string>
+    <string name="observation_rank_scope">Bounded ranking for this Web service run, not an all-time domain total.</string>
+    <string name="observation_rank_empty">No ranked domains in this service run</string>
+    <string name="observation_rank_stale">Historical observation only — the current ranking is unavailable</string>
+    <string name="observation_rank_loading">Loading the current service ranking…</string>
+</resources>

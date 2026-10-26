@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="response_check_title">普通首页实际响应</string>
+    <string name="response_check_notice">手动对已保存且确认属于本机的 IPv4／IPv6 监听地址发送普通 GET / 请求，分别检查 HTTP 与严格 HTTPS。请求可能计入 Web 日志和统计，不会创建地址。</string>
+    <string name="response_check_boundary">内容前缀不代表图片完整或浏览器渲染成功。本检查与上方的新鲜回执独立；HTTPS 校验实际 IP，不改用 localhost。未检查 QUIC／HTTP3。</string>
+    <string name="response_check_start">检查实际响应</string>
+    <string name="response_check_cancel">取消检查</string>
+    <string name="response_check_copy">复制响应报告</string>
+    <string name="response_check_browser">用系统浏览器打开：%1$s</string>
+    <string name="response_check_idle">尚未观察普通首页响应，请手动发起检查。</string>
+    <string name="response_check_running">正在检查已保存的本机首页目标…</string>
+    <string name="response_check_cancelling">正在取消并关闭本次连接…</string>
+    <string name="response_check_cancelled">检查已取消，保留上次完成的观察结果。</string>
+    <string name="response_check_finished">观察完成，请分别查看各协议和地址族的结果。</string>
+    <string name="response_check_failed">检查未完成：%1$s</string>
+    <string name="response_check_stale">历史观察：监听配置发生应用操作或变更，此结果尚未复核当前服务。</string>
+    <string name="response_check_previous">上次完成的观察（正在重新检查）</string>
+    <string name="response_check_browser_missing">没有可打开此地址的系统浏览器。</string>
+    <string name="response_check_browser_failed">保存的地址已不属于本机，或浏览器无法打开；请重新检查。</string>
+    <string name="response_check_no_log_link">不根据采样强行推断某条日志；可在请求日志中按 IPv4／IPv6 筛选候选请求。</string>
+</resources>

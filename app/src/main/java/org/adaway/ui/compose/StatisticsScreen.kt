@@ -139,6 +139,7 @@ fun StatisticsScreen(
 ) {
     // ── 从 ViewModel 收集数据流（每 10s 轮询一次 webserver）──
     val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
+    val topHostsObservation by viewModel.topHostsObservation.collectAsStateWithLifecycle()
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
@@ -340,8 +341,8 @@ fun StatisticsScreen(
             }
 
             // Top intercepted domains (ranked by how often they were blocked)
-            if (showTopHosts && serverStats != null && serverStats!!.topBlocked.isNotEmpty()) {
-                TopHostsCard(serverStats!!.topBlocked)
+            if (showTopHosts) {
+                TopHostsCard(topHostsObservation)
             }
             // Recently issued SNI certs
             if (showCerts && serverStats != null && serverStats!!.recentTls.isNotEmpty()) {
@@ -813,14 +814,14 @@ private fun DetailRow(label: String, value: Any) {
  * "被拦截"，也和拦截次数无关，所以榜单一直是错的。
  */
 @Composable
-private fun TopHostsCard(blocked: List<BlockedHost>) {
+internal fun TopHostsCard(observation: TopHostsObservation) {
+    val blocked = observation.rows.orEmpty()
     val top = blocked.filter { it.host.isNotEmpty() }
-        .sortedByDescending { it.count }
+        .sortedWith(compareByDescending<BlockedHost> { it.count }.thenBy { it.host })
         .take(10)
-    if (top.isEmpty()) return
-    val maxCount = top.first().count.coerceAtLeast(1)
+    val maxCount = (top.firstOrNull()?.count ?: 1).coerceAtLeast(1)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().testTag("top-hosts-card"),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
@@ -831,6 +832,24 @@ private fun TopHostsCard(blocked: List<BlockedHost>) {
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text(stringResource(R.string.observation_rank_scope), style = MaterialTheme.typography.labelSmall)
+            if (observation.stale) {
+                Text(stringResource(R.string.observation_rank_stale), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (observation.observedAt > 0) {
+                Text(stringResource(R.string.observation_observed_at,
+                    java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.MEDIUM)
+                        .format(java.util.Date(observation.observedAt))), style = MaterialTheme.typography.labelSmall)
+            }
+            if (top.isEmpty()) {
+                Text(stringResource(when {
+                    observation.checking -> R.string.observation_rank_loading
+                    observation.rows == null -> R.string.observation_unknown
+                    observation.stale -> R.string.observation_rank_stale
+                    else -> R.string.observation_rank_empty
+                }), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("top-hosts-state"))
+            }
             Spacer(Modifier.height(8.dp))
             val barBg = MaterialTheme.colorScheme.surfaceVariant
             val barFg = MaterialTheme.colorScheme.primary

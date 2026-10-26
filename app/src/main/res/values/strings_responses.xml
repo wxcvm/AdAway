@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="response_check_title">Actual homepage response</string>
+    <string name="response_check_notice">Manually sends ordinary GET / requests to saved, verified local IPv4/IPv6 listeners, over HTTP and strict HTTPS. These requests may count in Web logs and statistics. No address is created.</string>
+    <string name="response_check_boundary">A content prefix is not a complete image or proof of browser rendering. This check is independent of the fresh listener receipt above; HTTPS verifies the actual IP, not localhost. QUIC/HTTP3 is not tested.</string>
+    <string name="response_check_start">Check actual response</string>
+    <string name="response_check_cancel">Cancel check</string>
+    <string name="response_check_copy">Copy response report</string>
+    <string name="response_check_browser">Open system browser: %1$s</string>
+    <string name="response_check_idle">No homepage response observed yet. Run a check manually.</string>
+    <string name="response_check_running">Checking saved local homepage targets…</string>
+    <string name="response_check_cancelling">Cancelling and closing this check’s connections…</string>
+    <string name="response_check_cancelled">Check cancelled. The last completed observation is retained.</string>
+    <string name="response_check_finished">Observation complete. Read each protocol and address family separately.</string>
+    <string name="response_check_failed">Check incomplete: %1$s</string>
+    <string name="response_check_stale">Historical observation — configuration was applied or changed; this result has not verified the current service.</string>
+    <string name="response_check_previous">Last completed observation (a new check is running)</string>
+    <string name="response_check_browser_missing">No system browser is available for this address.</string>
+    <string name="response_check_browser_failed">The saved address is no longer local, or the browser could not be opened. Run a new check.</string>
+    <string name="response_check_no_log_link">No specific log row is inferred from this sample. Use the request log’s IPv4/IPv6 filters to inspect candidate requests.</string>
+</resources>
