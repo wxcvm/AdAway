@@ -77,6 +77,8 @@ class Server:
             ipv6,
             *extra,
         ]
+        if os.environ.get("SPIKE_DIAGNOSTIC_LOGS") == "1":
+            cmd.append("--debug")
         self.process = subprocess.Popen(
             cmd,
             stdout=self.out,
@@ -457,6 +459,9 @@ def forwarding_checks(exe, image, output, record):
             rows = []
             for ip in ("127.0.0.1", "::1"):
                 for path in ("/forward/text", "/forward-tls/text"):
+                    print(
+                        json.dumps({"forward_attempt": path, "family": ip}), flush=True
+                    )
                     meta, body = front.get(path, ip)
                     assert (
                         meta["status"] == 200
