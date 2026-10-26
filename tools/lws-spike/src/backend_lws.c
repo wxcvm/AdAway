@@ -7,8 +7,27 @@ struct session {
   size_t sent;
   size_t ws_length;
   bool forward_counted;
+  bool forward_failed;
+  bool forward_response_seen;
   unsigned char websocket[SPIKE_CHUNK];
 };
+static int fail_forward(struct lws *upstream) {
+  struct lws *parent = lws_get_parent(upstream);
+  if (parent) {
+    struct session *state = lws_wsi_user(parent);
+    if (state)
+      state->forward_failed = true;
+    /* A failed TLS handshake has no HTTP response. Close cleanly rather than
+     * allowing a proxy end-of-chunk marker to precede any status line. */
+    lws_set_timeout(parent, PENDING_TIMEOUT_USER_OK, LWS_TO_KILL_ASYNC);
+  }
+  return 0;
+}
+static bool saw_forward_response(struct lws *upstream) {
+  struct lws *parent = lws_get_parent(upstream);
+  struct session *state = parent ? lws_wsi_user(parent) : NULL;
+  return state && state->forward_response_seen && !state->forward_failed;
+}
 static int handle_http(struct lws *wsi, struct spike_app *app,
                        struct session *session, void *in) {
   if (!session)
@@ -86,6 +105,8 @@ static int callback(struct lws *wsi, enum lws_callback_reasons reason,
         return 1;
       }
       session->forward_counted = true;
+      session->forward_failed = false;
+      session->forward_response_seen = false;
       app->forwarding++;
       if (app->forwarding > app->forwarding_peak)
         app->forwarding_peak = app->forwarding;
@@ -133,9 +154,27 @@ static int callback(struct lws *wsi, enum lws_callback_reasons reason,
   case LWS_CALLBACK_HTTP:
     return handle_http(wsi, app, session, in);
   case LWS_CALLBACK_HTTP_WRITEABLE:
+    if (session && session->forward_failed)
+      return -1;
     if (session && session->forward_counted)
       return lws_callback_http_dummy(wsi, reason, user, in, length);
     return write_http(wsi, session);
+  case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
+    return fail_forward(wsi);
+  case LWS_CALLBACK_ESTABLISHED_CLIENT_HTTP: {
+    struct lws *parent = lws_get_parent(wsi);
+    struct session *state = parent ? lws_wsi_user(parent) : NULL;
+    unsigned status = lws_http_client_http_response(wsi);
+    if (!state || status < 100 || status > 599)
+      return fail_forward(wsi);
+    state->forward_response_seen = true;
+    return lws_callback_http_dummy(wsi, reason, user, in, length);
+  }
+  case LWS_CALLBACK_COMPLETED_CLIENT_HTTP:
+  case LWS_CALLBACK_RECEIVE_CLIENT_HTTP:
+    if (!saw_forward_response(wsi))
+      return fail_forward(wsi);
+    return lws_callback_http_dummy(wsi, reason, user, in, length);
   case LWS_CALLBACK_RECEIVE:
     if (!session || length > SPIKE_CHUNK - session->ws_length)
       return -1;

@@ -45,6 +45,12 @@ jobs:
             python3 tools/lws-spike/tests/correctness.py --binary "$RUNNER_TEMP/lws-asan/spike_$backend" --image "$RUNNER_TEMP/lws-host/inputs/fixture/app/src/main/assets/img_01.webp" --output "evidence/asan-$backend"
           done
           python3 tools/lws-spike/tests/compare.py evidence/asan-lws/correctness.json evidence/asan-mongoose/correctness.json evidence/asan-comparison.json
+      - name: Separate unchanged production-source reference (not a paired result)
+        run: |
+          test "$(git rev-parse HEAD:webserver/jni)" = e0c8408c6369c01e28069fdc073ec6fefd378681
+          cmake -S tools/lws-spike -B "$RUNNER_TEMP/lws-host/build" -DSPIKE_PRODUCTION_SOURCE="$GITHUB_WORKSPACE/webserver/jni" > evidence/production-build.log 2>&1
+          cmake --build "$RUNNER_TEMP/lws-host/build" --target spike_production_reference --parallel 4 >> evidence/production-build.log 2>&1
+          python3 tools/lws-spike/tests/production_reference.py --binary "$RUNNER_TEMP/lws-host/build/spike_production_reference" --image "$RUNNER_TEMP/lws-host/inputs/fixture/app/src/main/assets/img_01.webp" --output evidence/production-reference
       - uses: actions/upload-artifact@v4
         if: always()
         with:
