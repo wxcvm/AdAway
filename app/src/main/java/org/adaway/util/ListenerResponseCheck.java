@@ -130,6 +130,11 @@ public final class ListenerResponseCheck {
         String started = Instant.now().toString();
         if (!ListenerSettings.isLiteral(address) || port < 1 || port > 65535)
             throw new IllegalArgumentException("A literal IP and valid port are required");
+        InetAddress target = InetAddress.getByName(address);
+        if (address.contains(":") && target.getAddress().length != 16) {
+            return empty(address, port, https, started, false, State.SKIPPED,
+                    "This IPv4-mapped literal resolves as IPv4 on this platform; no IPv6 request was attempted.");
+        }
         try {
             if (!local.contains(address)) return empty(address, port, https, started, false, State.SKIPPED,
                     "Address is not currently owned by this device; no connection or address creation attempted.");
@@ -142,7 +147,7 @@ public final class ListenerResponseCheck {
             ListenerDiagnosticSession.Registration registration = session.register(transport);
             ScheduledFuture<?> timeout = WATCHDOG.schedule(() -> close(transport), https ? 2500 : 2000, TimeUnit.MILLISECONDS);
             try {
-                transport.connect(new InetSocketAddress(InetAddress.getByName(address), port), 800);
+                transport.connect(new InetSocketAddress(target, port), 800);
                 transport.setSoTimeout(2000);
                 if (!https) return exchange(transport, address, port, false, started, "", session);
                 // The actual IP URL is the peer identity. Never substitute localhost; IP literals have no SNI.

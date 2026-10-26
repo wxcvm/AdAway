@@ -116,6 +116,16 @@ public class ListenerResponseCheckTest {
         assertArrayEquals(FAMILIES,new ListenerSettings("0.0.0.0","::",8080,8443).diagnosticAddresses());
         assertThrows(IllegalArgumentException.class, () -> ListenerResponseCheck.browserUrl("localhost",80,false));
     }
+    @Test public void mappedLiteralCannotMasqueradeAsAnIpv6Observation() throws Exception {
+        for (String address : new String[]{"::ffff:127.0.0.1", "::ffff:7f00:1"}) {
+            ListenerResponseCheck.Observation skipped = ListenerResponseCheck.checkEndpoint(address,80,false,
+                candidate -> { fail("Mapped transport must be rejected before connecting"); return true; },
+                new ListenerDiagnosticSession());
+            assertEquals(ListenerResponseCheck.State.SKIPPED, skipped.state);
+            assertFalse(skipped.local); assertEquals(0,skipped.status);
+            assertTrue(skipped.detail.contains("no IPv6 request was attempted"));
+        }
+    }
     @Test public void heldResponseCancellationClosesOnlyThisSessionsSocket() throws Exception {
         CountDownLatch accepted = new CountDownLatch(1), release = new CountDownLatch(1);
         ExecutorService worker = Executors.newSingleThreadExecutor();
