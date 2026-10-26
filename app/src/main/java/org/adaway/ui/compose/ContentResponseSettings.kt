@@ -90,7 +90,11 @@ internal fun ContentResponseSettingsCard(
             Text(stringResource(R.string.content_scope), style = MaterialTheme.typography.bodyMedium)
             Text(stringResource(if (edited) R.string.content_status_draft else status),
                 modifier = Modifier.testTag("content-status"), color = MaterialTheme.colorScheme.primary)
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            // Reserve the progress slot: removing it after IO used to shrink
+            // the form by 16dp and clamp a bottom scroll (32px on API30).
+            Box(Modifier.fillMaxWidth().height(4.dp)) {
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
             val current = draft
             if (current != null) {
                 ContentPolicyOptions(current, !busy, validCount, rulesExist, rulesReadable,
