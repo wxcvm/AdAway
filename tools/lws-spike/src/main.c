@@ -19,10 +19,19 @@ static unsigned number(const char *value, unsigned max) {
   return (unsigned)n;
 }
 int main(int argc, char **argv) {
-  app.options = (struct spike_options){"127.0.0.1", "::1", NULL,    NULL, 0,
-                                       0,           3600,  3600000, false};
+  app.options = (struct spike_options){.ipv4 = "127.0.0.1",
+                                       .ipv6 = "::1",
+                                       .lifetime = 3600,
+                                       .cert_age_ms = 3600000,
+                                       .leaf_seconds = 86400 * 30,
+                                       .timeout_seconds = 2};
   int i = 1;
   while (i < argc) {
+    if (!strcmp(argv[i], "--debug")) {
+      app.options.debug = true;
+      i++;
+      continue;
+    }
     if (!strcmp(argv[i], "--logging")) {
       app.options.logging = true;
       i++;
@@ -49,8 +58,18 @@ int main(int argc, char **argv) {
       app.options.https = number(value, 65535);
     else if (!strcmp(key, "--lifetime"))
       app.options.lifetime = number(value, 86400);
+    else if (!strcmp(key, "--upstream-http"))
+      app.options.upstream_http = number(value, 65535);
+    else if (!strcmp(key, "--upstream-https"))
+      app.options.upstream_https = number(value, 65535);
+    else if (!strcmp(key, "--upstream-ca"))
+      app.options.upstream_ca = value;
     else if (!strcmp(key, "--cert-age-ms"))
       app.options.cert_age_ms = number(value, 86400000);
+    else if (!strcmp(key, "--leaf-seconds"))
+      app.options.leaf_seconds = number(value, 86400 * 30);
+    else if (!strcmp(key, "--timeout-seconds"))
+      app.options.timeout_seconds = number(value, 30);
     else {
       fprintf(stderr, "unknown argument\n");
       return 2;
@@ -58,6 +77,7 @@ int main(int argc, char **argv) {
   }
   if (!app.options.directory || !app.options.image || !app.options.http ||
       !app.options.https || app.options.http == app.options.https ||
+      (app.options.upstream_https && !app.options.upstream_ca) ||
       (!app.options.ipv4 && !app.options.ipv6))
     return 2;
   signal(SIGINT, stop);

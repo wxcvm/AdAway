@@ -15,8 +15,8 @@ static int extension(X509 *cert, X509 *issuer, int nid, const char *value) {
   X509_EXTENSION_free(ext);
   return ok;
 }
-static bool identity_fields(X509 *cert, const char *name, X509 *issuer,
-                            EVP_PKEY *key) {
+static bool identity_fields(X509 *cert, const char *name, const X509 *issuer,
+                            EVP_PKEY *key, unsigned seconds) {
   unsigned char serial[8];
   if (RAND_bytes(serial, sizeof(serial)) != 1)
     return false;
@@ -28,7 +28,7 @@ static bool identity_fields(X509 *cert, const char *name, X509 *issuer,
       !X509_set_version(cert, 2) || !X509_set_pubkey(cert, key))
     return false;
   if (!X509_gmtime_adj(X509_getm_notBefore(cert), -3600) ||
-      !X509_gmtime_adj(X509_getm_notAfter(cert), 86400L * 30))
+      !X509_gmtime_adj(X509_getm_notAfter(cert), (long)seconds))
     return false;
   X509_NAME *subject = X509_get_subject_name(cert);
   return X509_NAME_add_entry_by_txt(subject, "CN", MBSTRING_ASC,
@@ -59,9 +59,9 @@ static bool certificate_extensions(X509 *cert, const char *name, X509 *issuer,
          extension(cert, issuer, NID_ext_key_usage, "serverAuth");
 }
 static X509 *issue(const char *name, X509 *issuer, EVP_PKEY *signer,
-                   EVP_PKEY *key, bool ca) {
+                   EVP_PKEY *key, bool ca, unsigned seconds) {
   X509 *cert = X509_new();
-  if (cert && identity_fields(cert, name, issuer, key) &&
+  if (cert && identity_fields(cert, name, issuer, key, seconds) &&
       certificate_extensions(cert, name, issuer, ca) &&
       X509_sign(cert, signer, EVP_sha256()))
     return cert;
@@ -93,17 +93,31 @@ static int find_leaf(const struct spike_certificates *cache, const char *host) {
   return -1;
 }
 static X509 *select_leaf(struct spike_certificates *cache, const char *host) {
-  if (!host || !strcmp(host, "localhost"))
+  if (!host || !strcmp(host, "localhost") || !strcmp(host, "127.0.0.1") ||
+      !strcmp(host, "::1")) {
+    if (X509_cmp_current_time(X509_get0_notAfter(cache->fallback)) <= 0) {
+      X509 *fresh = issue("localhost", cache->ca, cache->ca_key,
+                          cache->leaf_key, false, cache->leaf_seconds);
+      if (!fresh)
+        return NULL;
+      X509_free(cache->fallback);
+      cache->fallback = fresh;
+      cache->renewals++;
+    }
     return cache->fallback;
+  }
   if (!safe_name(host))
     return NULL;
   uint64_t now = spike_now();
   int slot = find_leaf(cache, host);
-  if (slot >= 0 && now - cache->leaves[slot].born < cache->age_ms) {
+  if (slot >= 0 && now - cache->leaves[slot].born < cache->age_ms &&
+      X509_cmp_current_time(
+          X509_get0_notAfter(cache->leaves[slot].certificate)) > 0) {
     cache->hits++;
     return cache->leaves[slot].certificate;
   }
-  X509 *fresh = issue(host, cache->ca, cache->ca_key, cache->leaf_key, false);
+  X509 *fresh = issue(host, cache->ca, cache->ca_key, cache->leaf_key, false,
+                      cache->leaf_seconds);
   if (!fresh)
     return NULL;
   if (slot >= 0)
@@ -152,7 +166,7 @@ static bool load_or_create_ca(struct spike_certificates *cache,
     cache->ca_key = EVP_PKEY_Q_keygen(NULL, NULL, "EC", "prime256v1");
     if (cache->ca_key)
       cache->ca = issue("AdAway isolated test CA", NULL, cache->ca_key,
-                        cache->ca_key, true);
+                        cache->ca_key, true, 86400 * 30);
     if (cache->ca) {
       cert_file = spike_open(cert_path, "wbx");
       key_file = spike_open(key_path, "wbx");
@@ -184,9 +198,10 @@ int spike_certificates_init(struct spike_app *app) {
       X509_check_ca(cache->ca) <= 0)
     return 0;
   cache->leaf_key = EVP_PKEY_Q_keygen(NULL, NULL, "EC", "prime256v1");
+  cache->leaf_seconds = app->options.leaf_seconds;
   if (cache->leaf_key)
-    cache->fallback =
-        issue("localhost", cache->ca, cache->ca_key, cache->leaf_key, false);
+    cache->fallback = issue("localhost", cache->ca, cache->ca_key,
+                            cache->leaf_key, false, cache->leaf_seconds);
   cache->age_ms = app->options.cert_age_ms;
   return cache->fallback != NULL;
 }

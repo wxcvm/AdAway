@@ -52,6 +52,23 @@ record = {
     "dependencies": LOCK,
     "sources": files,
 }
+cache = {}
+for line in (build / "CMakeCache.txt").read_text(errors="replace").splitlines():
+    if (
+        line.startswith(("LWS_", "CMAKE_C_COMPILER:", "CMAKE_C_FLAGS:", "SPIKE_"))
+        and "=" in line
+    ):
+        key, value = line.split("=", 1)
+        cache[key] = value
+record["resolved_build_options"] = cache
+record["executables"] = {
+    name: {
+        "bytes": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+    for name in ("spike_lws", "spike_mongoose", "spike_probe")
+    if (path := build / (name + (".exe" if sys.platform == "win32" else ""))).is_file()
+}
 (directory / "build-evidence.json").write_text(
     json.dumps(record, indent=2) + "\n", encoding="utf8"
 )

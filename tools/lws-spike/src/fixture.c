@@ -56,21 +56,28 @@ void spike_free(struct spike_app *app) {
   free(app->image);
   spike_certificates_free(app);
 }
+void spike_forward_observed(struct spike_app *app) {
+  app->requests++;
+  if (app->log && fprintf(app->log, "%llu,forward-start,0,0\n",
+                          (unsigned long long)app->requests) < 0)
+    app->stop = 1;
+}
 void spike_reply(struct spike_app *app, const char *path, bool conditional,
                  struct spike_reply *reply) {
   memset(reply, 0, sizeof(*reply));
   reply->type = "text/plain";
   reply->status = 200;
   if (!strcmp(path, "/stats")) {
-    int n = snprintf(reply->scratch, sizeof(reply->scratch),
-                     "{\"requests\":%llu,\"ws\":%llu,\"active\":%u,\"peak\":%u,"
-                     "\"rejected\":%u,\"cert_hits\":%u,\"cert_misses\":%u,"
-                     "\"cert_evictions\":%u,\"cert_renewals\":%u}",
-                     (unsigned long long)app->requests,
-                     (unsigned long long)app->ws_messages, app->active,
-                     app->peak, app->rejected, app->certificates.hits,
-                     app->certificates.misses, app->certificates.evictions,
-                     app->certificates.renewals);
+    int n = snprintf(
+        reply->scratch, sizeof(reply->scratch),
+        "{\"requests\":%llu,\"ws\":%llu,\"active\":%u,\"peak\":%u,"
+        "\"rejected\":%u,\"cert_hits\":%u,\"cert_misses\":%u,"
+        "\"cert_evictions\":%u,\"cert_renewals\":%u,"
+        "\"forward_active\":%u,\"forward_peak\":%u}",
+        (unsigned long long)app->requests, (unsigned long long)app->ws_messages,
+        app->active, app->peak, app->rejected, app->certificates.hits,
+        app->certificates.misses, app->certificates.evictions,
+        app->certificates.renewals, app->forwarding, app->forwarding_peak);
     reply->body = (unsigned char *)reply->scratch;
     reply->length = (size_t)n;
     reply->type = "application/json";
@@ -94,6 +101,11 @@ void spike_reply(struct spike_app *app, const char *path, bool conditional,
       reply->body = app->image;
       reply->length = app->image_length;
     }
+  } else if (!strcmp(path, "/forward/text") ||
+             !strcmp(path, "/forward-tls/text")) {
+    reply->status = 503;
+    reply->body = (const unsigned char *)"upstream unavailable";
+    reply->length = 20;
   } else {
     reply->status = !strcmp(path, "/denied") ? 403 : 404;
     reply->body =

@@ -13,6 +13,7 @@
 #define SPIKE_CERTS 256
 #define SPIKE_CHUNK 4096
 #define SPIKE_BUFFER 16384
+#define SPIKE_FORWARDS 64
 struct spike_options {
   const char *ipv4;
   const char *ipv6;
@@ -22,7 +23,13 @@ struct spike_options {
   unsigned https;
   unsigned lifetime;
   unsigned cert_age_ms;
+  unsigned leaf_seconds;
+  unsigned timeout_seconds;
   bool logging;
+  bool debug;
+  unsigned upstream_http;
+  unsigned upstream_https;
+  const char *upstream_ca;
 };
 struct spike_leaf {
   char host[254];
@@ -41,6 +48,7 @@ struct spike_certificates {
   unsigned evictions;
   unsigned renewals;
   unsigned age_ms;
+  unsigned leaf_seconds;
 };
 struct spike_app {
   struct spike_options options;
@@ -54,6 +62,8 @@ struct spike_app {
   unsigned active;
   unsigned peak;
   unsigned rejected;
+  unsigned forwarding;
+  unsigned forwarding_peak;
   volatile sig_atomic_t stop;
 };
 struct spike_reply {
@@ -69,6 +79,7 @@ void spike_certificates_free(struct spike_app *app);
 int spike_configure_tls(struct spike_app *app, SSL_CTX *context);
 void spike_configure_ssl(struct spike_app *app, SSL *ssl);
 int spike_init(struct spike_app *app);
+void spike_forward_observed(struct spike_app *app);
 void spike_free(struct spike_app *app);
 void spike_reply(struct spike_app *app, const char *path, bool conditional,
                  struct spike_reply *reply);

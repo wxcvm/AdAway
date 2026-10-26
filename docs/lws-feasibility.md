@@ -29,3 +29,51 @@ Status is **EVIDENCE INCOMPLETE** until the pinned builds, sanitizer runs, Andro
 The complete production server remains reference-only. This fixture does not implement production qlog v1, cumulative stats, UID attribution, Root startup, Windows UI or packaging. Migration still needs an inventory of `mg_http_*`, `mg_json_*`, `mg_iobuf`, timers, file/persistence helpers, WebSocket publication, proxy cancellation, TLS counters and management access restrictions. No full-production acceptance follows from the fixture.
 
 Required final outcome: GO only after critical correctness is complete and stable paired P95, CPU/request and peak RSS regressions are each <=15%; NO-GO for a demonstrated unsupported critical capability or confirmed performance regression; INCONCLUSIVE for missing platforms/data or >10% paired variation. Performance parity can still justify a later migration for licensing/maintenance reasons. No production switch is automatic.
+
+## Forwarding and lifecycle follow-up
+
+The fixture adds only two controlled routes, `/forward/text` and `/forward-tls/text`, targeting the configured loopback ports. HTTPS forwarding requires an explicit test CA. LWS uses its public HTTP mounts and `lws_callback_http_dummy`; the baseline uses `mg_http_connect`. Neither backend accepts arbitrary public upstream addresses. The prototype supports bodyless GET forwarding only, not a production proxy. LWS's native proxy streams bounded read chunks, while the baseline buffers a maximum 16 KiB upstream message; this difference is not included in the five performance workloads and still needs broader production cancellation/body-policy work.
+
+Incoming connections are capped at 128, simultaneous forwards at 64. Forward start counters are observations, not completed upstream responses. Tests hold a controlled upstream response until the downstream closes, then require child closure before the ordinary timeout; this is not a sleep-based cancellation guess. HTTP close and protocol-drop both refund LWS admission exactly once. The baseline detaches its task before publishing an allocation failure. Tests also exercise partial-header timeout, oversized headers, capacity recovery, slow receivers/early close, restart on the same ports, strict untrusted-upstream rejection, and actual certificate expiry independently of cache age. Capacity tests use a common 10-second timeout to avoid silently testing idle expiry instead of admission; normal runs and benchmarks use 2 seconds.
+
+Both ordinary IP access and the native no-SNI/IP-verification path retain the default certificate's IP SANs. Cache renewal assigns new per-SSL references, including default-certificate renewal, without invalidating in-flight SSL owners. This is not a test of arbitrary imported intermediate chains.
+
+## Portability findings and fair measurement corrections
+
+- Bionic includes pthread in libc: `Threads::Threads` replaces an invalid unconditional `-lpthread`.
+- The pinned LWS CMake option `LWS_PLAT_ANDROID` removes stdin sources but its generated C config omits that macro. The parent supplies `-DLWS_PLAT_ANDROID=1` consistently with the selected public platform option, without changing upstream files.
+- MSVCRT and UCRT differ on `fopen("wbx")`. The fixture uses `_sopen_s` with `_O_CREAT|_O_EXCL` for that exact internal mode. Existing files are not truncated, and partial/invalid CA pairs fail initialization.
+- Windows baseline compilation now matches production's `MG_ENABLE_POLL=1`. The earlier default select backend silently hit Winsock's 64-entry fd_set limit. A standard 256-entry fallback definition fits the same 128+64 resource budget; this does not raise the admission cap. No baseline implementation is copied or patched.
+- Both adapters use explicit fixture upstream trust. LWS disables implicit OS-CA loading for server vhosts, matching the baseline's lack of unused client trust stores. Loopback forwarding explicitly disables inherited proxy settings. Neither change modifies system proxy or trust configuration.
+- Own code is compiled with strict warnings-as-errors. Vendor warnings remain visible but nonfatal for **both** libraries; this includes the pinned Windows LWS socket signedness diagnostic and Mongoose's WSAPoll zero-count diagnostic. Upstream code remains unmodified.
+- `build-evidence.json` records resolved CMake options, executable sizes/digests (not binaries), source hashes and pinned inputs. `idle_rss` is captured before warm-up, not mislabeled warm working set. Pairs are joined by round number.
+
+## Evidence ledger and current decision
+
+**Current decision: INCONCLUSIVE / evidence insufficient. Do not switch production.**
+
+The original default branches were Android `bfc8c7a3f5b11de8e738f3cfec09bb3d3c44ded8` and Windows `51e77155ad267bd0c1001c15286e089836bb2a80`, with default CI 40173416176 / 40173541018 successful. Independent `spike/lws-feasibility-v1` worktrees preserve the original dirty UI/export branches.
+
+- Shared prototype review: [Android draft PR 97](https://github.com/wxcvm/AdAway/pull/97).
+- Windows fixed-source consumer: [Windows draft PR 38](https://github.com/wxcvm/AdAway-Windows/pull/38).
+- Fixed OpenSSL3.5.9 Linux process/sanitizer evidence at `c57552953dfa38aaa9277cb3aaa46a047d863ff6`: [run 40198619201](https://github.com/wxcvm/AdAway/actions/runs/40198619201). This predates the expanded forwarding tests; do not call the expanded code sanitizer-accepted from this run.
+- Corrected MSVCRT file creation, fixed3.5.9 Windows process evidence: [run 40201091707](https://github.com/wxcvm/AdAway-Windows/actions/runs/40201091707), Windows `7e8b6a472bd2e9f4ad9dd170c9c82a8e3e0f6df7`, shared Android `a5c9fd582f18993054ddf3bd2fe8b258968fe921`. This also predates expanded tests.
+- Earlier five-round runs each produced 300 phases (5 workloads x 2 log modes x 3 concurrency levels x 5 rounds x 2 backends): [Linux 40196456524](https://github.com/wxcvm/AdAway/actions/runs/40196456524), [Windows 40196591111](https://github.com/wxcvm/AdAway-Windows/actions/runs/40196591111). Linux had 0 client errors but 8/30 groups exceeded 10% paired variability; Windows had 100 client errors and 25/30 noisy groups. Neither run passed acceptance. Both precede the resource/trust/idle-metric corrections above and are retained as debugging evidence, not a final ranking. Raw JSON identities are in `docs/lws-baseline-evidence.json` and the named Actions artifacts.
+
+The frozen-source matrix must still be joined with its own sanitizer, Android ABI/runtime, Windows runtime and full paired measurements. API30/API35 native probes verify real in-emulator IPv4/IPv6 and strict chain/name rejection; they are not the entire host Python suite or Android17 real-device/UI acceptance. arm64-v8a and riscv64 remain build-only without a matching runtime. No full production-service reference measurement has been collected in this spike yet; do not substitute a minimal fixture number for it.
+
+DeepSeek Flash was used for bounded read-only certificate and adapter reviews, not as an acceptance oracle. An admission-refund concern was reproduced and corrected. The claim that replacing DNS-name checks with the actual IP-SAN check removes CA validation was rejected against the pinned code and strict wrong-CA test. A possible allocation-failure task lifetime edge was hardened. Private upstream structures were not added. All findings are subject to executable tests and source review.
+
+## Migration gap and indicative effort (not implementation approval)
+
+`docs/lws-migration-inventory.json` lists lexical public `mg_*` call sites at the production baseline: 29 unique names in five own-source files, including a local wrapper and fixtures. It is not a reachability graph or complete type inventory. Windows has its own inventory because GUI, updater and qlog consumers use Mongoose JSON/HTTP helpers even if the server is replaced. Merely changing listen/TLS calls would therefore leave the dependency in the product.
+
+| Work package | Remaining production responsibilities | Indicative engineering days |
+|---|---|---:|
+| transport adapter | server callbacks, raw connection semantics, proxy backpressure/cancel, half-close, timeouts | 4-7 |
+| protocol utilities | HTTP parser/header/query helpers, JSON token iteration/escaping, buffers, string helpers, SHA/random/timing | 3-5 |
+| server contracts | qlog v1 cursor/generation/filter, statistics, persistence, WS publication, diagnostics, access restrictions | 4-7 |
+| cross-platform integration | Android Root start/stop, MinGW overlays and fixed pins, packaging and recovery | 3-5 |
+| end-to-end acceptance | API30/35, actual Android17 device, Windows GUI/install/update/recovery, stable matched benchmarks | 3-6 |
+
+Total initial range: **17-30 engineering days**, an estimate, not elapsed calendar time or a promise. Fixing issues uncovered by the spike, broader raw-connection scenarios, production reference measurement and third-party notice inventory may change it. Existing production Mongoose/OpenSSL distribution obligations are not changed or discharged by adding this prototype. This branch ships only validation source/documentation and JSON/log evidence; no new application build, update-channel change, preview release or production switch is authorized by its merge.

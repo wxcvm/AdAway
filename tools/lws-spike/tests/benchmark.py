@@ -23,6 +23,7 @@ def percentile(hist, q):
 
 def measure(server, path, tls, cold, clients, warmup, duration):
     process = psutil.Process(server.process.pid)
+    idle_rss = process.memory_info().rss  # before warm-up or client creation
     ctx = None
     if tls:
         import ssl
@@ -120,7 +121,7 @@ def measure(server, path, tls, cold, clients, warmup, duration):
         "cpu_per_request_us": (
             (cpu_after - cpu_before) * 1e6 / requests if requests else None
         ),
-        "idle_rss": rss,
+        "idle_rss": idle_rss,
         "peak_rss": peak,
         "threads": peak_threads,
         "handles_or_fds": peak_handles,
@@ -156,7 +157,9 @@ def summarize(rows, quick):
         variations = {}
         for metric in ("p95_ms", "cpu_per_request_us", "peak_rss"):
             pairs = []
-            for left, right in zip(backends["lws"], backends["mongoose"]):
+            left_rows = sorted(backends["lws"], key=lambda row: row["round"])
+            right_rows = sorted(backends["mongoose"], key=lambda row: row["round"])
+            for left, right in zip(left_rows, right_rows):
                 a, b = left.get(metric), right.get(metric)
                 if a is None or b is None or a <= 0 or b <= 0:
                     invalid = True

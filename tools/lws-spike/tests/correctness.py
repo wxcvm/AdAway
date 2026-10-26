@@ -1,6 +1,6 @@
 """Real private-loopback HTTP/TLS/WebSocket evidence. No OS trust/network changes."""
 
-import argparse, base64, hashlib, http.client, json, os, pathlib, socket, ssl, struct, subprocess, tempfile, time
+import argparse, base64, concurrent.futures, hashlib, http.client, json, os, pathlib, socket, ssl, struct, subprocess, tempfile, time
 
 
 def ports():
@@ -211,10 +211,23 @@ def check(exe, image, output, smoke=False):
             ]:
                 meta, body = server.get(path, ip)
                 assert meta["status"] == status, meta
+                assert meta["type"] == (
+                    "image/webp" if path == "/image" else "text/plain"
+                ), meta
+                assert int(meta["declared"]) == len(body), meta
                 if path == "/image":
                     assert body == pathlib.Path(image).read_bytes()
                 if path == "/text":
                     assert body == b"x" * 4096
+                if path in ("/denied", "/missing", "/empty"):
+                    assert (
+                        body
+                        == {
+                            "/denied": b"forbidden",
+                            "/missing": b"missing",
+                            "/empty": b"",
+                        }[path]
+                    )
                 rows.append(meta)
             golden[ip] = rows
             assert [r["sha256"] for r in rows] == [
@@ -285,6 +298,40 @@ def check(exe, image, output, smoke=False):
             response(sock)
         assert server.stats()["cert_renewals"] >= 1
         record("cache-age-renewal", stats=server.stats())
+    with Server(
+        exe, image, output, extra=("--leaf-seconds", "2", "--timeout-seconds", "10")
+    ) as server:
+        with server.socket(tls=True, name="expiry.spike.invalid") as held:
+            cert = held.getpeercert()
+            first = cert["serialNumber"]
+            response(held, keep=True)
+            with server.socket(tls=True) as default:
+                original_default = default.getpeercert()["serialNumber"]
+                response(default)
+            expires = ssl.cert_time_to_seconds(cert["notAfter"])
+            time.sleep(max(0, expires + 0.05 - time.time()))
+            # In-flight ownership remains valid even after the cached cert expires.
+            assert response(held, keep=True)[0]["status"] == 200
+            with server.socket(tls=True, name="expiry.spike.invalid") as fresh:
+                assert fresh.getpeercert()["serialNumber"] != first
+                response(fresh)
+            with server.socket(tls=True) as fresh:
+                assert fresh.getpeercert()["serialNumber"] != original_default
+                response(fresh)
+        assert server.stats()["cert_renewals"] >= 2
+        record("certificate-expiry-not-only-cache-age", stats=server.stats())
+    with Server(exe, image, output, extra=("--logging",)) as server:
+        server.get("/empty")
+        server.get("/text")
+        server.get("/denied")
+        assert server.stats()["requests"] == 3
+    lines = (server.root / "requests.log").read_text().splitlines()
+    assert len(lines) == 3 and [line.split(",")[0] for line in lines] == [
+        "1",
+        "2",
+        "3",
+    ], lines
+    record("same-test-log-one-entry-per-http-not-diagnostics", entries=len(lines))
     for ipv4, ipv6 in [("127.0.0.1", "-"), ("-", "::1")] + (
         [] if smoke else [("0.0.0.0", "::")]
     ):
@@ -304,7 +351,221 @@ def check(exe, image, output, smoke=False):
     with Server(exe, image, output, ipv4="192.0.2.123", ipv6="-", fail=True) as failed:
         assert failed.process.returncode != 0
         record("missing-address-startup-rejected")
+    lifecycle_checks(exe, image, output, record)
+    forwarding_checks(exe, image, output, record)
     return events
+
+
+def wait_for(check, timeout=5):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = check()
+        if result:
+            return result
+        time.sleep(0.02)
+    raise AssertionError("Bounded condition did not become true")
+
+
+def lifecycle_checks(exe, image, output, record):
+    with Server(exe, image, output) as server:
+        saved_ports = server.http, server.https
+        with server.socket() as slow:
+            slow.sendall(b"GET /text HTTP/1.1\r\nHost:")
+            assert server.get("/text")[0]["status"] == 200
+            slow.settimeout(5)
+            try:
+                assert slow.recv(1) == b""
+            except ConnectionError:
+                pass
+        record("partial-header-timeout-and-peer-isolation")
+        with server.socket() as oversized:
+            oversized.sendall(
+                b"GET /text HTTP/1.1\r\nHost: localhost\r\nX-Large: "
+                + b"x" * 18000
+                + b"\r\n\r\n"
+            )
+            oversized.settimeout(5)
+            data = b""
+            try:
+                while len(data) < 32768:
+                    chunk = oversized.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+            except ConnectionError:
+                pass
+            assert b" 200 " not in data, data[:100]
+        assert server.get("/text")[0]["status"] == 200
+        record("oversized-header-rejected-without-breaking-peer")
+    with Server(exe, image, output, extra=("--timeout-seconds", "10")) as server:
+        saved_ports = server.http, server.https
+        sockets = []
+        try:
+            with server.socket() as control:
+                response(control, "/stats", keep=True)
+
+                def partial(_):
+                    sock = server.socket()
+                    try:
+                        sock.sendall(b"GET /text HTTP/1.1\r\nHost:")
+                    except ConnectionError:
+                        pass  # an admission rejection is an expected outcome
+                    return sock
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+                    sockets.extend(pool.map(partial, range(140)))
+
+                def saturated():
+                    stats = json.loads(response(control, "/stats", keep=True)[1])
+                    return stats if stats["rejected"] else None
+
+                wait_for(saturated, timeout=1.5)
+        finally:
+            for sock in sockets:
+                sock.close()
+        stats = wait_for(lambda: (s if (s := server.stats())["active"] <= 2 else None))
+        assert stats["peak"] <= 128 and stats["rejected"] > 0, stats
+        record("connection-cap-and-resource-recovery", stats=stats)
+        # A bounded receiver keeps an image response pending while peers work.
+        with server.socket() as reader:
+            reader.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+            reader.sendall(
+                b"GET /image HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            )
+            assert reader.recv(1) == b"H"
+            assert server.get("/text")[0]["status"] == 200
+        record("slow-reader-and-early-close-peer-isolation")
+    assert server.process.returncode == 0
+    with Server(
+        exe, image, output, http=saved_ports[0], https=saved_ports[1]
+    ) as restarted:
+        assert restarted.get("/text")[0]["status"] == 200
+        record("restart-reuses-released-listeners")
+
+
+def forwarding_checks(exe, image, output, record):
+    with Server(exe, image, output) as upstream:
+        options = (
+            "--upstream-http",
+            str(upstream.http),
+            "--upstream-https",
+            str(upstream.https),
+            "--upstream-ca",
+            str(upstream.root / "ca.pem"),
+        )
+        with Server(exe, image, output, extra=options) as front:
+            rows = []
+            for ip in ("127.0.0.1", "::1"):
+                for path in ("/forward/text", "/forward-tls/text"):
+                    meta, body = front.get(path, ip)
+                    assert (
+                        meta["status"] == 200
+                        and meta["type"] == "text/plain"
+                        and body == b"x" * 4096
+                    ), meta
+                    rows.append(dict(family=ip, path=path, **meta))
+            stats = wait_for(
+                lambda: (s if (s := front.stats())["forward_active"] == 0 else None)
+            )
+            assert stats["requests"] == 4 and upstream.stats()["requests"] == 4, stats
+            record("controlled-http-and-strict-tls-forward", rows=rows, stats=stats)
+        with Server(exe, image, output) as wrong_ca:
+            bad = (
+                "--upstream-https",
+                str(upstream.https),
+                "--upstream-ca",
+                str(wrong_ca.root / "ca.pem"),
+            )
+            with Server(exe, image, output, extra=bad) as front:
+                try:
+                    result, _ = front.get("/forward-tls/text")
+                    assert result["status"] != 200, result
+                    outcome = str(result["status"])
+                except (ConnectionError, http.client.RemoteDisconnected) as error:
+                    outcome = type(error).__name__
+                assert front.get("/text")[0]["status"] == 200
+                wait_for(lambda: front.stats()["forward_active"] == 0)
+                record(
+                    "untrusted-upstream-refused-not-placeholder-success",
+                    outcome=outcome,
+                )
+    with socket.socket() as controlled:
+        controlled.bind(("127.0.0.1", 0))
+        controlled.listen()
+        controlled.settimeout(5)
+        with Server(
+            exe,
+            image,
+            output,
+            extra=("--upstream-http", str(controlled.getsockname()[1])),
+        ) as front:
+            client = front.socket()
+            try:
+                client.sendall(b"GET /forward/text HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                peer, _ = controlled.accept()
+                with peer:
+                    peer.settimeout(3)
+                    headers = b""
+                    while not headers.endswith(b"\r\n\r\n") and len(headers) < 16384:
+                        chunk = peer.recv(1)
+                        assert chunk, "Upstream closed before request"
+                        headers += chunk
+                    assert headers.endswith(b"\r\n\r\n")
+                    started = time.monotonic()
+                    client.close()  # response is deterministically held by this test
+                    peer.settimeout(1.5)  # less than the fixture's 2-second timeout
+                    try:
+                        assert peer.recv(1) == b""
+                    except ConnectionError:
+                        pass
+                    elapsed = time.monotonic() - started
+            finally:
+                client.close()
+            assert front.get("/text")[0]["status"] == 200
+            wait_for(lambda: front.stats()["forward_active"] == 0)
+            record("cancel-held-forward-closes-child-before-timeout", seconds=elapsed)
+    forward_capacity_checks(exe, image, output, record)
+
+
+def forward_capacity_checks(exe, image, output, record):
+    clients, children = [], []
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(128)
+        listener.settimeout(5)
+        options = (
+            "--upstream-http",
+            str(listener.getsockname()[1]),
+            "--timeout-seconds",
+            "10",
+        )
+        with Server(exe, image, output, extra=options) as front:
+            try:
+                for _ in range(64):
+                    client = front.socket()
+                    clients.append(client)
+                    client.sendall(
+                        b"GET /forward/text HTTP/1.1\r\nHost: localhost\r\n\r\n"
+                    )
+                    peer, _ = listener.accept()
+                    children.append(peer)
+                stats = wait_for(
+                    lambda: (
+                        s if (s := front.stats())["forward_active"] == 64 else None
+                    )
+                )
+                rejected, _ = front.get("/forward/text")
+                assert rejected["status"] == 503, rejected
+                assert front.get("/text")[0]["status"] == 200
+                assert stats["forward_peak"] == 64, stats
+            finally:
+                for sock in clients + children:
+                    sock.close()
+            stats = wait_for(
+                lambda: (s if (s := front.stats())["forward_active"] == 0 else None)
+            )
+            assert stats["requests"] == 66, stats  # 65 attempts and one healthy peer
+            record("forward-cap-and-cleanup", stats=stats)
 
 
 if __name__ == "__main__":

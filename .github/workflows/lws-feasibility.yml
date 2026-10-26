@@ -32,6 +32,7 @@ jobs:
           for backend in lws mongoose; do
             python3 tools/lws-spike/tests/correctness.py --binary "$RUNNER_TEMP/lws-host/build/spike_$backend" --image "$image" --output "evidence/$backend"
           done
+          python3 tools/lws-spike/tests/compare.py evidence/lws/correctness.json evidence/mongoose/correctness.json evidence/http-comparison.json
           cp "$RUNNER_TEMP/lws-host/build-evidence.json" evidence/
       - name: Rebuild and run ASan and UBSan
         env:
@@ -43,6 +44,7 @@ jobs:
           for backend in lws mongoose; do
             python3 tools/lws-spike/tests/correctness.py --binary "$RUNNER_TEMP/lws-asan/spike_$backend" --image "$RUNNER_TEMP/lws-host/inputs/fixture/app/src/main/assets/img_01.webp" --output "evidence/asan-$backend"
           done
+          python3 tools/lws-spike/tests/compare.py evidence/asan-lws/correctness.json evidence/asan-mongoose/correctness.json evidence/asan-comparison.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
