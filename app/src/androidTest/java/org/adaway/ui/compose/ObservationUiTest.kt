@@ -65,7 +65,11 @@ class ObservationUiTest {
     }
     private fun section(index: Int) = compose.onNodeWithTag("settings-section-scroll-$index", useUnmergedTree = true)
     private fun scroll(index: Int): Float = section(index).fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
-    private fun enter(index: Int) { compose.onNodeWithTag("settings-category-$index").performScrollTo().performClick() }
+    private fun enter(index: Int) {
+        // Lazy rows below the viewport do not exist in the semantics tree yet.
+        compose.onNodeWithTag("settings-categories").performScrollToNode(hasTestTag("settings-category-$index"))
+        compose.onNodeWithTag("settings-category-$index").performClick()
+    }
     private fun back() { compose.onNodeWithTag("settings-section-back").performClick() }
     private fun vm() = StatsViewModel(ApplicationProvider.getApplicationContext<Application>(), false)
 

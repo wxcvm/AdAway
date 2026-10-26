@@ -55,7 +55,7 @@ internal fun SettingsCategoryNavigation(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().testTag("settings-categories"),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp,
         ),
