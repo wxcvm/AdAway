@@ -25,7 +25,7 @@ static int fail_forward(struct lws *upstream) {
 }
 static bool saw_forward_response(struct lws *upstream) {
   struct lws *parent = lws_get_parent(upstream);
-  struct session *state = parent ? lws_wsi_user(parent) : NULL;
+  const struct session *state = parent ? lws_wsi_user(parent) : NULL;
   return state && state->forward_response_seen && !state->forward_failed;
 }
 static int handle_http(struct lws *wsi, struct spike_app *app,

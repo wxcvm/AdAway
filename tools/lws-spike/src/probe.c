@@ -106,6 +106,8 @@ static int connect_to(struct client *c, const char *ip, int port,
 static int parse_length(const char *value, const char *end, size_t *length) {
   while (*value == ' ' || *value == '\t')
     value++;
+  if (*value < '0' || *value > '9')
+    return 0;
   char *tail;
   errno = 0;
   unsigned long number = strtoul(value, &tail, 10);
@@ -131,10 +133,8 @@ static int response_lengths(const char *buffer, size_t used, size_t *headers,
     while (prefix[i] && line + i < next &&
            tolower((unsigned char)line[i]) == prefix[i])
       i++;
-    if (!prefix[i]) {
-      if (++found != 1 || !parse_length(line + i, next, body))
-        return -1;
-    }
+    if (!prefix[i] && (++found != 1 || !parse_length(line + i, next, body)))
+      return -1;
     line = next;
   }
   *headers = (size_t)(end + 4 - buffer);
@@ -168,6 +168,23 @@ static int verify_body(const char *body, size_t length, const char *path,
       return 0;
   return 1;
 }
+static size_t receive_response(struct client *c, char *buffer, size_t *headers,
+                               size_t *body) {
+  size_t used = 0;
+  int parsed = 0;
+  while (used < 262144 && (!parsed || used < *headers + *body)) {
+    int got = c->tls ? SSL_read(c->tls, buffer + used, (int)(262144 - used))
+                     : recv(c->socket, buffer + used, (int)(262144 - used), 0);
+    if (got <= 0 || (size_t)got > 262144 - used)
+      return 0;
+    used += (size_t)got;
+    buffer[used] = 0;
+    parsed = response_lengths(buffer, used, headers, body);
+    if (parsed < 0)
+      return 0;
+  }
+  return used;
+}
 static int request(struct client *c, const char *path, unsigned expected) {
   char request[256];
   int n = snprintf(
@@ -180,26 +197,9 @@ static int request(struct client *c, const char *path, unsigned expected) {
   char *buffer = malloc(262145);
   if (!buffer)
     return 0;
-  size_t used = 0;
   size_t headers = 0;
   size_t body = 0;
-  while (used < 262144) {
-    int got = c->tls ? SSL_read(c->tls, buffer + used, (int)(262144 - used))
-                     : recv(c->socket, buffer + used, (int)(262144 - used), 0);
-    if (got <= 0)
-      break;
-    if ((size_t)got > 262144 - used) {
-      free(buffer);
-      return 0;
-    }
-    used += (size_t)got;
-    buffer[used] = 0;
-    int parsed = response_lengths(buffer, used, &headers, &body);
-    if (parsed < 0)
-      break;
-    if (parsed && used >= headers + body)
-      break;
-  }
+  size_t used = receive_response(c, buffer, &headers, &body);
   buffer[used] = 0;
   unsigned long status = used >= 12 ? strtoul(buffer + 9, NULL, 10) : 0;
   int ok = used >= 12 && !strncmp(buffer, "HTTP/1.", 7) && status == expected &&
