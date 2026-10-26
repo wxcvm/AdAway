@@ -14,7 +14,8 @@ rule semantics, database schema and resource limits. The LWS spike is independen
   initial status is unknown/checking, never a false untrusted/stopped result.
 - Certificate reads publish service/trust/expiry together, off the UI thread.
   A bounded wait and a single unfinished root worker prevent queued root probes.
-  Revision checks reject late results. User-initiated trust actions have a
+  Revision checks reject late results. Trust labels report observed stores,
+  not a promise that every app accepts the CA. User-initiated trust actions have a
   ViewModel-owned single-flight gate that survives category navigation and is
   released on failure/cancellation; no automatic certificate mutation is added.
 - The content/response form keeps its last successfully read/saved values in

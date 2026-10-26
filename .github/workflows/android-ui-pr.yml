@@ -9,6 +9,7 @@ on:
       - 'app/src/main/java/org/adaway/ui/compose/**'
       - 'app/src/main/res/values/strings_compose.xml'
       - 'app/src/main/res/values-zh/strings_compose.xml'
+      - 'app/src/main/res/values*/strings_prefs_root.xml'
       - 'app/src/main/res/values*/strings_observations.xml'
       - 'app/src/main/res/values*/strings_responses.xml'
       - 'app/src/androidTest/java/org/adaway/ui/compose/ObservationUiTest.kt'
