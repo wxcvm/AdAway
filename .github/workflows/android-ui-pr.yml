@@ -17,6 +17,7 @@ on:
       - 'app/src/test/java/org/adaway/ui/compose/ObservationStateTest.kt'
       - 'app/src/test/java/org/adaway/util/ListenerResponseCheckTest.java'
       - 'app/src/test/resources/response-name-only-test.p12'
+      - 'tools/test-observation-ui.sh'
       - '.github/workflows/android-ui-pr.yml'
   workflow_dispatch:
 
@@ -132,13 +133,7 @@ jobs:
           api-level: ${{ matrix.api }}
           arch: x86_64
           disable-animations: false
-          script: |
-            set +e
-            ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.ui.compose.ObservationUiTest,org.adaway.ui.compose.ResponseCheckUiTest
-            result=$?
-            adb pull /sdcard/Pictures/AdAwayUiReview observation-ui || true
-            adb pull /sdcard/Download/AdAwayUiReview observation-manifests || true
-            exit "$result"
+          script: bash tools/test-observation-ui.sh
       - name: Upload continuous observation frames and results
         if: always()
         uses: actions/upload-artifact@v4

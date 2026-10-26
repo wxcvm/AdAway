@@ -398,9 +398,8 @@ fun SettingsScreen(
     BackHandler(enabled = selectedSection >= 0) { selectedSection = -1 }
     // A section owns its scroll state. Restore during composition, never scroll after the first frame.
     val sectionStates = rememberSaveableStateHolder()
-    // ScrollState must outlive the conditional detail subtree: disposing an
-    // outgoing scrolling layout can clamp its saved position during navigation.
-    // Allocate one saveable state per fixed category before any first layout.
+    // Keep one saveable scroll state per fixed category outside the conditional
+    // detail subtree, available before that category's first layout.
     val sectionScrolls = (0..6).map { section ->
         androidx.compose.runtime.key(section) { rememberScrollState() }
     }
@@ -1250,7 +1249,7 @@ fun SettingsScreen(
             }
                     }
                     3 -> {
-                        ContentResponseSettingsCard()
+                        ContentResponseSettingsCard(cache = viewModel.contentResponseCache)
                     }
                     4 -> {
             // ── Statistics chart settings ──

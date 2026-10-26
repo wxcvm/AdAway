@@ -361,6 +361,7 @@ class StatsViewModel @JvmOverloads constructor(
     val certificateObservation = CertificateObservation(viewModelScope,
         { CertificateProbe.read(application.applicationContext) })
     val certificateAction = CertificateAction(viewModelScope, certificateObservation)
+    internal val contentResponseCache = ContentResponseCache()
 
     private fun observeRanking(stats: ServerStats, at: Long, historical: Boolean) {
         _topHostsObservation.value = _topHostsObservation.value.accept(
