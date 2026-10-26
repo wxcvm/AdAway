@@ -38,18 +38,35 @@ private class AndroidContentResponseBackend(private val context: Context) : Cont
     override fun rulesExist() = java.nio.file.Files.isRegularFile(WebServerUtils.getResourcePath(context).resolve(ContentResponseRules.FILE_NAME))
 }
 
+/** Last successfully read/saved values, not jobs or an assertion about current service state.
+ * Keeping this outside the page avoids collapsing a deep scrolled form while
+ * the same saved configuration is checked again on category re-entry. */
+internal class ContentResponseCache {
+    var settings: ContentResponseSettings? = null
+    var rules: String? = null
+    var rulesExist: Boolean = false
+}
+
 @Composable
-internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null) {
+internal fun ContentResponseSettingsCard(
+    backend: ContentResponseBackend? = null,
+    cache: ContentResponseCache? = null,
+) {
     val context = LocalContext.current.applicationContext
     val service = backend ?: remember(context) { AndroidContentResponseBackend(context) }
     val scope = rememberCoroutineScope()
-    var saved by remember(service) { mutableStateOf<ContentResponseSettings?>(null) }
-    var draft by remember(service) { mutableStateOf<ContentResponseSettings?>(null) }
-    var rules by remember(service) { mutableStateOf("") }
-    var rulesExist by remember(service) { mutableStateOf(false) }
-    var rulesReadable by remember(service) { mutableStateOf(false) }
+    var saved by remember(service) { mutableStateOf<ContentResponseSettings?>(cache?.settings) }
+    var draft by remember(service) { mutableStateOf<ContentResponseSettings?>(cache?.settings) }
+    var rules by remember(service) { mutableStateOf(cache?.rules ?: "") }
+    var rulesExist by remember(service) { mutableStateOf(cache?.rulesExist ?: false) }
+    var rulesReadable by remember(service) { mutableStateOf(cache?.rules != null) }
     var busy by remember(service) { mutableStateOf(true) }
-    var status by remember(service) { mutableIntStateOf(R.string.content_status_loading) }
+    // The cached values have already been read, but service application is
+    // still unconfirmed (as this label says). Keep that paragraph while the
+    // reserved progress indicator rechecks: replacing it with a shorter
+    // loading paragraph used to clamp API30 bottom scroll by another 24dp.
+    var status by remember(service) { mutableIntStateOf(
+        if (cache?.settings != null) R.string.content_status_ready else R.string.content_status_loading) }
     var reload by remember { mutableIntStateOf(0) }
     var showRules by remember { mutableStateOf(false) }
     LaunchedEffect(service, reload) {
@@ -58,11 +75,13 @@ internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null
             val loaded = withContext(Dispatchers.IO) { service.load() }
             saved = loaded
             draft = loaded
+            cache?.settings = loaded
             status = R.string.content_status_ready
         } catch (_: IOException) { status = R.string.content_status_load_failed }
         try {
             val loaded = withContext(Dispatchers.IO) { service.loadRules() to service.rulesExist() }
             rules = loaded.first; rulesExist = loaded.second; rulesReadable = true
+            cache?.rules = loaded.first; cache?.rulesExist = loaded.second
         } catch (_: IOException) { rulesReadable = false }
         finally { busy = false }
     }
@@ -76,7 +95,11 @@ internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null
             Text(stringResource(R.string.content_scope), style = MaterialTheme.typography.bodyMedium)
             Text(stringResource(if (edited) R.string.content_status_draft else status),
                 modifier = Modifier.testTag("content-status"), color = MaterialTheme.colorScheme.primary)
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            // Reserve the progress slot: removing it after IO used to shrink
+            // the form by 16dp and clamp a bottom scroll (32px on API30).
+            Box(Modifier.fillMaxWidth().height(4.dp)) {
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
             val current = draft
             if (current != null) {
                 ContentPolicyOptions(current, !busy, validCount, rulesExist, rulesReadable,
@@ -100,6 +123,7 @@ internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null
                         try {
                             val confirmed = withContext(Dispatchers.IO) { service.save(proposed) }
                             saved = proposed
+                            cache?.settings = proposed
                             status = if (confirmed) R.string.content_status_confirmed else R.string.content_status_saved_unknown
                         } catch (_: IOException) { status = R.string.content_status_save_failed }
                         finally { busy = false }
@@ -117,7 +141,9 @@ internal fun ContentResponseSettingsCard(backend: ContentResponseBackend? = null
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
-    if (showRules) ContentRulesEditor(rules, service, onDismiss = { showRules = false }) { rules = it; rulesExist = true }
+    if (showRules) ContentRulesEditor(rules, service, onDismiss = { showRules = false }) {
+        rules = it; rulesExist = true; cache?.rules = it; cache?.rulesExist = true
+    }
 }
 
 @Composable

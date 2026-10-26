@@ -182,6 +182,7 @@ data class ServerStats(
     val apps: List<AppStat> = emptyList(),
     val recentTls: List<TlsHost> = emptyList(),
     val topBlocked: List<BlockedHost> = emptyList(),
+    val topHostsRead: TopHostsRead = TopHostsRead.VALID,
     val queryLog: List<QueryLogEntry> = emptyList(),
     val history: List<HistPoint> = emptyList(),
     val daily: List<HistPoint> = emptyList(),
@@ -259,13 +260,21 @@ data class ServerStats(
             }
             val topBlocked = mutableListOf<BlockedHost>()
             val topArray = json.optJSONArray("top_blocked")
+            var topRead = when {
+                !json.has("top_blocked") -> TopHostsRead.MISSING
+                topArray == null -> TopHostsRead.MALFORMED
+                else -> TopHostsRead.VALID
+            }
             if (topArray != null) {
                 for (i in 0 until topArray.length()) {
-                    val o = topArray.optJSONObject(i) ?: continue
-                    topBlocked += BlockedHost(
-                        host = o.optString("host", ""),
-                        count = o.optLong("count", 0),
-                    )
+                    val row = topArray.optJSONObject(i)
+                    val host = row?.opt("host") as? String
+                    val count = parseRankingCount(row?.opt("count"))
+                    if (host.isNullOrBlank() || count == null) {
+                        topRead = TopHostsRead.MALFORMED
+                        break
+                    }
+                    topBlocked += BlockedHost(host, count)
                 }
             }
             val parsed = ServerStats(
@@ -299,6 +308,7 @@ data class ServerStats(
                 apps = apps,
                 recentTls = recentTls,
                 topBlocked = topBlocked,
+                topHostsRead = topRead,
                 queryLog = queryLog,
                 history = history,
                 daily = daily,
@@ -322,7 +332,10 @@ data class ServerStats(
  * ViewModel for the new Compose UI: hosts-list statistics (Room) plus
  * native web server statistics polled from /internal-stats every 5s.
  */
-class StatsViewModel(application: Application) : AndroidViewModel(application) {
+class StatsViewModel @JvmOverloads constructor(
+    application: Application,
+    private val observeInBackground: Boolean = true,
+) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getInstance(application)
 
@@ -343,6 +356,18 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     // Web server statistics (polled)
     private val _serverStats = MutableStateFlow<ServerStats?>(null)
     val serverStats: StateFlow<ServerStats?> = _serverStats
+    private val _topHostsObservation = MutableStateFlow(TopHostsObservation())
+    val topHostsObservation: StateFlow<TopHostsObservation> = _topHostsObservation
+    val certificateObservation = CertificateObservation(viewModelScope,
+        { CertificateProbe.read(application.applicationContext) })
+    val certificateAction = CertificateAction(viewModelScope, certificateObservation)
+    internal val contentResponseCache = ContentResponseCache()
+
+    private fun observeRanking(stats: ServerStats, at: Long, historical: Boolean) {
+        _topHostsObservation.value = _topHostsObservation.value.accept(
+            stats.topBlocked, stats.topHostsRead, at, historical)
+    }
+
     // 统计获取状态：更新时间戳与错误标记（供 UI 状态横幅展示）
     val statsUpdatedAt = MutableStateFlow<Long>(0L)
     val statsError = MutableStateFlow<String?>(null)
@@ -377,18 +402,20 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        refreshServerStats()
-        startPolling()
-        // 若用户在设置页启用了实时推送，则自动连接 WebSocket
-        val app = getApplication<org.adaway.AdAwayApplication>()
-        if (org.adaway.helper.PreferenceHelper.getUpdateCheckAppStartup(app)) {
-            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { app.getUpdateModel().checkForUpdate(false) }
+        if (observeInBackground) {
+            refreshServerStats()
+            startPolling()
+            // 若用户在设置页启用了实时推送，则自动连接 WebSocket
+            val app = getApplication<org.adaway.AdAwayApplication>()
+            if (org.adaway.helper.PreferenceHelper.getUpdateCheckAppStartup(app)) {
+                viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { app.getUpdateModel().checkForUpdate(false) }
+            }
+            if (org.adaway.ui.compose.isRealtimeEnabled(app)) {
+                startRealtime()
+            }
+            // Pause background stats collection while app is backgrounded.
+            androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
         }
-        if (org.adaway.ui.compose.isRealtimeEnabled(app)) {
-            startRealtime()
-        }
-        // Pause background stats collection while app is backgrounded.
-        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
     }
 
     /**
@@ -398,7 +425,7 @@ class StatsViewModel(application: Application) : AndroidViewModel(application) {
      * （该应用曾因高频轮询被 ColorOS LMK 杀进程）。
      * 页面不可见时协程自动暂停（lifecycle-aware）。
      */
-private fun startPolling() {
+    private fun startPolling() {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
             while (isActive) {
@@ -442,6 +469,7 @@ private fun startPolling() {
                                     shouldReplacePushedStats(_serverStats.value?.snapshotTs,
                                         _serverStats.value?.uptimeSeconds, parsed.snapshotTs, parsed.uptimeSeconds)) {
                                     _serverStats.value = parsed
+                                    observeRanking(parsed, System.currentTimeMillis(), false)
                                     statsPublicationRevision++
                                     statsUpdatedAt.value = System.currentTimeMillis()
                                     statsError.value = null
@@ -523,19 +551,25 @@ private fun startPolling() {
                     val replace = shouldReplaceStats(_serverStats.value?.snapshotTs, statsUpdatedAt.value, stats.snapshotTs, fromSnapshot)
                     if (replace) {
                         _serverStats.value = stats
+                        observeRanking(stats, if (fromSnapshot) stats.snapshotTs * 1000 else System.currentTimeMillis(), fromSnapshot)
                         statsPublicationRevision++
                         statsUpdatedAt.value = if (fromSnapshot) stats.snapshotTs * 1000 else System.currentTimeMillis()
                     }
                     // "snapshot" 会让状态栏显示“最后一次更新 xx:xx（可能已过期）”
                     statsError.value = if (fromSnapshot) { if (replace) "snapshot" else "unreachable" } else null
+                    if (fromSnapshot && !replace) _topHostsObservation.value = _topHostsObservation.value.unavailable()
                 } else {
                     statsError.value = "unreachable"
+                    _topHostsObservation.value = _topHostsObservation.value.unavailable()
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
                 Timber.w(e, "Failed to refresh server stats")
-                if (startedAtRevision == statsPublicationRevision) statsError.value = "error"
+                if (startedAtRevision == statsPublicationRevision) {
+                    statsError.value = "error"
+                    _topHostsObservation.value = _topHostsObservation.value.unavailable()
+                }
             } finally {
                 statsRefreshTick.value++
             }

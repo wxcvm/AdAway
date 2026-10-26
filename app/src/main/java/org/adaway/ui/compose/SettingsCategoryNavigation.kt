@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.adaway.R
@@ -54,7 +55,7 @@ internal fun SettingsCategoryNavigation(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().testTag("settings-categories"),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(
             start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp,
         ),
@@ -134,7 +135,7 @@ internal fun SettingsCategoryNavigation(
         } else {
             itemsIndexed(filtered, key = { _, index -> index }) { _, index ->
                 Card(
-                    modifier = Modifier.fillMaxWidth().clickable { onSelect(index) },
+                    modifier = Modifier.fillMaxWidth().testTag("settings-category-$index").clickable { onSelect(index) },
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     ),

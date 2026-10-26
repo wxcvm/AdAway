@@ -25,6 +25,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
@@ -82,10 +83,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -357,7 +360,10 @@ internal fun setLightMode(context: Context, enabled: Boolean) =
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: StatsViewModel) {
+fun SettingsScreen(
+    viewModel: StatsViewModel,
+    certificateObservation: CertificateObservation = viewModel.certificateObservation,
+) {
     val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val apps = serverStats?.apps.orEmpty()
@@ -390,8 +396,27 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     var selectedSection by rememberSaveable { mutableIntStateOf(-1) }
     var settingsSearch by rememberSaveable { mutableStateOf("") }
     BackHandler(enabled = selectedSection >= 0) { selectedSection = -1 }
-    val settingsScroll = rememberScrollState()
-    LaunchedEffect(selectedSection) { settingsScroll.scrollTo(0) }
+    // A section owns its scroll state. Restore during composition, never scroll after the first frame.
+    val sectionStates = rememberSaveableStateHolder()
+    // Keep one saveable scroll state per fixed category outside the conditional
+    // detail subtree, available before that category's first layout.
+    val sectionScrolls = (0..6).map { section ->
+        androidx.compose.runtime.key(section) { rememberScrollState() }
+    }
+    val certificateState by certificateObservation.state.collectAsStateWithLifecycle()
+    val certificateLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(selectedSection, certificateLifecycle, certificateObservation) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (selectedSection == 2 && event == androidx.lifecycle.Lifecycle.Event.ON_RESUME &&
+                !viewModel.certificateAction.busy.value)
+                certificateObservation.refresh()
+        }
+        if (selectedSection == 2) {
+            // Lifecycle replays ON_RESUME for an already resumed owner. Do not probe twice.
+            certificateLifecycle.lifecycle.addObserver(observer)
+        }
+        onDispose { certificateLifecycle.lifecycle.removeObserver(observer) }
+    }
     val sectionTitles = listOf(
         stringResource(R.string.compose_settings_section_1_title),
         stringResource(R.string.compose_settings_section_2_title),
@@ -443,6 +468,8 @@ fun SettingsScreen(viewModel: StatsViewModel) {
     )
 
     Scaffold(
+        modifier = Modifier.background(MaterialTheme.colorScheme.background).testTag("settings-screen"),
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -455,7 +482,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                 },
                 navigationIcon = {
                     if (selectedSection >= 0) {
-                        IconButton(onClick = { selectedSection = -1 }) {
+                        IconButton(onClick = { selectedSection = -1 }, modifier = Modifier.testTag("settings-section-back")) {
                             Icon(
                                 Icons.Outlined.ArrowBack,
                                 contentDescription = stringResource(R.string.compose_settings_home_back),
@@ -470,7 +497,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
         },
     ) { padding ->
         Column(
-            modifier = Modifier.padding(padding).fillMaxSize(),
+            modifier = Modifier.padding(padding).fillMaxSize().background(MaterialTheme.colorScheme.background),
         ) {
             if (selectedSection < 0) {
                 SettingsCategoryNavigation(
@@ -492,9 +519,12 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     onSelect = { selectedSection = it },
                 )
             } else {
+                sectionStates.SaveableStateProvider(selectedSection) {
+                val settingsScroll = sectionScrolls[selectedSection]
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .testTag("settings-section-scroll-$selectedSection")
                         .verticalScroll(settingsScroll)
                         .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1151,160 +1181,29 @@ fun SettingsScreen(viewModel: StatsViewModel) {
             }
                     }
                     2 -> {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {// ===== [C9-GROUP-3 of 7] 证书与 HTTPS =====
-// 目标顺序：第 3 组（本组当前物理位置可能不在此处，改造时整块上移/下移到该位置）
-// 归入分区：证书管理区；一键信任 / 手动安装；固定证书的应用
-// 五段模板（名称→作用→当前状态→控件→生效方式）与取键规则见 docs/settings-groups.md；交接单见 docs/ui-handoff.md
-                    // ── 证书管理区 ──
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        stringResource(R.string.compose_settings_cert_title),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    // 证书状态（后台获取避免主线程网络）
-                    /*
-                     * 四态 + 可刷新：之前只在进页面时算一次，安装/删除之后不更新，用户看到的是旧结论；
-                     * 而且"已安装"只看用户库 —— targetSdk>=24 的 App 默认不信任用户库，必须把
-                     * "用户级"与"系统级"分开显示（系统级要写 /system 或 APEX，或 apexdata ——
-                     * 后者非空时 Conscrypt 优先读它，只覆盖 APEX 是不够的）。
-                     */
-                    var certStateRes by remember { mutableIntStateOf(R.string.pref_webserver_state_not_running) }
-                    var certTrust by remember { mutableIntStateOf(0) }
-                    var certRefresh by remember { mutableIntStateOf(0) }
-                    LaunchedEffect(certRefresh) {
-                        val probe = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            org.adaway.util.WebServerUtils.getWebServerState(context) to
-                                org.adaway.util.WebServerUtils.certificateTrustLevel(context)
+            val certificateActionBusy by viewModel.certificateAction.busy.collectAsStateWithLifecycle()
+            CertificateObservationCard(certificateState,
+                onRefresh = certificateObservation::refresh,
+                onTrust = {
+                    val applicationContext = context.applicationContext
+                    viewModel.certificateAction.run(action = {
+                        withContext(Dispatchers.IO) {
+                            org.adaway.util.WebServerUtils.installCertificateToUserStore(applicationContext) &&
+                                org.adaway.util.WebServerUtils.isUserCertificateInstalled(applicationContext)
                         }
-                        certStateRes = probe.first
-                        certTrust = probe.second
-                    }
-                    Text(
-                        stringResource(certStateRes),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (certStateRes == R.string.pref_webserver_state_running_and_installed ||
-                            certStateRes == R.string.pref_webserver_state_running_and_installed_system)
-                            MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.error,
-                    )
-                    if (certTrust > 0) {
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            stringResource(
-                                if (certTrust >= org.adaway.util.WebServerUtils.TRUST_SYSTEM)
-                                    R.string.compose_settings_cert_level_system
-                                else R.string.compose_settings_cert_level_user,
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (certTrust >= org.adaway.util.WebServerUtils.TRUST_SYSTEM)
-                                MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    // ── 一键信任（写入用户库）/ 手动安装 ──
-                    /* 复用同一次探测的结果，避免两处各自查一遍还互相不一致 */
-                    val certTrusted = certTrust > 0
-                    Spacer(Modifier.height(8.dp))
-                    if (certTrusted) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Outlined.Lock,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                stringResource(R.string.compose_settings_cert_trusted),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    val ok = org.adaway.util.WebServerUtils
-                                        .installCertificateToUserStore(context)
-                                    /*
-                                     * Verify instead of trusting the return
-                                     * value: the root copy can "succeed" while
-                                     * the store still does not list the CA
-                                     * (wrong hash name, SELinux context, a
-                                     * Magisk module that shadows the file).
-                                     * The user then wonders why HTTPS still
-                                     * warns.
-                                     */
-                                    val verified = ok && org.adaway.util.WebServerUtils
-                                        .isUserCertificateInstalled(context)
-                                    Toast.makeText(
-                                        context,
-                                        if (verified) R.string.compose_settings_cert_trust_ok
-                                        else R.string.compose_settings_cert_trust_fail,
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    /* 重新探测：状态与信任级别都要按事实刷新，而不是沿用旧结论。
-                                       certTrusted 现在是派生值（certTrust > 0），不能再赋值。 */
-                                    certRefresh++
-                                },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(stringResource(R.string.compose_settings_cert_trust))
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    org.adaway.util.WebServerUtils.installUserCertificate(context)
-                                },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Text(stringResource(R.string.compose_settings_cert_install_manual))
-                            }
-                        }
-                    }
-                    // 剩余天数
-                    val daysLeft = org.adaway.util.WebServerUtils.getCertificateDaysLeft(context)
-                    if (daysLeft != null) {
-                        Text(
-                            stringResource(R.string.compose_settings_cert_days, daysLeft),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (daysLeft < 30) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    /*
-                     * NOTE: the SHA-256 fingerprint block (and its QR share
-                     * button) used to sit here. It is not part of installing or
-                     * trusting the CA - it only helped someone compare the
-                     * fingerprint by hand - and it made this card the busiest
-                     * part of the screen. Removed on request: the card now ends
-                     * with the one action that matters, exporting the
-                     * certificate.
-                     */
-                    Spacer(Modifier.height(4.dp))
-                    // 导出证书到 Download 目录（供其他设备/模块使用）
-                    OutlinedButton(
-                        onClick = { exportCertificate(context) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(
-                            Icons.Outlined.Save,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(stringResource(R.string.compose_settings_cert_export))
-                    }
-                }
-            }
+                    }, onResult = { verified ->
+                        Toast.makeText(applicationContext,
+                            if (verified) R.string.compose_settings_cert_trust_ok
+                            else R.string.compose_settings_cert_trust_fail, Toast.LENGTH_LONG).show()
+                    })
+                },
+                onManualInstall = {
+                    certificateObservation.invalidate()
+                    org.adaway.util.WebServerUtils.installUserCertificate(context)
+                },
+                onExport = { exportCertificate(context) },
+                actionBusy = certificateActionBusy,
+            )
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1350,7 +1249,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
             }
                     }
                     3 -> {
-                        ContentResponseSettingsCard()
+                        ContentResponseSettingsCard(cache = viewModel.contentResponseCache)
                     }
                     4 -> {
             // ── Statistics chart settings ──
@@ -2383,6 +2282,7 @@ fun SettingsScreen(viewModel: StatsViewModel) {
                     }
                     else -> Unit
                     }
+                }
                 }
             }
         }

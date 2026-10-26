@@ -49,6 +49,7 @@ internal fun ListenerSettingsCard(
     var http by remember { mutableStateOf(saved.http.toString()) }
     var https by remember { mutableStateOf(saved.https.toString()) }
     var busy by remember { mutableStateOf(false) }
+    val diagnostics = remember { ListenerDiagnosticAdmission() }
     var probeGeneration by remember { mutableStateOf(0L) }
     var configurationRevision by remember { mutableStateOf(0L) }
     var autoCreate by remember { mutableStateOf(WebServerUtils.isListenerAutoCreate(context)) }
@@ -138,6 +139,9 @@ internal fun ListenerSettingsCard(
             OutlinedButton({ act(false) }, enabled = !busy) { Text("检测冲突") }
             Button({ act(true) }, enabled = !busy) { Text(if (busy) "正在处理…" else "应用并重启") }
         }
-        AdGuardArrivalCard(enabled = !busy, configurationRevision = configurationRevision)
+        AdGuardArrivalCard(enabled = !busy && !diagnostics.busy, configurationRevision = configurationRevision,
+            claimDiagnostic = diagnostics::claim, releaseDiagnostic = diagnostics::release)
+        ResponseCheckCard(enabled = !busy && !diagnostics.busy, configurationRevision = configurationRevision,
+            claimDiagnostic = diagnostics::claim, releaseDiagnostic = diagnostics::release)
     }
 }
