@@ -61,7 +61,12 @@ internal fun ContentResponseSettingsCard(
     var rulesExist by remember(service) { mutableStateOf(cache?.rulesExist ?: false) }
     var rulesReadable by remember(service) { mutableStateOf(cache?.rules != null) }
     var busy by remember(service) { mutableStateOf(true) }
-    var status by remember(service) { mutableIntStateOf(R.string.content_status_loading) }
+    // The cached values have already been read, but service application is
+    // still unconfirmed (as this label says). Keep that paragraph while the
+    // reserved progress indicator rechecks: replacing it with a shorter
+    // loading paragraph used to clamp API30 bottom scroll by another 24dp.
+    var status by remember(service) { mutableIntStateOf(
+        if (cache?.settings != null) R.string.content_status_ready else R.string.content_status_loading) }
     var reload by remember { mutableIntStateOf(0) }
     var showRules by remember { mutableStateOf(false) }
     LaunchedEffect(service, reload) {

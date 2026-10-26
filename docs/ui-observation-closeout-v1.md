@@ -20,7 +20,7 @@ rule semantics, database schema and resource limits. The LWS spike is independen
   released on failure/cancellation; no automatic certificate mutation is added.
 - The content/response form keeps its last successfully read/saved values in
   the ViewModel, while rechecking on re-entry with controls disabled and a
-  loading label. It no longer briefly collapses to a tiny loading card and
+  loading indicator and the retained unconfirmed-values explanation. It no longer briefly collapses to a tiny loading card and
   clamps a restored deep scroll to zero. This cache is neither persistent nor
   proof that the current service applied the settings; existing verification
   messages remain distinct. Jobs and unsaved draft mutation stay page-scoped.
