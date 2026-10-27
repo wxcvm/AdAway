@@ -53,7 +53,8 @@ class StatsObservationDeviceTest {
                 pool.execute { serve(socket) }
             } } catch (_: Exception) {}
         }.apply { start() }
-        fun json() = "{"uptime_seconds":10,"total_requests":" + (http.get()+upgrades.get()) + ","top_blocked":[]}"
+        fun json() = org.json.JSONObject().put("uptime_seconds", 10)
+            .put("total_requests", http.get()+upgrades.get()).put("top_blocked", org.json.JSONArray()).toString()
         fun serve(socket: Socket) {
             var websocket = false
             try { socket.use {
@@ -73,12 +74,7 @@ class StatsObservationDeviceTest {
                     val attempt = upgrades.incrementAndGet()
                     val key = headers["sec-websocket-key"]!! + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
                     val answer = Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1").digest(key.toByteArray()))
-                    output.write(("HTTP/1.1 101 Switching Protocols
-Upgrade: websocket
-Connection: Upgrade
-Sec-WebSocket-Accept: " + answer + "
-
-").toByteArray())
+                    output.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + answer + "\r\n\r\n").toByteArray())
                     val bytes = json().toByteArray()
                     output.write(byteArrayOf(0x81.toByte(), bytes.size.toByte())); output.write(bytes); output.flush()
                     if (attempt == 1) return // Deliberate abrupt close, not a simulated callback.
@@ -86,12 +82,7 @@ Sec-WebSocket-Accept: " + answer + "
                 } else {
                     http.incrementAndGet()
                     val body = json().toByteArray()
-                    output.write(("HTTP/1.1 200 OK
-Content-Type: application/json
-Content-Length: " + body.size + "
-Connection: close
-
-").toByteArray())
+                    output.write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + body.size + "\r\nConnection: close\r\n\r\n").toByteArray())
                     output.write(body); output.flush()
                 }
             } } catch (_: Exception) {} finally {
