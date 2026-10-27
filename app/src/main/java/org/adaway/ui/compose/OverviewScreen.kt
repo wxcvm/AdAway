@@ -214,16 +214,16 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 ) {
                     StatTile(
                         stringResource(R.string.compose_ws_control_certs),
-                        serverStats!!.sniCertsIssued,
+                        serverStats.sniCertsIssued,
                         Modifier.weight(1f),
                     )
                     StatTile(
                         stringResource(R.string.compose_stats_kpi_requests),
-                        serverStats!!.totalRequests,
+                        serverStats.totalRequests,
                         Modifier.weight(1f),
                     )
-                    val rate = if (serverStats!!.totalRequests > 0)
-                        (serverStats!!.totalBlocked * 100 / serverStats!!.totalRequests).toInt() else 0
+                    val rate = if (serverStats.totalRequests > 0)
+                        (serverStats.totalBlocked * 100 / serverStats.totalRequests).toInt() else 0
                     StatTile(
                         stringResource(R.string.compose_stats_kpi_rate),
                         rate,

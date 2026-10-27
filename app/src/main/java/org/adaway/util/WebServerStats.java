@@ -23,15 +23,15 @@ public final class WebServerStats {
 
     private WebServerStats() {}
 
-    /**
-     * @return 解析后的 JSONObject；webserver 未运行或响应不可解析时返回 null。
-     */
     /** Read the same local stats endpoint on an explicit port (including isolated fixtures). */
     @Nullable
     public static JSONObject getStats(int port) {
         return getJson("/internal-stats", port);
     }
 
+    /**
+     * @return 解析后的 JSONObject；webserver 未运行或响应不可解析时返回 null。
+     */
     @Nullable
     public static JSONObject getStats() {
         return getJson("/internal-stats");

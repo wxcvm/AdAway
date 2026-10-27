@@ -94,96 +94,120 @@ internal class StatsObservationCoordinator(
         mutable.value = mutable.value.copy(push = if (realtime) StatsPushState.SUSPENDED else StatsPushState.DISABLED)
     }
 
+    private fun currentPush(requested: Long) =
+        !closed && foreground && realtime && requested == socketRevision
+
+    private inner class PushAttempt(val revision: Long) {
+        private var connectedAt: Long? = null
+        private var received = false
+        fun connected() {
+            if (!currentPush(revision)) return
+            connectedAt = clock.monotonicMillis()
+            mutable.value = mutable.value.copy(push = StatsPushState.CONNECTED)
+        }
+        fun receive(incoming: ServerStats) {
+            if (!currentPush(revision)) return
+            if (connectedAt == null) connectedAt = clock.monotonicMillis()
+            received = true
+            mutable.value = mutable.value.copy(push = StatsPushState.CONNECTED)
+            acceptPush(incoming)
+        }
+        fun healthy() = received ||
+            connectedAt?.let { clock.monotonicMillis() - it >= 30_000 } == true
+    }
+
+    private fun acceptPush(incoming: ServerStats) {
+        val known = mutable.value.stats
+        if (shouldReplacePushedStats(known?.snapshotTs, known?.uptimeSeconds,
+                incoming.snapshotTs, incoming.uptimeSeconds)) {
+            publish(incoming, StatsSource.WEBSOCKET, clock.wallMillis())
+            tick.value++
+        }
+    }
+
+    private suspend fun collectAttempt(attempt: PushAttempt) {
+        try {
+            sockets.withLock { transport.collectPush(attempt::connected, attempt::receive) }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* HTTP polling remains authoritative and active. */ }
+    }
+
     private fun ensurePush() {
         if (!foreground || !realtime) { stopPush(); return }
         if (pushJob?.isActive == true) return
         val requested = ++socketRevision
-        pushJob = scope.launch {
-            var failures = 0
-            val backoff = longArrayOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)
-            fun current() = !closed && foreground && realtime && requested == socketRevision
-            try {
-                while (isActive && current()) {
-                    var connectedAt: Long? = null
-                    var received = false
-                    mutable.value = mutable.value.copy(push = StatsPushState.CONNECTING)
-                    try {
-                        sockets.withLock {
-                            transport.collectPush(
-                                connected = {
-                                    if (current()) {
-                                        connectedAt = clock.monotonicMillis()
-                                        mutable.value = mutable.value.copy(push = StatsPushState.CONNECTED)
-                                    }
-                                },
-                                receive = { incoming ->
-                                    if (current()) {
-                                        if (connectedAt == null) connectedAt = clock.monotonicMillis()
-                                        received = true
-                                        mutable.value = mutable.value.copy(push = StatsPushState.CONNECTED)
-                                        val known = mutable.value.stats
-                                        if (shouldReplacePushedStats(known?.snapshotTs, known?.uptimeSeconds,
-                                                incoming.snapshotTs, incoming.uptimeSeconds)) {
-                                            publish(incoming, StatsSource.WEBSOCKET, clock.wallMillis())
-                                            tick.value++
-                                        }
-                                    }
-                                },
-                            )
-                        }
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { /* HTTP polling remains authoritative and active. */ }
-                    if (!current()) break
-                    val stable = connectedAt?.let { clock.monotonicMillis() - it >= 30_000 } == true
-                    if (received || stable) failures = 0
-                    val wait = backoff[failures.coerceAtMost(backoff.lastIndex)]
-                    failures = (failures + 1).coerceAtMost(backoff.lastIndex)
-                    mutable.value = mutable.value.copy(push = StatsPushState.RETRYING)
-                    clock.pause(wait)
-                }
-            } finally {
-                if (requested == socketRevision) mutable.value = mutable.value.copy(
-                    push = if (realtime) StatsPushState.SUSPENDED else StatsPushState.DISABLED)
+        pushJob = scope.launch { reconnect(requested) }
+    }
+
+    private suspend fun reconnect(requested: Long) {
+        var failures = 0
+        val backoff = longArrayOf(1_000, 2_000, 4_000, 8_000, 16_000, 30_000)
+        try {
+            while (currentCoroutineContext().isActive && currentPush(requested)) {
+                val attempt = PushAttempt(requested)
+                mutable.value = mutable.value.copy(push = StatsPushState.CONNECTING)
+                collectAttempt(attempt)
+                if (!currentPush(requested)) break
+                if (attempt.healthy()) failures = 0
+                val wait = backoff[failures.coerceAtMost(backoff.lastIndex)]
+                failures = (failures + 1).coerceAtMost(backoff.lastIndex)
+                mutable.value = mutable.value.copy(push = StatsPushState.RETRYING)
+                clock.pause(wait)
             }
+        } finally {
+            if (requested == socketRevision) mutable.value = mutable.value.copy(
+                push = if (realtime) StatsPushState.SUSPENDED else StatsPushState.DISABLED)
         }
     }
 
+    private data class ReadToken(val session: Long, val read: Long, val publication: Long)
+    private data class ReadResult(val stats: ServerStats?, val source: StatsSource)
+    private fun currentRead(token: ReadToken) =
+        !closed && foreground && token.session == session && token.read == refreshRevision
+    private fun currentPublication(token: ReadToken) =
+        currentRead(token) && token.publication == mutable.value.revision
+
     fun refresh() {
         if (closed || !foreground || refreshJob?.isActive == true) return
-        val requestedSession = session
-        val requestedRead = ++refreshRevision
-        val startedRevision = mutable.value.revision
+        val token = ReadToken(session, ++refreshRevision, mutable.value.revision)
         mutable.value = mutable.value.copy(refreshing = true)
-        refreshJob = scope.launch {
-            fun current() = !closed && foreground && requestedSession == session && requestedRead == refreshRevision
-            try {
-                val result = reads.withLock {
-                    val live = try { transport.readLive() }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { null }
-                    currentCoroutineContext().ensureActive()
-                    if (live != null) live to false else transport.readSnapshot() to true
-                }
-                if (!current() || startedRevision != mutable.value.revision) return@launch
-                val (incoming, snapshot) = result
-                if (incoming == null) unavailable(StatsReadError.UNREACHABLE)
-                else if (shouldReplaceStats(mutable.value.stats?.snapshotTs, mutable.value.observedAtMillis,
-                        incoming.snapshotTs, snapshot)) {
-                    val observed = if (snapshot) {
-                        incoming.snapshotTs.takeIf { it > 0 && it <= Long.MAX_VALUE / 1000 }?.times(1000) ?: 0
-                    } else clock.wallMillis()
-                    publish(incoming, if (snapshot) StatsSource.SNAPSHOT else StatsSource.HTTP, observed)
-                } else unavailable(StatsReadError.UNREACHABLE)
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) {
-                if (current() && startedRevision == mutable.value.revision) unavailable(StatsReadError.ERROR)
-            } finally {
-                if (current()) mutable.value = mutable.value.copy(refreshing = false)
-                // Logs must not depend on successful statistics, including discarded/cancelled reads.
-                tick.value++
-            }
+        refreshJob = scope.launch { refreshOnce(token) }
+    }
+
+    private suspend fun readStats(): ReadResult = reads.withLock {
+        val live = try { transport.readLive() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        currentCoroutineContext().ensureActive()
+        if (live != null) ReadResult(live, StatsSource.HTTP)
+        else ReadResult(transport.readSnapshot(), StatsSource.SNAPSHOT)
+    }
+
+    private suspend fun refreshOnce(token: ReadToken) {
+        try {
+            val result = readStats()
+            if (currentPublication(token)) acceptRead(result)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) {
+            if (currentPublication(token)) unavailable(StatsReadError.ERROR)
+        } finally {
+            if (currentRead(token)) mutable.value = mutable.value.copy(refreshing = false)
+            // Logs must not depend on successful statistics, including discarded/cancelled reads.
+            tick.value++
         }
     }
+
+    private fun acceptRead(result: ReadResult) {
+        val incoming = result.stats ?: return unavailable(StatsReadError.UNREACHABLE)
+        val snapshot = result.source == StatsSource.SNAPSHOT
+        if (!shouldReplaceStats(mutable.value.stats?.snapshotTs, mutable.value.observedAtMillis,
+                incoming.snapshotTs, snapshot)) return unavailable(StatsReadError.UNREACHABLE)
+        val observed = if (snapshot) {
+            incoming.snapshotTs.takeIf { it > 0 && it <= Long.MAX_VALUE / 1000 }?.times(1000) ?: 0
+        } else clock.wallMillis()
+        publish(incoming, result.source, observed)
+    }
+
     private fun publish(stats: ServerStats, source: StatsSource, observed: Long) {
         val previous = mutable.value
         mutable.value = previous.copy(stats = stats, source = source, observedAtMillis = observed,

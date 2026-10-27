@@ -197,6 +197,42 @@ data class ServerStats(
             return out
         }
 
+        private fun parseRecentLog(json: JSONObject): List<QueryLogEntry> {
+            val queryLog = mutableListOf<QueryLogEntry>()
+            val qlogArray = json.optJSONArray("query_log")
+            if (qlogArray != null) {
+                for (i in 0 until qlogArray.length()) {
+                    val o = qlogArray.optJSONObject(i) ?: continue
+                    // A corrupt optional recent row must not discard valid counters.
+                    runCatching { QueryLogPage.parseEntry(o) }.getOrNull()?.let(queryLog::add)
+                }
+            }
+            return queryLog
+        }
+
+        private fun parseRanking(json: JSONObject): Pair<List<BlockedHost>, TopHostsRead> {
+            val topBlocked = mutableListOf<BlockedHost>()
+            val topArray = json.optJSONArray("top_blocked")
+            var topRead = when {
+                !json.has("top_blocked") -> TopHostsRead.MISSING
+                topArray == null -> TopHostsRead.MALFORMED
+                else -> TopHostsRead.VALID
+            }
+            if (topArray != null) {
+                for (i in 0 until topArray.length()) {
+                    val row = topArray.optJSONObject(i)
+                    val host = row?.opt("host") as? String
+                    val count = parseRankingCount(row?.opt("count"))
+                    if (host.isNullOrBlank() || count == null) {
+                        topRead = TopHostsRead.MALFORMED
+                        break
+                    }
+                    topBlocked += BlockedHost(host, count)
+                }
+            }
+            return topBlocked to topRead
+        }
+
         fun fromJson(json: JSONObject?): ServerStats? {
             if (json == null || !json.has("uptime_seconds") || !json.has("total_requests") ||
                 json.optLong("uptime_seconds", -1) < 0 || json.optLong("total_requests", -1) < 0) return null
@@ -233,34 +269,8 @@ data class ServerStats(
             }
             val history = parseHistArray(json, "history")
             val daily = parseHistArray(json, "daily")
-            val queryLog = mutableListOf<QueryLogEntry>()
-            val qlogArray = json.optJSONArray("query_log")
-            if (qlogArray != null) {
-                for (i in 0 until qlogArray.length()) {
-                    val o = qlogArray.optJSONObject(i) ?: continue
-                    // A corrupt optional recent row must not discard valid counters.
-                    runCatching { QueryLogPage.parseEntry(o) }.getOrNull()?.let(queryLog::add)
-                }
-            }
-            val topBlocked = mutableListOf<BlockedHost>()
-            val topArray = json.optJSONArray("top_blocked")
-            var topRead = when {
-                !json.has("top_blocked") -> TopHostsRead.MISSING
-                topArray == null -> TopHostsRead.MALFORMED
-                else -> TopHostsRead.VALID
-            }
-            if (topArray != null) {
-                for (i in 0 until topArray.length()) {
-                    val row = topArray.optJSONObject(i)
-                    val host = row?.opt("host") as? String
-                    val count = parseRankingCount(row?.opt("count"))
-                    if (host.isNullOrBlank() || count == null) {
-                        topRead = TopHostsRead.MALFORMED
-                        break
-                    }
-                    topBlocked += BlockedHost(host, count)
-                }
-            }
+            val queryLog = parseRecentLog(json)
+            val (topBlocked, topRead) = parseRanking(json)
             val parsed = ServerStats(
                 snapshotTs = json.optLong("snapshot_ts", 0),
                 uptimeSeconds = json.optLong("uptime_seconds", 0),

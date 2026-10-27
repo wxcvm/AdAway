@@ -29,3 +29,8 @@ then background cancellation. It does not edit preferences or listener configura
 Lifecycle tests report max active readers/sockets and pending timers; elapsed time
 is an observation, not a claimed throughput/battery improvement.
 Android 17 / Root / AdGuard and RISC-V runtime remain separate field acceptance.
+
+The loopback-only push URL is intentionally plain HTTP because that is the daemon
+management endpoint contract. A method-local S5332 annotation documents this
+reviewed exception, not a project-wide analysis exclusion. Host/scheme are fixed;
+the injected port is validated. No remote/upstream TLS validation is relaxed.

@@ -30,8 +30,7 @@ internal class AndroidStatsTransport(
     }
     override suspend fun collectPush(connected: () -> Unit, receive: (ServerStats) -> Unit) {
         val events = Channel<Push>(Channel.CONFLATED)
-        val request = Request.Builder()
-            .url("http://[::ffff:127.0.0.1]:" + port() + "/internal-ws").build()
+        val request = localPushRequest()
         val socket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) { events.trySend(Push.Open) }
             override fun onMessage(webSocket: WebSocket, text: String) { events.trySend(Push.Text(text)) }
@@ -54,6 +53,16 @@ internal class AndroidStatsTransport(
             }
         } finally { events.cancel(); socket.cancel() }
     }
+    // The daemon's management endpoint is HTTP-only on loopback, matching the nc
+    // fallback contract. Host/scheme are not user input; never use this for remote
+    // services or upstream requests. Switching to HTTPS would not be compatible.
+    @Suppress("kotlin:S5332")
+    private fun localPushRequest(): Request {
+        val localPort = port()
+        require(localPort in 1..65535)
+        return Request.Builder().url("http://[::ffff:127.0.0.1]:" + localPort + "/internal-ws").build()
+    }
+
     override fun close() {
         client.dispatcher.cancelAll()
         client.connectionPool.evictAll()
