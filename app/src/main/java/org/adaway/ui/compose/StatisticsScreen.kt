@@ -193,7 +193,7 @@ fun StatisticsScreen(
                  * （Room 直接读取，无网络与进程开销）。
                  */
                 var localCounts by remember { mutableStateOf(Triple(0, 0, 0)) }
-                LaunchedEffect(statsErr) {
+                LaunchedEffect(observation.error) {
                     viewModel.loadLocalHostCounts { blocked, allowed, redirected ->
                         localCounts = Triple(blocked, allowed, redirected)
                     }
