@@ -52,6 +52,7 @@ import kotlinx.coroutines.withContext
 import timber.log.Timber
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.ui.platform.testTag
 
 /** Category content only. Navigation and saveable scroll keys stay in SettingsScreen. */
@@ -690,6 +691,7 @@ internal fun rememberNetworkSettingsActions(): NetworkSettingsActions {
 
 
 /** Action labels keep their natural width and wrap between buttons on narrow screens. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun DiagnosticLifecycleActions(active: Boolean, onStart: () -> Unit, onStop: () -> Unit, onRefresh: () -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

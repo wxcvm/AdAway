@@ -19,7 +19,7 @@
     <string name="response_check_browser_failed">The saved address is no longer local, or the browser could not be opened. Run a new check.</string>
     <string name="response_check_no_log_link">No specific log row is inferred from this sample. Use the request log’s IPv4/IPv6 filters to inspect candidate requests.</string>
     <string name="response_summary_observed">Observation started (UTC): %1$s</string>
-    <string name="response_summary_no_targets">No saved address family is enabled. Save a local listener address before checking; no address was created.</string>
+    <string name="response_summary_no_targets">No address-family observation was returned. Check the saved listener configuration and try again; no address was created.</string>
     <string name="response_summary_complete">This check read a complete HTTP response</string>
     <string name="response_summary_incomplete">HTTP response is incomplete</string>
     <string name="response_summary_invalid">HTTP response is invalid or unsupported</string>
