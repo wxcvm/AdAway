@@ -20,6 +20,8 @@ on:
       - 'app/schemas/**'
       - 'app/src/main/java/org/adaway/model/rules/**'
       - 'app/src/main/java/org/adaway/ui/compose/Stats*.kt'
+      - 'app/src/test/java/org/adaway/ui/compose/Stats*.kt'
+      - 'app/src/androidTest/java/org/adaway/ui/compose/StatsObservationDeviceTest.kt'
       - 'app/src/main/java/org/adaway/util/WebServerUtils.java'
       - 'app/src/main/java/org/adaway/util/WebServerNet.java'
       - 'app/src/main/java/org/adaway/util/WebServerStats.java'
