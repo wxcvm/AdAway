@@ -160,6 +160,31 @@ class ObservationUiTest {
         assertEquals(activeBefore, org.adaway.model.traffic.DiagnosticVpnService.isActive())
     }
 
+    @Test fun diagnosticButtonsWrapAtNarrowWidthAndLargeTextWithoutChangingActions() {
+        var starts = 0; var stops = 0; var refreshes = 0
+        compose.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 1.5f)) {
+                AdAwayTheme(dynamicColor = false, darkTheme = true) {
+                    Surface {
+                        Column(Modifier.width(288.dp)) {
+                            DiagnosticLifecycleActions(false, { starts++ }, { stops++ }, { refreshes++ })
+                        }
+                    }
+                }
+            }
+        }
+        compose.onNodeWithTag("diagnostic-start").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("diagnostic-stop").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithTag("diagnostic-refresh").assertIsDisplayed().performClick()
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        compose.onNodeWithTag("diagnostic-stop-label", useUnmergedTree = true)
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(1, layouts.size)
+        assertTrue("Stop label must not wrap character by character", layouts.single().lineCount <= 2)
+        assertEquals(1, starts); assertEquals(0, stops); assertEquals(1, refreshes)
+        frame("diagnostic-actions-narrow-large-text", "diagnostic-stop")
+    }
+
     @Test fun rankingCardRemainsMountedForMissingFailedAndValidEmptyAtLargeText() {
         var observation by mutableStateOf(TopHostsObservation())
         compose.setContent {

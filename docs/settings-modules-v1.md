@@ -24,3 +24,8 @@ Required evidence: full JVM and existing settings/rule UI; API30/35 observation
 navigation/scroll/first frames plus real loopback response summaries; three ABI
 builds and existing native/runtime checks. Android17 physical-device behavior
 and RISC-V execution remain separate. Do not claim these from source checks.
+
+Actual API35 category screenshots exposed the old three-button diagnostic Row
+squeezing the stop label character-by-character. The action group now uses
+FlowRow and a dedicated 288dp/1.5x-font regression checks layout lines, visibility
+and unchanged enabled/callback semantics. No real diagnostic is started by this test.

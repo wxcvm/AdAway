@@ -51,6 +51,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.ui.platform.testTag
 
 /** Category content only. Navigation and saveable scroll keys stay in SettingsScreen. */
 @Composable
@@ -94,10 +96,9 @@ internal fun ColumnScope.NetworkSettingsSection(viewModel: StatsViewModel, actio
                 ),
                 style = MaterialTheme.typography.labelSmall,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    enabled = !diagnosticActive,
-                    onClick = {
+            DiagnosticLifecycleActions(
+                active = diagnosticActive,
+                onStart = {
                         state.scope.launch {
                             // Root's isEnabled() runs a shell: never do
                             // this blocking check on the Compose UI thread.
@@ -132,19 +133,13 @@ internal fun ColumnScope.NetworkSettingsSection(viewModel: StatsViewModel, actio
                             }
                         }
                     },
-                ) { Text(stringResource(R.string.compose_tun_diagnostic_start)) }
-                OutlinedButton(
-                    enabled = diagnosticActive,
-                    onClick = {
+                onStop = {
                         org.adaway.model.traffic.DiagnosticVpnService.stop(context)
                         state.status = context.getString(R.string.compose_tun_diagnostic_stop_requested)
                         state.refreshKey++
                     },
-                ) { Text(stringResource(R.string.compose_tun_diagnostic_stop)) }
-                TextButton(onClick = { state.refreshKey++ }) {
-                    Text(stringResource(R.string.compose_settings_hijack_refresh_status))
-                }
-            }
+                onRefresh = { state.refreshKey++ },
+            )
             DiagnosticTcpActions(diagnosticActive, state.tcpBusy) { ipv6 ->
                 state.tcpBusy = true
                 state.scope.launch {
@@ -691,4 +686,21 @@ internal fun rememberNetworkSettingsActions(): NetworkSettingsActions {
         state.refreshKey++
     }
     return remember(state, launcher) { NetworkSettingsActions(state, launcher) }
+}
+
+
+/** Action labels keep their natural width and wrap between buttons on narrow screens. */
+@Composable
+internal fun DiagnosticLifecycleActions(active: Boolean, onStart: () -> Unit, onStop: () -> Unit, onRefresh: () -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Button(onClick = onStart, enabled = !active, modifier = Modifier.testTag("diagnostic-start")) {
+            Text(stringResource(R.string.compose_tun_diagnostic_start))
+        }
+        OutlinedButton(onClick = onStop, enabled = active, modifier = Modifier.testTag("diagnostic-stop")) {
+            Text(stringResource(R.string.compose_tun_diagnostic_stop), modifier = Modifier.testTag("diagnostic-stop-label"))
+        }
+        TextButton(onClick = onRefresh, modifier = Modifier.testTag("diagnostic-refresh")) {
+            Text(stringResource(R.string.compose_settings_hijack_refresh_status))
+        }
+    }
 }
