@@ -19,7 +19,9 @@ on:
       - 'app/src/main/java/org/adaway/db/**'
       - 'app/schemas/**'
       - 'app/src/main/java/org/adaway/model/rules/**'
-      - 'app/src/main/java/org/adaway/ui/compose/StatsViewModel.kt'
+      - 'app/src/main/java/org/adaway/ui/compose/Stats*.kt'
+      - 'app/src/test/java/org/adaway/ui/compose/Stats*.kt'
+      - 'app/src/androidTest/java/org/adaway/ui/compose/StatsObservationDeviceTest.kt'
       - 'app/src/main/java/org/adaway/util/WebServerUtils.java'
       - 'app/src/main/java/org/adaway/util/WebServerNet.java'
       - 'app/src/main/java/org/adaway/util/WebServerStats.java'
@@ -47,6 +49,10 @@ on:
       - 'app/src/test/java/org/adaway/model/traffic/**'
       - '.github/workflows/traffic-mode-tests.yml'
   workflow_dispatch:
+
+concurrency:
+  group: traffic-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

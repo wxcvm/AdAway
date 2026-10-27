@@ -138,8 +138,9 @@ fun StatisticsScreen(
     onOpenApp: (Int) -> Unit = {},
 ) {
     // ── 从 ViewModel 收集数据流（每 10s 轮询一次 webserver）──
-    val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
-    val topHostsObservation by viewModel.topHostsObservation.collectAsStateWithLifecycle()
+    val observation by viewModel.statsObservation.collectAsStateWithLifecycle()
+    val serverStats = observation.stats
+    val topHostsObservation = observation.ranking
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
@@ -175,70 +176,24 @@ fun StatisticsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // 统计状态横幅：更新时间 + 状态（hosts 统计不依赖 webserver）
-            val updatedAt by viewModel.statsUpdatedAt.collectAsStateWithLifecycle()
-            val statsErr by viewModel.statsError.collectAsStateWithLifecycle()
-            val statsTime = remember(updatedAt) {
-                if (updatedAt > 0L) {
-                    java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date(updatedAt))
-                } else null
-            }
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Outlined.Info,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (statsErr == null && statsTime != null) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            stringResource(R.string.compose_stats_status_title),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            when {
-                                statsTime != null && statsErr == null ->
-                                    stringResource(R.string.compose_stats_status_ok, statsTime)
-                                statsTime != null ->
-                                    stringResource(R.string.compose_stats_status_stale, statsTime)
-                                statsErr == "snapshot" -> stringResource(R.string.compose_stats_snapshot_unknown)
-                                else -> stringResource(R.string.compose_stats_status_waiting)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
+            StatsObservationStatus(observation)
 
             Text(stringResource(R.string.compose_stats_scope), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             // Server counters and local rule counts describe different things.
             if (serverStats != null) {
-                if (serverStats!!.categorizedBlocked > serverStats!!.totalBlocked) {
+                if (serverStats.categorizedBlocked > serverStats.totalBlocked) {
                     Text(stringResource(R.string.compose_stats_inconsistent_history),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
-                KpiCardRow(stats = serverStats!!)
+                KpiCardRow(stats = serverStats)
             } else {
                 /*
                  * 服务器未运行/不可达：不显示空白，改显示本机规则统计
                  * （Room 直接读取，无网络与进程开销）。
                  */
                 var localCounts by remember { mutableStateOf(Triple(0, 0, 0)) }
-                LaunchedEffect(statsErr) {
+                LaunchedEffect(observation.error) {
                     viewModel.loadLocalHostCounts { blocked, allowed, redirected ->
                         localCounts = Triple(blocked, allowed, redirected)
                     }
@@ -272,11 +227,11 @@ fun StatisticsScreen(
             // category breakdown and lifetime diagnostics.
             // Trend + traffic chart (AdGuard Home style)
             if (showTrend && serverStats != null &&
-                (serverStats!!.history.isNotEmpty() || serverStats!!.daily.isNotEmpty())
+                (serverStats.history.isNotEmpty() || serverStats.daily.isNotEmpty())
             ) {
                 TrafficTrendCard(
-                    hourly = serverStats!!.history,
-                    daily = serverStats!!.daily,
+                    hourly = serverStats.history,
+                    daily = serverStats.daily,
                     showConnections = showConn,
                 )
             }
@@ -303,10 +258,10 @@ fun StatisticsScreen(
                             modifier = Modifier.align(Alignment.Start),
                         )
                         Spacer(Modifier.height(12.dp))
-                        if (serverStats == null || serverStats!!.totalBlocked == 0L) {
+                        if (serverStats == null || serverStats.totalBlocked == 0L) {
                             EmptyChartPlaceholder()
                         } else {
-                            val stats = serverStats!!
+                            val stats = serverStats
                             DonutChart(stats = stats)
                             Spacer(Modifier.height(12.dp))
                             val categories = buildCategories(stats)
@@ -320,24 +275,24 @@ fun StatisticsScreen(
             // Keep the legacy setting readable without rendering duplicate numbers.
 
             // Block rate ring
-            if (showRate && serverStats != null && serverStats!!.totalRequests > 0) {
-                BlockRateCard(serverStats!!)
+            if (showRate && serverStats != null && serverStats.totalRequests > 0) {
+                BlockRateCard(serverStats)
             }
 
             // Per-app activity
-            if (showApps && serverStats != null && serverStats!!.apps.isNotEmpty()) {
+            if (showApps && serverStats != null && serverStats.apps.isNotEmpty()) {
                 StormCard(
-                    apps = serverStats!!.apps,
-                    uptimeSeconds = serverStats!!.uptimeSeconds,
+                    apps = serverStats.apps,
+                    uptimeSeconds = serverStats.uptimeSeconds,
                     onAllowApp = { uid -> viewModel.allowAppForever(uid) },
                     onAllowDomain = { host -> viewModel.allowHost(host) },
                 )
-                ActiveAppsCard(serverStats!!.apps, serverStats!!.uptimeSeconds, onOpenApp)
+                ActiveAppsCard(serverStats.apps, serverStats.uptimeSeconds, onOpenApp)
             }
 
             // Recent requests: what was asked for and what the filter did with it
-            if (showQlog && serverStats != null && serverStats!!.queryLog.isNotEmpty()) {
-                RecentRequestsCard(serverStats!!.queryLog, onOpenLogs)
+            if (showQlog && serverStats != null && serverStats.queryLog.isNotEmpty()) {
+                RecentRequestsCard(serverStats.queryLog, onOpenLogs)
             }
 
             // Top intercepted domains (ranked by how often they were blocked)
@@ -345,13 +300,13 @@ fun StatisticsScreen(
                 TopHostsCard(topHostsObservation)
             }
             // Recently issued SNI certs
-            if (showCerts && serverStats != null && serverStats!!.recentTls.isNotEmpty()) {
-                RecentCertsCard(serverStats!!.recentTls)
+            if (showCerts && serverStats != null && serverStats.recentTls.isNotEmpty()) {
+                RecentCertsCard(serverStats.recentTls)
             }
 
             // Web server details
             if (serverStats != null) {
-                ServerDetailsCard(serverStats!!)
+                ServerDetailsCard(serverStats)
             }
         }
     }

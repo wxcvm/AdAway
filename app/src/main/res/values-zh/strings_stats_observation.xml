@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="stats_push_disabled">实时更新已关闭 · 前台每 10 秒轮询</string>
+    <string name="stats_push_suspended">后台已暂停实时更新</string>
+    <string name="stats_push_connecting">正在连接实时更新 · HTTP 轮询仍有效</string>
+    <string name="stats_push_connected">实时已连接 · 仍每 10 秒通过 HTTP 复核</string>
+    <string name="stats_push_retrying">实时已断开，正在重试 · HTTP 轮询仍有效</string>
+</resources>

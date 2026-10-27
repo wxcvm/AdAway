@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="stats_push_disabled">Realtime updates off · HTTP fallback every 10 s in foreground</string>
+    <string name="stats_push_suspended">Realtime updates paused in background</string>
+    <string name="stats_push_connecting">Connecting realtime updates · HTTP fallback remains active</string>
+    <string name="stats_push_connected">Realtime connected · HTTP fallback remains active every 10 s</string>
+    <string name="stats_push_retrying">Realtime disconnected, retrying · HTTP fallback remains active</string>
+</resources>

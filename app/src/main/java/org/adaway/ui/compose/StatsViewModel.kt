@@ -4,333 +4,22 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.adaway.db.AppDatabase
 import org.adaway.db.entity.ListType
 import org.adaway.model.adblocking.AdBlockModel
 import org.adaway.util.WebServerUtils
-import org.json.JSONObject
 import timber.log.Timber
 
 /**
- * Per-app statistics from /internal-stats: which uid connected, made
- * requests, got blocked, and asked for SNI certificates.
- */
-data class AppStat(
-    val uid: Int,
-    val connections: Long = 0,
-    val requests: Long = 0,
-    val blocked: Long = 0,
-    val tlsHosts: Long = 0,
-    /**
-     * Completed / failed TLS handshakes for this uid (best effort: the server
-     * only attributes them when the connection already knew its uid).
-     * Failures alone do not identify certificate pinning or a retry cause.
-     */
-    val tlsOk: Long = 0,
-    val tlsFail: Long = 0,
-    /**
-     * True while the server is refusing this uid's CONNECT requests without
-     * interception under the user-enabled TLS retry policy. Its heuristic
-     * does not prove which certificate or network condition caused failures.
-     */
-    val pinRefused: Boolean = false,
-    /**
-     * Requests per second measured by the server between two stats snapshots
-     * (i.e. the observation window). A high rate is an activity signal, not
-     * proof of a blocked-request retry loop.
-     */
-    val tps: Int = 0,
-    val hasMeasuredRate: Boolean = false,
-    /**
-     * What this uid is actually hitting (server-side, up to three hosts with
-     * counts) - the missing half of "there is a storm": which host it hammers.
-     */
-    val hosts: List<Pair<String, Int>> = emptyList(),
-) {
-    /** Requests per second since the server started (0 when unknown). */
-    fun requestsPerSecond(uptimeSeconds: Long): Long =
-        if (uptimeSeconds > 0) requests / uptimeSeconds else 0L
-
-    /**
-     * Rate to display: the measured window rate when the server reported one,
-     * otherwise the average since start (older servers had no tps field).
-     */
-    fun ratePerSecond(uptimeSeconds: Long): Long =
-        if (hasMeasuredRate || tps > 0) tps.coerceAtLeast(0).toLong() else requestsPerSecond(uptimeSeconds)
-
-    /** Whether this app is retrying fast enough to be worth showing as a storm. */
-    fun isStorming(uptimeSeconds: Long): Boolean = ratePerSecond(uptimeSeconds) >= STORM_TPS
-
-    companion object {
-        /**
-         * Requests per second above which an app counts as storming.
-         *
-         * Measured on a real device: a system component hit ~240 req/s against a
-         * host it could never reach, which is what this threshold is sized for -
-         * 20/s is already ~1700 requests per minute, i.e. clearly a retry loop.
-         */
-        const val STORM_TPS = 20L
-    }
-}
-
-/** A TLS (SNI) hostname requested by a uid — i.e. a per-domain cert effectively issued. */
-data class TlsHost(
-    val uid: Int,
-    val host: String,
-)
-
-/**
- * One entry of the server's "top blocked hosts" ranking: how often the filter
- * actually blocked this host. (The old card reused [TlsHost] — the SNI names
- * apps asked certificates for — which is a different thing entirely.)
- */
-data class BlockedHost(
-    val host: String = "",
-    val count: Long = 0,
-)
-
-/**
- * One entry of the server's query log: what was requested and what the filter
- * did with it (0 = forwarding started, 1 = filtered, 2 = local exemption,
- * 3 = access rejected). A queued response is not proof of client receipt.
- */
-data class QueryLogEntry(
-    val ts: Long = 0,
-    val uid: Int = -1,
-    val action: Int = 0,
-    /** Matched policy type (LT_* order), -1 = unknown / not a blocked request. */
-    val type: Int = -1,
-    /** How that type answers: 0 = placeholder, 1 = 204, 2 = passthrough. */
-    val mode: Int = 0,
-    val host: String = "",
-    /** Observed socket family; 0 means not recorded, including legacy rows. */
-    val family: Int = 0,
-    /** Origin-form path only, without query/fragment. Empty means not recorded. */
-    val path: String = "",
-    /** Local HTTP response queued by the server; 0 means not recorded/pending. */
-    val httpStatus: Int = 0,
-    val pathTruncated: Boolean = false,
-    /** Ephemeral observation identity; never inferred from host/time. */
-    val sequence: String = "",
-    val generation: String = "",
-)
-
-/** One time bucket of web server activity (hourly or daily series). */
-data class HistPoint(
-    val ts: Long = 0,
-    val requests: Long = 0,
-    val blocked: Long = 0,
-    val connections: Long = 0,
-    val certs: Long = 0,
-)
-
-/** Parse a history/daily JSON array ({"ts":…,"requests":…, …}) into [HistPoint]s. */
-private fun parseHistArray(json: JSONObject, key: String): List<HistPoint> {
-    val list = mutableListOf<HistPoint>()
-    val arr = json.optJSONArray(key) ?: return list
-    for (i in 0 until arr.length()) {
-        val o = arr.optJSONObject(i) ?: continue
-        list += HistPoint(
-            ts = o.optLong("ts", 0),
-            requests = o.optLong("requests", 0),
-            blocked = o.optLong("blocked", 0),
-            connections = o.optLong("connections", 0),
-            certs = o.optLong("certs", 0),
-        )
-    }
-    return list
-}
-
-/**
- * Snapshot of the native web server statistics (from /internal-stats).
- */
-data class ServerStats(
-    val snapshotTs: Long = 0,
-    val uptimeSeconds: Long = 0,
-    val uptimeDays: Double = 0.0,
-    val totalRequests: Long = 0,
-    val totalConnections: Long = 0,
-    val activeConnections: Int = 0,
-    val tlsHandshakes: Long = 0,
-    val tlsFailures: Long = 0,
-    val sniCacheHits: Long = 0,
-    val sniHitRate: Double = 0.0,
-    val blockRate: Double = 0.0,
-    val dailyPeak: Long = 0,
-    val blockedImages: Long = 0,
-    val blockedScripts: Long = 0,
-    val blockedStyles: Long = 0,
-    val blockedFonts: Long = 0,
-    val blockedMedia: Long = 0,
-    val blockedApi: Long = 0,
-    val blockedTelemetry: Long = 0,
-    val blockedHeartbeat: Long = 0,
-    val blockedConfig: Long = 0,
-    val blockedWsSse: Long = 0,
-    val blockedOther: Long = 0,
-    val blockedCrypto: Long = 0,
-    val blockedClickbait: Long = 0,
-    val sniCertsIssued: Long = 0,
-    val blockImageCount: Int = 0,
-    val apps: List<AppStat> = emptyList(),
-    val recentTls: List<TlsHost> = emptyList(),
-    val topBlocked: List<BlockedHost> = emptyList(),
-    val topHostsRead: TopHostsRead = TopHostsRead.VALID,
-    val queryLog: List<QueryLogEntry> = emptyList(),
-    val history: List<HistPoint> = emptyList(),
-    val daily: List<HistPoint> = emptyList(),
-    val reportedTotalBlocked: Long? = null,
-) {
-    val totalBlocked: Long get() = reportedTotalBlocked ?: categorizedBlocked
-    val uncategorizedBlocked: Long get() = (totalBlocked - categorizedBlocked).coerceAtLeast(0)
-    val categorizedBlocked: Long
-        get() = blockedImages + blockedScripts + blockedStyles + blockedFonts +
-            blockedMedia + blockedApi + blockedTelemetry + blockedHeartbeat +
-            blockedConfig + blockedWsSse + blockedOther +
-            blockedCrypto + blockedClickbait
-
-    companion object {
-        /**
-         * Parse `hosts:[{h,n},…]` of one app: the domains the native server
-         * attributed to that uid (see app_note_host() in webserver.c).
-         */
-        private fun parseAppHosts(o: JSONObject): List<Pair<String, Int>> {
-            val arr = o.optJSONArray("hosts") ?: return emptyList()
-            val out = ArrayList<Pair<String, Int>>(arr.length())
-            for (i in 0 until arr.length()) {
-                val h = arr.optJSONObject(i) ?: continue
-                val name = h.optString("h", "")
-                if (name.isEmpty()) continue
-                out += name to h.optInt("n", 0)
-            }
-            return out
-        }
-
-        fun fromJson(json: JSONObject?): ServerStats? {
-            if (json == null || !json.has("uptime_seconds") || !json.has("total_requests") ||
-                json.optLong("uptime_seconds", -1) < 0 || json.optLong("total_requests", -1) < 0) return null
-            val apps = mutableListOf<AppStat>()
-            val appsArray = json.optJSONArray("apps")
-            if (appsArray != null) {
-                for (i in 0 until appsArray.length()) {
-                    val o = appsArray.optJSONObject(i) ?: continue
-                    apps += AppStat(
-                        uid = o.optInt("uid", -1),
-                        connections = o.optLong("connections", 0),
-                        requests = o.optLong("requests", 0),
-                        blocked = o.optLong("blocked", 0),
-                        tlsHosts = o.optLong("tls_hosts", 0),
-                        tlsOk = o.optLong("tls_ok", 0),
-                        tlsFail = o.optLong("tls_fail", 0),
-                        pinRefused = o.optBoolean("pin_refused", false),
-                        tps = o.optInt("tps", 0),
-                        hasMeasuredRate = o.has("tps"),
-                        hosts = parseAppHosts(o),
-                    )
-                }
-            }
-            val recentTls = mutableListOf<TlsHost>()
-            val tlsArray = json.optJSONArray("recent_tls")
-            if (tlsArray != null) {
-                for (i in 0 until tlsArray.length()) {
-                    val o = tlsArray.optJSONObject(i) ?: continue
-                    recentTls += TlsHost(
-                        uid = o.optInt("uid", -1),
-                        host = o.optString("host", ""),
-                    )
-                }
-            }
-            val history = parseHistArray(json, "history")
-            val daily = parseHistArray(json, "daily")
-            val queryLog = mutableListOf<QueryLogEntry>()
-            val qlogArray = json.optJSONArray("query_log")
-            if (qlogArray != null) {
-                for (i in 0 until qlogArray.length()) {
-                    val o = qlogArray.optJSONObject(i) ?: continue
-                    // A corrupt optional recent row must not discard valid counters.
-                    runCatching { QueryLogPage.parseEntry(o) }.getOrNull()?.let(queryLog::add)
-                }
-            }
-            val topBlocked = mutableListOf<BlockedHost>()
-            val topArray = json.optJSONArray("top_blocked")
-            var topRead = when {
-                !json.has("top_blocked") -> TopHostsRead.MISSING
-                topArray == null -> TopHostsRead.MALFORMED
-                else -> TopHostsRead.VALID
-            }
-            if (topArray != null) {
-                for (i in 0 until topArray.length()) {
-                    val row = topArray.optJSONObject(i)
-                    val host = row?.opt("host") as? String
-                    val count = parseRankingCount(row?.opt("count"))
-                    if (host.isNullOrBlank() || count == null) {
-                        topRead = TopHostsRead.MALFORMED
-                        break
-                    }
-                    topBlocked += BlockedHost(host, count)
-                }
-            }
-            val parsed = ServerStats(
-                snapshotTs = json.optLong("snapshot_ts", 0),
-                uptimeSeconds = json.optLong("uptime_seconds", 0),
-                uptimeDays = json.optDouble("uptime_days", 0.0),
-                totalRequests = json.optLong("total_requests", 0),
-                totalConnections = json.optLong("total_connections", 0),
-                activeConnections = json.optInt("active_connections", 0),
-                tlsHandshakes = json.optLong("tls_handshakes", 0),
-                tlsFailures = json.optLong("tls_failures", 0),
-                sniCacheHits = json.optLong("sni_cache_hits", 0),
-                sniHitRate = json.optDouble("sni_hit_rate", 0.0),
-                blockRate = json.optDouble("block_rate", 0.0),
-                dailyPeak = json.optLong("daily_peak", 0),
-                blockedImages = json.optLong("blocked_images", 0),
-                blockedScripts = json.optLong("blocked_scripts", 0),
-                blockedStyles = json.optLong("blocked_styles", 0),
-                blockedFonts = json.optLong("blocked_fonts", 0),
-                blockedMedia = json.optLong("blocked_media", 0),
-                blockedApi = json.optLong("blocked_api", 0),
-                blockedTelemetry = json.optLong("blocked_telemetry", 0),
-                blockedHeartbeat = json.optLong("blocked_heartbeat", 0),
-                blockedConfig = json.optLong("blocked_config", 0),
-                blockedWsSse = json.optLong("blocked_ws_sse", 0),
-                blockedOther = json.optLong("blocked_other", 0),
-                blockedCrypto = json.optLong("blocked_crypto", 0),
-                blockedClickbait = json.optLong("blocked_clickbait", 0),
-                sniCertsIssued = json.optLong("sni_certs_issued", 0),
-                blockImageCount = json.optInt("block_image_count", 0),
-                apps = apps,
-                recentTls = recentTls,
-                topBlocked = topBlocked,
-                topHostsRead = topRead,
-                queryLog = queryLog,
-                history = history,
-                daily = daily,
-                reportedTotalBlocked = if (json.has("total_blocked")) json.optLong("total_blocked", -1) else null,
-            )
-            var classified = 0L
-            for (count in listOf(parsed.blockedImages, parsed.blockedScripts, parsed.blockedStyles,
-                parsed.blockedFonts, parsed.blockedMedia, parsed.blockedApi, parsed.blockedTelemetry,
-                parsed.blockedHeartbeat, parsed.blockedConfig, parsed.blockedWsSse, parsed.blockedOther,
-                parsed.blockedCrypto, parsed.blockedClickbait)) {
-                if (count < 0 || count > Long.MAX_VALUE - classified) return null
-                classified += count
-            }
-            if (parsed.reportedTotalBlocked != null && parsed.reportedTotalBlocked < parsed.categorizedBlocked) return null
-            return parsed
-        }
-    }
-}
-
-/**
  * ViewModel for the new Compose UI: hosts-list statistics (Room) plus
- * native web server statistics polled from /internal-stats every 5s.
+ * one retained native statistics observer (10-second polling plus optional push).
  */
 class StatsViewModel @JvmOverloads constructor(
     application: Application,
@@ -353,230 +42,41 @@ class StatsViewModel @JvmOverloads constructor(
     // Ad block model (state, web server enabled, etc.)
     val adBlockModel: AdBlockModel = (application as org.adaway.AdAwayApplication).getAdBlockModel()
 
-    // Web server statistics (polled)
-    private val _serverStats = MutableStateFlow<ServerStats?>(null)
-    val serverStats: StateFlow<ServerStats?> = _serverStats
-    private val _topHostsObservation = MutableStateFlow(TopHostsObservation())
-    val topHostsObservation: StateFlow<TopHostsObservation> = _topHostsObservation
+    private val statsObserver = StatsObservationCoordinator(viewModelScope, AndroidStatsTransport(application))
+    val statsObservation: StateFlow<StatsObservationState> = statsObserver.state
+    // Read-only compatibility views; all decisions are made by statsObservation.
+    val serverStats = statsObservation.map { it.stats }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val topHostsObservation = statsObservation.map { it.ranking }.stateIn(viewModelScope, SharingStarted.Eagerly, TopHostsObservation())
+    val statsUpdatedAt = statsObservation.map { it.observedAtMillis }.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    val statsError = statsObservation.map { it.legacyError }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    internal val statsRefreshTick = statsObserver.refreshTick
+    internal val queryLogBrowser = QueryLogBrowser(viewModelScope, ::loadQueryLogPage)
     val certificateObservation = CertificateObservation(viewModelScope,
         { CertificateProbe.read(application.applicationContext) })
     val certificateAction = CertificateAction(viewModelScope, certificateObservation)
     internal val contentResponseCache = ContentResponseCache()
 
-    private fun observeRanking(stats: ServerStats, at: Long, historical: Boolean) {
-        _topHostsObservation.value = _topHostsObservation.value.accept(
-            stats.topBlocked, stats.topHostsRead, at, historical)
-    }
-
-    // 统计获取状态：更新时间戳与错误标记（供 UI 状态横幅展示）
-    val statsUpdatedAt = MutableStateFlow<Long>(0L)
-    val statsError = MutableStateFlow<String?>(null)
-    // Poll completion also wakes the log reader when statistics are unavailable.
-    internal val statsRefreshTick = MutableStateFlow(0L)
-    private var statsPublicationRevision = 0L
-    internal val queryLogBrowser = QueryLogBrowser(viewModelScope, ::loadQueryLogPage)
-
-    private var pollingJob: Job? = null
-    private var statsRefreshJob: Job? = null
-    private val lifecycleObserver = object : androidx.lifecycle.LifecycleEventObserver {
-        override fun onStateChanged(
-            source: androidx.lifecycle.LifecycleOwner,
-            event: androidx.lifecycle.Lifecycle.Event,
-        ) {
-            when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_START -> {
-                    refreshServerStats()
-                    startPolling()
-                    val app = getApplication<org.adaway.AdAwayApplication>()
-                    if (org.adaway.ui.compose.isRealtimeEnabled(app)) startRealtime()
-                }
-                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
-                    pollingJob?.cancel()
-                    statsRefreshJob?.cancel()
-                    wsJob?.cancel()
-                    wsJob = null
-                }
-                else -> {}
-            }
+    private val lifecycleObserver = androidx.lifecycle.LifecycleEventObserver { _, event ->
+        when (event) {
+            androidx.lifecycle.Lifecycle.Event.ON_START -> statsObserver.setForeground(true, isRealtimeEnabled(application))
+            androidx.lifecycle.Lifecycle.Event.ON_STOP -> statsObserver.setForeground(false)
+            else -> Unit
         }
     }
-
     init {
         if (observeInBackground) {
-            refreshServerStats()
-            startPolling()
-            // 若用户在设置页启用了实时推送，则自动连接 WebSocket
-            val app = getApplication<org.adaway.AdAwayApplication>()
-            if (org.adaway.helper.PreferenceHelper.getUpdateCheckAppStartup(app)) {
-                viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { app.getUpdateModel().checkForUpdate(false) }
-            }
-            if (org.adaway.ui.compose.isRealtimeEnabled(app)) {
-                startRealtime()
-            }
-            // Pause background stats collection while app is backgrounded.
+            // An already-started lifecycle replays ON_START; there is no duplicate eager start.
             androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
-        }
-    }
-
-    /**
-     * 启动周期性轮询（默认每 10s）。
-     *
-     * 轮询间隔从 5s 调到 10s 以降低内存/CPU 压力
-     * （该应用曾因高频轮询被 ColorOS LMK 杀进程）。
-     * 页面不可见时协程自动暂停（lifecycle-aware）。
-     */
-    private fun startPolling() {
-        pollingJob?.cancel()
-        pollingJob = viewModelScope.launch {
-            while (isActive) {
-                delay(10_000)
-                refreshServerStats()
+            if (org.adaway.helper.PreferenceHelper.getUpdateCheckAppStartup(application)) {
+                viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    (application as org.adaway.AdAwayApplication).getUpdateModel().checkForUpdate(false)
+                }
             }
         }
     }
-
-    /*
-     * WebSocket 实时推送（可选）：当用户在设置页启用 realtime_enabled
-     * 时，连到 webserver 的 /internal-ws，服务器在每次拦截事件后推送
-     * JSON 快照，替代/补充 10s 轮询。连接失败时自动回退轮询。
-     */
-    private var wsJob: Job? = null
-
-    fun startRealtime() {
-        if (wsJob?.isActive == true) return
-        wsJob = viewModelScope.launch {
-            val connectionJob = kotlinx.coroutines.currentCoroutineContext()[Job]!!
-            val client = okhttp3.OkHttpClient.Builder()
-                .proxy(java.net.Proxy.NO_PROXY)
-                .pingInterval(15, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
-            val request = okhttp3.Request.Builder()
-                .url("http://[::ffff:127.0.0.1]:${org.adaway.util.WebServerUtils.getStatsHttpPort()}/internal-ws")
-                .build()
-            try {
-                val ws = client.newWebSocket(request, object : okhttp3.WebSocketListener() {
-                    override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
-                        // NOTE: the native server only pushes after blocking events;
-                        // with no traffic the WS stays silent and stats would freeze
-                        // at null forever. Keep the 10s polling as a safety net
-                        // (cheap nc probe); WS messages simply update faster.
-                    }
-                    override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
-                        try {
-                            val parsed = ServerStats.fromJson(org.json.JSONObject(text)) ?: return
-                            viewModelScope.launch {
-                                if (wsJob === connectionJob && connectionJob.isActive &&
-                                    shouldReplacePushedStats(_serverStats.value?.snapshotTs,
-                                        _serverStats.value?.uptimeSeconds, parsed.snapshotTs, parsed.uptimeSeconds)) {
-                                    _serverStats.value = parsed
-                                    observeRanking(parsed, System.currentTimeMillis(), false)
-                                    statsPublicationRevision++
-                                    statsUpdatedAt.value = System.currentTimeMillis()
-                                    statsError.value = null
-                                    statsRefreshTick.value++
-                                }
-                            }
-                        } catch (e: Exception) {
-                            Timber.w(e, "Bad WS payload")
-                        }
-                    }
-
-                    override fun onClosed(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
-                        // Polling already runs while visible; closing a background socket must not restart it.
-                    }
-                    override fun onFailure(
-                        webSocket: okhttp3.WebSocket,
-                        t: Throwable,
-                        response: okhttp3.Response?,
-                    ) {
-                        Timber.w(t, "WebSocket failed — falling back to polling")
-                    }
-                })
-                // 保持连接直到协程取消
-                try {
-                    while (isActive) delay(1000)
-                } finally {
-                    ws.close(1000, null)
-                }
-            } catch (e: Exception) {
-                Timber.w(e, "WebSocket connect failed")
-            }
-        }
-    }
-
-    fun stopRealtime() {
-        wsJob?.cancel()
-        wsJob = null
-    }
-
-    /**
-     * 拉取一次 webserver 统计并更新 UI 状态。
-     *
-     * 通过 WebServerUtils.getStats()（toybox nc + v4-mapped）
-     * 获取 JSON 快照，解析为 ServerStats 数据类后推送到
-     * serverStats StateFlow，驱动统计页/概览页重组。
-     */
-    fun refreshServerStats() {
-        if (statsRefreshJob?.isActive == true) return
-        statsRefreshJob = viewModelScope.launch {
-            val startedAtRevision = statsPublicationRevision
-            try {
-                val context = getApplication<Application>()
-                // OkHttp request must not run on the main dispatcher
-                var fromSnapshot = false
-                // 自己的 try：服务器不可达时可能抛异常，不能因此跳过快照回退
-                var stats = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        ServerStats.fromJson(WebServerUtils.getStats())
-                    } catch (e: Exception) {
-                        Timber.w(e, "Live statistics unavailable")
-                        null
-                    }
-                }
-                if (stats == null) {
-                    /*
-                     * 统计不再依赖 web 服务器端口可用：服务器每 5 秒会把同一份
-                     * JSON 落到 <files>/webserver/stats.json，端口被 AdGuard/系统
-                     * 占用或服务器刚好没在跑时，直接读这份快照。
-                     */
-                    stats = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        ServerStats.fromJson(WebServerUtils.readStatsSnapshot(context))
-                    }
-                    fromSnapshot = stats != null
-                }
-                // A WebSocket observation published during this request is newer
-                // by delivery order, even if the system clock moved backwards.
-                if (startedAtRevision != statsPublicationRevision) return@launch
-                if (stats != null) {
-                    val replace = shouldReplaceStats(_serverStats.value?.snapshotTs, statsUpdatedAt.value, stats.snapshotTs, fromSnapshot)
-                    if (replace) {
-                        _serverStats.value = stats
-                        observeRanking(stats, if (fromSnapshot) stats.snapshotTs * 1000 else System.currentTimeMillis(), fromSnapshot)
-                        statsPublicationRevision++
-                        statsUpdatedAt.value = if (fromSnapshot) stats.snapshotTs * 1000 else System.currentTimeMillis()
-                    }
-                    // "snapshot" 会让状态栏显示“最后一次更新 xx:xx（可能已过期）”
-                    statsError.value = if (fromSnapshot) { if (replace) "snapshot" else "unreachable" } else null
-                    if (fromSnapshot && !replace) _topHostsObservation.value = _topHostsObservation.value.unavailable()
-                } else {
-                    statsError.value = "unreachable"
-                    _topHostsObservation.value = _topHostsObservation.value.unavailable()
-                }
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (e: Exception) {
-                Timber.w(e, "Failed to refresh server stats")
-                if (startedAtRevision == statsPublicationRevision) {
-                    statsError.value = "error"
-                    _topHostsObservation.value = _topHostsObservation.value.unavailable()
-                }
-            } finally {
-                statsRefreshTick.value++
-            }
-        }
-    }
-
-    
+    fun startRealtime() = statsObserver.setRealtime(true)
+    fun stopRealtime() = statsObserver.setRealtime(false)
+    fun refreshServerStats() = statsObserver.refresh()
 
     /** Cursor pins the original history; expired generations fail without clearing the UI. */
     suspend fun loadQueryLogPage(offset: Int, limit: Int, cursor: QueryLogCursor?, filter: QueryLogFilter): QueryLogPage =
@@ -1093,10 +593,7 @@ class StatsViewModel @JvmOverloads constructor(
     }
 
     override fun onCleared() {
-        pollingJob?.cancel()
-        statsRefreshJob?.cancel()
-        wsJob?.cancel()
-        wsJob = null
+        statsObserver.close()
         androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver)
         super.onCleared()
     }
