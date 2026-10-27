@@ -58,7 +58,16 @@ class ResponseCheckUiTest {
                 })
             }
             compose.onNodeWithTag("response-check-start").performScrollTo().performClick()
-            compose.waitUntil(8000) { compose.onAllNodesWithTag("response-check-report").fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(8000) { compose.onAllNodesWithTag("response-status-4-false").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("response-check-report").assertDoesNotExist()
+            compose.onNodeWithTag("response-status-4-false").assertTextContains("403", substring = true)
+            compose.onNodeWithTag("response-status-4-true").assertTextContains(
+                compose.activity.getString(org.adaway.R.string.response_summary_unknown), substring = true)
+            compose.onNodeWithTag("response-state-4-true").assertTextEquals(
+                compose.activity.getString(org.adaway.R.string.response_summary_unavailable))
+            compose.onNodeWithTag("response-summary-4-false").performScrollTo()
+            capture("response-family-summary-403-and-unavailable")
+            compose.onNodeWithTag("response-check-details").performScrollTo().performClick()
             compose.onNodeWithTag("response-check-report").assertTextContains("HTTP: 403", substring = true)
             compose.onNodeWithTag("response-browser-4-false").assertTextContains("http://127.0.0.1:${server.localPort}/", substring = true)
             compose.onNodeWithTag("response-check-report").performScrollTo()

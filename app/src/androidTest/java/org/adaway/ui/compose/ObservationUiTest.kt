@@ -141,6 +141,25 @@ class ObservationUiTest {
         frame("category-state-restored", "settings-section-scroll-3")
     }
 
+    @Test fun splitCategoriesKeepStableNavigationAndNeverStartDiagnosticByOpening() {
+        val model = vm()
+        val observation = CertificateObservation(scope, {
+            CertificateSnapshot(R.string.observation_unknown, 1, null)
+        })
+        val activeBefore = org.adaway.model.traffic.DiagnosticVpnService.isActive()
+        compose.setContent { AdAwayTheme(dynamicColor = false) { SettingsScreen(model, observation) } }
+        repeat(2) { visit ->
+            for (index in 0..6) {
+                enter(index)
+                section(index).assertExists()
+                if (visit == 0) frame("split-category-" + index, "settings-section-scroll-" + index)
+                back()
+                compose.onNodeWithTag("settings-categories").assertExists()
+            }
+        }
+        assertEquals(activeBefore, org.adaway.model.traffic.DiagnosticVpnService.isActive())
+    }
+
     @Test fun rankingCardRemainsMountedForMissingFailedAndValidEmptyAtLargeText() {
         var observation by mutableStateOf(TopHostsObservation())
         compose.setContent {
