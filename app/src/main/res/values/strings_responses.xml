@@ -18,4 +18,21 @@
     <string name="response_check_browser_missing">No system browser is available for this address.</string>
     <string name="response_check_browser_failed">The saved address is no longer local, or the browser could not be opened. Run a new check.</string>
     <string name="response_check_no_log_link">No specific log row is inferred from this sample. Use the request log’s IPv4/IPv6 filters to inspect candidate requests.</string>
+    <string name="response_summary_observed">Observation started (UTC): %1$s</string>
+    <string name="response_summary_no_targets">No address-family observation was returned. Check the saved listener configuration and try again; no address was created.</string>
+    <string name="response_summary_complete">This check read a complete HTTP response</string>
+    <string name="response_summary_incomplete">HTTP response is incomplete</string>
+    <string name="response_summary_invalid">HTTP response is invalid or unsupported</string>
+    <string name="response_summary_unavailable">No HTTP response obtained</string>
+    <string name="response_summary_certificate">HTTPS certificate verification failed</string>
+    <string name="response_summary_skipped">No connection attempted</string>
+    <string name="response_summary_unknown">Unknown</string>
+    <string name="response_summary_status">HTTP status: %1$s</string>
+    <string name="response_summary_forbidden">403 means access was denied. It does not establish an advertising-rule hit or successful image rendering.</string>
+    <string name="response_summary_type">Content-Type: %1$s</string>
+    <string name="response_summary_length">Declared Content-Length: %1$s</string>
+    <string name="response_summary_bytes">Read %1$d / %2$d bytes including headers; body: %3$d bytes</string>
+    <string name="response_summary_sample_prefix">The content sample is only a bounded prefix and may be incomplete.</string>
+    <string name="response_summary_show_details">Show full technical report</string>
+    <string name="response_summary_hide_details">Hide technical report</string>
 </resources>

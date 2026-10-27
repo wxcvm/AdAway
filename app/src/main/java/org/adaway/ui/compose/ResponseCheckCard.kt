@@ -159,16 +159,17 @@ internal fun ResponseCheckCard(
         else if (running && report != null) Text(stringResource(R.string.response_check_previous))
         val known = report
         if (known == null) Text(stringResource(R.string.response_check_idle)) else {
-            SelectionContainer { Text(known.describe(), style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.testTag("response-check-report")) }
+            ResponseReportSummary(known, browserEnabled = !stale && !running, onOpenBrowser = ::openBrowser)
+            var detailsExpanded by remember(known) { mutableStateOf(false) }
+            OutlinedButton({ detailsExpanded = !detailsExpanded }, modifier = Modifier.testTag("response-check-details")) {
+                Text(stringResource(if (detailsExpanded) R.string.response_summary_hide_details else R.string.response_summary_show_details))
+            }
+            if (detailsExpanded) {
+                SelectionContainer { Text(known.describe(), style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.testTag("response-check-report")) }
+            }
             OutlinedButton({ clipboard.setText(AnnotatedString(known.describe())) }) {
                 Text(stringResource(R.string.response_check_copy))
-            }
-            for (observation in known.observations.filter { it.local }) {
-                OutlinedButton({ openBrowser(observation.address, observation.url) }, enabled = !stale && !running,
-                    modifier = Modifier.testTag("response-browser-${observation.family}-${observation.https}")) {
-                    Text(stringResource(R.string.response_check_browser, observation.url))
-                }
             }
         }
         Text(stringResource(R.string.response_check_boundary), style = MaterialTheme.typography.bodySmall)

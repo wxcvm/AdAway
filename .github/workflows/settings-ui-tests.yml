@@ -5,6 +5,8 @@ on:
     branches: [master]
     paths:
       - 'app/src/main/java/org/adaway/ui/compose/SettingsScreen.kt'
+      - 'app/src/main/java/org/adaway/ui/compose/*SettingsSection.kt'
+      - 'app/src/main/java/org/adaway/ui/compose/SettingsPreferences.kt'
       - 'app/src/main/java/org/adaway/ui/compose/SettingsCategoryNavigation.kt'
       - 'app/src/main/res/values/strings_compose.xml'
       - 'app/src/main/res/values-zh/strings_compose.xml'
@@ -61,7 +63,12 @@ jobs:
           assert "OutlinedTextField" in nav and "SettingsCategoryNavigation" in nav
           for i in range(7):
               assert f"{i} ->" in page, f"Missing settings page section {i}"
-          print("All seven categorized settings sections present and localized")
+          assert "serverStats.collectAsStateWithLifecycle" not in page
+          assert "getSharedPreferences(" not in page
+          for name in ("Network", "WebServer", "Certificate", "Statistics", "App", "Tools"):
+              path = Path(f"app/src/main/java/org/adaway/ui/compose/{name}SettingsSection.kt")
+              assert path.exists() and f"{name}SettingsSection(" in page, name
+          print("All seven categorized settings sections present and localized; root owns navigation only")
           PY
       - name: Compile Compose settings and run debug unit tests
         run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --no-daemon --max-workers=2

@@ -18,4 +18,21 @@
     <string name="response_check_browser_missing">没有可打开此地址的系统浏览器。</string>
     <string name="response_check_browser_failed">保存的地址已不属于本机，或浏览器无法打开；请重新检查。</string>
     <string name="response_check_no_log_link">不根据采样强行推断某条日志；可在请求日志中按 IPv4／IPv6 筛选候选请求。</string>
+    <string name="response_summary_observed">检查开始时间（UTC）：%1$s</string>
+    <string name="response_summary_no_targets">检查未返回任何地址族的观察。请核对已保存的监听配置后重试；本次没有创建地址。</string>
+    <string name="response_summary_complete">本次检查已读到完整 HTTP 响应</string>
+    <string name="response_summary_incomplete">HTTP 响应不完整</string>
+    <string name="response_summary_invalid">HTTP 响应无效或尚不支持</string>
+    <string name="response_summary_unavailable">未取得 HTTP 响应</string>
+    <string name="response_summary_certificate">HTTPS 证书验证未通过</string>
+    <string name="response_summary_skipped">未发起连接</string>
+    <string name="response_summary_unknown">未知</string>
+    <string name="response_summary_status">HTTP 状态：%1$s</string>
+    <string name="response_summary_forbidden">403 表示访问被拒绝，不能据此认定命中广告规则或占位图渲染成功。</string>
+    <string name="response_summary_type">Content-Type：%1$s</string>
+    <string name="response_summary_length">声明的 Content-Length：%1$s</string>
+    <string name="response_summary_bytes">已读取 %1$d / %2$d 字节（含响应头）；正文：%3$d 字节</string>
+    <string name="response_summary_sample_prefix">内容采样仅为有界前缀，可能不完整。</string>
+    <string name="response_summary_show_details">展开完整技术报告</string>
+    <string name="response_summary_hide_details">收起技术报告</string>
 </resources>
