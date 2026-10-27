@@ -138,8 +138,9 @@ fun StatisticsScreen(
     onOpenApp: (Int) -> Unit = {},
 ) {
     // ── 从 ViewModel 收集数据流（每 10s 轮询一次 webserver）──
-    val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
-    val topHostsObservation by viewModel.topHostsObservation.collectAsStateWithLifecycle()
+    val observation by viewModel.statsObservation.collectAsStateWithLifecycle()
+    val serverStats = observation.stats
+    val topHostsObservation = observation.ranking
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
@@ -175,53 +176,7 @@ fun StatisticsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // 统计状态横幅：更新时间 + 状态（hosts 统计不依赖 webserver）
-            val updatedAt by viewModel.statsUpdatedAt.collectAsStateWithLifecycle()
-            val statsErr by viewModel.statsError.collectAsStateWithLifecycle()
-            val statsTime = remember(updatedAt) {
-                if (updatedAt > 0L) {
-                    java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date(updatedAt))
-                } else null
-            }
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Outlined.Info,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (statsErr == null && statsTime != null) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Column {
-                        Text(
-                            stringResource(R.string.compose_stats_status_title),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            when {
-                                statsTime != null && statsErr == null ->
-                                    stringResource(R.string.compose_stats_status_ok, statsTime)
-                                statsTime != null ->
-                                    stringResource(R.string.compose_stats_status_stale, statsTime)
-                                statsErr == "snapshot" -> stringResource(R.string.compose_stats_snapshot_unknown)
-                                else -> stringResource(R.string.compose_stats_status_waiting)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
+            StatsObservationStatus(observation)
 
             Text(stringResource(R.string.compose_stats_scope), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)

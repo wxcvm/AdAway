@@ -75,7 +75,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OverviewScreen(viewModel: StatsViewModel) {
-    val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
+    val observation by viewModel.statsObservation.collectAsStateWithLifecycle()
+    val serverStats = observation.stats
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
     val allowedCount by viewModel.allowedHostCount.observeAsStateCompat(0)
     val redirectCount by viewModel.redirectHostCount.observeAsStateCompat(0)
@@ -143,6 +144,7 @@ fun OverviewScreen(viewModel: StatsViewModel) {
                 stateText = blockingState,
             )
 
+            StatsObservationStatus(observation)
             AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
             RuleSyncCard(status = syncStatus, onSync = viewModel::syncHosts)
 

@@ -18,6 +18,11 @@ on:
       - 'app/src/test/java/org/adaway/ui/compose/ObservationStateTest.kt'
       - 'app/src/test/java/org/adaway/util/ListenerResponseCheckTest.java'
       - 'app/src/test/resources/response-name-only-test.p12'
+      - 'app/src/androidTest/java/org/adaway/ui/compose/StatsObservationDeviceTest.kt'
+      - 'app/src/test/java/org/adaway/ui/compose/StatsObservationCoordinatorTest.kt'
+      - 'app/src/main/res/values*/strings_stats_observation.xml'
+      - 'tools/*preview_notes.py'
+      - 'docs/preview-changes.md'
       - 'tools/test-observation-ui.sh'
       - '.github/workflows/android-ui-pr.yml'
   workflow_dispatch:
@@ -40,6 +45,8 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle
+      - name: Validate generated preview notes
+        run: python3 tools/test_preview_notes.py
       - name: Validate network center reservations and translations
         run: |
           python3 - <<'PY'

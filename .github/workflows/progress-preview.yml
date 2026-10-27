@@ -188,6 +188,7 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > release-assets/SOURCE-COMMIT.txt
           printf '%s\n' "Preview signature: same signing certificate as current published Android stable APK." > release-assets/SIGNING-POLICY.txt
           python3 tools/prepare-preview-feed.py
+          python3 tools/preview_notes.py --version "$PREVIEW_VERSION_NAME"
           (cd release-assets && sha256sum * > SHA256SUMS.txt)
 
       - name: Publish signed, in-place inspection prerelease
@@ -196,43 +197,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/preview-notes.md" <<'NOTES'
-          Android ABI-specific opt-in progress preview for inspection.
-          ARM64 and x86_64 require Android 11/API30 or later. RISC-V requires
-          API35 or later and remains a provisional Google Android ABI.
-          RISC-V build/signature checks do not establish device or emulator
-          acceptance; no RISC-V runtime acceptance is claimed.
-
-          Package identity is com.wxcvm.Adaway: this APK upgrades the installed
-          production app in place and preserves app data. No parallel app is installed.
-          This preview is signed by the SAME Android signing certificate as
-          the repository's latest production APK; a verified certificate
-          SHA-256 digest is attached. Version code is verified to exceed the
-          current stable APK before publication. Stable feeds remain unchanged.
-
-          Includes custom HTTP/HTTPS listening IP, port conflict checks and
-          rollback to previous settings on application failure.
-          Includes scoped TUN and DNS-policy wire foundation. This does NOT
-          implement default whole-device routing or unrestricted DNS/TCP/UDP
-          forwarding. No production update feeds are changed.
-
-          All ABI APKs share one versionCode/versionName and production signer.
-          Legacy clients keep the ARM64 URL; ABI-aware clients use the artifacts
-          map. Source revision, per-ABI identity/signature/native verification,
-          status and checksums are attached.
-          NOTES
-          cat docs/request-evidence.md docs/content-response-settings.md docs/android-abi-preview-contract.md docs/listener-lifecycle.md >> "$RUNNER_TEMP/preview-notes.md"
-          cat docs/preview-updates.md >> "$RUNNER_TEMP/preview-notes.md"
-          cat docs/dual-stack-transport.md docs/tcp-backend.md >> "$RUNNER_TEMP/preview-notes.md"
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             gh release create "$PREVIEW_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" \
               --verify-tag --prerelease --latest=false \
               --title "AdAway Android signed preview $PREVIEW_TAG" \
-              --notes-file "$RUNNER_TEMP/preview-notes.md"
+              --notes-file release-assets/PREVIEW-NOTES.md
           else
             gh release create "$PREVIEW_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" --prerelease --latest=false \
               --title "AdAway Android signed preview $PREVIEW_TAG" \
-              --notes-file "$RUNNER_TEMP/preview-notes.md"
+              --notes-file release-assets/PREVIEW-NOTES.md
           fi
           python3 tools/publish-preview-channel.py
