@@ -87,6 +87,7 @@ fun AdAwayApp() {
     // Keeping the primary navigation here wastes valuable space on phones.
     val showBottomBar = currentDestination?.route !in setOf(
         Destinations.LOGS,
+        Destinations.NETWORK,
         Destinations.EXEMPT,
         Destinations.OVERRIDES,
         "${Destinations.APP_DETAIL}/{uid}",
@@ -183,6 +184,7 @@ fun AdAwayApp() {
                     onOpenSettings = { navController.navigate(Destinations.SETTINGS) },
                     onOpenRules = { navController.navigate(Destinations.RULES) },
                     onOpenStats = { navController.navigate(Destinations.STATS) },
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(Destinations.SETTINGS) {
