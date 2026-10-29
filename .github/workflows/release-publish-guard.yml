@@ -6,6 +6,8 @@ on:
       - '.github/workflows/android-ci.yml'
       - '.github/workflows/release-publish-guard.yml'
       - '.github/workflows/progress-preview.yml'
+      - 'tools/compress_block_images.py'
+      - 'tools/test_compress_block_images.py'
       - 'tools/check_stats_contract.py'
       - 'tools/test_check_stats_contract.py'
       - 'docs/windows-core-contract.md'
@@ -17,6 +19,8 @@ on:
       - '.github/workflows/android-ci.yml'
       - '.github/workflows/release-publish-guard.yml'
       - '.github/workflows/progress-preview.yml'
+      - 'tools/compress_block_images.py'
+      - 'tools/test_compress_block_images.py'
       - 'tools/check_stats_contract.py'
       - 'tools/test_check_stats_contract.py'
       - 'docs/windows-core-contract.md'
@@ -78,6 +82,12 @@ jobs:
 
           print('PASS: ordinary main branch merges do not publish an APK and preview must match production signing key')
           PY
+      - name: Test shared stable/preview image compression
+        run: |
+          python3 -c "import PIL" 2>/dev/null \
+            || pip3 install pillow -q --break-system-packages
+          python3 -m unittest discover -s tools -p 'test_compress_block_images.py'
+
       - name: Test APK signer fingerprint compatibility across Build Tools versions
         run: python3 -m unittest discover -s tools -p 'test_compare_apk_signers.py'
 
