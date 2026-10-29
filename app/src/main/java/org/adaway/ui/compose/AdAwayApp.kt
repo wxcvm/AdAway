@@ -136,7 +136,24 @@ fun AdAwayApp() {
                 .consumeWindowInsets(innerPadding),
         ) {
             composable(Destinations.OVERVIEW) {
-                OverviewScreen(viewModel)
+                OverviewScreen(
+                    viewModel = viewModel,
+                    onOpenStats = {
+                        navController.navigate(Destinations.STATS) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onOpenRules = {
+                        navController.navigate(Destinations.RULES) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onOpenLogs = { navController.navigate(Destinations.LOGS) },
+                )
             }
             composable(Destinations.STATS) {
                 StatisticsScreen(
