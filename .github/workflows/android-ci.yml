@@ -211,6 +211,14 @@ jobs:
             --out app/build/outputs/apk/release/app-release-signed.apk \
             "$UNSIGNED_APK"
 
+      - name: Verify final signed APK before publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/release/app-release-signed.apk
+          test -s "$apk"
+          python3 tools/verify_webserver_apk.py --apk "$apk" --variant release --abi arm64-v8a --executable webserver/build/generated/webserverJniLibs/release/arm64-v8a/libwebserver_exec.so
+
       # Limit cleanup to release APKs. UI/Room/native evidence belongs to its
       # own workflow retention and must survive a later master build.
       # NOTE: GitHub recalculates artifact storage usage every 6-12h, so a
