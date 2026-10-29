@@ -23,12 +23,15 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -80,6 +83,14 @@ fun AdAwayApp() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
+    // Full-screen secondary workflows already provide their own Back action.
+    // Keeping the primary navigation here wastes valuable space on phones.
+    val showBottomBar = currentDestination?.route !in setOf(
+        Destinations.LOGS,
+        Destinations.EXEMPT,
+        Destinations.OVERRIDES,
+        "${Destinations.APP_DETAIL}/{uid}",
+    )
 
     Scaffold(
         // Child page TopAppBars handle the status bar inset. The root scaffold
@@ -87,7 +98,11 @@ fun AdAwayApp() {
         // second blank strip above the active page on many Android versions.
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            NavigationBar {
+            if (showBottomBar) NavigationBar(
+                modifier = Modifier.testTag("main-bottom-navigation"),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                tonalElevation = 0.dp,
+            ) {
                 destinations.forEach { dest ->
                     val selected = currentDestination?.hierarchy
                         ?.any { it.route == dest.route } == true ||
