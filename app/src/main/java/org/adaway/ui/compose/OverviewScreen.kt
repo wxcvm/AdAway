@@ -16,6 +16,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Surface
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -415,37 +418,58 @@ private fun DetailChip(label: String, value: String) {
  * 当前状态文本与规则条数。颜色语义：运行=主色，停止=错误色。
  */
 internal fun StatusCard(running: Boolean, stateText: String) {
-    val color = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val scheme = MaterialTheme.colorScheme
+    val color = if (running) scheme.primary else scheme.onSurfaceVariant
+    val containerColor = if (running) scheme.primaryContainer else scheme.surfaceContainerHigh
+    val contentColor = if (running) scheme.onPrimaryContainer else scheme.onSurface
+    val statusText = stringResource(
+        if (running) R.string.compose_status_active else R.string.compose_status_not_applied,
+    )
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth().semantics { stateDescription = statusText },
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+        ),
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Box(
-                    Modifier.size(48.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f), CircleShape),
+                    Modifier.size(48.dp).background(scheme.surface.copy(alpha = 0.65f), CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Outlined.Shield, contentDescription = null, tint = color)
                 }
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.compose_status_ad_blocking), style = MaterialTheme.typography.titleLarge)
-                    Text(stringResource(R.string.compose_status_hosts_method), style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
-            }
-            Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f), shape = MaterialTheme.shapes.small) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Canvas(Modifier.size(8.dp)) { drawCircle(color) }
-                    Spacer(Modifier.width(8.dp))
                     Text(
-                        stringResource(if (running) R.string.compose_status_active else R.string.compose_status_not_applied),
-                        style = MaterialTheme.typography.labelLarge, color = color,
+                        stringResource(R.string.compose_status_ad_blocking),
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    Text(
+                        stringResource(R.string.compose_status_hosts_method),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor,
                     )
                 }
             }
+            Surface(
+                color = scheme.surface.copy(alpha = 0.7f),
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Canvas(Modifier.size(8.dp)) { drawCircle(color) }
+                    Spacer(Modifier.width(8.dp))
+                    Text(statusText, style = MaterialTheme.typography.labelLarge, color = color)
+                }
+            }
             if (stateText.isNotBlank()) {
-                Text(stateText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(stateText, style = MaterialTheme.typography.bodyMedium, color = contentColor)
             }
         }
     }
@@ -456,7 +480,7 @@ internal fun AdaptiveHostSummary(blocked: Int, allowed: Int, redirected: Int) {
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         // At normal phone widths prefer one compact KPI row. Reserve wrapping
         // for genuinely narrow split-screen or accessibility layouts.
-        if (maxWidth / LocalDensity.current.fontScale < 300.dp) {
+        if (maxWidth / LocalDensity.current.fontScale < 350.dp) {
             // Give numbers and localized labels enough room at large font scales.
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -485,20 +509,24 @@ internal fun StatTile(label: String, value: Int, modifier: Modifier = Modifier, 
 
 @Composable
 internal fun StatTile(label: String, value: Long, modifier: Modifier = Modifier, suffix: String = "") {
+    val exactValue = String.format(Locale.getDefault(), "%,d", value) + suffix
+    // Keep large host counters readable in 2- and 3-column phone layouts.
+    // TalkBack still announces the exact count, not the abbreviated display.
+    val displayValue = if (value >= 100_000L) ChartUtils.compactNumber(value) + suffix else exactValue
     Card(
-        modifier = modifier,
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = "$label: $exactValue"
+        },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                String.format(Locale.US, "%,d", value) + suffix,
+                displayValue,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleMedium.copy(
