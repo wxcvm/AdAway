@@ -322,8 +322,9 @@ fun StatisticsScreen(
  */
 @Composable
 private fun KpiCardRow(stats: ServerStats) {
-    val rate = if (stats.totalRequests > 0) {
-        stats.totalBlocked * 100.0 / stats.totalRequests
+    val rate = if (stats.totalRequests > 0L) {
+        (stats.totalBlocked.toDouble() / stats.totalRequests.toDouble() * 100.0)
+            .coerceIn(0.0, 100.0)
     } else 0.0
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -565,10 +566,16 @@ private fun DonutChart(stats: ServerStats) {
     val categories = buildCategories(stats)
     val total = stats.totalBlocked
     val strokeWidth = 28.dp
+    val totalLabel = stringResource(R.string.compose_stats_total)
+    val exactCount = String.format(Locale.getDefault(), "%,d", total)
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
-            Canvas(modifier = Modifier.size(160.dp)) {
+            Canvas(
+                modifier = Modifier.size(160.dp).semantics {
+                    contentDescription = "$totalLabel: $exactCount"
+                },
+            ) {
                 val stroke = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Butt)
                 val inset = strokeWidth.toPx() / 2
                 val arcSize = Size(
@@ -576,30 +583,41 @@ private fun DonutChart(stats: ServerStats) {
                     size.height - strokeWidth.toPx(),
                 )
                 var startAngle = -90f
-                categories.forEach { cat ->
-                    val sweep = 360f * cat.count.toFloat() / total.toFloat()
-                    drawArc(
-                        color = cat.color,
-                        startAngle = startAngle,
-                        sweepAngle = sweep - 1f, // small gap between segments
-                        useCenter = false,
-                        topLeft = Offset(inset, inset),
-                        size = arcSize,
-                        style = stroke,
-                    )
-                    startAngle += sweep
+                // Use Double for large counters and never draw negative sweeps.
+                // Corrupt/inconsistent server category totals must not exceed 360°.
+                if (total > 0L) {
+                    categories.forEach { cat ->
+                        val sweep = (360.0 * cat.count.toDouble() / total.toDouble())
+                            .toFloat()
+                            .coerceAtLeast(0f)
+                            .coerceAtMost((270f - startAngle).coerceAtLeast(0f))
+                        if (sweep > 0f) {
+                            drawArc(
+                                color = cat.color,
+                                startAngle = startAngle,
+                                sweepAngle = (sweep - 1f).coerceAtLeast(0f),
+                                useCenter = false,
+                                topLeft = Offset(inset, inset),
+                                size = arcSize,
+                                style = stroke,
+                            )
+                            startAngle += sweep
+                        }
+                    }
                 }
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    String.format(Locale.US, "%,d", total),
+                    ChartUtils.compactNumber(total),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.headlineSmall.copy(
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold,
                     ),
                 )
                 Text(
-                    stringResource(R.string.compose_stats_total),
+                    totalLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -610,7 +628,9 @@ private fun DonutChart(stats: ServerStats) {
 
 @Composable
 private fun CategoryRow(category: BlockCategory, total: Long) {
-    val fraction = if (total > 0) category.count.toFloat() / total.toFloat() else 0f
+    val fraction = if (total > 0L) {
+        (category.count.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f)
+    } else 0f
     // Capture colors before the Canvas draw block (not @Composable context)
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
     // 点击分类行时展开/收起说明文字（telemetry/heartbeat 等专业术语释义）
@@ -952,15 +972,32 @@ internal fun TrafficTrendCard(
             TrendControls(mode, style, { mode = it; setChartRange(context, it) },
                 { style = it; setChartStyle(context, it) })
             Spacer(Modifier.height(12.dp))
-            if (data.isEmpty()) Text(stringResource(R.string.compose_stats_history_empty),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            var selectedIndex by remember { mutableIntStateOf(-1) }
-            TrendCanvas(TrendPlot(data, mode, style, showConnections, selectedIndex), palette) { selectedIndex = it }
-            Spacer(Modifier.height(8.dp))
-            TrendLegend(mode, showConnections, palette)
-            val selected = data.getOrNull(selectedIndex)
-            if (selected != null) TrendTooltip(selected, mode, showConnections, palette)
+            if (data.isEmpty()) {
+                // A selected time range may have no buckets although another
+                // time range does. Show a real empty state, not a blank Canvas.
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(128.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(R.string.compose_stats_history_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                // A previously selected point does not refer to the same
+                // time bucket after switching from hourly to daily.
+                var selectedIndex by remember(mode) { mutableIntStateOf(-1) }
+                TrendCanvas(
+                    TrendPlot(data, mode, style, showConnections, selectedIndex),
+                    palette,
+                ) { selectedIndex = it }
+                Spacer(Modifier.height(8.dp))
+                TrendLegend(mode, showConnections, palette)
+                val selected = data.getOrNull(selectedIndex)
+                if (selected != null) TrendTooltip(selected, mode, showConnections, palette)
+            }
         }
     }
 }
@@ -1027,17 +1064,23 @@ private fun TrendControls(mode: Int, style: Int, onMode: (Int) -> Unit, onStyle:
 
 @Composable
 private fun TrendLegend(mode: Int, showConnections: Boolean, palette: TrendPalette) {
-    Row(
+    // Put the series in a horizontally scrollable row and the time window
+    // below it: neither should squeeze the other out on 320dp screens.
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        LegendDot(palette.requests, stringResource(R.string.compose_stats_history_requests))
-        LegendDot(palette.blocked, stringResource(R.string.compose_stats_history_blocked))
-        if (showConnections) {
-            LegendDot(palette.connections, stringResource(R.string.compose_stats_history_connections))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LegendDot(palette.requests, stringResource(R.string.compose_stats_history_requests))
+            LegendDot(palette.blocked, stringResource(R.string.compose_stats_history_blocked))
+            if (showConnections) {
+                LegendDot(palette.connections, stringResource(R.string.compose_stats_history_connections))
+            }
         }
-        Spacer(Modifier.weight(1f))
         Text(
             stringResource(
                 when (mode) {
@@ -1305,7 +1348,8 @@ private fun smoothPath(points: List<Offset>): androidx.compose.ui.graphics.Path 
  */
 private fun BlockRateCard(stats: ServerStats) {
     val total = stats.totalRequests.coerceAtLeast(1L)
-    val rate = stats.totalBlocked.toFloat() / total
+    val rate = (stats.totalBlocked.toDouble() / total.toDouble())
+        .toFloat().coerceIn(0f, 1f)
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
