@@ -238,8 +238,14 @@ fun OverviewScreen(
                         serverStats.totalRequests,
                         Modifier.weight(1f),
                     )
-                    val rate = if (serverStats.totalRequests > 0)
-                        (serverStats.totalBlocked * 100 / serverStats.totalRequests).toInt() else 0
+                    // Compute as floating point to avoid overflowing Long when
+                    // a device has accumulated a very large request history.
+                    val rate = if (serverStats.totalRequests > 0L) {
+                        (serverStats.totalBlocked.toDouble() * 100.0 /
+                            serverStats.totalRequests.toDouble())
+                            .coerceIn(0.0, 100.0)
+                            .toInt()
+                    } else 0
                     StatTile(
                         stringResource(R.string.compose_stats_kpi_rate),
                         rate,
