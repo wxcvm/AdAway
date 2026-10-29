@@ -136,7 +136,7 @@ jobs:
           # Shared versionCode epoch for stable and in-place preview workflows.
           # Both channels must advance past previously installed version codes.
           VERSION_CODE=$(($(date -u +%s) - 1577836800))
-          VERSION_NAME="6.7.5.${{ github.run_number }}"
+          VERSION_NAME=$(python3 tools/android_release_version.py stable "${{ github.run_number }}")
           echo "Building $VERSION_NAME (versionCode $VERSION_CODE)"
           echo "$VERSION_NAME|$VERSION_CODE" > version.txt
           ./gradlew test assembleRelease -PversionCode=$VERSION_CODE -PversionName=$VERSION_NAME
