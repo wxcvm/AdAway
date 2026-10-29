@@ -13,6 +13,7 @@ on:
       - 'app/src/main/res/values*/strings_observations.xml'
       - 'app/src/main/res/values*/strings_responses.xml'
       - 'app/src/androidTest/java/org/adaway/ui/compose/ObservationUiTest.kt'
+      - 'app/src/androidTest/java/org/adaway/ui/compose/RulesTypeTabsUiTest.kt'
       - 'app/src/androidTest/java/org/adaway/ui/compose/ResponseCheckUiTest.kt'
       - 'app/src/main/java/org/adaway/util/ListenerResponseCheck.java'
       - 'app/src/test/java/org/adaway/ui/compose/ObservationStateTest.kt'
@@ -104,6 +105,7 @@ jobs:
           disable-animations: true
           script: |
             ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.ui.compose.RuleWorkflowUiTest
+            ./gradlew :app:connectedDebugAndroidTest --no-daemon --max-workers=2 -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=org.adaway.ui.compose.RulesTypeTabsUiTest
             adb pull /sdcard/Pictures/AdAwayUiReview ui-review
       - name: Upload UI screenshots and interaction evidence
         if: always()
