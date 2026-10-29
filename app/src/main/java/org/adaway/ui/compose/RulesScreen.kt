@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -66,6 +67,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -83,6 +85,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -102,11 +106,52 @@ import timber.log.Timber
  * the page is never empty even when the user has no manual rules.
  */
 
-private data class RuleTab(
+internal data class RuleTab(
     @StringRes val labelRes: Int,
     val type: Int,          // ListType value
     @StringRes val emptyRes: Int,
 )
+
+/**
+ * Keep rule-type labels readable at large font sizes and in split screen.
+ * The compact variant is horizontally scrollable rather than forcing three
+ * fixed-width tabs to truncate their localized labels.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun RulesTypeTabs(
+    tabs: List<RuleTab>,
+    selectedTab: Int,
+    onSelect: (Int) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth().testTag("rules-type-tabs")) {
+        val compact = maxWidth / LocalDensity.current.fontScale < 380.dp
+        val content: @Composable () -> Unit = {
+            tabs.forEachIndexed { index, tab ->
+                Tab(
+                    selected = index == selectedTab,
+                    onClick = { onSelect(index) },
+                    modifier = Modifier.testTag("rules-type-tab-$index"),
+                    text = {
+                        Text(
+                            stringResource(tab.labelRes),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
+            }
+        }
+        if (compact) {
+            ScrollableTabRow(
+                selectedTabIndex = selectedTab,
+                edgePadding = 8.dp,
+            ) { content() }
+        } else {
+            TabRow(selectedTabIndex = selectedTab) { content() }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -250,15 +295,11 @@ fun RulesScreen(
         ) {
             RulesWorkspaceSelector(showSources, { showSources = it }, onOpenExempt, onOpenOverrides)
             if (!showSources) {
-            TabRow(selectedTabIndex = selectedTab) {
-                tabs.forEachIndexed { index, tab ->
-                    Tab(
-                        selected = index == selectedTab,
-                        onClick = { selectedTab = index; requestedPage = 0 },
-                        text = { Text(stringResource(tab.labelRes), maxLines = 1) },
-                    )
-                }
-            }
+            RulesTypeTabs(
+                tabs = tabs,
+                selectedTab = selectedTab,
+                onSelect = { selectedTab = it; requestedPage = 0 },
+            )
 
             // Rule search box
             OutlinedTextField(
