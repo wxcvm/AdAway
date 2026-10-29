@@ -77,7 +77,12 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OverviewScreen(viewModel: StatsViewModel) {
+fun OverviewScreen(
+    viewModel: StatsViewModel,
+    onOpenStats: () -> Unit = {},
+    onOpenRules: () -> Unit = {},
+    onOpenLogs: () -> Unit = {},
+) {
     val observation by viewModel.statsObservation.collectAsStateWithLifecycle()
     val serverStats = observation.stats
     val blockedCount by viewModel.blockedHostCount.observeAsStateCompat(0)
@@ -149,6 +154,14 @@ fun OverviewScreen(viewModel: StatsViewModel) {
 
             StatsObservationStatus(observation)
             AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
+
+            // Quick navigation uses the exact existing screens; it doesn't toggle
+            // the service or claim that any future capture feature is active.
+            OverviewQuickActions(
+                onOpenStats = onOpenStats,
+                onOpenRules = onOpenRules,
+                onOpenLogs = onOpenLogs,
+            )
             RuleSyncCard(status = syncStatus, onSync = viewModel::syncHosts)
 
             // Place the controllable service before secondary counters, so
