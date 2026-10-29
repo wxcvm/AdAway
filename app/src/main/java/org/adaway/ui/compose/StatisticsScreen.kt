@@ -418,13 +418,13 @@ private fun KpiMiniGrid(stats: ServerStats) {
         Row(modifier = Modifier.fillMaxWidth()) {
             HeroMini(
                 stringResource(R.string.compose_stats_kpi_requests),
-                ChartUtils.compactNumber(stats.totalRequests),
+                stats.totalRequests,
                 MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
             )
             HeroMini(
                 stringResource(R.string.compose_stats_kpi_blocked),
-                ChartUtils.compactNumber(stats.totalBlocked),
+                stats.totalBlocked,
                 MaterialTheme.colorScheme.error,
                 modifier = Modifier.weight(1f),
             )
@@ -433,13 +433,13 @@ private fun KpiMiniGrid(stats: ServerStats) {
         Row(modifier = Modifier.fillMaxWidth()) {
             HeroMini(
                 stringResource(R.string.compose_stats_kpi_connections),
-                ChartUtils.compactNumber(stats.totalConnections),
+                stats.totalConnections,
                 MaterialTheme.colorScheme.tertiary,
                 modifier = Modifier.weight(1f),
             )
             HeroMini(
                 stringResource(R.string.compose_stats_kpi_certs),
-                ChartUtils.compactNumber(stats.sniCertsIssued),
+                stats.sniCertsIssued,
                 MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.weight(1f),
             )
@@ -450,16 +450,19 @@ private fun KpiMiniGrid(stats: ServerStats) {
 @Composable
 private fun HeroMini(
     label: String,
-    value: String,
+    value: Long,
     color: Color,
     modifier: Modifier = Modifier,
 ) {
+    val fullValue = String.format(Locale.getDefault(), "%,d", value)
     Column(
-        modifier = modifier,
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = "$label: $fullValue"
+        },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            value,
+            ChartUtils.compactNumber(value),
             style = MaterialTheme.typography.titleMedium.copy(
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
