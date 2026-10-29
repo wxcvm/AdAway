@@ -1,7 +1,6 @@
 package org.adaway.ui.compose
 
 import androidx.annotation.StringRes
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,8 +8,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -21,8 +25,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import org.adaway.R
@@ -35,6 +42,7 @@ import org.adaway.R
 private data class MoreAction(
     @StringRes val title: Int,
     @StringRes val description: Int,
+    val icon: ImageVector,
     val onClick: () -> Unit,
 )
 
@@ -48,15 +56,20 @@ fun MoreScreen(
     onOpenSettings: () -> Unit,
 ) {
     val tools = listOf(
-        MoreAction(R.string.compose_more_logs, R.string.compose_more_logs_desc, onOpenLogs),
-        MoreAction(R.string.compose_more_exempt, R.string.compose_more_exempt_desc, onOpenExempt),
-        MoreAction(R.string.compose_more_overrides, R.string.compose_more_overrides_desc, onOpenOverrides),
-        MoreAction(R.string.compose_more_network, R.string.compose_more_network_desc, onOpenNetwork),
-        MoreAction(R.string.compose_more_settings, R.string.compose_more_settings_desc, onOpenSettings),
+        MoreAction(R.string.compose_more_logs, R.string.compose_more_logs_desc, Icons.Outlined.Info, onOpenLogs),
+        MoreAction(R.string.compose_more_exempt, R.string.compose_more_exempt_desc, Icons.Outlined.Shield, onOpenExempt),
+        MoreAction(R.string.compose_more_overrides, R.string.compose_more_overrides_desc, Icons.Outlined.Public, onOpenOverrides),
+        MoreAction(R.string.compose_more_network, R.string.compose_more_network_desc, Icons.Outlined.Dns, onOpenNetwork),
+        MoreAction(R.string.compose_more_settings, R.string.compose_more_settings_desc, Icons.Outlined.Settings, onOpenSettings),
     )
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.compose_nav_more)) })
+            TopAppBar(
+                title = { Text(stringResource(R.string.compose_nav_more)) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            )
         },
     ) { padding ->
         LazyColumn(
@@ -72,10 +85,12 @@ fun MoreScreen(
                     modifier = Modifier.padding(vertical = 6.dp),
                 )
             }
-            items(tools.size) { i ->
-                val action = tools[i]
+            items(tools, key = { it.title }) { action ->
+                // A clickable Material card gives the entire row a ripple and
+                // accessible action semantics; avoid nested clickable surfaces.
                 Card(
-                    modifier = Modifier.fillMaxWidth().clickable(onClick = action.onClick),
+                    onClick = action.onClick,
+                    modifier = Modifier.fillMaxWidth().testTag("more-action-${action.title}"),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     ),
@@ -83,6 +98,9 @@ fun MoreScreen(
                     ListItem(
                         headlineContent = { Text(stringResource(action.title)) },
                         supportingContent = { Text(stringResource(action.description)) },
+                        leadingContent = {
+                            Icon(action.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        },
                         trailingContent = {
                             Icon(Icons.Outlined.ChevronRight, contentDescription = null)
                         },

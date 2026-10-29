@@ -20,6 +20,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -71,6 +72,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -226,9 +229,9 @@ fun StatisticsScreen(
             // Show recent traffic directly after the live KPIs, before the
             // category breakdown and lifetime diagnostics.
             // Trend + traffic chart (AdGuard Home style)
-            if (showTrend && serverStats != null &&
-                (serverStats.history.isNotEmpty() || serverStats.daily.isNotEmpty())
-            ) {
+            // Keep the enabled chart visible even before the server has
+            // published its first history bucket; the card explains the gap.
+            if (showTrend && serverStats != null) {
                 TrafficTrendCard(
                     hourly = serverStats.history,
                     daily = serverStats.daily,
@@ -319,101 +322,35 @@ fun StatisticsScreen(
  */
 @Composable
 private fun KpiCardRow(stats: ServerStats) {
-    // ADGuard Home 风格 Hero KPI：左侧拦截率大环形，右侧 2x2 指标
-    val rate = if (stats.totalRequests > 0) stats.totalBlocked * 100.0 / stats.totalRequests else 0.0
+    val rate = if (stats.totalRequests > 0L) {
+        (stats.totalBlocked.toDouble() / stats.totalRequests.toDouble() * 100.0)
+            .coerceIn(0.0, 100.0)
+    } else 0.0
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 拦截率环形
-            Box(
-                modifier = Modifier.size(96.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                val arcBg = MaterialTheme.colorScheme.surfaceVariant
-                val arcFg = MaterialTheme.colorScheme.primary
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val stroke = 12.dp.toPx()
-                    val inset = stroke / 2
-                    val arcSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
-                    drawArc(
-                        color = arcBg,
-                        startAngle = -90f,
-                        sweepAngle = 360f,
-                        useCenter = false,
-                        topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                        size = arcSize,
-                        style = Stroke(width = stroke, cap = StrokeCap.Round),
-                    )
-                    drawArc(
-                        color = arcFg,
-                        startAngle = -90f,
-                        sweepAngle = (rate / 100.0 * 360.0).toFloat().coerceIn(0f, 360f),
-                        useCenter = false,
-                        topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                        size = arcSize,
-                        style = Stroke(width = stroke, cap = StrokeCap.Round),
-                    )
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        String.format(Locale.US, "%.1f%%", rate),
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                        ),
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        stringResource(R.string.compose_stats_kpi_rate),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Spacer(Modifier.width(16.dp))
-            // 右侧 2x2 指标
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            // Avoid squeezing the 2x2 metrics beside the rate ring on compact
+            // devices, split-screen, and large accessibility font sizes.
+            if (maxWidth / androidx.compose.ui.platform.LocalDensity.current.fontScale < 340.dp) {
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    HeroMini(
-                        stringResource(R.string.compose_stats_kpi_requests),
-                        ChartUtils.compactNumber(stats.totalRequests),
-                        MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    HeroMini(
-                        stringResource(R.string.compose_stats_kpi_blocked),
-                        ChartUtils.compactNumber(stats.totalBlocked),
-                        MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
+                    BlockRateRing(rate)
+                    KpiMiniGrid(stats)
                 }
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    HeroMini(
-                        stringResource(R.string.compose_stats_kpi_connections),
-                        ChartUtils.compactNumber(stats.totalConnections),
-                        MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    HeroMini(
-                        stringResource(R.string.compose_stats_kpi_certs),
-                        ChartUtils.compactNumber(stats.sniCertsIssued),
-                        Color(0xFFE6A23C),
-                        modifier = Modifier.weight(1f),
-                    )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BlockRateRing(rate)
+                    Spacer(Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        KpiMiniGrid(stats)
+                    }
                 }
             }
         }
@@ -421,15 +358,111 @@ private fun KpiCardRow(stats: ServerStats) {
 }
 
 @Composable
+private fun BlockRateRing(rate: Double) {
+    val rateText = String.format(Locale.getDefault(), "%.1f%%", rate)
+    val rateLabel = stringResource(R.string.compose_stats_kpi_rate)
+    Box(
+        modifier = Modifier
+            .size(96.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$rateLabel: $rateText"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        val arcBg = MaterialTheme.colorScheme.surfaceVariant
+        val arcFg = MaterialTheme.colorScheme.primary
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = 12.dp.toPx()
+            val inset = stroke / 2
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            drawArc(
+                color = arcBg,
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            drawArc(
+                color = arcFg,
+                startAngle = -90f,
+                sweepAngle = (rate / 100.0 * 360.0).toFloat().coerceIn(0f, 360f),
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                rateText,
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                rateLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun KpiMiniGrid(stats: ServerStats) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            HeroMini(
+                stringResource(R.string.compose_stats_kpi_requests),
+                stats.totalRequests,
+                MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            HeroMini(
+                stringResource(R.string.compose_stats_kpi_blocked),
+                stats.totalBlocked,
+                MaterialTheme.colorScheme.error,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            HeroMini(
+                stringResource(R.string.compose_stats_kpi_connections),
+                stats.totalConnections,
+                MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.weight(1f),
+            )
+            HeroMini(
+                stringResource(R.string.compose_stats_kpi_certs),
+                stats.sniCertsIssued,
+                MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
 private fun HeroMini(
     label: String,
-    value: String,
-    color: androidx.compose.ui.graphics.Color,
+    value: Long,
+    color: Color,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    val fullValue = String.format(Locale.getDefault(), "%,d", value)
+    Column(
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = "$label: $fullValue"
+        },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         Text(
-            value,
+            ChartUtils.compactNumber(value),
             style = MaterialTheme.typography.titleMedium.copy(
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
@@ -536,10 +569,16 @@ private fun DonutChart(stats: ServerStats) {
     val categories = buildCategories(stats)
     val total = stats.totalBlocked
     val strokeWidth = 28.dp
+    val totalLabel = stringResource(R.string.compose_stats_total)
+    val exactCount = String.format(Locale.getDefault(), "%,d", total)
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(contentAlignment = Alignment.Center) {
-            Canvas(modifier = Modifier.size(160.dp)) {
+            Canvas(
+                modifier = Modifier.size(160.dp).semantics {
+                    contentDescription = "$totalLabel: $exactCount"
+                },
+            ) {
                 val stroke = Stroke(width = strokeWidth.toPx(), cap = StrokeCap.Butt)
                 val inset = strokeWidth.toPx() / 2
                 val arcSize = Size(
@@ -547,30 +586,41 @@ private fun DonutChart(stats: ServerStats) {
                     size.height - strokeWidth.toPx(),
                 )
                 var startAngle = -90f
-                categories.forEach { cat ->
-                    val sweep = 360f * cat.count.toFloat() / total.toFloat()
-                    drawArc(
-                        color = cat.color,
-                        startAngle = startAngle,
-                        sweepAngle = sweep - 1f, // small gap between segments
-                        useCenter = false,
-                        topLeft = Offset(inset, inset),
-                        size = arcSize,
-                        style = stroke,
-                    )
-                    startAngle += sweep
+                // Use Double for large counters and never draw negative sweeps.
+                // Corrupt/inconsistent server category totals must not exceed 360°.
+                if (total > 0L) {
+                    categories.forEach { cat ->
+                        val sweep = (360.0 * cat.count.toDouble() / total.toDouble())
+                            .toFloat()
+                            .coerceAtLeast(0f)
+                            .coerceAtMost((270f - startAngle).coerceAtLeast(0f))
+                        if (sweep > 0f) {
+                            drawArc(
+                                color = cat.color,
+                                startAngle = startAngle,
+                                sweepAngle = (sweep - 1f).coerceAtLeast(0f),
+                                useCenter = false,
+                                topLeft = Offset(inset, inset),
+                                size = arcSize,
+                                style = stroke,
+                            )
+                            startAngle += sweep
+                        }
+                    }
                 }
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    String.format(Locale.US, "%,d", total),
+                    ChartUtils.compactNumber(total),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.headlineSmall.copy(
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold,
                     ),
                 )
                 Text(
-                    stringResource(R.string.compose_stats_total),
+                    totalLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -581,7 +631,9 @@ private fun DonutChart(stats: ServerStats) {
 
 @Composable
 private fun CategoryRow(category: BlockCategory, total: Long) {
-    val fraction = if (total > 0) category.count.toFloat() / total.toFloat() else 0f
+    val fraction = if (total > 0L) {
+        (category.count.toDouble() / total.toDouble()).toFloat().coerceIn(0f, 1f)
+    } else 0f
     // Capture colors before the Canvas draw block (not @Composable context)
     val trackColor = MaterialTheme.colorScheme.surfaceVariant
     // 点击分类行时展开/收起说明文字（telemetry/heartbeat 等专业术语释义）
@@ -923,15 +975,35 @@ internal fun TrafficTrendCard(
             TrendControls(mode, style, { mode = it; setChartRange(context, it) },
                 { style = it; setChartStyle(context, it) })
             Spacer(Modifier.height(12.dp))
-            if (data.isEmpty()) Text(stringResource(R.string.compose_stats_history_empty),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            var selectedIndex by remember { mutableIntStateOf(-1) }
-            TrendCanvas(TrendPlot(data, mode, style, showConnections, selectedIndex), palette) { selectedIndex = it }
-            Spacer(Modifier.height(8.dp))
-            TrendLegend(mode, showConnections, palette)
-            val selected = data.getOrNull(selectedIndex)
-            if (selected != null) TrendTooltip(selected, mode, showConnections, palette)
+            if (data.isEmpty()) {
+                // A selected time range may have no buckets although another
+                // time range does. Show a real empty state, not a blank Canvas.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(128.dp)
+                        .testTag("traffic-history-empty"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        stringResource(R.string.compose_stats_history_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                // A previously selected point does not refer to the same
+                // time bucket after switching from hourly to daily.
+                var selectedIndex by remember(mode) { mutableIntStateOf(-1) }
+                TrendCanvas(
+                    TrendPlot(data, mode, style, showConnections, selectedIndex),
+                    palette,
+                ) { selectedIndex = it }
+                Spacer(Modifier.height(8.dp))
+                TrendLegend(mode, showConnections, palette)
+                val selected = data.getOrNull(selectedIndex)
+                if (selected != null) TrendTooltip(selected, mode, showConnections, palette)
+            }
         }
     }
 }
@@ -998,17 +1070,23 @@ private fun TrendControls(mode: Int, style: Int, onMode: (Int) -> Unit, onStyle:
 
 @Composable
 private fun TrendLegend(mode: Int, showConnections: Boolean, palette: TrendPalette) {
-    Row(
+    // Put the series in a horizontally scrollable row and the time window
+    // below it: neither should squeeze the other out on 320dp screens.
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        LegendDot(palette.requests, stringResource(R.string.compose_stats_history_requests))
-        LegendDot(palette.blocked, stringResource(R.string.compose_stats_history_blocked))
-        if (showConnections) {
-            LegendDot(palette.connections, stringResource(R.string.compose_stats_history_connections))
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LegendDot(palette.requests, stringResource(R.string.compose_stats_history_requests))
+            LegendDot(palette.blocked, stringResource(R.string.compose_stats_history_blocked))
+            if (showConnections) {
+                LegendDot(palette.connections, stringResource(R.string.compose_stats_history_connections))
+            }
         }
-        Spacer(Modifier.weight(1f))
         Text(
             stringResource(
                 when (mode) {
@@ -1276,7 +1354,8 @@ private fun smoothPath(points: List<Offset>): androidx.compose.ui.graphics.Path 
  */
 private fun BlockRateCard(stats: ServerStats) {
     val total = stats.totalRequests.coerceAtLeast(1L)
-    val rate = stats.totalBlocked.toFloat() / total
+    val rate = (stats.totalBlocked.toDouble() / total.toDouble())
+        .toFloat().coerceIn(0f, 1f)
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
