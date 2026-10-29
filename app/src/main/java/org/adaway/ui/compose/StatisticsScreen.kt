@@ -229,9 +229,9 @@ fun StatisticsScreen(
             // Show recent traffic directly after the live KPIs, before the
             // category breakdown and lifetime diagnostics.
             // Trend + traffic chart (AdGuard Home style)
-            if (showTrend && serverStats != null &&
-                (serverStats.history.isNotEmpty() || serverStats.daily.isNotEmpty())
-            ) {
+            // Keep the enabled chart visible even before the server has
+            // published its first history bucket; the card explains the gap.
+            if (showTrend && serverStats != null) {
                 TrafficTrendCard(
                     hourly = serverStats.history,
                     daily = serverStats.daily,
@@ -976,7 +976,10 @@ internal fun TrafficTrendCard(
                 // A selected time range may have no buckets although another
                 // time range does. Show a real empty state, not a blank Canvas.
                 Box(
-                    modifier = Modifier.fillMaxWidth().height(128.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(128.dp)
+                        .testTag("traffic-history-empty"),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
