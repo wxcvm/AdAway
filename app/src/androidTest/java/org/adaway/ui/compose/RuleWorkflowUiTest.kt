@@ -1045,7 +1045,13 @@ class RuleWorkflowUiTest {
             }
         }
         compose.onNodeWithText(compose.activity.getString(R.string.compose_status_active)).assertIsDisplayed()
-        compose.onNodeWithText("300,000").assertExists()
+        // The screen now visually abbreviates large host totals so the three
+        // stat cards fit on narrow phones, but TalkBack must retain the exact
+        // localized count. Assert both rather than requiring old visible text.
+        val blockedLabel = compose.activity.getString(R.string.compose_hosts_blocked)
+        val exactCount = String.format(java.util.Locale.getDefault(), "%,d", 300_000)
+        compose.onNodeWithContentDescription("$blockedLabel: $exactCount").assertExists()
+        compose.onNodeWithText(ChartUtils.compactNumber(300_000L), useUnmergedTree = true).assertExists()
         compose.waitForIdle()
         saveScreenshot(name)
         compose.onNode(hasClickAction()).performScrollTo().assertIsEnabled()
