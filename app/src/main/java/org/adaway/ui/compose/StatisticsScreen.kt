@@ -20,6 +20,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -71,6 +72,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -319,101 +322,34 @@ fun StatisticsScreen(
  */
 @Composable
 private fun KpiCardRow(stats: ServerStats) {
-    // ADGuard Home 风格 Hero KPI：左侧拦截率大环形，右侧 2x2 指标
-    val rate = if (stats.totalRequests > 0) stats.totalBlocked * 100.0 / stats.totalRequests else 0.0
+    val rate = if (stats.totalRequests > 0) {
+        stats.totalBlocked * 100.0 / stats.totalRequests
+    } else 0.0
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 拦截率环形
-            Box(
-                modifier = Modifier.size(96.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                val arcBg = MaterialTheme.colorScheme.surfaceVariant
-                val arcFg = MaterialTheme.colorScheme.primary
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val stroke = 12.dp.toPx()
-                    val inset = stroke / 2
-                    val arcSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
-                    drawArc(
-                        color = arcBg,
-                        startAngle = -90f,
-                        sweepAngle = 360f,
-                        useCenter = false,
-                        topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                        size = arcSize,
-                        style = Stroke(width = stroke, cap = StrokeCap.Round),
-                    )
-                    drawArc(
-                        color = arcFg,
-                        startAngle = -90f,
-                        sweepAngle = (rate / 100.0 * 360.0).toFloat().coerceIn(0f, 360f),
-                        useCenter = false,
-                        topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                        size = arcSize,
-                        style = Stroke(width = stroke, cap = StrokeCap.Round),
-                    )
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        String.format(Locale.US, "%.1f%%", rate),
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                        ),
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        stringResource(R.string.compose_stats_kpi_rate),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Spacer(Modifier.width(16.dp))
-            // 右侧 2x2 指标
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            // Avoid squeezing the 2x2 metrics beside the rate ring on compact
+            // devices, split-screen, and large accessibility font sizes.
+            if (maxWidth / androidx.compose.ui.platform.LocalDensity.current.fontScale < 340.dp) {
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    HeroMini(
-                        stringResource(R.string.compose_stats_kpi_requests),
-                        ChartUtils.compactNumber(stats.totalRequests),
-                        MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    HeroMini(
-                        stringResource(R.string.compose_stats_kpi_blocked),
-                        ChartUtils.compactNumber(stats.totalBlocked),
-                        MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
+                    BlockRateRing(rate)
+                    KpiMiniGrid(stats)
                 }
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    HeroMini(
-                        stringResource(R.string.compose_stats_kpi_connections),
-                        ChartUtils.compactNumber(stats.totalConnections),
-                        MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    HeroMini(
-                        stringResource(R.string.compose_stats_kpi_certs),
-                        ChartUtils.compactNumber(stats.sniCertsIssued),
-                        Color(0xFFE6A23C),
-                        modifier = Modifier.weight(1f),
-                    )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    BlockRateRing(rate)
+                    Spacer(Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        KpiMiniGrid(stats)
+                    }
                 }
             }
         }
@@ -421,30 +357,92 @@ private fun KpiCardRow(stats: ServerStats) {
 }
 
 @Composable
-private fun HeroMini(
-    label: String,
-    value: String,
-    color: androidx.compose.ui.graphics.Color,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            value,
-            style = MaterialTheme.typography.titleMedium.copy(
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.SemiBold,
-            ),
-            color = color,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+private fun BlockRateRing(rate: Double) {
+    val rateText = String.format(Locale.getDefault(), "%.1f%%", rate)
+    val rateLabel = stringResource(R.string.compose_stats_kpi_rate)
+    Box(
+        modifier = Modifier
+            .size(96.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$rateLabel: $rateText"
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        val arcBg = MaterialTheme.colorScheme.surfaceVariant
+        val arcFg = MaterialTheme.colorScheme.primary
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = 12.dp.toPx()
+            val inset = stroke / 2
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            drawArc(
+                color = arcBg,
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            drawArc(
+                color = arcFg,
+                startAngle = -90f,
+                sweepAngle = (rate / 100.0 * 360.0).toFloat().coerceIn(0f, 360f),
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                rateText,
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                ),
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                rateLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun KpiMiniGrid(stats: ServerStats) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            HeroMini(
+                stringResource(R.string.compose_stats_kpi_requests),
+                ChartUtils.compactNumber(stats.totalRequests),
+                MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            HeroMini(
+                stringResource(R.string.compose_stats_kpi_blocked),
+                ChartUtils.compactNumber(stats.totalBlocked),
+                MaterialTheme.colorScheme.error,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            HeroMini(
+                stringResource(R.string.compose_stats_kpi_connections),
+                ChartUtils.compactNumber(stats.totalConnections),
+                MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.weight(1f),
+            )
+            HeroMini(
+                stringResource(R.string.compose_stats_kpi_certs),
+                ChartUtils.compactNumber(stats.sniCertsIssued),
+                MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
