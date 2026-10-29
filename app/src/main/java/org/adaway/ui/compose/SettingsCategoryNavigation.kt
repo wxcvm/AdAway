@@ -13,11 +13,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -65,10 +67,20 @@ internal fun SettingsCategoryNavigation(
             OutlinedTextField(
                 value = search,
                 onValueChange = onSearchChange,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("settings-search-field"),
                 singleLine = true,
                 label = { Text(stringResource(R.string.compose_settings_search_hint)) },
                 leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (search.isNotEmpty()) {
+                        IconButton(
+                            onClick = { onSearchChange("") },
+                            modifier = Modifier.testTag("settings-clear-search"),
+                        ) {
+                            Icon(Icons.Outlined.Close, contentDescription = stringResource(R.string.button_close))
+                        }
+                    }
+                },
             )
         }
         if (query.isEmpty()) {
@@ -135,7 +147,8 @@ internal fun SettingsCategoryNavigation(
         } else {
             itemsIndexed(filtered, key = { _, index -> index }) { _, index ->
                 Card(
-                    modifier = Modifier.fillMaxWidth().testTag("settings-category-$index").clickable { onSelect(index) },
+                    onClick = { onSelect(index) },
+                    modifier = Modifier.fillMaxWidth().testTag("settings-category-$index"),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     ),
