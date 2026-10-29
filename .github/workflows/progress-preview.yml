@@ -57,6 +57,14 @@ jobs:
           python3 -m unittest discover -s tools -p 'test_check_stats_contract.py'
           python3 -m unittest discover -s tools -p 'test_prepare_preview_feed.py'
 
+      - name: Compress oversized block images (same as stable)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "import PIL" 2>/dev/null \
+            || pip3 install pillow -q --break-system-packages
+          python3 tools/compress_block_images.py
+
       - name: Build and verify ABI-specific production-identity release APKs
         shell: bash
         run: |
