@@ -146,13 +146,9 @@ internal fun RulesTypeTabs(
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 edgePadding = 8.dp,
-                content = content,
-            )
+            ) { content() }
         } else {
-            TabRow(
-                selectedTabIndex = selectedTab,
-                content = content,
-            )
+            TabRow(selectedTabIndex = selectedTab) { content() }
         }
     }
 }
