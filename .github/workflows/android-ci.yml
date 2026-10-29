@@ -126,48 +126,10 @@ jobs:
       # repeated ndk-build of the large webserver.c / mongoose / openssl.
       - name: Compress oversized block images (assets -> webp)
         run: |
-          # Only install when Pillow is really missing (saves ~10 s per run).
+          # Stable and preview must package the same optimized default assets.
           python3 -c "import PIL" 2>/dev/null \
             || pip3 install pillow -q --break-system-packages
-
-          python3 - <<'PYEOF'
-
-          import glob, os
-
-          from PIL import Image
-
-          for p in glob.glob('app/src/main/assets/img_*'):
-
-              if p.endswith('.webp'):
-
-                  continue
-
-              name = os.path.basename(p)
-
-              base = name.rsplit('.', 1)[0]
-
-              im = Image.open(p).convert('RGB')
-
-              w, h = im.size
-
-              scale = min(1.0, 800 / max(w, h))
-
-              if scale < 1.0:
-
-                  im = im.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
-
-              out = f'app/src/main/assets/{base}.webp'
-
-              im.save(out, 'WEBP', quality=95, method=6)
-
-              os.remove(p)
-
-              print(f'{name} ({w}x{h}) -> {os.path.basename(out)} ({os.path.getsize(out)//1024}KB)')
-
-          print('block images compressed')
-
-          PYEOF
-
+          python3 tools/compress_block_images.py
 
       - name: Run tests & build release
         run: |
