@@ -8,6 +8,9 @@ on:
       - '.github/workflows/progress-preview.yml'
       - 'tools/compress_block_images.py'
       - 'tools/test_compress_block_images.py'
+      - 'gradle/libs.versions.toml'
+      - 'tools/android_release_version.py'
+      - 'tools/test_android_release_version.py'
       - 'tools/check_stats_contract.py'
       - 'tools/test_check_stats_contract.py'
       - 'docs/windows-core-contract.md'
@@ -21,6 +24,9 @@ on:
       - '.github/workflows/progress-preview.yml'
       - 'tools/compress_block_images.py'
       - 'tools/test_compress_block_images.py'
+      - 'gradle/libs.versions.toml'
+      - 'tools/android_release_version.py'
+      - 'tools/test_android_release_version.py'
       - 'tools/check_stats_contract.py'
       - 'tools/test_check_stats_contract.py'
       - 'docs/windows-core-contract.md'
@@ -87,6 +93,9 @@ jobs:
           python3 -c "import PIL" 2>/dev/null \
             || pip3 install pillow -q --break-system-packages
           python3 -m unittest discover -s tools -p 'test_compress_block_images.py'
+
+      - name: Test Android release version policy
+        run: python3 -m unittest discover -s tools -p 'test_android_release_version.py'
 
       - name: Test APK signer fingerprint compatibility across Build Tools versions
         run: python3 -m unittest discover -s tools -p 'test_compare_apk_signers.py'
