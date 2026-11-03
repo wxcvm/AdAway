@@ -35,7 +35,7 @@ public class AppExecutors {
 
     // For Singleton instantiation
     private static final Object LOCK = new Object();
-    private static AppExecutors sInstance;
+    private static volatile AppExecutors sInstance;
     private final Executor diskIO;
     private final Executor mainThread;
     private final Executor networkIO;
@@ -47,16 +47,21 @@ public class AppExecutors {
     }
 
     public static AppExecutors getInstance() {
-        if (sInstance == null) {
+        AppExecutors instance = sInstance;
+        if (instance == null) {
             synchronized (LOCK) {
-                sInstance = new AppExecutors(
-                        Executors.newSingleThreadExecutor(),
-                        Executors.newFixedThreadPool(3),
-                        new MainThreadExecutor()
-                );
+                instance = sInstance;
+                if (instance == null) {
+                    instance = new AppExecutors(
+                            Executors.newSingleThreadExecutor(),
+                            Executors.newFixedThreadPool(3),
+                            new MainThreadExecutor()
+                    );
+                    sInstance = instance;
+                }
             }
         }
-        return sInstance;
+        return instance;
     }
 
     public Executor diskIO() {
