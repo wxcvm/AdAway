@@ -108,6 +108,10 @@ final class ReleaseFeed {
                 || !url.equals(json.optString("downloadUrl")))) return null;
         if (!preview && !tag.matches(STABLE_TAG)) return null;
         if (!json.has("artifacts")) {
+            // Fork ARM64 builds require API 30+. Legacy pointer metadata has
+            // no minSdk field, so reject older devices before offering an APK
+            // that the package installer cannot install.
+            if (sdk < 30) return null;
             // Legacy pointers describe ARM64 only. Never offer them to x86/RISC-V devices.
             for (String abi : supportedAbis) if ("arm64-v8a".equals(abi)) {
                 return new Manifest(version, code, json.optString("changelog"), url, code > currentCode, preview);
