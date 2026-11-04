@@ -15,18 +15,62 @@ import static org.junit.Assert.*;
 /** Linux CI exercises real deleted executable mappings and failure preservation without su/network. */
 public class BundledExecutableLifecycleTest {
     @Test public void stagedNewPathCannotHideOldMappedImageAndBackupUsesActualImage() throws Exception {
-        Assume.assumeTrue(new File("/proc/self/exe").exists() && new File("/bin/sleep").exists());
+        Assume.assumeTrue(new File("/proc/self/exe").exists() && new File("/bin/sh").exists());
         Path directory = Files.createTempDirectory("adaway-image-");
         Path target = directory.resolve("libwebserver_exec.so");
         Path source = directory.resolve("current-image");
         Path previous = Path.of(target + ".previous");
-        Files.copy(Path.of("/bin/sleep"), target);
+        // Ubuntu CI uses a basename-checking multi-call /bin/sleep; renaming
+        // it to libwebserver_exec.so fails before /proc can map an image.
+        // Copy /bin/sh instead and block on its built-in read command.
+        // This tests the same real ELF inode, deleted mapping and rollback.
+        Files.copy(Path.of("/bin/sh"), target);
         assertTrue(target.toFile().setExecutable(true));
         String oldHash = BundledExecutableIdentity.sha256(target.toFile());
-        Process old = new ProcessBuilder(target.toString(), "30").start();
+        Process old = new ProcessBuilder(target.toString(), "-c", "read ignored").start();
         Process foreign = new ProcessBuilder("/bin/sh", "-c", "read ignored", target.toString()).start();
         Process second = null;
         try {
+            // ProcessBuilder.start() can return before the child exec() has
+            // installed its final /proc/<pid>/exe mapping. Do not rename the
+            // executable until the old image has actually become observable.
+            // The production identity check remains strict and unchanged.
+            List<String> initialImages = List.of();
+            long readyUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (System.nanoTime() < readyUntil && old.isAlive()) {
+                initialImages = output(BundledExecutableIdentity.scanPidCommand(
+                        target.toString(), pid(old), true));
+                if (BundledExecutableIdentity.allImagesMatch(initialImages, oldHash)) break;
+                Thread.sleep(25);
+            }
+            if (!BundledExecutableIdentity.allImagesMatch(initialImages, oldHash)) {
+                String mappedPath;
+                try {
+                    mappedPath = Files.readSymbolicLink(
+                            Path.of("/proc", Long.toString(pid(old)), "exe")).toString();
+                } catch (Exception error) {
+                    mappedPath = "unavailable: " + error.getClass().getSimpleName();
+                }
+                String exitEvidence = "";
+                if (!old.isAlive()) {
+                    try {
+                        exitEvidence = " exit=" + old.exitValue()
+                                + " stderr=" + new String(old.getErrorStream().readAllBytes(),
+                                        StandardCharsets.UTF_8)
+                                + " stdout=" + new String(old.getInputStream().readAllBytes(),
+                                        StandardCharsets.UTF_8);
+                    } catch (Exception error) {
+                        exitEvidence = " unavailable: " + error.getClass().getSimpleName();
+                    }
+                }
+                System.err.println("Executable fixture not ready: oldPid=" + pid(old)
+                        + " alive=" + old.isAlive() + " mappedPath=" + mappedPath
+                        + " scan=" + initialImages + " expectedHash=" + oldHash
+                        + exitEvidence);
+            }
+            assertTrue("old executable not ready before atomic rename: " + initialImages,
+                    BundledExecutableIdentity.allImagesMatch(initialImages, oldHash));
+
             byte[] bytes = Files.readAllBytes(target);
             byte[] updated = Arrays.copyOf(bytes, bytes.length + 1);
             updated[updated.length - 1] = 42;
@@ -55,7 +99,7 @@ public class BundledExecutableLifecycleTest {
             assertEquals(oldHash, BundledExecutableIdentity.sha256(previous.toFile()));
             assertTrue(old.isAlive());
 
-            second = new ProcessBuilder(target.toString(), "30").start();
+            second = new ProcessBuilder(target.toString(), "-c", "read ignored").start();
             run(BundledExecutableIdentity.stageCommand(source.toString(), target.toString()), 1);
             assertTrue("ambiguous mappings must not be stopped", old.isAlive() && second.isAlive());
             assertEquals(oldHash, BundledExecutableIdentity.sha256(previous.toFile()));

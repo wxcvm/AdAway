@@ -20,7 +20,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 tools/verify_webserver_apk_test.py
+      - name: Test bounded pinned graphics source fetch (offline)
+        run: python3 webserver/scripts/test_prepare_graphics_path.py
       - run: python3 -m unittest discover -s tools -p test_prepare_preview_feed.py
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Verify old executable mapping before atomic lifecycle replacement
+        run: ./gradlew :app:testDebugUnitTest --tests org.adaway.util.BundledExecutableLifecycleTest --no-daemon --info -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64
+      - name: Preserve exact JVM lifecycle failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lifecycle-jvm-results
+          path: app/build/test-results/testDebugUnitTest/**
+          if-no-files-found: warn
 
   package:
     name: Native APK (${{ matrix.abi }})
