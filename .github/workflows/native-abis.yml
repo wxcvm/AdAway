@@ -29,7 +29,14 @@ jobs:
           java-version: '21'
           cache: gradle
       - name: Verify old executable mapping before atomic lifecycle replacement
-        run: ./gradlew :app:testDebugUnitTest --tests org.adaway.util.BundledExecutableLifecycleTest --no-daemon -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64
+        run: ./gradlew :app:testDebugUnitTest --tests org.adaway.util.BundledExecutableLifecycleTest --no-daemon --info -PruleLoaderTestAbi=x86_64 -Pandroid.injected.build.abi=x86_64
+      - name: Preserve exact JVM lifecycle failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lifecycle-jvm-results
+          path: app/build/test-results/testDebugUnitTest/**
+          if-no-files-found: warn
 
   package:
     name: Native APK (${{ matrix.abi }})
