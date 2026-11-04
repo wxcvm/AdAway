@@ -9,7 +9,32 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import time
+import urllib.error
 import urllib.request
+
+
+_MAX_ENCODED_SIZE = 2 * 1024 * 1024
+_RETRYABLE_HTTP = {429, 500, 502, 503, 504}
+
+
+def download_pinned_source(url):
+    """Bounded retries for transient source-host failures; never change the pin."""
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(url, timeout=45) as response:
+                encoded = response.read(_MAX_ENCODED_SIZE + 1)
+            if len(encoded) > _MAX_ENCODED_SIZE:
+                raise ValueError('AndroidX source file exceeds limit')
+            return encoded
+        except urllib.error.HTTPError as error:
+            if error.code not in _RETRYABLE_HTTP or attempt == 3:
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt == 3:
+                raise
+        time.sleep(1 << attempt)
+    raise AssertionError('unreachable retry state')
 
 
 def prepare(destination):
@@ -30,10 +55,7 @@ def prepare(destination):
         target = destination / relative
         if target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == digest:
             continue
-        with urllib.request.urlopen(base + name + '?format=TEXT', timeout=45) as response:
-            encoded = response.read(2 * 1024 * 1024 + 1)
-        if len(encoded) > 2 * 1024 * 1024:
-            raise ValueError('AndroidX source file exceeds limit')
+        encoded = download_pinned_source(base + name + '?format=TEXT')
         data = base64.b64decode(encoded, validate=True)
         if hashlib.sha256(data).hexdigest() != digest:
             raise ValueError('AndroidX source hash mismatch: ' + name)
