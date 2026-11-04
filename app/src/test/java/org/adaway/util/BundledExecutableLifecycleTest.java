@@ -27,6 +27,21 @@ public class BundledExecutableLifecycleTest {
         Process foreign = new ProcessBuilder("/bin/sh", "-c", "read ignored", target.toString()).start();
         Process second = null;
         try {
+            // ProcessBuilder.start() can return before the child exec() has
+            // installed its final /proc/<pid>/exe mapping. Do not rename the
+            // executable until the old image has actually become observable.
+            // The production identity check remains strict and unchanged.
+            List<String> initialImages = List.of();
+            long readyUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (System.nanoTime() < readyUntil && old.isAlive()) {
+                initialImages = output(BundledExecutableIdentity.scanPidCommand(
+                        target.toString(), pid(old), true));
+                if (BundledExecutableIdentity.allImagesMatch(initialImages, oldHash)) break;
+                Thread.sleep(25);
+            }
+            assertTrue("old executable not ready before atomic rename: " + initialImages,
+                    BundledExecutableIdentity.allImagesMatch(initialImages, oldHash));
+
             byte[] bytes = Files.readAllBytes(target);
             byte[] updated = Arrays.copyOf(bytes, bytes.length + 1);
             updated[updated.length - 1] = 42;
