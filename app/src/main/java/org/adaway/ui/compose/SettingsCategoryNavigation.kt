@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -23,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -32,6 +34,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.adaway.R
 import java.util.Locale
+
+/**
+ * A search word may occur in the title, description or aliases. Treat
+ * whitespace-separated terms as AND so "AdGuard DNS" finds the same
+ * section without depending on either literal word order or translation.
+ */
+internal fun settingsCategoryMatches(
+    title: String, description: String, keywords: String, search: String,
+): Boolean {
+    val tokens = search.trim().lowercase(Locale.ROOT)
+        .split(Regex("\\s+")).filter { it.isNotEmpty() }
+    if (tokens.isEmpty()) return true
+    val text = "$title $description $keywords".lowercase(Locale.ROOT)
+    return tokens.all(text::contains)
+}
 
 /**
  * Settings home -> category detail. Unlike seven horizontal tabs, every
@@ -50,10 +67,9 @@ internal fun SettingsCategoryNavigation(
     onSelect: (Int) -> Unit,
 ) {
     require(titles.size == 7 && descriptions.size == 7 && keywords.size == 7)
-    val query = search.trim().lowercase(Locale.ROOT)
+    val query = search.trim()
     val filtered = titles.indices.filter { index ->
-        query.isEmpty() || listOf(titles[index], descriptions[index], keywords[index])
-            .any { it.lowercase(Locale.ROOT).contains(query) }
+        settingsCategoryMatches(titles[index], descriptions[index], keywords[index], query)
     }
 
     LazyColumn(
@@ -149,11 +165,27 @@ internal fun SettingsCategoryNavigation(
                 Card(
                     onClick = { onSelect(index) },
                     modifier = Modifier.fillMaxWidth().testTag("settings-category-$index"),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     ),
                 ) {
                     ListItem(
+                        leadingContent = {
+                            // Stable section numbers are easier to scan than a wall of
+                            // same-looking cards, and require no new icon dependency.
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Text(
+                                    text = (index + 1).toString().padStart(2, '0'),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        },
                         headlineContent = {
                             Text(titles[index], fontWeight = FontWeight.Medium)
                         },

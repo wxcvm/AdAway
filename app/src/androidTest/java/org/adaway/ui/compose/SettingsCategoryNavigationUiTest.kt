@@ -19,6 +19,29 @@ class SettingsCategoryNavigationUiTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
+    fun multiTermSearchMatchesAliasAndDescriptionWithoutSelectingOtherCategories() {
+        var selected = -1
+        compose.setContent {
+            var search by remember { mutableStateOf("") }
+            AdAwayTheme(dynamicColor = false) {
+                SettingsCategoryNavigation(
+                    titles = listOf("Blocking", "Server", "Certificates", "Response", "Stats", "App", "Tools"),
+                    descriptions = listOf("AdGuard coexistence", "HTTP listener", "TLS", "Rules", "Charts", "Theme", "Backup"),
+                    keywords = listOf("DNS VPN", "ports", "CA", "cache", "live", "dark", "export"),
+                    search = search,
+                    onSearchChange = { search = it },
+                    onSelect = { selected = it },
+                )
+            }
+        }
+        compose.onNodeWithTag("settings-search-field").performTextInput("adguard dns")
+        compose.onNodeWithTag("settings-category-0").assertExists()
+        compose.onNodeWithTag("settings-category-1").assertDoesNotExist()
+        compose.onNodeWithTag("settings-category-0").performClick()
+        compose.runOnIdle { assertEquals(0, selected) }
+    }
+
+    @Test
     fun clearingSearchRestoresCategoriesAndCardsRemainClickable() {
         var selected = -1
         compose.setContent {
