@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 tools/verify_webserver_apk_test.py
+      - name: Test bounded pinned graphics source fetch (offline)
+        run: python3 webserver/scripts/test_prepare_graphics_path.py
       - run: python3 -m unittest discover -s tools -p test_prepare_preview_feed.py
 
   package:
