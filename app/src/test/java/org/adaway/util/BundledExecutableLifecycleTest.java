@@ -39,6 +39,18 @@ public class BundledExecutableLifecycleTest {
                 if (BundledExecutableIdentity.allImagesMatch(initialImages, oldHash)) break;
                 Thread.sleep(25);
             }
+            if (!BundledExecutableIdentity.allImagesMatch(initialImages, oldHash)) {
+                String mappedPath;
+                try {
+                    mappedPath = Files.readSymbolicLink(
+                            Path.of("/proc", Long.toString(pid(old)), "exe")).toString();
+                } catch (Exception error) {
+                    mappedPath = "unavailable: " + error.getClass().getSimpleName();
+                }
+                System.err.println("Executable fixture not ready: oldPid=" + pid(old)
+                        + " alive=" + old.isAlive() + " mappedPath=" + mappedPath
+                        + " scan=" + initialImages + " expectedHash=" + oldHash);
+            }
             assertTrue("old executable not ready before atomic rename: " + initialImages,
                     BundledExecutableIdentity.allImagesMatch(initialImages, oldHash));
 
