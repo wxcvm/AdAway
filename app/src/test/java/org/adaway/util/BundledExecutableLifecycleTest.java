@@ -47,9 +47,22 @@ public class BundledExecutableLifecycleTest {
                 } catch (Exception error) {
                     mappedPath = "unavailable: " + error.getClass().getSimpleName();
                 }
+                String exitEvidence = "";
+                if (!old.isAlive()) {
+                    try {
+                        exitEvidence = " exit=" + old.exitValue()
+                                + " stderr=" + new String(old.getErrorStream().readAllBytes(),
+                                        StandardCharsets.UTF_8)
+                                + " stdout=" + new String(old.getInputStream().readAllBytes(),
+                                        StandardCharsets.UTF_8);
+                    } catch (Exception error) {
+                        exitEvidence = " unavailable: " + error.getClass().getSimpleName();
+                    }
+                }
                 System.err.println("Executable fixture not ready: oldPid=" + pid(old)
                         + " alive=" + old.isAlive() + " mappedPath=" + mappedPath
-                        + " scan=" + initialImages + " expectedHash=" + oldHash);
+                        + " scan=" + initialImages + " expectedHash=" + oldHash
+                        + exitEvidence);
             }
             assertTrue("old executable not ready before atomic rename: " + initialImages,
                     BundledExecutableIdentity.allImagesMatch(initialImages, oldHash));
