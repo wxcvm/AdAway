@@ -15,15 +15,19 @@ import static org.junit.Assert.*;
 /** Linux CI exercises real deleted executable mappings and failure preservation without su/network. */
 public class BundledExecutableLifecycleTest {
     @Test public void stagedNewPathCannotHideOldMappedImageAndBackupUsesActualImage() throws Exception {
-        Assume.assumeTrue(new File("/proc/self/exe").exists() && new File("/bin/sleep").exists());
+        Assume.assumeTrue(new File("/proc/self/exe").exists() && new File("/bin/sh").exists());
         Path directory = Files.createTempDirectory("adaway-image-");
         Path target = directory.resolve("libwebserver_exec.so");
         Path source = directory.resolve("current-image");
         Path previous = Path.of(target + ".previous");
-        Files.copy(Path.of("/bin/sleep"), target);
+        // Ubuntu CI uses a basename-checking multi-call /bin/sleep; renaming
+        // it to libwebserver_exec.so fails before /proc can map an image.
+        // Copy /bin/sh instead and block on its built-in read command.
+        // This tests the same real ELF inode, deleted mapping and rollback.
+        Files.copy(Path.of("/bin/sh"), target);
         assertTrue(target.toFile().setExecutable(true));
         String oldHash = BundledExecutableIdentity.sha256(target.toFile());
-        Process old = new ProcessBuilder(target.toString(), "30").start();
+        Process old = new ProcessBuilder(target.toString(), "-c", "read ignored").start();
         Process foreign = new ProcessBuilder("/bin/sh", "-c", "read ignored", target.toString()).start();
         Process second = null;
         try {
@@ -95,7 +99,7 @@ public class BundledExecutableLifecycleTest {
             assertEquals(oldHash, BundledExecutableIdentity.sha256(previous.toFile()));
             assertTrue(old.isAlive());
 
-            second = new ProcessBuilder(target.toString(), "30").start();
+            second = new ProcessBuilder(target.toString(), "-c", "read ignored").start();
             run(BundledExecutableIdentity.stageCommand(source.toString(), target.toString()), 1);
             assertTrue("ambiguous mappings must not be stopped", old.isAlive() && second.isAlive());
             assertEquals(oldHash, BundledExecutableIdentity.sha256(previous.toFile()));
