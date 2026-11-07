@@ -1669,14 +1669,15 @@ static struct mg_str key_to_pem_mgstr(EVP_PKEY *key) {
    dialed — which is effectively all of them — would fail to validate
    it even though the CA is trusted, since the CA's own identity isn't
    a valid SAN for the server it's terminating TLS for. Sign a proper
-   short-lived leaf cert for "localhost" with DNS + IPv4 loopback +
-   IPv6 loopback SANs (the server also listens on ::1) and use *that*
+   short-lived leaf cert for localhost, configured IPv4 and IPv6
+   listeners, and recommended loopback / ULA IPs, then use *that*
    as the default, matching how every other hostname already gets a
    purpose-issued leaf cert via make_domain_ctx(). */
-static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts) {
+static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts,
+                               const char *san) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
     if (make_cert("localhost", ca->cert, ca->key, 0, 397,
-                  "DNS:localhost,IP:127.0.0.1,IP:127.0.0.2,IP:0:0:0:0:0:0:0:1", /*use_ec=*/0, /*rsa_bits=*/0, &cert, &key) != EXIT_SUCCESS)
+                  san, /*use_ec=*/0, /*rsa_bits=*/0, &cert, &key) != EXIT_SUCCESS)
         return EXIT_FAILURE;
     out_opts->cert = cert_to_pem_mgstr(cert);
     out_opts->key  = key_to_pem_mgstr(key);
@@ -1773,9 +1774,9 @@ static void sni_cache_load(const char *resource_dir) {
 static int sni_callback(SSL *ssl, int *ad, void *arg) {
     (void)ad;  /* unused: required by OpenSSL callback signature */
     const char *host = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
-    if (!host || strcmp(host, "localhost") == 0 ||
-        strcmp(host, "127.0.0.1") == 0 || strcmp(host, "127.0.0.2") == 0)
-        return SSL_TLSEXT_ERR_OK;  /* keep default loopback certificate */
+    char numeric_ip[64];
+    if (!host || strcmp(host, "localhost") == 0 || la_normalize(host, numeric_ip))
+        return SSL_TLSEXT_ERR_OK;  /* IP literals use the listener SAN cert */
 
     struct ca_state *ca = (struct ca_state *)arg;
 
@@ -4413,14 +4414,6 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
             }
             LOG_INFO("CA loaded OK");
 
-            /* TLS opts for the localhost listener: a leaf cert issued
-               specifically for "localhost"/127.0.0.1, not the raw CA
-               cert (see make_localhost_leaf() for why). */
-            if (make_localhost_leaf(&s.ca, &s.tls_opts) != EXIT_SUCCESS) {
-                LOG_FATAL("Failed to issue localhost leaf cert");
-                return s;
-            }
-            LOG_INFO("localhost leaf cert issued OK");
             snprintf(s.resource_dir, sizeof(s.resource_dir), "%s", rpath);
             /* The TLS-failure hook (pin detector) needs the resource dir
                without going through c->fn_data - see the note next to the
@@ -4456,6 +4449,18 @@ static struct settings parse_cli_parameters(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "--https-port") == 0 && i < argc-1) {
             s.https_port = la_port(argv[++i]);
             LOG_INFO("HTTPS port: %d", s.https_port);
+        }
+    }
+    /* Parse all listener flags before creating the leaf. The same CA keeps
+       signing fresh leaves when a configured IPv4 or IPv6 address changes. */
+    if (s.init) {
+        char san[288];
+        if (!lp_cert_san(san, sizeof(san), &s.listener_pair, s.bind_ip) ||
+            make_localhost_leaf(&s.ca, &s.tls_opts, san) != EXIT_SUCCESS) {
+            LOG_FATAL("Failed to issue listener TLS certificate");
+            s.init = false;
+        } else {
+            LOG_INFO("Listener TLS leaf issued for %s", san);
         }
     }
     return s;
