@@ -15,6 +15,28 @@ int main(void) {
     assert(lp_set(&pair,"--listen-ipv6","::1"));
     assert(!lp_set(&pair,"--listen-ipv4","::1"));
     assert(!lp_set(&pair,"--listen-ipv6","127.0.0.1"));
+    char san[288];
+    assert(lp_cert_san(san, sizeof(san), &pair, ""));
+    assert(strstr(san, "DNS:localhost") && strstr(san, "IP:127.0.0.2"));
+    assert(strstr(san, "IP:fd6b:2a91:84f0::2"));
+    assert(strstr(san, "IP:0:0:0:0:0:0:0:1"));
+    assert(!strstr(san, "18443"));
+    assert(!lp_cert_san(san, 15, &pair, ""));
+
+    lp_pair custom={0};
+    assert(lp_set(&custom, "--listen-ipv4", "192.0.2.40"));
+    assert(lp_set(&custom, "--listen-ipv6", "fd6b:2a91:84f0::9"));
+    assert(lp_cert_san(san, sizeof(san), &custom, ""));
+    assert(strstr(san, "IP:192.0.2.40"));
+    assert(strstr(san, "IP:fd6b:2a91:84f0::9"));
+    assert(lp_set(&custom, "--listen-ipv4", "0.0.0.0"));
+    assert(lp_set(&custom, "--listen-ipv6", "::"));
+    assert(lp_cert_san(san, sizeof(san), &custom, ""));
+    assert(!strstr(san, "IP:0.0.0.0") && !strstr(san, ",IP::,"));
+    lp_pair legacy={0};
+    assert(lp_cert_san(san, sizeof(san), &legacy, "10.8.0.7"));
+    assert(strstr(san, "IP:10.8.0.7"));
+
     char h[128],s[128],h6[128],s6[128];
     lp_urls(&pair,"",0,18080,18443,h,s,h6,s6);
     assert(!strcmp(h,"http://127.0.0.2:18080") && !strcmp(h6,"http://[::1]:18080"));
