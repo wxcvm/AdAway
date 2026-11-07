@@ -1676,7 +1676,7 @@ static struct mg_str key_to_pem_mgstr(EVP_PKEY *key) {
 static int make_localhost_leaf(struct ca_state *ca, struct mg_tls_opts *out_opts) {
     X509 *cert = NULL; EVP_PKEY *key = NULL;
     if (make_cert("localhost", ca->cert, ca->key, 0, 397,
-                  "DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1", /*use_ec=*/0, /*rsa_bits=*/0, &cert, &key) != EXIT_SUCCESS)
+                  "DNS:localhost,IP:127.0.0.1,IP:127.0.0.2,IP:0:0:0:0:0:0:0:1", /*use_ec=*/0, /*rsa_bits=*/0, &cert, &key) != EXIT_SUCCESS)
         return EXIT_FAILURE;
     out_opts->cert = cert_to_pem_mgstr(cert);
     out_opts->key  = key_to_pem_mgstr(key);
@@ -1773,8 +1773,9 @@ static void sni_cache_load(const char *resource_dir) {
 static int sni_callback(SSL *ssl, int *ad, void *arg) {
     (void)ad;  /* unused: required by OpenSSL callback signature */
     const char *host = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
-    if (!host || strcmp(host, "localhost") == 0)
-        return SSL_TLSEXT_ERR_OK;  /* keep default localhost cert */
+    if (!host || strcmp(host, "localhost") == 0 ||
+        strcmp(host, "127.0.0.1") == 0 || strcmp(host, "127.0.0.2") == 0)
+        return SSL_TLSEXT_ERR_OK;  /* keep default loopback certificate */
 
     struct ca_state *ca = (struct ca_state *)arg;
 
