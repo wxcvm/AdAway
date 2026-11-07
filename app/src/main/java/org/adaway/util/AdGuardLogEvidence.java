@@ -16,6 +16,10 @@ public final class AdGuardLogEvidence {
     /** A user-triggered snapshot taken before sending any domain probes. */
     public static String inspect(String domain) {
         String normalized = ListenerArrivalCheck.normalizeDomain(domain);
+        // The qlog filter limits query text to 191 UTF-8 bytes; a valid DNS
+        // name can be longer. Never let that abort the remaining diagnostics.
+        if (normalized.length() > 191)
+            return "域名超过 Web 历史筛选长度限制；未检索，不代表零条请求。";
         JSONObject page = WebServerStats.getFilteredQueryLogPage(
                 0, SAMPLE_LIMIT, null, null, null, null, null, null, null, normalized);
         return summarize(normalized, page);
@@ -62,7 +66,8 @@ public final class AdGuardLogEvidence {
                     .append("，放行 ").append(allowed)
                     .append("，代理 ").append(proxied)
                     .append("，拒绝 ").append(denied).append("。");
-            if (newest > 0) report.append("最近一条：").append(Instant.ofEpochSecond(newest)).append("（UTC）。");
+            if (newest > 0 && newest < 253402300800L)
+                report.append("最近一条：").append(Instant.ofEpochSecond(newest)).append("（UTC）。");
         } else if (total == 0) {
             report.append("当前保留历史中未找到该域名的关键词记录。");
         } else {
