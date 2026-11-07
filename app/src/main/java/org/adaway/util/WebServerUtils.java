@@ -1814,7 +1814,11 @@ private static String computeSubjectHashOld(Path certFile)
 
     private static void inflateResource(android.content.res.AssetManager am,
                                         String name, Path target) throws IOException {
+        // test.html is bundled with the APK. Refresh it on every server start
+        // so upgrades do not keep serving an obsolete test page.
         Path out = target.resolve(name);
-        if (!Files.isRegularFile(out)) Files.copy(am.open(name), out);
+        try (InputStream in = am.open(name)) {
+            Files.copy(in, out, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 }

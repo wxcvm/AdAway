@@ -69,4 +69,32 @@ static inline void lp_urls(const lp_pair *pair,const char *legacy,int all,int ht
         la_urls(pair->ipv6,0,http,https,h6,s6,unused_h,unused_s);
     }
 }
+
+/* TLS identities are domain/IP literals, never ports. Preserve local test
+ * identities and add the configured concrete listener IPs at startup. */
+static inline int lp_cert_san(char *out, size_t capacity,
+                              const lp_pair *pair, const char *bind_ip) {
+    const char *defaults =
+        "DNS:localhost,IP:127.0.0.1,IP:127.0.0.2,"
+        "IP:0:0:0:0:0:0:0:1,IP:fd6b:2a91:84f0::2";
+    int n = snprintf(out, capacity, "%s", defaults);
+    if (n < 0 || (size_t)n >= capacity) return 0;
+    size_t used = (size_t)n;
+    const char *addresses[2] = {
+        pair->explicit_pair ? pair->ipv4 : bind_ip,
+        pair->explicit_pair ? pair->ipv6 : NULL
+    };
+    for (int i = 0; i < 2; i++) {
+        if (!addresses[i] || !*addresses[i]) continue;
+        char ip[64];
+        if (!la_normalize(addresses[i], ip)) return 0;
+        if (!strcmp(ip, "0.0.0.0") || !strcmp(ip, "::") ||
+            !strcmp(ip, "127.0.0.1") || !strcmp(ip, "127.0.0.2") ||
+            !strcmp(ip, "::1") || !strcmp(ip, "fd6b:2a91:84f0::2")) continue;
+        n = snprintf(out + used, capacity - used, ",IP:%s", ip);
+        if (n < 0 || (size_t)n >= capacity - used) return 0;
+        used += (size_t)n;
+    }
+    return 1;
+}
 #endif
