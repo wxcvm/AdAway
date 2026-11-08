@@ -52,7 +52,12 @@ public final class AdGuardArrivalDiagnostics {
         lines.add("VPN 状态：" + org.adaway.model.traffic.AndroidVpnObserver.read(context, false).name() + "；不据此推断 VPN 属于 AdGuard。");
         RootListenerAddresses local = new RootListenerAddresses();
         session.progress("检查管理端口回执");
-        lines.add(hasManagementReceipt(session) ? "管理端口回执已确认：当前 AdAway 支持请求到达检测。" : "未确认管理端口回执；服务未就绪、旧版本或路径受影响，不能判定请求被谁处理。");
+        boolean managementReady = hasManagementReceipt(session);
+        lines.add(managementReady ? "管理端口回执已确认：当前 AdAway 支持请求到达检测。" : "未确认管理端口回执；服务未就绪、旧版本或路径受影响，不能判定请求被谁处理。");
+        // Read before the active domain probes so generated test traffic cannot
+        // be confused with the AdGuard event the user is comparing.
+        addLogEvidence(lines, "广告规则测试：", adblockDomain, managementReady, session);
+        addLogEvidence(lines, "Hosts 规则测试：", hostsDomain, managementReady, session);
         for (String address : settings.diagnosticAddresses()) {
             session.progress("检查 HTTP " + address + ":" + settings.http);
             lines.add(directResult(address, settings.http, local, session));
@@ -123,6 +128,21 @@ public final class AdGuardArrivalDiagnostics {
             if (!local.exists(address)) return address + "：当前地址不属于本机，未连接。";
             return address + (ListenerArrivalCheck.received(address, port, "localhost", session) ? "：HTTP 请求已到达 AdAway" : "：没有 AdAway 回执；端口连通也不能视为已收到");
         } catch (IOException exception) { session.checkCancelled(); return address + "：没有 AdAway 回执（超时、拒绝或被其他路径处理）"; }
+    }
+
+    private static void addLogEvidence(List<String> lines, String label, String domain,
+            boolean managementReady, ListenerDiagnosticSession session) throws IOException {
+        session.checkCancelled();
+        if (domain.trim().isEmpty()) return;
+        String normalized = ListenerArrivalCheck.normalizeDomain(domain);
+        if (!managementReady) {
+            lines.add(label + "AdAway Web 日志无法核验管理入口；不把未知当作零请求。");
+            return;
+        }
+        session.progress("读取 AdAway Web 历史：" + normalized);
+        String evidence = AdGuardLogEvidence.inspect(normalized);
+        session.checkCancelled();
+        lines.add(label + evidence);
     }
 
     private static void addDomain(List<String> lines, String label, String domain, ListenerSettings settings, RootListenerAddresses local,
