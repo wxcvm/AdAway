@@ -99,6 +99,13 @@ internal fun ListenerSettingsCard(
             OutlinedButton({ ipv4 = "127.0.0.1"; ipv6 = "::1" }, enabled = !busy) { Text("仅本机（推荐）") }
             TextButton({ lan = !lan }, enabled = !busy) { Text(if (lan) "收起网卡" else "选择网卡") }
         }
+        TextButton({ ipv4 = "127.0.0.2"; ipv6 = "fd6b:2a91:84f0::2" }, enabled = !busy) {
+            Text("进阶双地址示例")
+        }
+        Text("可选推荐：127.0.0.2（IPv4 回环）与 fd6b:2a91:84f0::2（IPv6 ULA，需要配置到本机）。" +
+            "应用后 HTTPS 证书会自动包含已配置的监听 IP，不包含端口。" +
+            "Root 透明重定向仍需使用 127.0.0.1。",
+            style = MaterialTheme.typography.bodySmall)
         TextButton({
             runCatching { ListenerSettings(ipv4, ipv6, http.toInt(), https.toInt()) }
                 .onSuccess { createConfirmation = it }
