@@ -106,6 +106,16 @@ public class ReleaseFeedTest {
         assertNull(ReleaseFeed.parse(multiAbiPreview(), true, null, 1, new String[]{"linux-riscv64"}, 35));
     }
 
+    @Test public void legacyArmPointersRespectTheForkMinimumAndroidSdk() throws Exception {
+        JSONObject stablePointer = new JSONObject(stable(300));
+        JSONObject previewPointer = new JSONObject(preview("progress-android-20261020.5", 300));
+        for (JSONObject pointer : new JSONObject[]{stablePointer, previewPointer}) {
+            boolean isPreview = pointer == previewPointer;
+            assertNull(ReleaseFeed.parse(pointer, isPreview, null, 1, new String[]{"arm64-v8a"}, 29));
+            assertNotNull(ReleaseFeed.parse(pointer, isPreview, null, 1, new String[]{"arm64-v8a"}, 30));
+        }
+    }
+
     @Test public void rejectsUnavailableSdkAndMalformedArtifactContractWithoutLegacyFallback() throws Exception {
         assertNull(ReleaseFeed.parse(multiAbiPreview(), true, null, 1, new String[]{"riscv64"}, 34));
         assertNull(ReleaseFeed.parse(multiAbiPreview(), true, null, 1, new String[]{"x86_64"}, 29));
