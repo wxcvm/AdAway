@@ -39,17 +39,17 @@ If not, see <https://www.gnu.org/licenses/>.
   https://github.com/material-components/material-components-android  
   Apache License v2
 
-* Mongoose Webserver  
+* Mongoose Webserver (vendored source; see `webserver/jni/mongoose/LICENSE` and `mongoose.h`)  
   https://github.com/cesanta/mongoose  
-  GPLv2 License
+  GPL-2.0-only OR commercial license; **GPLv3 compatibility review pending**.
 
 * OkHttp  
   https://github.com/square/okhttp  
   Apache License v2
 
-* Openssl  
-  https://www.openssl.org/  
-  [OpenSSL license](https://www.openssl.org/source/license-openssl-ssleay.txt)
+* OpenSSL 3.5.9 (official source build)  
+  https://github.com/openssl/openssl/tree/openssl-3.5.9  
+  Apache License 2.0 (see [OpenSSL 3.5.9 LICENSE.txt](https://github.com/openssl/openssl/blob/openssl-3.5.9/LICENSE.txt)); the OpenSSL/SSLeay license shown in older AdAway notices does **not** describe this 3.x build.
 
 * Pcap4J  
   https://github.com/kaitoy/pcap4j  
@@ -76,3 +76,9 @@ If not, see <https://www.gnu.org/licenses/>.
 
 * Menu Icons  
   Original Android Icons
+
+## License compatibility review (unresolved)
+
+The bundled `webserver/jni/mongoose/mongoose.h` declares `GPL-2.0-only OR commercial`, while the AdAway application uses GPL-3.0-or-later. `webserver/jni/Android.mk` compiles `mongoose/mongoose.c` with `webserver.c` into one executable. GPL-2.0-only and GPLv3 are generally incompatible for a combined derivative work unless additional permission or a qualifying exception applies. **This notice is not a grant of extra rights and does not resolve that issue.** Confirm licensing with the rights holders or use a compatible replacement before distributing affected binaries.
+
+This document is a third-party attribution summary, not a substitute for the full license and notice texts required by each component. Verify the final release dependency inventory and accompanying notices against actual packaged artifacts.
