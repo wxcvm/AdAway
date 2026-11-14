@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-26",
+  "decision": "NO-GO current public-mount adaptation",
+  "reason": "Repeated truncated plain HTTP forwarding on real Windows; no claim of permanent LWS impossibility",
+  "performance_verdict": "INCONCLUSIVE",
+  "thresholds": {
+    "regression": 0.15,
+    "paired_variation": 0.1,
+    "variation_formula": "(max(paired_ratios)-min(paired_ratios))/median(paired_ratios)"
+  },
+  "source": {
+    "android": "d710dd89ff9e77204ec5815394a8757fba033ce4",
+    "windows": "f1f0e116d57c00ea1f73dd94040cd2be69a25f85"
+  },
+  "measurements": [
+    {
+      "platform": "linux",
+      "ci": "https://github.com/wxcvm/AdAway/actions/runs/40254451625",
+      "artifact": "https://github.com/wxcvm/AdAway/actions/runs/40254451625/artifacts/12622244559",
+      "shared_source_commit": "89e467120e778fb866576b78758bb3dc1ceaeea0",
+      "phases": 300,
+      "errors": 0,
+      "noisy_groups": 9,
+      "groups": 30,
+      "performance_verdict": "INCONCLUSIVE",
+      "min_observed_seconds": 5.000924510000004,
+      "raw_sha256": "a8d93a7faa6a1b7ce933008f7646a101ff2ac50971948ac1a8d6362a63b2dc0b",
+      "gzip_sha256": "a28ca9e30801c18838fcb2c66d7b19155a226d4c9b414c07c6af067fc28d138f",
+      "binary_bytes": {
+        "lws": 7974392,
+        "mongoose": 7737808
+      }
+    },
+    {
+      "platform": "windows",
+      "ci": "https://github.com/wxcvm/AdAway-Windows/actions/runs/40256075862",
+      "artifact": "https://github.com/wxcvm/AdAway-Windows/actions/runs/40256075862/artifacts/12624232063",
+      "shared_source_commit": "d710dd89ff9e77204ec5815394a8757fba033ce4",
+      "phases": 300,
+      "errors": 0,
+      "noisy_groups": 25,
+      "groups": 30,
+      "performance_verdict": "INCONCLUSIVE",
+      "min_observed_seconds": 5.0003964,
+      "raw_sha256": "3f6d2c44dbe6db15c0b0b01f78ac75a5dc7bc05857c1ff43ed2ba8fc11e68575",
+      "gzip_sha256": "eebd16343ffe5955ff8124ea9e9f6c2ac1c2a0cd5c8ac7d617e2ed1ba79f499b",
+      "binary_bytes": {
+        "lws": 8026195,
+        "mongoose": 7798259
+      }
+    }
+  ],
+  "windows_blocker": {
+    "error": "IncompleteRead(4018 bytes read, 78 more expected)",
+    "received_bytes": 4018,
+    "expected_remaining": 78,
+    "partial_sha256": "dc3a7abd84046b4c4bca9059c6ec5580da546aaa244b973f1ae57ceea69853dd",
+    "tail_hex": "7878787878787878787878300d0a0d0a",
+    "payload_pattern_confirmed": true,
+    "actual_payload_bytes": 4013,
+    "missing_payload_bytes": 83,
+    "invalid_terminator_bytes": 5,
+    "route": "/forward/text",
+    "family": 4,
+    "transport": "plain HTTP",
+    "shared_source_commit": "d710dd89ff9e77204ec5815394a8757fba033ce4",
+    "windows_commit": "f1f0e116d57c00ea1f73dd94040cd2be69a25f85"
+  }
+}

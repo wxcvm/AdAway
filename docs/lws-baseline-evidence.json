@@ -1,0 +1,33 @@
+{
+  "verdict": "INCONCLUSIVE",
+  "baseline_runs": [
+    {
+      "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+      "shared_source_commit": "f11c1d0cbe0e76d0d57a45417ae8d52a39c31de2",
+      "ci": "https://github.com/wxcvm/AdAway/actions/runs/40196456524",
+      "artifact": "lws-linux-paired-performance",
+      "raw_file": "performance/measurements.json",
+      "sha256": "c2b1b7930698d36b7276297bc8829477f83a49040d6def86cb85e432c7b41f42",
+      "phases": 300,
+      "errors": 0,
+      "groups_over_variation_limit": 8,
+      "verdict": "INCONCLUSIVE",
+      "acceptance": false,
+      "reason": "Earlier fixture: Windows lacked production MG_ENABLE_POLL; LWS loaded unused OS trust sets; idle_rss was sampled after warmup. Preserve as debugging evidence, rerun frozen source."
+    },
+    {
+      "platform": "Windows-2025Server-10.0.26100-SP0",
+      "shared_source_commit": "f11c1d0cbe0e76d0d57a45417ae8d52a39c31de2",
+      "ci": "https://github.com/wxcvm/AdAway-Windows/actions/runs/40196591111",
+      "artifact": "lws-windows-evidence",
+      "raw_file": "performance/measurements.json",
+      "sha256": "5963dcc75d5f5f6edc74d3e8aac348558137d02c480b349a4b8c530cdcee6ff9",
+      "phases": 300,
+      "errors": 100,
+      "groups_over_variation_limit": 25,
+      "verdict": "INCONCLUSIVE",
+      "acceptance": false,
+      "reason": "Earlier fixture: Windows lacked production MG_ENABLE_POLL; LWS loaded unused OS trust sets; idle_rss was sampled after warmup. Preserve as debugging evidence, rerun frozen source."
+    }
+  ]
+}

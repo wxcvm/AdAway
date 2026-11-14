@@ -1,0 +1,55 @@
+{
+  "source_commit": "bfc8c7a3f5b11de8e738f3cfec09bb3d3c44ded8",
+  "method": "lexical public mg_* call-site inventory; not a runtime call graph",
+  "files": {
+    "webserver/jni/listener_arrival_fixture.c": {
+      "mg_http_listen": 1,
+      "mg_http_reply": 1,
+      "mg_mgr_free": 2,
+      "mg_mgr_init": 1,
+      "mg_mgr_poll": 1
+    },
+    "webserver/jni/listener_arrival_probe.h": {
+      "mg_http_reply": 3,
+      "mg_str": 1,
+      "mg_strcmp": 1
+    },
+    "webserver/jni/qlog_filter_contract.h": {
+      "mg_sha256_final": 1,
+      "mg_sha256_init": 1,
+      "mg_sha256_update": 1
+    },
+    "webserver/jni/query_log_store.inc": {
+      "mg_http_get_var": 3,
+      "mg_http_reply": 14,
+      "mg_random": 1
+    },
+    "webserver/jni/webserver.c": {
+      "mg_conn_ssl_ctx": 2,
+      "mg_connect": 1,
+      "mg_http_etag": 1,
+      "mg_http_get_header": 10,
+      "mg_http_get_var": 2,
+      "mg_http_listen": 6,
+      "mg_http_reply": 39,
+      "mg_http_serve_file": 4,
+      "mg_json_get": 3,
+      "mg_json_get_str": 1,
+      "mg_log_set": 1,
+      "mg_match": 16,
+      "mg_mgr_free": 6,
+      "mg_mgr_init": 1,
+      "mg_mgr_poll": 6,
+      "mg_millis": 31,
+      "mg_ntohs": 2,
+      "mg_send": 7,
+      "mg_str": 39,
+      "mg_str_n": 3,
+      "mg_strcasecmp": 13,
+      "mg_strcmp": 4,
+      "mg_tls_init": 2,
+      "mg_ws_send": 3,
+      "mg_ws_upgrade": 1
+    }
+  }
+}
