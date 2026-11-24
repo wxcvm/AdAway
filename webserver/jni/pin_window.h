@@ -34,6 +34,25 @@ static inline bool pin_bypass_hit(const struct pin_bypass_entry *entries, int co
     return false;
 }
 
+/* Reuse expired slots before growing the bounded table. Never evict an
+ * active cooldown merely to admit a new UID. */
+static inline bool pin_bypass_record(struct pin_bypass_entry *entries, int *count,
+                                     int capacity, unsigned int uid,
+                                     uint64_t now, uint64_t until) {
+    int slot = -1;
+    for (int i = 0; i < *count; i++) {
+        if (entries[i].uid == uid) { slot = i; break; }
+        if (slot < 0 && entries[i].until_ms <= now) slot = i;
+    }
+    if (slot < 0) {
+        if (*count >= capacity) return false;
+        slot = (*count)++;
+    }
+    entries[slot].uid = uid;
+    entries[slot].until_ms = until;
+    return true;
+}
+
 /* 滑动窗口推进一格，返回推进后的计数（并可能重置窗口）。 */
 static inline unsigned int pin_fail_window_step(uint64_t *win_start, unsigned int count,
                                                 uint64_t now, uint64_t window_ms) {
