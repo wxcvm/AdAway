@@ -23117,6 +23117,7 @@ void mg_tls_ctx_free(struct mg_mgr *mgr) {
 /* One immutable default server context per manager. SSL objects remain
  * connection-local; SNI may switch an SSL to its own cached domain context. */
 struct mg_tls_ctx {
+  BIO_METHOD *bio_method;
   SSL_CTX *server_ctx;
   unsigned char server_fingerprint[32];
   mg_event_handler_t server_fn;
@@ -23344,7 +23345,7 @@ void mg_tls_free(struct mg_connection *c) {
   if (tls == NULL) return;
   SSL_free(tls->ssl);
   if (!tls->ctx_shared) SSL_CTX_free(tls->ctx);
-  BIO_meth_free(tls->bm);
+  if (!tls->bm_shared) BIO_meth_free(tls->bm);
   mg_free(tls->name);
   mg_free(tls);
   c->tls = NULL;
@@ -23500,16 +23501,38 @@ if (c->is_client && opts->name.buf != NULL && opts->name.len > 0 && opts->name.b
     SSL_set_tlsext_host_name(tls->ssl, tls->name);
   }
 #endif
-#if MG_TLS == MG_TLS_WOLFSSL
-  tls->bm = BIO_meth_new(0, "bio_mg");
+#if MG_TLS == MG_TLS_OPENSSL
+  struct mg_tls_ctx *manager = c->mgr == NULL ? NULL : c->mgr->tls_ctx;
+  if (manager != NULL && manager->bio_method != NULL) {
+    tls->bm = manager->bio_method;
+    tls->bm_shared = true;
+  } else {
+    int index = BIO_get_new_index();
+    if (index < 0 ||
+        (tls->bm = BIO_meth_new(index | BIO_TYPE_SOURCE_SINK, "bio_mg")) == NULL ||
+        BIO_meth_set_write(tls->bm, mg_bio_write) != 1 ||
+        BIO_meth_set_read(tls->bm, mg_bio_read) != 1 ||
+        BIO_meth_set_ctrl(tls->bm, mg_bio_ctrl) != 1) {
+      mg_error(c, "BIO method");
+      goto fail;
+    }
+    if (manager != NULL) {
+      manager->bio_method = tls->bm;
+      tls->bm_shared = true;
+    }
+  }
 #else
-  tls->bm = BIO_meth_new(BIO_get_new_index() | BIO_TYPE_SOURCE_SINK, "bio_mg");
-#endif
+  tls->bm = BIO_meth_new(0, "bio_mg");
   BIO_meth_set_write(tls->bm, mg_bio_write);
   BIO_meth_set_read(tls->bm, mg_bio_read);
   BIO_meth_set_ctrl(tls->bm, mg_bio_ctrl);
+#endif
 
   bio = BIO_new(tls->bm);
+  if (bio == NULL) {
+    mg_error(c, "BIO_new");
+    goto fail;
+  }
   BIO_set_data(bio, c);
   SSL_set_bio(tls->ssl, bio, bio);
 
@@ -23595,6 +23618,7 @@ void mg_tls_ctx_free(struct mg_mgr *mgr) {
   struct mg_tls_ctx *ctx = (struct mg_tls_ctx *) mgr->tls_ctx;
   if (ctx != NULL) {
     SSL_CTX_free(ctx->server_ctx);
+    BIO_meth_free(ctx->bio_method);
     mg_bzero(ctx->server_fingerprint, sizeof(ctx->server_fingerprint));
     mg_free(ctx);
     mgr->tls_ctx = NULL;
