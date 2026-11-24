@@ -2666,49 +2666,43 @@ static void top_host_add(const char *host) {
    every counted request so clients get real-time updates. */
 #define WS_PUSH_MAX 16
 static struct mg_connection *ws_clients[WS_PUSH_MAX] = {0};
-/* ws_push_broadcast() runs after EVERY counted request. Building the ~16 KB
- * snapshot and pushing it is expensive, so it is skipped entirely when nobody
- * is subscribed and otherwise coalesced to one push per second. */
-#define WS_PUSH_MIN_INTERVAL_MS 1000ULL
-static uint64_t s_ws_last_push_ms = 0;
+static uint32_t s_ws_pending;
+static uint64_t s_ws_last_push_ms;
 
-
-/*
- * Broadcast the current stats snapshot to every registered WebSocket
- * subscriber. Call after each request is counted (blocked or served).
- * Must not be called from inside mg_mgr_poll() while holding locks that
- * the event handler also takes — we only read the pointer array and
- * mg_ws_send() is async (appends to c->send), safe from the event loop.
- */
 static void ws_push_broadcast(struct settings *s) {
     if (!s || !s->init) return;
-    /* CPU: this used to build the full JSON snapshot even with zero
-     * subscribers - a page load with dozens of blocked requests rebuilt ~16 KB
-     * of stats dozens of times per second for nothing. Only work when a
-     * subscriber exists, and at most once per second afterwards (the UI draws
-     * a chart and a few counters; it does not need per-request pushes). */
-    bool subscribed = false;
-    pthread_mutex_lock(&s_sni_mutex);
-    for (int i = 0; i < WS_PUSH_MAX; i++) {
-        struct mg_connection *cl0 = ws_clients[i];
-        if (cl0 && !cl0->is_closing && !cl0->is_draining) { subscribed = true; break; }
+    for (int i = 0; i < WS_PUSH_MAX; ++i)
+        if (ws_clients[i] && !ws_clients[i]->is_closing && !ws_clients[i]->is_draining)
+            s_ws_pending |= UINT32_C(1) << i;
+}
+
+/* Event-loop owned; no queue of historical snapshots. Retry slow subscribers
+   after their existing output drains, and build at most one snapshot per second. */
+static void ws_push_flush(struct settings *s, uint64_t now) {
+    if (!s_ws_pending || (s_ws_last_push_ms && now - s_ws_last_push_ms < 1000)) return;
+    uint32_t ready = 0;
+    for (int i = 0; i < WS_PUSH_MAX; ++i) {
+        uint32_t bit = UINT32_C(1) << i;
+        if (!(s_ws_pending & bit)) continue;
+        struct mg_connection *cl = ws_clients[i];
+        if (!cl || cl->is_closing || cl->is_draining) s_ws_pending &= ~bit;
+        else if (cl->send.len == 0) ready |= bit;
     }
-    pthread_mutex_unlock(&s_sni_mutex);
-    if (!subscribed) return;
-    uint64_t ws_now = mg_millis();
-    if (s_ws_last_push_ms != 0 && ws_now - s_ws_last_push_ms < WS_PUSH_MIN_INTERVAL_MS) return;
-    s_ws_last_push_ms = ws_now;
+    if (!ready) return;
+    s_ws_last_push_ms = now;
     char body[STATS_JSON_BUF];
     int n = build_stats_json(s, body, sizeof(body));
     if (n <= 0) return;
-    pthread_mutex_lock(&s_sni_mutex);
-    for (int i = 0; i < WS_PUSH_MAX; i++) {
+    for (int i = 0; i < WS_PUSH_MAX; ++i) {
+        uint32_t bit = UINT32_C(1) << i;
+        if (!(ready & bit)) continue;
         struct mg_connection *cl = ws_clients[i];
-        if (cl && !cl->is_closing && !cl->is_draining) {
-            mg_ws_send(cl, body, (size_t)n, WEBSOCKET_OP_TEXT);
-        }
+        size_t len = (size_t)n;
+        size_t expected = len + (len < 126 ? 2 : len <= 65535 ? 4 : 10);
+        size_t sent = mg_ws_send(cl, body, len, WEBSOCKET_OP_TEXT);
+        if (sent == expected) s_ws_pending &= ~bit;
+        else if (sent != 0) cl->is_closing = 1; /* incomplete frame */
     }
-    pthread_mutex_unlock(&s_sni_mutex);
 }
 
 /*
@@ -3659,7 +3653,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         c->data[WS_CONN_OFFSET] = 1;   /* exempt from the idle drain below */
         pthread_mutex_lock(&s_sni_mutex);  /* reuse cache mutex as a cheap lock */
         for (int i = 0; i < WS_PUSH_MAX; i++) {
-            if (ws_clients[i] == NULL) { ws_clients[i] = c; break; }
+            if (ws_clients[i] == NULL) {
+                s_ws_pending &= ~(UINT32_C(1) << i);
+                ws_clients[i] = c; break;
+            }
         }
         pthread_mutex_unlock(&s_sni_mutex);
         /* Send a first snapshot immediately so the UI has data. */
@@ -4580,6 +4577,7 @@ int main(int argc, char *argv[]) {
         mg_mgr_poll(&mgr, 1000);
         uint64_t now_ms = mg_millis();
         if (s_shutdown_connection != 0 && now_ms >= s_shutdown_deadline) s_sig_num = SIGTERM;
+        if (s_sig_num == 0) ws_push_flush(&s, now_ms);
         uint64_t counter = s_stats.total_requests + s_stats.total_connections;
         if (now_ms - last_json_ms > 300000 ||
             (counter != last_json_counter && now_ms - last_json_ms > 20000)) {
