@@ -219,6 +219,7 @@ int main(void) {
   MAIN_CHECK(BIO_get_data(SSL_get_rbio(t1->ssl)) == &c1);
   MAIN_CHECK(BIO_get_data(SSL_get_rbio(t2->ssl)) == &c2);
   BIO_METHOD *shared_method = t1->bm;
+  int shared_type = BIO_method_type(SSL_get_rbio(t1->ssl));
   SSL_CTX *shared_ctx = t1->ctx;
   int ex_index = SSL_CTX_get_ex_new_index(0, NULL, NULL, NULL, on_shared_ctx_free);
   MAIN_CHECK(ex_index >= 0);
@@ -266,11 +267,13 @@ int main(void) {
   MAIN_CHECK(separate.tls != NULL);
   MAIN_CHECK(((struct mg_tls *) separate.tls)->bm_shared);
   MAIN_CHECK(((struct mg_tls *) separate.tls)->bm != shared_method);
+  MAIN_CHECK(BIO_method_type(SSL_get_rbio(((struct mg_tls *) separate.tls)->ssl)) == shared_type);
   mg_tls_free(&separate);
   mg_tls_ctx_free(&uncached_mgr);
   mg_tls_init(&separate, &first.opts);
   MAIN_CHECK(separate.tls != NULL);
   MAIN_CHECK(!((struct mg_tls *) separate.tls)->bm_shared);
+  MAIN_CHECK(BIO_method_type(SSL_get_rbio(((struct mg_tls *) separate.tls)->ssl)) == shared_type);
   mg_tls_free(&separate);
   double uncached_seconds = init_benchmark(&uncached_mgr, &first, 0, 300);
   MAIN_CHECK(uncached_seconds >= 0.0);
