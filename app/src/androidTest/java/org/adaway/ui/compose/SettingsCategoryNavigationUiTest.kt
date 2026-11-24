@@ -7,6 +7,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import org.adaway.ui.compose.theme.AdAwayTheme
@@ -38,6 +40,29 @@ class SettingsCategoryNavigationUiTest {
         compose.onNodeWithTag("settings-category-0").assertExists()
         compose.onNodeWithTag("settings-category-1").assertDoesNotExist()
         compose.onNodeWithTag("settings-category-0").performClick()
+        compose.runOnIdle { assertEquals(0, selected) }
+    }
+
+    @Test
+    fun searchRemainsVisibleAfterScrollingToLastCategory() {
+        var selected = -1
+        compose.setContent {
+            var search by remember { mutableStateOf("") }
+            AdAwayTheme(dynamicColor = false) {
+                SettingsCategoryNavigation(
+                    titles = listOf("Network", "Server", "Certificates", "Response", "Statistics", "App", "Tools"),
+                    descriptions = List(7) { "Description $it" },
+                    keywords = List(7) { "keyword-$it" },
+                    search = search,
+                    onSearchChange = { search = it },
+                    onSelect = { selected = it },
+                )
+            }
+        }
+        compose.onNodeWithTag("settings-categories").performScrollToIndex(8)
+        compose.onNodeWithTag("settings-search-field").assertIsDisplayed()
+        compose.onNodeWithTag("settings-search-field").performTextInput("network")
+        compose.onNodeWithTag("settings-category-0").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(0, selected) }
     }
 
