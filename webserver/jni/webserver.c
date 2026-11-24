@@ -4527,7 +4527,8 @@ int main(int argc, char *argv[]) {
     uint64_t last_json_ms = mg_millis();
     uint64_t last_json_counter = s_stats.total_requests + s_stats.total_connections;
     while (s_sig_num == 0) {
-        mg_mgr_poll(&mgr, 1000);
+        mg_mgr_poll(&mgr, listener_poll_timeout(&mgr,
+            s_shutdown_connection != 0 || s_ws_pending != 0));
         uint64_t now_ms = mg_millis();
         if (s_shutdown_connection != 0 && now_ms >= s_shutdown_deadline) s_sig_num = SIGTERM;
         if (s_sig_num == 0) ws_push_flush(&s, now_ms);
