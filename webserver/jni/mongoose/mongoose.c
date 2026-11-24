@@ -23601,9 +23601,6 @@ void mg_tls_ctx_free(struct mg_mgr *mgr) {
   (void) mgr;
 #endif
 }
-void mg_tls_ctx_free(struct mg_mgr *mgr) {
-  (void) mgr;
-}
 #endif
 
 #ifdef MG_ENABLE_LINES
