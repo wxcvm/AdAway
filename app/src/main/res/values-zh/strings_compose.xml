@@ -106,7 +106,9 @@
     <string name="compose_settings_block_mode_recommended">优化（推荐）</string>
     <string name="compose_settings_adguard_title">已安装 AdGuard 且检测到 VPN（尚无法确认 VPN 归属）</string>
     <string name="compose_settings_adguard_steps">可选的 DNS 层协同：如果当前 AdGuard 版本支持在 DNS 保护的阻断模式中设置“自定义 IP 地址”，可考虑将 A 应答设为 %1$s、AAAA 应答设为 %2$s，但必须确认本地服务实际可达且分别支持 IPv4/IPv6。这只适用于被 DNS 规则拦截的域名，不代表 AdGuard 的全部拦截请求都会转交。DNS 不携带端口，服务器必须实际接收 80/443（或已验证的端口重定向）；HTTPS 还需要客户端信任 CA，证书固定的应用仍可能拒绝。请先确认 VPN 归属，并分别测试 DNS 与 HTTPS 后再判断协同是否生效。</string>
-    <string name="compose_settings_adguard_copy">复制这两个地址</string>
+    <string name="adguard_listener_family_disabled">未配置</string>
+    <string name="adguard_listener_nonstandard">当前监听并非标准端口；仅设置 DNS 地址无法到达这些端口。使用前须验证独立的端口重定向。</string>
+    <string name="compose_settings_adguard_copy">复制候选地址</string>
     <string name="compose_settings_adguard_copied">地址已复制</string>
     <string name="compose_settings_adguard_dismiss">不再提示</string>
     <string name="compose_stats_app_pin_refused">按已配置的 TLS 重试策略拒绝</string>
