@@ -3,6 +3,27 @@
 #include "listener_activity.h"
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); return 1; } } while (0)
 int main(void) {
+    struct mg_mgr mgr = {0};
+    struct mg_connection listener = {0}, peer = {0};
+    struct mg_timer timer = {0};
+    listener.is_listening = 1;
+    mgr.conns = &listener;
+    CHECK(listener_poll_timeout(&mgr, false) == 1500);
+    CHECK(listener_poll_timeout(&mgr, true) == 1000);
+    listener.next = &peer;
+    CHECK(listener_poll_timeout(&mgr, false) == 1000);
+    peer.is_listening = 1;
+    CHECK(listener_poll_timeout(&mgr, false) == 1500);
+    peer.is_draining = 1;
+    CHECK(listener_poll_timeout(&mgr, false) == 1000);
+    peer.is_draining = 0;
+    peer.send.len = 1;
+    CHECK(listener_poll_timeout(&mgr, false) == 1000);
+    peer.send.len = 0;
+    mgr.timers = &timer;
+    CHECK(listener_poll_timeout(&mgr, false) == 1000);
+    mgr.timers = NULL;
+    CHECK(listener_poll_timeout(&mgr, false) == 1500);
     struct mg_connection c = {0};
     c.data[sizeof(uint64_t)] = 1;
     listener_touch(&c, 100);
