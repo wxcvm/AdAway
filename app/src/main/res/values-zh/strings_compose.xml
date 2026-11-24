@@ -213,8 +213,8 @@
     <string name="compose_settings_cert_trust_ok">CA 已写入系统信任库</string>
     <string name="compose_settings_cert_trust_fail">安装失败：未写入系统信任库，请改用手动安装</string>
     <string name="compose_settings_cert_install_manual">手动安装</string>
-    <string name="compose_settings_light_mode">轻量模式（省内存）</string>
-    <string name="compose_settings_light_mode_hint">占用最低：开机拉起服务器后，应用会在退到后台时退出进程（服务器作为独立原生进程继续运行，拦截不受影响），自愈检查从每 5 分钟降为每 6 小时一次。开启常驻通知时本项被忽略；劫持模式始终保留高频检查。</string>
+    <string name="compose_settings_light_mode">低功耗后台模式</string>
+    <string name="compose_settings_light_mode_hint">开机启动成功后，后台应用进程可退出，原生服务器继续运行。自愈检查由约 5 分钟（15 分钟兜底）调整为 6 小时；系统可能延迟执行。常驻守护和劫持模式保留高频检查，常驻守护同时阻止进程退出。不改变原生拦截或响应策略。</string>
     <string name="compose_settings_pin_policy">固定证书的应用：改为廉价拒绝</string>
     <string name="compose_settings_pin_policy_hint">默认关闭。开启后：被检测出证书固定（反复握手失败）的应用，其 CONNECT 请求会直接拒绝而不再做中间人——拦截效果不变，但每次重试只花一行 HTTP，而不是一次 TLS 握手加一张新签证书。开启前实测：单个系统组件就达到约 240 请求/秒且全部被拦截。哪些应用命中会在统计页的应用列表里标注。</string>
     <string name="compose_settings_allowlist_title">放行名单（跳过拦截）</string>
