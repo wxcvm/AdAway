@@ -3325,7 +3325,9 @@ struct mg_tls {
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#if MG_TLS == MG_TLS_OPENSSL
 #include <openssl/evp.h>
+#endif
 
 struct mg_tls {
   BIO_METHOD *bm;
