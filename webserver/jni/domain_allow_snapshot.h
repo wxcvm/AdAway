@@ -53,14 +53,29 @@ struct da_file_stamp {
 static inline bool da_file_stamp_read(const char *path, struct da_file_stamp *stamp) {
     memset(stamp, 0, sizeof(*stamp));
 #ifdef _WIN32
-    struct _stat64 info;
-    if (_stat64(path, &info) != 0) return errno == ENOENT;
+    /* CRT stat has second-resolution times and cannot reliably distinguish
+     * same-size atomic replacements. Read actual NT file identity and times.
+     * Match the existing narrow-path fopen semantics on this platform. */
+    HANDLE handle = CreateFileA(path, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (handle == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    BY_HANDLE_FILE_INFORMATION info;
+    BOOL ok = GetFileInformationByHandle(handle, &info);
+    CloseHandle(handle);
+    if (!ok || (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
     stamp->exists = true;
-    stamp->size = (uint64_t)info.st_size;
-    stamp->device = (uint64_t)info.st_dev;
-    stamp->inode = (uint64_t)info.st_ino;
-    stamp->modified_sec = (int64_t)info.st_mtime;
-    stamp->changed_sec = (int64_t)info.st_ctime;
+    stamp->size = ((uint64_t)info.nFileSizeHigh << 32) | info.nFileSizeLow;
+    stamp->device = info.dwVolumeSerialNumber;
+    stamp->inode = ((uint64_t)info.nFileIndexHigh << 32) | info.nFileIndexLow;
+    /* Store the two FILETIME halves verbatim; equality is all we need. */
+    stamp->modified_sec = info.ftLastWriteTime.dwHighDateTime;
+    stamp->modified_nsec = info.ftLastWriteTime.dwLowDateTime;
+    stamp->changed_sec = info.ftCreationTime.dwHighDateTime;
+    stamp->changed_nsec = info.ftCreationTime.dwLowDateTime;
 #else
     struct stat info;
     if (stat(path, &info) != 0) return errno == ENOENT;
