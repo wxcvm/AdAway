@@ -565,14 +565,6 @@ public class WebServerUtils {
         }
     }
 
-    /**
-     * Ensure allowlist.txt contains UIDs for captive portal login packages
-     * so they can work properly (their traffic must pass through unblocked).
-     * This fixes the issue where AdGuard blocks captive portal login apps
-     * (com.google.android.captiveportallogin / com.android.captiveportallogin),
-     * causing the portal page to show blank/white screen.
-     * See: https://github.com/AdguardTeam/AdguardForAndroid/issues/2713
-     */
     private static final Object ALLOWLIST_FILE_LOCK = new Object();
 
     /** Atomically publish the shared UID allowlist used by the native request path. */
@@ -595,6 +587,14 @@ public class WebServerUtils {
         }
     }
 
+    /**
+     * Ensure allowlist.txt contains UIDs for captive portal login packages
+     * so they can work properly (their traffic must pass through unblocked).
+     * This fixes the issue where AdGuard blocks captive portal login apps
+     * (com.google.android.captiveportallogin / com.android.captiveportallogin),
+     * causing the portal page to show blank/white screen.
+     * See: https://github.com/AdguardTeam/AdguardForAndroid/issues/2713
+     */
     private static void ensureCaptivePortalAllowlist(Context context) {
         try {
             java.util.List<String> lines = new java.util.ArrayList<>();
