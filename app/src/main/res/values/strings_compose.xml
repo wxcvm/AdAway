@@ -208,8 +208,10 @@
     <string name="compose_settings_ws_bind">LAN access</string>
     <string name="compose_settings_light_mode">Light mode (save RAM)</string>
     <string name="compose_settings_light_mode_hint">Smallest footprint: after a boot start confirms the server is up, the app process exits once it is in the background (the server keeps running as a native process, blocking is unaffected), and the recovery check drops from every 5 minutes to every 6 hours. Ignored while the keep-alive notification is on; hijack mode always keeps the frequent check.</string>
-    <string name="compose_settings_pin_policy">Apps that pin certificates: refuse cheaply</string>
-    <string name="compose_settings_pin_policy_hint">Off by default. When on, an app detected pinning certificates (repeated failed handshakes) has its CONNECT requests refused without interception: it stays blocked, but each retry costs one line of HTTP instead of a TLS handshake plus a signed certificate. Measured before this option: one system component alone reached ~240 requests/second, all blocked. The app list shows which apps are affected.</string>
+    <string name="pin_policy_saved">Policy saved; server reloads on a subsequent relevant request. Runtime confirmation unavailable.</string>
+    <string name="pin_policy_save_failed">Could not save policy; previous setting retained.</string>
+    <string name="compose_settings_pin_policy">Repeated TLS failures: fast CONNECT refusal</string>
+    <string name="compose_settings_pin_policy_hint">Experimental, off by default. Five TLS failures for a known app in a 10-second window trigger a 10-minute cooldown for its CONNECT requests. Failures do not prove certificate pinning. Direct TLS connections are not avoided by this policy.</string>
     <string name="compose_settings_ws_bind_all">Listening on all interfaces</string>
     <string name="compose_settings_ws_bind_loop">Loopback only</string>
     <string name="compose_settings_ws_http_port">HTTP port</string>
