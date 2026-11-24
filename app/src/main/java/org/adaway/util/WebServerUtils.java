@@ -9,7 +9,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
-import android.util.AtomicFile;
 import android.view.ContextThemeWrapper;
 import android.widget.Toast;
 
@@ -570,20 +569,8 @@ public class WebServerUtils {
     /** Atomically publish the shared UID allowlist used by the native request path. */
     public static void writeAllowlistFile(Context context, String content) throws IOException {
         synchronized (ALLOWLIST_FILE_LOCK) {
-            File directory = getResourcePath(context).toFile();
-            if (!directory.exists() && !directory.mkdirs() && !directory.isDirectory()) {
-                throw new IOException("Cannot create webserver resource directory");
-            }
-            AtomicFile atomicFile = new AtomicFile(new File(directory, "allowlist.txt"));
-            java.io.FileOutputStream output = null;
-            try {
-                output = atomicFile.startWrite();
-                output.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                atomicFile.finishWrite(output);
-            } catch (IOException e) {
-                if (output != null) atomicFile.failWrite(output);
-                throw e;
-            }
+            File target = getResourcePath(context).resolve("allowlist.txt").toFile();
+            org.adaway.model.source.AtomicRuleFile.write(target, writer -> writer.write(content));
         }
     }
 
