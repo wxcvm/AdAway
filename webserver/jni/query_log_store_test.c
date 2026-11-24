@@ -400,6 +400,43 @@ static void family_compaction(const char *directory) {
     fclose(file);
 }
 
+/* Compare raw QLG3 bytes with the pre-optimization layout, not just a
+ * round trip through a loader that might hide ordering mistakes. */
+static void persistence_spans(const char *directory) {
+    const unsigned counts[] = {0, 1, 4096, 9999, 10000, 10001, 14095, 14096, 14097};
+    for (size_t c = 0; c < sizeof(counts)/sizeof(counts[0]); c++) {
+        qlog_clear();
+        for (unsigned n = 1; n <= counts[c]; n++) add_with_family(n, family_for_number(n));
+        uint32_t persist = s_qlog_count < QLOG_PERSIST_MAX ? s_qlog_count : QLOG_PERSIST_MAX;
+        qlog_save(directory);
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/query_log.dat", directory);
+        FILE *file = fopen(path, "rb");
+        assert(file);
+        uint32_t header[3];
+        assert(fread(header, sizeof(header), 1, file) == 1);
+        assert(header[0] == QLOG_MAGIC_V3 && header[1] == 0 && header[2] == persist);
+        for (uint32_t i = 0; i < persist; i++) {
+            uint32_t idx = (s_qlog_pos + QLOG_MAX - persist + i) % QLOG_MAX;
+            struct qlog_entry row;
+            assert(fread(&row, sizeof(row), 1, file) == 1);
+            assert(!memcmp(&row, &s_qlog[idx], sizeof(row)));
+        }
+        for (uint32_t i = 0; i < persist; i++) {
+            uint32_t idx = (s_qlog_pos + QLOG_MAX - persist + i) % QLOG_MAX;
+            assert(fgetc(file) == s_qlog_family[idx]);
+        }
+        for (uint32_t i = 0; i < persist; i++) {
+            uint32_t idx = (s_qlog_pos + QLOG_MAX - persist + i) % QLOG_MAX;
+            struct response_log_metadata row;
+            assert(fread(&row, sizeof(row), 1, file) == 1);
+            assert(!memcmp(&row, &s_qlog_metadata[idx], sizeof(row)));
+        }
+        assert(fgetc(file) == EOF && !ferror(file));
+        assert(fclose(file) == 0);
+    }
+}
+
 static void write_legacy(const char *directory, uint32_t count, uint32_t position) {
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/query_log.dat", directory);
@@ -815,6 +852,7 @@ int main(int argc, char **argv) {
     invalid_clock(argv[1]);
     family_metadata(argv[1]);
     family_compaction(argv[1]);
+    persistence_spans(argv[1]);
     legacy_family_migration(argv[1]);
     corrupt_family_keeps_live_state(argv[1]);
     response_metadata(argv[1]);
