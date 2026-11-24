@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
+import android.util.AtomicFile;
 import android.view.ContextThemeWrapper;
 import android.widget.Toast;
 
@@ -564,6 +565,28 @@ public class WebServerUtils {
         }
     }
 
+    private static final Object ALLOWLIST_FILE_LOCK = new Object();
+
+    /** Atomically publish the shared UID allowlist used by the native request path. */
+    public static void writeAllowlistFile(Context context, String content) throws IOException {
+        synchronized (ALLOWLIST_FILE_LOCK) {
+            File directory = getResourcePath(context).toFile();
+            if (!directory.exists() && !directory.mkdirs() && !directory.isDirectory()) {
+                throw new IOException("Cannot create webserver resource directory");
+            }
+            AtomicFile atomicFile = new AtomicFile(new File(directory, "allowlist.txt"));
+            java.io.FileOutputStream output = null;
+            try {
+                output = atomicFile.startWrite();
+                output.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                atomicFile.finishWrite(output);
+            } catch (IOException e) {
+                if (output != null) atomicFile.failWrite(output);
+                throw e;
+            }
+        }
+    }
+
     /**
      * Ensure allowlist.txt contains UIDs for captive portal login packages
      * so they can work properly (their traffic must pass through unblocked).
@@ -573,47 +596,44 @@ public class WebServerUtils {
      * See: https://github.com/AdguardTeam/AdguardForAndroid/issues/2713
      */
     private static void ensureCaptivePortalAllowlist(Context context) {
-        try {
-            java.util.List<String> lines = new java.util.ArrayList<>();
-            // Existing allowlist entries (if any)
-            java.io.File allowlistFile = getResourcePath(context).resolve("allowlist.txt").toFile();
-            if (allowlistFile.exists()) {
-                try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                        new java.io.InputStreamReader(
-                                new java.io.FileInputStream(allowlistFile), "UTF-8"))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (!line.trim().isEmpty()) lines.add(line.trim());
+        synchronized (ALLOWLIST_FILE_LOCK) {
+            try {
+                java.util.List<String> lines = new java.util.ArrayList<>();
+                // Existing allowlist entries (if any)
+                java.io.File allowlistFile = getResourcePath(context).resolve("allowlist.txt").toFile();
+                if (allowlistFile.exists()) {
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(
+                                    new java.io.FileInputStream(allowlistFile), "UTF-8"))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (!line.trim().isEmpty()) lines.add(line.trim());
+                        }
                     }
                 }
-            }
 
-            // Add UIDs for captive portal login packages
-            for (String pkg : CAPTIVE_PORTAL_PACKAGES) {
-                try {
-                    int uid = context.getPackageManager()
-                            .getPackageUid(pkg, 0);
-                    if (!lines.contains(String.valueOf(uid))) {
-                        lines.add(String.valueOf(uid));
-                        Timber.d("Added captive portal UID %d (%s) to allowlist", uid, pkg);
+                // Add UIDs for captive portal login packages
+                for (String pkg : CAPTIVE_PORTAL_PACKAGES) {
+                    try {
+                        int uid = context.getPackageManager()
+                                .getPackageUid(pkg, 0);
+                        if (!lines.contains(String.valueOf(uid))) {
+                            lines.add(String.valueOf(uid));
+                            Timber.d("Added captive portal UID %d (%s) to allowlist", uid, pkg);
+                        }
+                    } catch (PackageManager.NameNotFoundException e) {
+                        // Package not installed, skip
                     }
-                } catch (PackageManager.NameNotFoundException e) {
-                    // Package not installed, skip
                 }
-            }
 
-            // Write back
-            java.io.File dir = getResourcePath(context).toFile();
-            dir.mkdirs();
-            try (java.io.FileWriter writer = new java.io.FileWriter(
-                    new java.io.File(dir, "allowlist.txt"))) {
-                writer.write(String.join("\n", lines));
+                // Publish atomically so the native cache never sees a partial list.
+                writeAllowlistFile(context, String.join("\n", lines));
+            } catch (Exception e) {
+                Timber.w(e, "Failed to ensure captive portal allowlist");
             }
-        } catch (Exception e) {
-            Timber.w(e, "Failed to ensure captive portal allowlist");
+        
         }
     }
-
     /**
      * Start the web server, killing any stale instance first and waiting for
      * the port to be released before relaunching.
