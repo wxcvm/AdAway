@@ -2631,6 +2631,14 @@ static void ws_push_broadcast(struct settings *s) {
             s_ws_pending |= UINT32_C(1) << i;
 }
 
+static bool ws_send_snapshot(struct mg_connection *cl, const char *body, size_t len) {
+    size_t expected = len + (len < 126 ? 2 : len <= 65535 ? 4 : 10);
+    size_t sent = mg_ws_send(cl, body, len, WEBSOCKET_OP_TEXT);
+    if (sent == expected) return true;
+    if (sent != 0) cl->is_closing = 1; /* incomplete frame */
+    return false;
+}
+
 /* Event-loop owned; no queue of historical snapshots. Retry slow subscribers
    after their existing output drains, and build at most one snapshot per second. */
 static void ws_push_flush(struct settings *s, uint64_t now) {
@@ -2652,11 +2660,7 @@ static void ws_push_flush(struct settings *s, uint64_t now) {
         uint32_t bit = UINT32_C(1) << i;
         if (!(ready & bit)) continue;
         struct mg_connection *cl = ws_clients[i];
-        size_t len = (size_t)n;
-        size_t expected = len + (len < 126 ? 2 : len <= 65535 ? 4 : 10);
-        size_t sent = mg_ws_send(cl, body, len, WEBSOCKET_OP_TEXT);
-        if (sent == expected) s_ws_pending &= ~bit;
-        else if (sent != 0) cl->is_closing = 1; /* incomplete frame */
+        if (ws_send_snapshot(cl, body, (size_t)n)) s_ws_pending &= ~bit;
     }
 }
 
@@ -3619,7 +3623,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         if (ws_s && ws_s->init) {
             char body[STATS_JSON_BUF];
             int n = build_stats_json(ws_s, body, sizeof(body));
-            if (n > 0) mg_ws_send(c, body, (size_t)n, WEBSOCKET_OP_TEXT);
+            if (n > 0 && !ws_send_snapshot(c, body, (size_t)n))
+                c->is_closing = 1; /* initial snapshot cannot be silently lost */
         }
         return;
     }

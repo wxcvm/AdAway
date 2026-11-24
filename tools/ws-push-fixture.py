@@ -62,6 +62,14 @@ int main(void) {
     forced_result = 2;
     ws_push_flush(&s, 5100);
     assert(fast.is_closing);
+    struct mg_connection initial = {0};
+    forced_result = 10;
+    assert(ws_send_snapshot(&initial, "snapshot", 8) && !initial.is_closing);
+    forced_result = 2;
+    assert(!ws_send_snapshot(&initial, "snapshot", 8) && initial.is_closing);
+    initial.is_closing = false;
+    forced_result = 0;
+    assert(!ws_send_snapshot(&initial, "snapshot", 8) && !initial.is_closing);
     puts("PASS: coalescing, slow client, trailing delivery and partial frame handling");
     return 0;
 }
