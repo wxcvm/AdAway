@@ -3,7 +3,7 @@
 appName = "6.7.6"
 appCode = "60706" # Read x.yy.zz to match version name
 gradle = "9.3.1"
-kotlin = "2.2.20"
+kotlin = "2.4.21"
 composeBom = "2025.06.01"
 activityCompose = "1.10.1"
 navigationCompose = "2.9.0"
