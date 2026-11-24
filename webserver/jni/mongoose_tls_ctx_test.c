@@ -8,6 +8,7 @@
 #include <time.h>
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); return 0; } } while (0)
+#define MAIN_CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); return 1; } } while (0)
 
 struct identity {
   EVP_PKEY *key;
@@ -15,6 +16,7 @@ struct identity {
   char *cert_pem;
   char *key_pem;
   struct mg_tls_opts opts;
+  char host[256];
 };
 
 struct tls_pair {
@@ -36,6 +38,7 @@ static int bio_copy(BIO *bio, char **out, size_t *len) {
 
 static int identity_init(struct identity *id, const char *host) {
   memset(id, 0, sizeof(*id));
+  if (snprintf(id->host, sizeof(id->host), "%s", host) >= (int) sizeof(id->host)) return 0;
   id->key = EVP_RSA_gen(2048);
   id->cert = X509_new();
   CHECK(id->key != NULL && id->cert != NULL);
@@ -100,23 +103,8 @@ static int pair_start(struct mg_connection *server_conn,
   SSL_set_bio(pair->client, client_bio, client_bio);
   SSL_set_accept_state(tls->ssl);
   SSL_set_connect_state(pair->client);
-  CHECK(SSL_set_tlsext_host_name(pair->client, id->opts.cert.buf ? 
-        (id->cert == NULL ? "" : (const char *) X509_NAME_get0_entry(
-        X509_get_subject_name(id->cert), 0)) : "") == 1 || 1);
-  /* The generated certificate's CN and SAN are the same host. */
-  X509_NAME *subject = X509_get_subject_name(id->cert);
-  X509_NAME_ENTRY *entry = X509_NAME_get_entry(subject, 0);
-  ASN1_STRING *cn = X509_NAME_ENTRY_get_data(entry);
-  char host[256];
-  int host_len = ASN1_STRING_to_UTF8((unsigned char **) &(char *){0}, cn);
-  (void) host_len;
-  /* Use the SAN identity from the test fixture's common names. */
-  int n = ASN1_STRING_length(cn);
-  CHECK(n > 0 && (size_t) n < sizeof(host));
-  memcpy(host, ASN1_STRING_get0_data(cn), (size_t) n);
-  host[n] = '\0';
-  CHECK(SSL_set_tlsext_host_name(pair->client, host) == 1);
-  CHECK(SSL_set1_host(pair->client, host) == 1);
+  CHECK(SSL_set_tlsext_host_name(pair->client, id->host) == 1);
+  CHECK(SSL_set1_host(pair->client, id->host) == 1);
   CHECK(SSL_set_min_proto_version(tls->ssl, version) == 1);
   CHECK(SSL_set_max_proto_version(tls->ssl, version) == 1);
   CHECK(SSL_set_min_proto_version(pair->client, version) == 1);
@@ -190,8 +178,8 @@ static double init_benchmark(struct mg_mgr *mgr, const struct identity *id,
 
 int main(void) {
   struct identity first, second;
-  CHECK(identity_init(&first, "localhost"));
-  CHECK(identity_init(&second, "other.test"));
+  MAIN_CHECK(identity_init(&first, "localhost"));
+  MAIN_CHECK(identity_init(&second, "other.test"));
 
   struct mg_mgr mgr;
   mg_mgr_init(&mgr);
@@ -204,41 +192,41 @@ int main(void) {
 
   mg_tls_init(&c1, &first.opts);
   mg_tls_init(&c2, &first.opts);
-  CHECK(c1.tls != NULL && c2.tls != NULL);
+  MAIN_CHECK(c1.tls != NULL && c2.tls != NULL);
   struct mg_tls *t1 = (struct mg_tls *) c1.tls;
   struct mg_tls *t2 = (struct mg_tls *) c2.tls;
-  CHECK(t1->ctx_shared && t2->ctx_shared && t1->ctx == t2->ctx);
+  MAIN_CHECK(t1->ctx_shared && t2->ctx_shared && t1->ctx == t2->ctx);
   SSL_CTX *shared_ctx = t1->ctx;
-  CHECK(X509_cmp(SSL_CTX_get0_certificate(shared_ctx), first.cert) == 0);
+  MAIN_CHECK(X509_cmp(SSL_CTX_get0_certificate(shared_ctx), first.cert) == 0);
 
   struct tls_pair p1, p2;
-  CHECK(pair_start(&c1, &first, TLS1_2_VERSION, &p1));
-  CHECK(pair_start(&c2, &first, TLS1_3_VERSION, &p2));
-  CHECK(pair_handshake(&p1) && pair_handshake(&p2));
+  MAIN_CHECK(pair_start(&c1, &first, TLS1_2_VERSION, &p1));
+  MAIN_CHECK(pair_start(&c2, &first, TLS1_3_VERSION, &p2));
+  MAIN_CHECK(pair_handshake(&p1) && pair_handshake(&p2));
   mg_tls_free(&c1);
   pair_free(&p1);
-  CHECK(pair_exchange(&p2));
+  MAIN_CHECK(pair_exchange(&p2));
   mg_tls_free(&c2);
   pair_free(&p2);
 
   mg_tls_init(&c3, &second.opts);
-  CHECK(c3.tls != NULL);
+  MAIN_CHECK(c3.tls != NULL);
   struct mg_tls *t3 = (struct mg_tls *) c3.tls;
-  CHECK(!t3->ctx_shared && t3->ctx != shared_ctx);
-  CHECK(X509_cmp(SSL_get_certificate(t3->ssl), second.cert) == 0);
+  MAIN_CHECK(!t3->ctx_shared && t3->ctx != shared_ctx);
+  MAIN_CHECK(X509_cmp(SSL_get_certificate(t3->ssl), second.cert) == 0);
   struct tls_pair p3;
-  CHECK(pair_start(&c3, &second, TLS1_3_VERSION, &p3));
-  CHECK(pair_handshake(&p3) && pair_exchange(&p3));
+  MAIN_CHECK(pair_start(&c3, &second, TLS1_3_VERSION, &p3));
+  MAIN_CHECK(pair_handshake(&p3) && pair_exchange(&p3));
   mg_tls_free(&c3);
   pair_free(&p3);
 
   double shared_seconds = init_benchmark(&mgr, &first, 1, 300);
-  CHECK(shared_seconds >= 0.0);
+  MAIN_CHECK(shared_seconds >= 0.0);
   struct mg_mgr uncached_mgr;
   mg_mgr_init(&uncached_mgr);
   mg_tls_ctx_free(&uncached_mgr);
   double uncached_seconds = init_benchmark(&uncached_mgr, &first, 0, 300);
-  CHECK(uncached_seconds >= 0.0);
+  MAIN_CHECK(uncached_seconds >= 0.0);
   mg_mgr_free(&uncached_mgr);
   mg_mgr_free(&mgr);
   identity_free(&first);
