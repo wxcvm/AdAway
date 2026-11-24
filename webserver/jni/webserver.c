@@ -222,48 +222,9 @@ static int scan_block_images(const char *resource_dir,
 #include "sni_cache_slot.h"
 static struct sni_entry s_sni_cache[SNI_CACHE_SIZE];
 
-/* ── retired per-domain SSL_CTX objects ─────────────────────────────
- * SSL_set_SSL_CTX() does NOT take a reference: the caller must keep the
- * SSL_CTX alive as long as the SSL object may use it, and a connection lives
- * up to IDLE_TIMEOUT_MS (10 s). Freeing an evicted ctx immediately (what the
- * code used to do) could hand a live connection a dangling pointer - a native
- * crash waiting for the ring to wrap. Evicted ctxs are parked here for a grace
- * period and freed once no connection can still reference them. The list is
- * bounded: if it fills up the oldest entry is freed early, which is no worse
- * than the previous behaviour. */
-#define SNI_RETIRE_MAX 128
-#define SNI_RETIRE_GRACE_MS 60000ULL   /* comfortably > IDLE_TIMEOUT_MS */
-static struct { SSL_CTX *ctx; uint64_t free_at; } s_sni_retired[SNI_RETIRE_MAX];
-static int s_sni_retire_count = 0;
-
-/* Add a ctx to the retired list. Caller holds s_sni_mutex. */
-static void sni_retire(SSL_CTX *ctx, uint64_t now) {
-    if (!ctx) return;
-    if (s_sni_retire_count >= SNI_RETIRE_MAX) {
-        int oldest = 0;
-        for (int i = 1; i < s_sni_retire_count; i++)
-            if (s_sni_retired[i].free_at < s_sni_retired[oldest].free_at) oldest = i;
-        SSL_CTX_free(s_sni_retired[oldest].ctx);
-        s_sni_retired[oldest] = s_sni_retired[s_sni_retire_count - 1];
-        s_sni_retire_count--;
-    }
-    s_sni_retired[s_sni_retire_count].ctx = ctx;
-    s_sni_retired[s_sni_retire_count].free_at = now + SNI_RETIRE_GRACE_MS;
-    s_sni_retire_count++;
-}
-
-/* Free retired ctxs whose grace period has passed. Caller holds s_sni_mutex. */
-static void sni_retire_drain(uint64_t now) {
-    for (int i = 0; i < s_sni_retire_count; ) {
-        if (now >= s_sni_retired[i].free_at) {
-            SSL_CTX_free(s_sni_retired[i].ctx);
-            s_sni_retired[i] = s_sni_retired[s_sni_retire_count - 1];
-            s_sni_retire_count--;
-        } else {
-            i++;
-        }
-    }
-}
+/* Each cache slot owns one SSL_CTX reference. OpenSSL 3.5.9
+ * SSL_set_SSL_CTX() takes an independent reference for the SSL object;
+ * releasing an evicted cache slot does not invalidate live connections. */
 /* BUG FIX (integer overflow): s_sni_pos used to be a plain signed int
    incremented without bound (s_sni_pos++ on every SNI cache miss, even
    after the ring wrapped). A boot-time daemon that keeps issuing
@@ -1788,7 +1749,6 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
     /* A cold restored slot is eligible for in-place renewal, not a hit. */
     pthread_mutex_lock(&s_sni_mutex);
     uint64_t now = mg_millis();
-    sni_retire_drain(now);
     struct sni_slot_match match = sni_match_slot(
         s_sni_cache, SNI_CACHE_SIZE, host, now, SNI_CERT_RENEW_MS);
     if (match.reusable) {
@@ -1811,15 +1771,13 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
 
     /* Insert into cache under lock */
     pthread_mutex_lock(&s_sni_mutex);
-    uint64_t evict_ms = mg_millis();
-    sni_retire_drain(evict_ms);
     int pos;
     if (expired_slot >= 0) {
         pos = expired_slot;          /* refresh a cold or expired slot in place */
     } else {
         pos = (int) (s_sni_pos % SNI_CACHE_SIZE);
     }
-    if (s_sni_cache[pos].ctx) sni_retire(s_sni_cache[pos].ctx, evict_ms);
+    if (s_sni_cache[pos].ctx) SSL_CTX_free(s_sni_cache[pos].ctx);
     strncpy(s_sni_cache[pos].hostname, host, 255);
     s_sni_cache[pos].issued_at = mg_millis();
     s_sni_cache[pos].hostname[255] = '\0';  /* BUG FIX: strncpy doesn't
@@ -4595,9 +4553,6 @@ int main(int argc, char *argv[]) {
     pthread_mutex_lock(&s_sni_mutex);
     for (int i = 0; i < SNI_CACHE_SIZE; i++)
         if (s_sni_cache[i].ctx) SSL_CTX_free(s_sni_cache[i].ctx);
-    for (int i = 0; i < s_sni_retire_count; i++)
-        if (s_sni_retired[i].ctx) SSL_CTX_free(s_sni_retired[i].ctx);
-    s_sni_retire_count = 0;
     pthread_mutex_unlock(&s_sni_mutex);
     pthread_mutex_destroy(&s_sni_mutex);
 

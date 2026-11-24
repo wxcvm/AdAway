@@ -201,6 +201,8 @@ jobs:
           "$RUNNER_TEMP/sni-slot-test"
           cc -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/sni_cache_slot_test.c -o "$RUNNER_TEMP/sni-slot-asan"
           "$RUNNER_TEMP/sni-slot-asan"
+          cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/sni_ctx_lifetime_test.c -o "$RUNNER_TEMP/sni-ctx-lifetime" -lssl -lcrypto
+          "$RUNNER_TEMP/sni-ctx-lifetime"
           cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic -pthread webserver/jni/block_rule_snapshot_test.c -o "$RUNNER_TEMP/block-loader-test"
           "$RUNNER_TEMP/block-loader-test"
           cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -pthread webserver/jni/block_rule_snapshot_test.c -o "$RUNNER_TEMP/block-loader-asan"
