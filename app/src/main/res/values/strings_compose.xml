@@ -49,7 +49,7 @@
     <string name="compose_stats_title">Statistics</string>
     <string name="compose_stats_kpi_requests">Web requests</string>
     <string name="compose_stats_kpi_blocked">Local blocks</string>
-    <string name="compose_stats_kpi_rate">Block rate</string>
+    <string name="compose_stats_kpi_rate">Local block share</string>
     <string name="compose_stats_kpi_certs">Certs</string>
     <string name="compose_stats_hosts_list">Hosts list</string>
     <string name="compose_stats_blocked_by_type">Blocked requests by type</string>
@@ -196,10 +196,10 @@
     <string name="compose_settings_about_version">Version %1$s</string>
     <string name="compose_settings_chart_style">Bar chart style</string>
     <string name="compose_settings_realtime">Real-time updates</string>
-    <string name="compose_settings_realtime_hint">Push stats over WebSocket when enabled (faster than polling)</string>
+    <string name="compose_settings_realtime_hint">Use WebSocket updates in the foreground. Background observation is suspended; polling remains a fallback.</string>
     <string name="compose_settings_chart_lifetime">All-time totals</string>
     <string name="compose_settings_chart_lifetime_hint">Cumulative request/block/conn/cert counters</string>
-    <string name="compose_settings_chart_rate">Block rate</string>
+    <string name="compose_settings_chart_rate">Local block share</string>
     <string name="compose_settings_chart_rate_hint">Blocked / requests percentage ring</string>
     <string name="compose_settings_chart_conn">Connections line</string>
     <string name="compose_settings_chart_conn_hint">Third series on the trend chart</string>
@@ -267,8 +267,8 @@
     <string name="compose_stats_style_area">Area</string>
     <string name="compose_stats_trend_title">Request trend</string>
     <string name="compose_stats_trend_requests">Requests / hour</string>
-    <string name="compose_stats_rate_title">Block rate</string>
-    <string name="compose_stats_rate_hint">Share of requests answered as blocked</string>
+    <string name="compose_stats_rate_title">Local block share</string>
+    <string name="compose_stats_rate_hint">Share of Web server requests answered as blocked, not device-wide coverage. — means unavailable or inconsistent counters.</string>
     <string name="compose_stats_rate_blocked_of">%1$d of %2$d</string>
     <string name="compose_stats_lifetime_title">All-time totals</string>
     <string name="compose_stats_lifetime_hint">Web response counters saved by this server. Some short-lived mechanism counters reset when it restarts.</string>
