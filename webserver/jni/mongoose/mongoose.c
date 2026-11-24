@@ -23257,10 +23257,6 @@ static bool mg_tls_server_fingerprint(const struct mg_tls_opts *opts,
       !mg_tls_digest_field(md, opts->key,
                            opts->key.buf != NULL && opts->key.buf[0] != '\0'))
     goto done;
-  {
-    uint8_t skip = opts->skip_verification ? 1 : 0;
-    if (EVP_DigestUpdate(md, &skip, sizeof(skip)) != 1) goto done;
-  }
   ok = EVP_DigestFinal_ex(md, out, &len) == 1 && len == 32;
 done:
   EVP_MD_CTX_free(md);
