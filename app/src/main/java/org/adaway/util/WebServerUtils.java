@@ -573,6 +573,28 @@ public class WebServerUtils {
      * causing the portal page to show blank/white screen.
      * See: https://github.com/AdguardTeam/AdguardForAndroid/issues/2713
      */
+    private static final Object ALLOWLIST_FILE_LOCK = new Object();
+
+    /** Atomically publish the shared UID allowlist used by the native request path. */
+    public static void writeAllowlistFile(Context context, String content) throws IOException {
+        synchronized (ALLOWLIST_FILE_LOCK) {
+            File directory = getResourcePath(context).toFile();
+            if (!directory.exists() && !directory.mkdirs() && !directory.isDirectory()) {
+                throw new IOException("Cannot create webserver resource directory");
+            }
+            AtomicFile atomicFile = new AtomicFile(new File(directory, "allowlist.txt"));
+            java.io.FileOutputStream output = null;
+            try {
+                output = atomicFile.startWrite();
+                output.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                atomicFile.finishWrite(output);
+            } catch (IOException e) {
+                if (output != null) atomicFile.failWrite(output);
+                throw e;
+            }
+        }
+    }
+
     private static void ensureCaptivePortalAllowlist(Context context) {
         try {
             java.util.List<String> lines = new java.util.ArrayList<>();
@@ -603,20 +625,8 @@ public class WebServerUtils {
                 }
             }
 
-            // Write back
-            java.io.File dir = getResourcePath(context).toFile();
-            dir.mkdirs();
-            AtomicFile atomicFile = new AtomicFile(new File(dir, "allowlist.txt"));
-            java.io.FileOutputStream output = null;
-            try {
-                output = atomicFile.startWrite();
-                output.write(String.join("\n", lines).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                atomicFile.finishWrite(output);
-                output = null;
-            } catch (Exception e) {
-                if (output != null) atomicFile.failWrite(output);
-                throw e;
-            }
+            // Publish atomically so the native cache never sees a partial list.
+            writeAllowlistFile(context, String.join("\n", lines));
         } catch (Exception e) {
             Timber.w(e, "Failed to ensure captive portal allowlist");
         }
