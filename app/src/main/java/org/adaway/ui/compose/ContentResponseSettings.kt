@@ -162,9 +162,14 @@ private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Bool
                     ContentSwitch(key, stringResource(label), null, current.enabled(key), enabled) { onToggle(key, it) }
                 }
                 HorizontalDivider()
+                Text(stringResource(R.string.content_visible_group), style = MaterialTheme.typography.titleMedium)
+                ContentSwitch("visible", stringResource(R.string.compose_settings_visible_reply),
+                    stringResource(R.string.compose_settings_visible_reply_hint), current.enabled("visible"), enabled) { onToggle("visible", it) }
+                HorizontalDivider()
                 Text(stringResource(R.string.content_protection_title), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.content_protection_tradeoff), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 listOf(
-                    Triple("visible", R.string.compose_settings_visible_reply, R.string.compose_settings_visible_reply_hint),
                     Triple("dedup", R.string.compose_settings_dedup, R.string.compose_settings_dedup_hint),
                     Triple("retry_guard", R.string.compose_settings_retry_guard, R.string.compose_settings_retry_guard_hint),
                     Triple("circuit_breaker", R.string.compose_settings_circuit_breaker, R.string.compose_settings_circuit_breaker_hint),
@@ -172,7 +177,9 @@ private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Bool
                     ContentSwitch(key, stringResource(label), stringResource(hint), current.enabled(key), enabled) { onToggle(key, it) }
                 }
                 HorizontalDivider()
-                Text(stringResource(R.string.content_rules_hint), style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.compose_settings_rule_override), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.compose_settings_rule_override_hint), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(if (!rulesReadable) stringResource(R.string.content_rules_read_failed)
                     else if (!rulesExist) stringResource(R.string.content_rules_missing)
                     else if (validCount < 0) stringResource(R.string.content_rules_legacy)

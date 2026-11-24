@@ -41,7 +41,8 @@ typedef unsigned int uid_t;
 #define CORS_HDR "Access-Control-Allow-Origin: *\r\n"
 struct settings { const char *resource_dir; int block_image_count; char block_images[1][128]; bool proxy_filter; };
 static const char *s_pin_resource_dir;
-static uid_t conn_load_uid(struct mg_connection *c) { (void)c; return 42; }
+static uid_t fixture_uid = 42;
+static uid_t conn_load_uid(struct mg_connection *c) { (void)c; return fixture_uid; }
 enum { HIST_BLOCKED };
 static void hist_add(int kind) { (void)kind; }
 struct appstat { uint64_t blocked; };
@@ -323,6 +324,23 @@ static void run_family(const char *directory,const char *binding,unsigned family
     struct receipt denied=request(&manager,url,"/same.png",host,"Accept: image/png\r\n"); CHECK(denied.status==204);
     if(!baseline) {
         check_categories(&manager,url,directory,family);
+        write_policy(directory,"dedup_enabled",1);
+        fixture_uid=(uid_t)-1;
+        snprintf(host,sizeof(host),"unknown-%u.fixture.invalid",family);
+        struct receipt unknown_first=request(&manager,url,"/unknown.js",host,"");
+        struct receipt unknown_second=request(&manager,url,"/other.js",host,"");
+        CHECK(unknown_first.status==200 && unknown_second.status==200);
+        fixture_uid=42;
+        snprintf(host,sizeof(host),"known-%u.fixture.invalid",family);
+        struct receipt known_first=request(&manager,url,"/known.js",host,"");
+        struct receipt known_second=request(&manager,url,"/other.js",host,"");
+        CHECK(known_first.status==200 && known_second.status==204);
+        write_policy(directory,"reply_visible",0);
+        struct receipt normal_page=request(&manager,url,"/banner",host,"Sec-Fetch-Dest: document\r\n");
+        CHECK(normal_page.status==200 && !strcmp(normal_page.type,"application/json"));
+        write_policy(directory,"reply_visible",1);
+        struct receipt visible_page=request(&manager,url,"/banner",host,"Sec-Fetch-Dest: document\r\n");
+        image_is_complete(&visible_page);
         check_domain_responses(&manager,url,directory,family);
     }
     mg_mgr_free(&manager);

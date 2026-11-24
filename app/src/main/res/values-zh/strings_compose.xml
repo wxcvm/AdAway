@@ -411,13 +411,13 @@
     <string name="compose_settings_cache_reuse">旧版响应快捷路径已停用</string>
     <string name="compose_settings_cache_reuse_hint">旧选项会把重复请求的原响应替换为空 HTTP 204，并未复用内容。现已忽略此选项和旧设置，避免占位图因此变空；请求去重和重试保护仍是独立选项。</string>
     <string name="compose_settings_circuit_breaker">按域熔断</string>
-    <string name="compose_settings_circuit_breaker_hint">任意应用在 10 秒内让同一个域被快速失败超过 60 次时，对该域快速失败 20 秒。与「重试风暴护栏」互补 —— 护栏只看单个应用。默认关闭。</string>
-    <string name="compose_settings_dedup">请求去重</string>
-    <string name="compose_settings_dedup_hint">同一应用在一秒内重复请求同一域名时，其余请求返回空 HTTP 204，包括不同资源路径；这可能让占位图变空或改变资源响应。默认关闭，属于降载策略，不是内容缓存。</string>
+    <string name="compose_settings_circuit_breaker_hint">跨应用对同一域在 10 秒内达到 60 次待拦截应答，触发 20 秒冷却，后续返回空 204。默认关闭。</string>
+    <string name="compose_settings_dedup">同域突发请求降载</string>
+    <string name="compose_settings_dedup_hint">已识别应用在 1 秒内反复请求同一被拦域名时，后续返回空 204，不区分路径。可能使占位图消失。默认关闭。</string>
     <string name="compose_settings_retry_guard">重试风暴护栏</string>
-    <string name="compose_settings_retry_guard_hint">同一个应用在 10 秒内对同一个域超过 40 次就判为风暴，随后 30 秒快速失败并记日志，之后自动恢复探测。默认关闭。</string>
+    <string name="compose_settings_retry_guard_hint">已识别应用在 10 秒内对同一域达到 40 次待拦截应答，触发 30 秒冷却，后续返回空 204。默认关闭。</string>
     <string name="compose_settings_visible_reply">可见型占位</string>
-    <string name="compose_settings_visible_reply_hint">页面本身或 iframe 被拦时也返回占位图，页面不会整片塌陷而是显示一个可见的占位。默认关闭；关闭时行为与之前完全一致。</string>
+    <string name="compose_settings_visible_reply_hint">进入资源用途识别流程的被拦页面或嵌入内容优先返回可见占位图；普通兜底也可能返回图片。默认关闭。</string>
     <string name="compose_exempt_effective_note">这里"解除过滤"的真实效果：本服务器不再拦截该域名（回 204 No Content）。在"AdGuard 把拦截 IP 指向本服务器"的部署里，服务器拿不到真实内容，所以要让该域真正可用，还需要在 AdGuard 侧同步豁免。以前那种伪造的成功响应已经去掉了。</string>
     <string name="compose_settings_autostart_battery_button">电池优化设置</string>
     <string name="compose_settings_autostart_retry">重新启动服务器</string>
@@ -650,7 +650,9 @@
     <string name="content_types_title">分类响应</string>
     <string name="content_types_hint">开启：使用相应类别的策略（例如占位图、空脚本或 JSON）；关闭：该类请求返回空 HTTP 204，并非放行域名。部分类别本来就使用 204。</string>
     <string name="content_type_structures">结构化资源（XML／文本／WASM）</string>
-    <string name="content_protection_title">应答行为与重试保护</string>
+    <string name="content_visible_group">占位显示</string>
+    <string name="content_protection_tradeoff">仅在被拦请求反复造成负载时考虑开启。这些策略改变响应内容，不提高拦截覆盖率，也不保证客户端停止重试。</string>
+    <string name="content_protection_title">高级降载策略</string>
     <string name="content_rules_hint">每行：域名 = 状态码。最多 64 条，ASCII 域名须短于 128 字符；支持 204、403、404、410、503、200（非 204 状态返回简短的纯文本拦截提示）。域名匹配自身及标签边界上的子域，按顺序取第一条命中。拒绝路径、通配和过滤条件。只改变 HTTP 应答，不改变 DNS 拦截规则。</string>
     <string name="content_rules_legacy">已保存文本包含旧格式或不支持的语法，请先在编辑器中修正，再启用或保存设置。</string>
     <string name="content_rules_count">已保存 %1$d／64 条按域响应。没有规则时不能启用覆盖。</string>
