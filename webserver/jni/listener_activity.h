@@ -17,6 +17,18 @@ static inline bool listener_idle_due(const struct mg_connection *c,
     memcpy(&last, c->data, sizeof(last));
     return now >= last && now - last > timeout;
 }
+/* Poll blocks on the listener sockets themselves, so arrivals still wake it.
+ * Only relax the idle wait when no connection or timer needs periodic service.
+ * Stay below Android's 2-second native stop/restart wait, even if a signal
+ * arrives just before the blocking poll. */
+static inline int listener_poll_timeout(const struct mg_mgr *mgr, bool pending) {
+    if (pending || mgr->timers) return 1000;
+    for (const struct mg_connection *c = mgr->conns; c; c = c->next)
+        if (!c->is_listening || c->is_closing || c->is_draining ||
+            c->send.len || c->recv.len || c->rtls.len) return 1000;
+    return 1500;
+}
+
 /* Release oversized empty buffers after five seconds of inactivity. */
 static inline void listener_trim_idle(struct mg_connection *c, uint64_t now) {
     if (!c->data[sizeof(uint64_t)] || c->is_closing || c->is_draining ||
