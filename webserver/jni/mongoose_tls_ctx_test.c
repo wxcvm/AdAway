@@ -214,6 +214,11 @@ int main(void) {
   struct mg_tls *t1 = (struct mg_tls *) c1.tls;
   struct mg_tls *t2 = (struct mg_tls *) c2.tls;
   MAIN_CHECK(t1->ctx_shared && t2->ctx_shared && t1->ctx == t2->ctx);
+  MAIN_CHECK(t1->bm_shared && t2->bm_shared && t1->bm == t2->bm);
+  MAIN_CHECK(SSL_get_rbio(t1->ssl) != SSL_get_rbio(t2->ssl));
+  MAIN_CHECK(BIO_get_data(SSL_get_rbio(t1->ssl)) == &c1);
+  MAIN_CHECK(BIO_get_data(SSL_get_rbio(t2->ssl)) == &c2);
+  BIO_METHOD *shared_method = t1->bm;
   SSL_CTX *shared_ctx = t1->ctx;
   int ex_index = SSL_CTX_get_ex_new_index(0, NULL, NULL, NULL, on_shared_ctx_free);
   MAIN_CHECK(ex_index >= 0);
@@ -234,6 +239,7 @@ int main(void) {
   MAIN_CHECK(c3.tls != NULL);
   struct mg_tls *t3 = (struct mg_tls *) c3.tls;
   MAIN_CHECK(!t3->ctx_shared && t3->ctx != shared_ctx);
+  MAIN_CHECK(t3->bm_shared && t3->bm == shared_method);
   MAIN_CHECK(X509_cmp(SSL_get_certificate(t3->ssl), second.cert) == 0);
   struct tls_pair p3;
   MAIN_CHECK(pair_start(&c3, &second, TLS1_3_VERSION, &p3));
@@ -247,13 +253,25 @@ int main(void) {
   MAIN_CHECK(c4.tls != NULL);
   struct mg_tls *t4 = (struct mg_tls *) c4.tls;
   MAIN_CHECK(!t4->ctx_shared && t4->ctx != shared_ctx);
+  MAIN_CHECK(t4->bm_shared && t4->bm == shared_method);
   mg_tls_free(&c4);
 
   double shared_seconds = init_benchmark(&mgr, &first, 1, 300);
   MAIN_CHECK(shared_seconds >= 0.0);
   struct mg_mgr uncached_mgr;
   mg_mgr_init(&uncached_mgr);
+  struct mg_connection separate = {0};
+  separate.mgr = &uncached_mgr;
+  mg_tls_init(&separate, &first.opts);
+  MAIN_CHECK(separate.tls != NULL);
+  MAIN_CHECK(((struct mg_tls *) separate.tls)->bm_shared);
+  MAIN_CHECK(((struct mg_tls *) separate.tls)->bm != shared_method);
+  mg_tls_free(&separate);
   mg_tls_ctx_free(&uncached_mgr);
+  mg_tls_init(&separate, &first.opts);
+  MAIN_CHECK(separate.tls != NULL);
+  MAIN_CHECK(!((struct mg_tls *) separate.tls)->bm_shared);
+  mg_tls_free(&separate);
   double uncached_seconds = init_benchmark(&uncached_mgr, &first, 0, 300);
   MAIN_CHECK(uncached_seconds >= 0.0);
   mg_mgr_free(&uncached_mgr);
@@ -264,6 +282,7 @@ int main(void) {
 
   printf("OpenSSL: %s\n", OpenSSL_version(OPENSSL_VERSION));
   printf("PASS: same identity shares manager SSL_CTX; different identity falls back\n");
+  printf("PASS: manager BIO method reuse, connection-local BIO data and fallback\n");
   printf("PASS: TLS 1.2/1.3 strict hostname verification and live bidirectional data\n");
   printf("300 init cycles: shared=%.6fs uncached=%.6fs (initialization only)\n",
          shared_seconds, uncached_seconds);
