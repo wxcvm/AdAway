@@ -18,6 +18,8 @@ static uint8_t s_qlog_family[QLOG_MAX];
 static struct response_log_metadata s_qlog_metadata[QLOG_MAX];
 static uint32_t s_qlog_pos;    /* next slot to write */
 static uint64_t s_qlog_sequence;
+/* Single event-loop owner: only successful persistence clears this flag. */
+static bool s_qlog_dirty = true;
 static char s_qlog_generation[33];
 static uint32_t s_qlog_count;  /* valid entries (<= QLOG_MAX) */
 /* Compaction buffer for persistence: only the newest QLOG_PERSIST_MAX entries
@@ -27,6 +29,7 @@ static uint8_t s_qlog_persist_family[QLOG_PERSIST_MAX];
 static struct response_log_metadata s_qlog_persist_metadata[QLOG_PERSIST_MAX];
 
 static void qlog_clear(void) {
+    s_qlog_dirty = true;
     s_qlog_sequence = 0;
     s_qlog_generation[0] = 0;
     s_qlog_pos = 0;
@@ -74,6 +77,7 @@ static void qlog_add_status(uid_t uid, int action, struct mg_http_message *hm, c
     s_qlog_pos = (s_qlog_pos + 1) % QLOG_MAX;
     if (s_qlog_count < QLOG_MAX) s_qlog_count++;
     s_qlog_sequence++;
+    s_qlog_dirty = true;
 }
 
 static void qlog_add(uid_t uid, int action, struct mg_http_message *hm, const struct mg_connection *connection) {
@@ -193,7 +197,11 @@ static void qlog_save(const char *resource_dir) {
         remove(atomic_tmp);
         return;
     }
-    finish_atomic_write(fp, path, atomic_tmp);
+    if (finish_atomic_write(fp, path, atomic_tmp)) s_qlog_dirty = false;
+}
+
+static void qlog_save_if_dirty(const char *resource_dir) {
+    if (s_qlog_dirty) qlog_save(resource_dir);
 }
 
 static void qlog_load(const char *resource_dir) {
@@ -243,6 +251,8 @@ static void qlog_load(const char *resource_dir) {
                 s_qlog_pos = pos ? pos : (uint32_t) (count % QLOG_MAX);
                 s_qlog_count = count;
                 s_qlog_sequence = count;
+                /* Old formats still need migration at the next flush. */
+                s_qlog_dirty = magic != QLOG_MAGIC_V3;
             }
         }
         free(staged);

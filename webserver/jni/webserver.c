@@ -7,6 +7,7 @@
 #define _GNU_SOURCE 1
 #endif
 #include <stdio.h>
+#include <stdbool.h>
 #include "rule_norm.h"
 #include "pin_window.h"
 #include "f5_guard.h"
@@ -24,7 +25,7 @@
  * 失败时删掉临时文件，旧文件原样保留。
  */
 static FILE *open_atomic_write(const char *path, char *tmp, size_t tmp_cap);
-static void  finish_atomic_write(FILE *fp, const char *path, const char *tmp);
+static bool  finish_atomic_write(FILE *fp, const char *path, const char *tmp);
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -921,6 +922,7 @@ static uint64_t s_persist_sni_last_ms = 0;
    flush it. Declare the save side here; qlog_load() is called from main(),
    which is after the definition. */
 static void qlog_save(const char *resource_dir);
+static void qlog_save_if_dirty(const char *resource_dir);
 
 static void persist_dat_files(struct settings *s, bool force) {
     if (!s) return;
@@ -930,7 +932,8 @@ static void persist_dat_files(struct settings *s, bool force) {
         save_stats(s);
         save_hist(s);
         apps_save(s->resource_dir);
-        qlog_save(s->resource_dir);   /* "why was this blocked?" survives restarts */
+        if (force) qlog_save(s->resource_dir);
+        else qlog_save_if_dirty(s->resource_dir);
     }
     if (force || now - s_persist_sni_last_ms >= PERSIST_SNI_INTERVAL_MS) {
         s_persist_sni_last_ms = now;
@@ -3312,13 +3315,12 @@ static FILE *open_atomic_write(const char *path, char *tmp, size_t tmp_cap) {
     return fopen(tmp, "wb");
 }
 
-static void finish_atomic_write(FILE *fp, const char *path, const char *tmp) {
-    if (fp == NULL) return;
-    if (fclose(fp) == 0) {
-        rename(tmp, path);
-    } else {
-        remove(tmp);                              /* 落盘失败：删掉临时文件，旧文件保持原样 */
-    }
+static bool finish_atomic_write(FILE *fp, const char *path, const char *tmp) {
+    if (fp == NULL) return false;
+    bool written = !ferror(fp);
+    if (fclose(fp) == 0 && written && rename(tmp, path) == 0) return true;
+    remove(tmp); /* Keep the previous file on write, close or rename failure. */
+    return false;
 }
 
 /* ── proxy plumbing ── */

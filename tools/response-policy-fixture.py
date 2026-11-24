@@ -58,12 +58,13 @@ static FILE *open_atomic_write(const char *path,char *tmp,size_t cap) {
     int length=snprintf(tmp,cap,"%s.tmp",path); if(length<0 || (size_t)length>=cap) return NULL;
     return fopen(tmp,"wb");
 }
-static void finish_atomic_write(FILE *file,const char *path,const char *tmp) {
+static bool finish_atomic_write(FILE *file,const char *path,const char *tmp) {
     CHECK(!fclose(file));
 #ifdef _WIN32
     remove(path); /* Disposable fixture only; production uses its atomic helper. */
 #endif
     CHECK(!rename(tmp,path));
+    return true;
 }
 static bool fixture_remote_peer;
 static int fixture_loopback_peer(const uint8_t *ip,int ipv6) {
@@ -277,7 +278,7 @@ static void run_family(const char *directory,const char *binding,unsigned family
         CHECK(s_qlog_metadata[0].status==403 && !strcmp(s_qlog_metadata[0].path,"/internal-test"));
         CHECK(s_qlog_metadata[1].status==200 && !strcmp(s_qlog_metadata[1].path,"/favicon.ico"));
         CHECK(s_qlog_family[0]==family && s_qlog_family[1]==family);
-        qlog_save(directory); qlog_clear(); qlog_load(directory);
+        qlog_save_if_dirty(directory); qlog_clear(); qlog_load(directory);
         CHECK(s_qlog_count==2 && s_qlog_metadata[0].status==403 && s_qlog_metadata[1].status==200);
         char summary[QLOG_JSON_MAX]; qlog_render(summary,sizeof(summary));
         CHECK(strstr(summary,"/internal-test") && strstr(summary,"/favicon.ico") && !strstr(summary,"secret"));
