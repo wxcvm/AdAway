@@ -596,42 +596,44 @@ public class WebServerUtils {
      * See: https://github.com/AdguardTeam/AdguardForAndroid/issues/2713
      */
     private static void ensureCaptivePortalAllowlist(Context context) {
-        try {
-            java.util.List<String> lines = new java.util.ArrayList<>();
-            // Existing allowlist entries (if any)
-            java.io.File allowlistFile = getResourcePath(context).resolve("allowlist.txt").toFile();
-            if (allowlistFile.exists()) {
-                try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                        new java.io.InputStreamReader(
-                                new java.io.FileInputStream(allowlistFile), "UTF-8"))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (!line.trim().isEmpty()) lines.add(line.trim());
+        synchronized (ALLOWLIST_FILE_LOCK) {
+            try {
+                java.util.List<String> lines = new java.util.ArrayList<>();
+                // Existing allowlist entries (if any)
+                java.io.File allowlistFile = getResourcePath(context).resolve("allowlist.txt").toFile();
+                if (allowlistFile.exists()) {
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.InputStreamReader(
+                                    new java.io.FileInputStream(allowlistFile), "UTF-8"))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            if (!line.trim().isEmpty()) lines.add(line.trim());
+                        }
                     }
                 }
-            }
 
-            // Add UIDs for captive portal login packages
-            for (String pkg : CAPTIVE_PORTAL_PACKAGES) {
-                try {
-                    int uid = context.getPackageManager()
-                            .getPackageUid(pkg, 0);
-                    if (!lines.contains(String.valueOf(uid))) {
-                        lines.add(String.valueOf(uid));
-                        Timber.d("Added captive portal UID %d (%s) to allowlist", uid, pkg);
+                // Add UIDs for captive portal login packages
+                for (String pkg : CAPTIVE_PORTAL_PACKAGES) {
+                    try {
+                        int uid = context.getPackageManager()
+                                .getPackageUid(pkg, 0);
+                        if (!lines.contains(String.valueOf(uid))) {
+                            lines.add(String.valueOf(uid));
+                            Timber.d("Added captive portal UID %d (%s) to allowlist", uid, pkg);
+                        }
+                    } catch (PackageManager.NameNotFoundException e) {
+                        // Package not installed, skip
                     }
-                } catch (PackageManager.NameNotFoundException e) {
-                    // Package not installed, skip
                 }
-            }
 
-            // Publish atomically so the native cache never sees a partial list.
-            writeAllowlistFile(context, String.join("\n", lines));
-        } catch (Exception e) {
-            Timber.w(e, "Failed to ensure captive portal allowlist");
+                // Publish atomically so the native cache never sees a partial list.
+                writeAllowlistFile(context, String.join("\n", lines));
+            } catch (Exception e) {
+                Timber.w(e, "Failed to ensure captive portal allowlist");
+            }
+        
         }
     }
-
     /**
      * Start the web server, killing any stale instance first and waiting for
      * the port to be released before relaunching.
