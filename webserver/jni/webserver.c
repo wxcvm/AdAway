@@ -563,20 +563,11 @@ static bool domain_is_allowed(const char *host, const char *resource_dir) {
     return result.allowed;
 }
 
+#include "uid_allow_snapshot.h"
+static struct ua_snapshot s_uid_allow_snapshot = UA_SNAPSHOT_INITIALIZER;
+
 static bool uid_is_allowed(uid_t uid, const char *resource_dir) {
-    char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/allowlist.txt", resource_dir);
-    FILE *fp = fopen(path, "r");
-    if (!fp) return false;
-    char line[32];
-    bool allowed = false;
-    while (fgets(line, sizeof(line), fp) != NULL) {
-        char *end = NULL;
-        long v = strtol(line, &end, 10);
-        if (end != line && v >= 0 && (uid_t)v == uid) { allowed = true; break; }
-    }
-    fclose(fp);
-    return allowed;
+    return ua_snapshot_contains(&s_uid_allow_snapshot, uid, resource_dir);
 }
 
 /*
