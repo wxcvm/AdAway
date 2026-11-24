@@ -50,8 +50,8 @@ import org.adaway.model.rules.ExemptionRules
  * 禁用并写明原因——藏起来会让用户以为功能坏了。</p>
  *
  * <p>规则只写规则库（单一事实来源），`domain_allowlist.txt` 由
- * `WebServerUtils.exportBlockList()` 派生；原生服务器每次请求都重读该文件，
- * 所以改完立即生效、不需要重启。</p>
+ * `WebServerUtils.exportBlockList()` 派生；原生服务器每次检查文件指纹，仅在文件变化后重载，
+ * 所以改完很快生效、不需要重启。</p>
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

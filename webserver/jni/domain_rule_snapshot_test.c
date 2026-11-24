@@ -118,29 +118,62 @@ static void concurrent(void) {
     dr_dispose(&store); puts("4 native readers / 1000 publications / 200000 reads passed");
 }
 static void write_file(const char *path, const char *text) {
-    FILE *file = fopen(path, "wb"); CHECK(file); CHECK(fwrite(text, 1, strlen(text), file) == strlen(text)); CHECK(fclose(file) == 0);
+    char temporary[4096];
+    int length = snprintf(temporary, sizeof(temporary), "%s.tmp", path);
+    CHECK(length > 0 && (size_t)length < sizeof(temporary));
+    FILE *file = fopen(temporary, "wb"); CHECK(file);
+    CHECK(fwrite(text, 1, strlen(text), file) == strlen(text));
+    CHECK(fclose(file) == 0);
+#ifdef _WIN32
+    CHECK(MoveFileExA(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH));
+#else
+    CHECK(rename(temporary, path) == 0);
+#endif
 }
 static void production_adapter(const char *directory) {
     char path[4096]; CHECK(snprintf(path, sizeof(path), "%s/domain_allowlist.txt", directory) > 0);
     struct da_repository repository = DA_REPOSITORY_INITIALIZER;
     write_file(path, "@@||ads.test^\nhttps://legacy.test/path\n*.wild.test\n");
     struct da_result result = da_lookup(&repository, "sub.ads.test", directory);
-    CHECK(result.allowed && result.update_valid && result.generation == 1);
+    CHECK(result.allowed && result.update_valid && result.refresh_attempted && result.generation == 1);
+    CHECK(repository.reloads == 1);
     CHECK(da_lookup(&repository, "legacy.test", directory).allowed);
     CHECK(da_lookup(&repository, "wild.test", directory).allowed);
-    CHECK(da_lookup(&repository, "notads.test", directory).generation == 1);
+    result = da_lookup(&repository, "notads.test", directory);
+    CHECK(result.generation == 1 && !result.refresh_attempted && repository.reloads == 1);
+
     write_file(path, "@@||new.test^\nbad..test\n");
     result = da_lookup(&repository, "ads.test", directory);
-    CHECK(result.allowed && !result.update_valid && result.generation == 1);
-    CHECK(!da_lookup(&repository, "new.test", directory).allowed);
+    CHECK(result.allowed && !result.update_valid && result.refresh_attempted && result.generation == 1);
+    CHECK(repository.reloads == 2);
+    result = da_lookup(&repository, "new.test", directory);
+    CHECK(!result.allowed && !result.update_valid && !result.refresh_attempted && repository.reloads == 2);
+
     write_file(path, "@@||new.test^/path\n@@||new.test^$script\n");
     result = da_lookup(&repository, "new.test", directory);
-    CHECK(!result.allowed && result.update_valid && result.generation == 2);
-    write_file(path, "new.test\n"); CHECK(da_lookup(&repository, "new.test", directory).allowed);
+    CHECK(!result.allowed && result.update_valid && result.refresh_attempted && result.generation == 2);
+    CHECK(repository.reloads == 3);
+
+    write_file(path, "new.test\n");
+    result = da_lookup(&repository, "new.test", directory);
+    CHECK(result.allowed && result.update_valid && result.refresh_attempted && result.generation == 3);
+    CHECK(repository.reloads == 4);
+
+    /* Same-size atomic replacement must invalidate the fingerprint too. */
+    write_file(path, "old.test\n");
+    result = da_lookup(&repository, "old.test", directory);
+    CHECK(result.allowed && result.update_valid && result.refresh_attempted && result.generation == 4);
+    result = da_lookup(&repository, "new.test", directory);
+    CHECK(!result.allowed && !result.refresh_attempted && repository.reloads == 5);
+
     CHECK(remove(path) == 0);
-    result = da_lookup(&repository, "new.test", directory); CHECK(!result.allowed && result.update_valid);
+    result = da_lookup(&repository, "old.test", directory);
+    CHECK(!result.allowed && result.update_valid && result.refresh_attempted && result.generation == 5);
+    CHECK(repository.reloads == 6);
+    result = da_lookup(&repository, "old.test", directory);
+    CHECK(!result.allowed && result.update_valid && !result.refresh_attempted && repository.reloads == 6);
     dr_dispose(&repository.rules);
-    puts("Actual production exemption loader: rollback, stable generation, legacy syntax and explicit deletion passed");
+    puts("Actual production exemption loader: cached unchanged/invalid files, same-size atomic replacement and deletion passed");
 }
 static void equality_ignores_padding(void) {
     struct dr_store store = DR_STORE_INITIALIZER;

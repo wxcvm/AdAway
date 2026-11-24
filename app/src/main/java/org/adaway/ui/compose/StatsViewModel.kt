@@ -281,7 +281,7 @@ class StatsViewModel @JvmOverloads constructor(
             )
             file.parentFile?.mkdirs()
             org.adaway.model.source.AtomicRuleFile.write(file) { writer ->
-                writer.write("# 由 ADBlock 生成：按域名解除过滤（原生服务器每次请求都会重读）\n")
+                writer.write("# 由 ADBlock 生成：按域名解除过滤（原生服务器按文件变化重载）\n")
                 for (item in allowed) {
                     val host = org.adaway.model.rules.ExemptionRules.normalize(item.host.orEmpty()) ?: continue
                     if (item.isEnabled && host.isNotEmpty() && !host.startsWith("#")) {
@@ -298,7 +298,7 @@ class StatsViewModel @JvmOverloads constructor(
 
     /**
      * 只放行一个域：写规则库（ALLOWED，单一事实来源），随后导出豁免名单。
-     * 原生服务器每请求重读 domain_allowlist.txt，所以立即生效。
+     * 原生服务器按 domain_allowlist.txt 的文件指纹重载，所以无需重启。
      */
     fun allowHost(host: String, onDone: () -> Unit = {}) {
         addExemptionRules(listOf(host)) { onDone() }

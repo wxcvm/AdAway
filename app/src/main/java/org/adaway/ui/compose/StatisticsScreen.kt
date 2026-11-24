@@ -1548,7 +1548,7 @@ private fun appLabelOf(context: android.content.Context, uid: Int): String = try
  * 数据都来自原生服务器：`tps` 是两次统计快照之间的实测速率，`hosts` 是该 uid 命中的
  * 域（见 webserver.c 的 app_note_host()）。风暴几乎总是"被拦 → 立即重试"的循环，
  * 所以止血只有两条路：放行整个应用（uid，写 allowlist.txt），或只放行它死磕的那个
- * 域（写 domain_allowlist.txt —— 原生每请求重读，立即生效）。
+ * 域（写 domain_allowlist.txt —— 原生按文件变化重载，无需重启）。
  */
 @Composable
 private fun StormCard(
