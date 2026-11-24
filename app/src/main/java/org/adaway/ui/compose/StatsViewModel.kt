@@ -298,7 +298,7 @@ class StatsViewModel @JvmOverloads constructor(
 
     /**
      * 只放行一个域：写规则库（ALLOWED，单一事实来源），随后导出豁免名单。
-     * 原生服务器每请求重读 domain_allowlist.txt，所以立即生效。
+     * 原生服务器按 domain_allowlist.txt 的文件指纹重载，所以无需重启。
      */
     fun allowHost(host: String, onDone: () -> Unit = {}) {
         addExemptionRules(listOf(host)) { onDone() }
