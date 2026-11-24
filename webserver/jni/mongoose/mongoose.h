@@ -3336,6 +3336,7 @@ struct mg_tls {
   char *name;       // matching hostname
   bool check_name;  // set when hostname was set, but no CA certificate given
   bool ctx_shared;  // true when ctx is owned by the manager TLS cache
+  bool bm_shared;   // true when bm is owned by the manager TLS cache
 };
 #endif
 
