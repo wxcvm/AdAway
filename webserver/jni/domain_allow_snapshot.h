@@ -149,7 +149,6 @@ static inline struct da_result da_lookup(struct da_repository *repository, const
 query:
     result.allowed = strcmp(repository->path, path) == 0 &&
         dr_query(&repository->rules, host, 1, 1, 0, 0).decision.reason == CORE_ALLOW_EXCEPTION;
-done:
     result.generation = repository->generation;
     dr_unlock(&repository->writer);
     return result;
