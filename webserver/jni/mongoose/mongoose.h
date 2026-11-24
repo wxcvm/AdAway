@@ -3325,6 +3325,9 @@ struct mg_tls {
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#if MG_TLS == MG_TLS_OPENSSL
+#include <openssl/evp.h>
+#endif
 
 struct mg_tls {
   BIO_METHOD *bm;
@@ -3332,6 +3335,7 @@ struct mg_tls {
   SSL *ssl;
   char *name;       // matching hostname
   bool check_name;  // set when hostname was set, but no CA certificate given
+  bool ctx_shared;  // true when ctx is owned by the manager TLS cache
 };
 #endif
 

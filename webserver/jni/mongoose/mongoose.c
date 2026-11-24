@@ -23113,6 +23113,17 @@ void mg_tls_ctx_free(struct mg_mgr *mgr) {
 
 #if MG_TLS == MG_TLS_OPENSSL || MG_TLS == MG_TLS_WOLFSSL
 
+#if MG_TLS == MG_TLS_OPENSSL
+/* One immutable default server context per manager. SSL objects remain
+ * connection-local; SNI may switch an SSL to its own cached domain context. */
+struct mg_tls_ctx {
+  SSL_CTX *server_ctx;
+  unsigned char server_fingerprint[32];
+  mg_event_handler_t server_fn;
+  void *server_fn_data;
+};
+#endif
+
 static int tls_err_cb(const char *s, size_t len, void *c) {
   int n = (int) len - 1;
   MG_ERROR(("%lu %.*s", ((struct mg_connection *) c)->id, n, s));
@@ -23196,6 +23207,90 @@ static int load_cert(SSL *ssl, struct mg_str s) {
   return rc;
 }
 
+#if MG_TLS == MG_TLS_OPENSSL
+static int load_cert_ctx(SSL_CTX *ctx, struct mg_str s) {
+  BIO *bio = BIO_new_mem_buf(s.buf, (int) (long) s.len);
+  X509 *cert = NULL;
+  int rc = 0;
+  if (bio == NULL) return 0;
+  if (MG_IS_DER(s.buf)) {
+    cert = d2i_X509_bio(bio, NULL);
+    rc = cert == NULL ? 0 : SSL_CTX_use_certificate(ctx, cert);
+  } else {
+    cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+    rc = cert == NULL ? 0 : SSL_CTX_use_certificate(ctx, cert);
+    X509_free(cert);
+    while (rc == 1) {
+      cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+      if (cert == NULL) {
+        ERR_clear_error();
+        break;
+      }
+      rc = SSL_CTX_add1_chain_cert(ctx, cert);
+      X509_free(cert);
+    }
+    cert = NULL;
+  }
+  X509_free(cert);
+  BIO_free(bio);
+  return rc;
+}
+
+static bool mg_tls_digest_field(EVP_MD_CTX *md, struct mg_str value,
+                                bool present) {
+  uint8_t marker = present ? 1 : 0;
+  uint64_t len = present ? (uint64_t) value.len : 0;
+  return EVP_DigestUpdate(md, &marker, sizeof(marker)) == 1 &&
+         EVP_DigestUpdate(md, &len, sizeof(len)) == 1 &&
+         (len == 0 || EVP_DigestUpdate(md, value.buf, (size_t) len) == 1);
+}
+
+static bool mg_tls_server_fingerprint(const struct mg_tls_opts *opts,
+                                      unsigned char out[32]) {
+  EVP_MD_CTX *md = EVP_MD_CTX_new();
+  unsigned int len = 0;
+  bool ok = false;
+  if (md == NULL || EVP_DigestInit_ex(md, EVP_sha256(), NULL) != 1) goto done;
+  if (!mg_tls_digest_field(md, opts->ca,
+                           opts->ca.buf != NULL && opts->ca.len > 0 &&
+                               opts->ca.buf[0] != '\0') ||
+      !mg_tls_digest_field(md, opts->cert,
+                           opts->cert.buf != NULL && opts->cert.buf[0] != '\0') ||
+      !mg_tls_digest_field(md, opts->key,
+                           opts->key.buf != NULL && opts->key.buf[0] != '\0'))
+    goto done;
+  ok = EVP_DigestFinal_ex(md, out, &len) == 1 && len == 32;
+done:
+  EVP_MD_CTX_free(md);
+  return ok;
+}
+
+static SSL_CTX *mg_tls_server_ctx_new(const struct mg_tls_opts *opts) {
+  SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
+  if (ctx == NULL) return NULL;
+  if (opts->ca.buf != NULL && opts->ca.len > 0 && opts->ca.buf[0] != '\0') {
+    STACK_OF(X509_INFO) *certs = load_ca_certs(opts->ca);
+    int rc = certs != NULL && add_ca_certs(ctx, certs);
+    if (certs != NULL) sk_X509_INFO_pop_free(certs, X509_INFO_free);
+    if (!rc) goto fail;
+  }
+  if (opts->cert.buf != NULL && opts->cert.buf[0] != '\0' &&
+      load_cert_ctx(ctx, opts->cert) != 1)
+    goto fail;
+  if (opts->key.buf != NULL && opts->key.buf[0] != '\0') {
+    EVP_PKEY *key = load_key(opts->key);
+    int rc = key == NULL ? 0 : SSL_CTX_use_PrivateKey(ctx, key);
+    EVP_PKEY_free(key);
+    if (rc != 1) goto fail;
+  }
+  return ctx;
+fail:
+  ERR_clear_error();
+  SSL_CTX_free(ctx);
+  return NULL;
+}
+#endif
+
 static long mg_bio_ctrl(BIO *b, int cmd, long larg, void *pargs) {
   long ret = 0;
   if (cmd == BIO_CTRL_PUSH) ret = 1;
@@ -23248,7 +23343,7 @@ void mg_tls_free(struct mg_connection *c) {
   struct mg_tls *tls = (struct mg_tls *) c->tls;
   if (tls == NULL) return;
   SSL_free(tls->ssl);
-  SSL_CTX_free(tls->ctx);
+  if (!tls->ctx_shared) SSL_CTX_free(tls->ctx);
   BIO_meth_free(tls->bm);
   mg_free(tls->name);
   mg_free(tls);
@@ -23273,8 +23368,36 @@ void mg_tls_init(struct mg_connection *c, const struct mg_tls_opts *opts) {
     s_initialised++;
   }
   MG_DEBUG(("%lu Setting TLS", c->id));
-  tls->ctx = c->is_client ? SSL_CTX_new(TLS_client_method())
-                          : SSL_CTX_new(TLS_server_method());
+#if MG_TLS == MG_TLS_OPENSSL
+  if (!c->is_client && c->mgr != NULL && c->mgr->tls_ctx != NULL) {
+    struct mg_tls_ctx *shared = (struct mg_tls_ctx *) c->mgr->tls_ctx;
+    unsigned char fingerprint[32];
+    if (mg_tls_server_fingerprint(opts, fingerprint)) {
+      if (shared->server_ctx == NULL) {
+        SSL_CTX *ctx = mg_tls_server_ctx_new(opts);
+        if (ctx != NULL) {
+          shared->server_ctx = ctx;
+          memcpy(shared->server_fingerprint, fingerprint,
+                 sizeof(shared->server_fingerprint));
+          shared->server_fn = c->fn;
+          shared->server_fn_data = c->fn_data;
+        }
+      }
+      if (shared->server_ctx != NULL &&
+          shared->server_fn == c->fn &&
+          shared->server_fn_data == c->fn_data &&
+          memcmp(shared->server_fingerprint, fingerprint,
+                 sizeof(shared->server_fingerprint)) == 0) {
+        tls->ctx = shared->server_ctx;
+        tls->ctx_shared = true;
+      }
+    }
+  }
+#endif
+  if (tls->ctx == NULL) {
+    tls->ctx = c->is_client ? SSL_CTX_new(TLS_client_method())
+                            : SSL_CTX_new(TLS_server_method());
+  }
   if (tls->ctx == NULL) {
     mg_error(c, "SSL_CTX_new");
     goto fail;
@@ -23330,26 +23453,30 @@ if (c->is_client && opts->name.buf != NULL && opts->name.len > 0 && opts->name.b
       goto fail;
     }
 #else
-    STACK_OF(X509_INFO) *certs = load_ca_certs(opts->ca);
-    rc = add_ca_certs(tls->ctx, certs);
-    sk_X509_INFO_pop_free(certs, X509_INFO_free);
-    if (!rc) {
-      mg_error(c, "CA err");
-      goto fail;
+    if (!tls->ctx_shared) {
+      STACK_OF(X509_INFO) *certs = load_ca_certs(opts->ca);
+      rc = add_ca_certs(tls->ctx, certs);
+      sk_X509_INFO_pop_free(certs, X509_INFO_free);
+      if (!rc) {
+        mg_error(c, "CA err");
+        goto fail;
+      }
     }
 #endif
   } else {
     tls->check_name = check_name; // host name set but no CA cert given
   }
 
-  if (opts->cert.buf != NULL && opts->cert.buf[0] != '\0') {
+  if (!tls->ctx_shared && opts->cert.buf != NULL &&
+      opts->cert.buf[0] != '\0') {
     rc = load_cert(tls->ssl, opts->cert);
     if (rc != 1) {
       mg_error(c, "CERT err %d", mg_tls_err(c, tls, rc));
       goto fail;
     }
   }
-  if (opts->key.buf != NULL && opts->key.buf[0] != '\0') {
+  if (!tls->ctx_shared && opts->key.buf != NULL &&
+      opts->key.buf[0] != '\0') {
     EVP_PKEY *key = load_key(opts->key);
     rc = key == NULL ? 0 : SSL_use_PrivateKey(tls->ssl, key);
     EVP_PKEY_free(key);
@@ -23450,11 +23577,31 @@ long mg_tls_flush(struct mg_connection *c) {
 }
 
 void mg_tls_ctx_init(struct mg_mgr *mgr) {
+#if MG_TLS == MG_TLS_OPENSSL
+  struct mg_tls_ctx *ctx =
+      (struct mg_tls_ctx *) mg_calloc(1, sizeof(struct mg_tls_ctx));
+  if (ctx == NULL) {
+    MG_ERROR(("TLS manager context OOM"));
+  } else {
+    mgr->tls_ctx = ctx;
+  }
+#else
   (void) mgr;
+#endif
 }
 
 void mg_tls_ctx_free(struct mg_mgr *mgr) {
+#if MG_TLS == MG_TLS_OPENSSL
+  struct mg_tls_ctx *ctx = (struct mg_tls_ctx *) mgr->tls_ctx;
+  if (ctx != NULL) {
+    SSL_CTX_free(ctx->server_ctx);
+    mg_bzero(ctx->server_fingerprint, sizeof(ctx->server_fingerprint));
+    mg_free(ctx);
+    mgr->tls_ctx = NULL;
+  }
+#else
   (void) mgr;
+#endif
 }
 #endif
 
