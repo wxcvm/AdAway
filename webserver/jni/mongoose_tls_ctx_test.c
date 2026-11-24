@@ -25,6 +25,13 @@ struct tls_pair {
   SSL *server;
 };
 
+static unsigned shared_ctx_destroyed;
+static void on_shared_ctx_free(void *parent, void *ptr, CRYPTO_EX_DATA *ad,
+                               int idx, long argl, void *argp) {
+  (void) parent; (void) ad; (void) idx; (void) argl; (void) argp;
+  if (ptr == &shared_ctx_destroyed) shared_ctx_destroyed++;
+}
+
 static int bio_copy(BIO *bio, char **out, size_t *len) {
   char *data = NULL;
   long n = BIO_get_mem_data(bio, &data);
@@ -197,6 +204,9 @@ int main(void) {
   struct mg_tls *t2 = (struct mg_tls *) c2.tls;
   MAIN_CHECK(t1->ctx_shared && t2->ctx_shared && t1->ctx == t2->ctx);
   SSL_CTX *shared_ctx = t1->ctx;
+  int ex_index = SSL_CTX_get_ex_new_index(0, NULL, NULL, NULL, on_shared_ctx_free);
+  MAIN_CHECK(ex_index >= 0);
+  MAIN_CHECK(SSL_CTX_set_ex_data(shared_ctx, ex_index, &shared_ctx_destroyed) == 1);
   MAIN_CHECK(X509_cmp(SSL_CTX_get0_certificate(shared_ctx), first.cert) == 0);
 
   struct tls_pair p1, p2;
@@ -229,6 +239,7 @@ int main(void) {
   MAIN_CHECK(uncached_seconds >= 0.0);
   mg_mgr_free(&uncached_mgr);
   mg_mgr_free(&mgr);
+  MAIN_CHECK(shared_ctx_destroyed == 1);
   identity_free(&first);
   identity_free(&second);
 
