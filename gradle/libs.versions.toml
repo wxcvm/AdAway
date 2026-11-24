@@ -11,10 +11,10 @@ lifecycle = "2.9.0"
 # Common
 guava = "33.8.0-android"
 junitVersion = "1.3.0"
-okhttp = "5.4.0"
+okhttp = "5.5.1"
 timber = "5.0.1"
 # QR Code
-zxing = "3.5.2"
+zxing = "3.5.4"
 # Root
 libsu = "6.0.0"
 # VPN
