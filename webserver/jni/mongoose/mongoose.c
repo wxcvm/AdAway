@@ -23123,6 +23123,12 @@ struct mg_tls_ctx {
   mg_event_handler_t server_fn;
   void *server_fn_data;
 };
+
+/* OpenSSL allocates custom BIO type indices for the process lifetime.
+ * Every instance of our identical method uses one registered type. */
+static CRYPTO_ONCE s_bio_type_once = CRYPTO_ONCE_STATIC_INIT;
+static int s_bio_type = -1;
+static void mg_bio_type_init(void) { s_bio_type = BIO_get_new_index(); }
 #endif
 
 static int tls_err_cb(const char *s, size_t len, void *c) {
@@ -23507,9 +23513,9 @@ if (c->is_client && opts->name.buf != NULL && opts->name.len > 0 && opts->name.b
     tls->bm = manager->bio_method;
     tls->bm_shared = true;
   } else {
-    int index = BIO_get_new_index();
-    if (index < 0 ||
-        (tls->bm = BIO_meth_new(index | BIO_TYPE_SOURCE_SINK, "bio_mg")) == NULL ||
+    if (CRYPTO_THREAD_run_once(&s_bio_type_once, mg_bio_type_init) != 1 ||
+        s_bio_type < 0 ||
+        (tls->bm = BIO_meth_new(s_bio_type | BIO_TYPE_SOURCE_SINK, "bio_mg")) == NULL ||
         BIO_meth_set_write(tls->bm, mg_bio_write) != 1 ||
         BIO_meth_set_read(tls->bm, mg_bio_read) != 1 ||
         BIO_meth_set_ctrl(tls->bm, mg_bio_ctrl) != 1) {
