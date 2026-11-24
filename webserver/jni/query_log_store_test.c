@@ -27,19 +27,27 @@ static void req_host_of(struct mg_http_message *hm, char *out, size_t cap) {
 static void json_safe_copy(char *out, size_t cap, const char *host) {
     snprintf(out, cap, "%s", host); /* The fixture only generates DNS labels. */
 }
+static unsigned test_write_attempts;
+static bool test_fail_publish;
 static FILE *open_atomic_write(const char *path, char *tmp, size_t cap) {
+    ++test_write_attempts;
     size_t length = strlen(path);
     if (length > cap || cap - length < 5) return NULL;
     memcpy(tmp, path, length);
     memcpy(tmp + length, ".tmp", 5);
     return fopen(tmp, "wb");
 }
-static void finish_atomic_write(FILE *fp, const char *path, const char *tmp) {
+static bool finish_atomic_write(FILE *fp, const char *path, const char *tmp) {
     assert(fclose(fp) == 0);
+    if (test_fail_publish) {
+        remove(tmp);
+        return false;
+    }
 #ifdef _WIN32
     remove(path); /* Test adapter only; production overlay uses its platform helper. */
 #endif
     assert(rename(tmp, path) == 0);
+    return true;
 }
 static bool test_clock_enabled;
 static time_t test_clock_value;
@@ -116,6 +124,40 @@ static void persistence(const char *directory) {
     newest_is(12037);
     remove(path);
 }
+static void dirty_persistence(const char *directory) {
+    qlog_clear();
+    add(1);
+    unsigned before = test_write_attempts;
+    qlog_save_if_dirty(directory);
+    assert(!s_qlog_dirty && test_write_attempts == before + 1);
+    qlog_save_if_dirty(directory);
+    assert(test_write_attempts == before + 1);
+    qlog_load(directory);
+    assert(!s_qlog_dirty && s_qlog_count == 1);
+    qlog_save_if_dirty(directory);
+    assert(test_write_attempts == before + 1);
+    add(2);
+    test_fail_publish = true;
+    qlog_save_if_dirty(directory);
+    assert(s_qlog_dirty && test_write_attempts == before + 2);
+    test_fail_publish = false;
+    qlog_save_if_dirty(directory);
+    assert(!s_qlog_dirty && test_write_attempts == before + 3);
+    qlog_load(directory);
+    assert(s_qlog_count == 2 && !s_qlog_dirty);
+    newest_is(2);
+    qlog_clear();
+    qlog_save_if_dirty(directory);
+    assert(!s_qlog_dirty && test_write_attempts == before + 4);
+    qlog_load(directory);
+    assert(s_qlog_count == 0 && !s_qlog_dirty);
+    qlog_save_if_dirty(directory);
+    assert(test_write_attempts == before + 4);
+    /* Explicit shutdown-style save remains unconditional. */
+    qlog_save(directory);
+    assert(test_write_attempts == before + 5);
+}
+
 static void pages(void) {
     qlog_clear();
     for (unsigned i = 1; i <= 600; i++) add(i);
@@ -387,7 +429,9 @@ static void legacy_family_migration(const char *directory) {
         assert(mg_json_get_long(body, "$.entries[0].family", -1) == 0);
         assert(mg_json_get_long(body, "$.entries[0].type", -1) == 13);
         assert(mg_json_get_long(body, "$.entries[0].mode", -1) == 255);
-        qlog_save(directory); qlog_clear(); qlog_load(directory);
+        assert(s_qlog_dirty);
+        qlog_save_if_dirty(directory); qlog_clear(); qlog_load(directory);
+        assert(!s_qlog_dirty);
         assert(s_qlog_count == (counts[variant] < QLOG_PERSIST_MAX ? counts[variant] : QLOG_PERSIST_MAX));
         for (uint32_t i = 0; i < s_qlog_count; i++) assert(s_qlog_family[i] == 0 && s_qlog[i].pad == 255);
     }
@@ -764,6 +808,7 @@ int main(int argc, char **argv) {
     mg_log_set(MG_LL_NONE);
     host_authorities();
     persistence(argv[1]);
+    dirty_persistence(argv[1]);
     pages();
     page_boundaries();
     metadata(argv[1]);
