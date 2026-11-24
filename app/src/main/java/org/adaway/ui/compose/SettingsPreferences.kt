@@ -2,7 +2,6 @@ package org.adaway.ui.compose
 
 import android.content.Context
 import timber.log.Timber
-import java.io.File
 
 /** Shared preference contract; no composition or navigation state lives here. */
 internal const val PREFS_MONITOR = "compose_app_monitor"
@@ -58,9 +57,7 @@ private fun syncAllowlistFile(context: Context) {
             runCatching { uids.add(context.packageManager.getPackageUid(pkg, 0)) }
         }
         val content = uids.sorted().joinToString("\n")
-        val dir = java.io.File(context.filesDir, "webserver")
-        dir.mkdirs()
-        java.io.File(dir, "allowlist.txt").writeText(content)
+        org.adaway.util.WebServerUtils.writeAllowlistFile(context, content)
     } catch (e: Exception) {
         Timber.w(e, "Failed to sync allowlist")
     }
