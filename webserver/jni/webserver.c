@@ -2027,8 +2027,8 @@ static bool f5_guard_tripped(uid_t uid, uint32_t hh) {
 }
 
 /* ============ F5 续：按域熔断（独立开关，默认关） ============
-   circuit_breaker：同一域（不限 uid）在 10s 内被快速失败超过 60 次 → 判定为
-     "这个域在当前客户端上已成死循环"，随后 20s 内对该域的请求直接快速失败。
+   circuit_breaker：同一域（不限 uid）在 10s 窗口内收到 60 次待拦截应答请求 → 判定为
+     "这个域出现高频拦截应答"，随后 20s 内对该域的请求直接返回空 204。
      与 retry_guard 的区别：retry_guard 看的是"单个应用 × 单个域"，熔断看的是"整个域"。
    The former cache_reuse path is retired: it never cached a response, and
    replaced image/script/style responses with empty 204s. Legacy config keys
@@ -2223,17 +2223,17 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
                 return deny_status(&s_f5_override_hits, c, ov);
             }
         }
-        if (cfg_breaker && f5_breaker_tripped(f5_hh, f5_now)) {
+        if (cfg_breaker && f5_host[0] && f5_breaker_tripped(f5_hh, f5_now)) {
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
             return deny_fast(&s_f5_breaker_hits, c);
         }
-        if (cfg_guard && f5_guard_tripped(f5_uid, f5_hh)) {
+        if (cfg_guard && f5_host[0] && f5_uid != (uid_t)-1 && f5_guard_tripped(f5_uid, f5_hh)) {
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
             return deny_fast(&s_f5_guard_hits, c);
         }
-        if (cfg_dedup && f5_dedup_hit(f5_uid, f5_hh)) {
+        if (cfg_dedup && f5_host[0] && f5_uid != (uid_t)-1 && f5_dedup_hit(f5_uid, f5_hh)) {
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
             return deny_fast(&s_f5_dedup_hits, c);
