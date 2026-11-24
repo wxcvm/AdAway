@@ -217,7 +217,7 @@ static int scan_block_images(const char *resource_dir,
 #define SNI_CACHE_SIZE 256
 #define SNI_CERT_VALIDITY_DAYS 60  /* longer validity = fewer re-issues */
 #define SNI_CERT_RENEW_MS ((uint64_t) SNI_CERT_VALIDITY_DAYS * 86400000ULL / 2)
-struct sni_entry { char hostname[256]; SSL_CTX *ctx; uint64_t issued_at; };
+#include "sni_cache_slot.h"
 static struct sni_entry s_sni_cache[SNI_CACHE_SIZE];
 
 /* ── retired per-domain SSL_CTX objects ─────────────────────────────
@@ -276,11 +276,10 @@ static uint64_t         s_sni_hits = 0;
 static uint64_t         s_sni_misses = 0;
 static pthread_mutex_t  s_sni_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* SNI cache persistence: dump hostnames + issued_at to sni_cache.dat so
-   a restart doesn't flush the whole cache (re-issue = slow EC keygen +
-   new TLS handshakes). On load, entries are re-keyed lazily: the SSL_CTX
-   is rebuilt only on the next hit that finds the entry expired, but the
-   hostname is remembered so a "miss" is not counted as a fresh issue. */
+/* Persist slot metadata, not certificates or private keys. A restored hostname
+   reuses its slot on first access, but must generate a fresh context and
+   count that generation as a miss. Persisted monotonic times are not used
+   to validate certificates after restart. */
 #define SNI_CACHE_MAGIC 0x534E4943u  /* "SNIC" */
 struct sni_cache_file {
     uint32_t magic;
@@ -1786,27 +1785,20 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
      * keep serving expired certificates to returning clients.
      */
 
-    /* Fast path: cache lookup under lock (also reaps expired retired ctxs) */
-    int expired_slot = -1;
+    /* A cold restored slot is eligible for in-place renewal, not a hit. */
     pthread_mutex_lock(&s_sni_mutex);
-    sni_retire_drain(mg_millis());
-    for (int i = 0; i < SNI_CACHE_SIZE; i++) {
-        if (s_sni_cache[i].ctx && strcmp(s_sni_cache[i].hostname, host) == 0) {
-            if (mg_millis() - s_sni_cache[i].issued_at < SNI_CERT_RENEW_MS) {
-                SSL_set_SSL_CTX(ssl, s_sni_cache[i].ctx);
-                pthread_mutex_unlock(&s_sni_mutex);
-                s_stats.sni_cache_hits++;  /* avoid re-issuing */
-                s_sni_hits++;
-                return SSL_TLSEXT_ERR_OK;
-            }
-            /* Cert is near/at expiry: fall through and re-issue below.
-               The stale entry stays until evicted by the insert (if
-               that slot happens to be this one) - a later hit would simply
-               find it expired again (audit D3: it is now replaced in place). */
-            expired_slot = i;
-            break;
-        }
+    uint64_t now = mg_millis();
+    sni_retire_drain(now);
+    struct sni_slot_match match = sni_match_slot(
+        s_sni_cache, SNI_CACHE_SIZE, host, now, SNI_CERT_RENEW_MS);
+    if (match.reusable) {
+        SSL_set_SSL_CTX(ssl, s_sni_cache[match.slot].ctx);
+        pthread_mutex_unlock(&s_sni_mutex);
+        s_stats.sni_cache_hits++;
+        s_sni_hits++;
+        return SSL_TLSEXT_ERR_OK;
     }
+    int expired_slot = match.slot;
     pthread_mutex_unlock(&s_sni_mutex);
 
     /* Slow path: generate new cert outside the lock so we don't
@@ -1823,7 +1815,7 @@ static int sni_callback(SSL *ssl, int *ad, void *arg) {
     sni_retire_drain(evict_ms);
     int pos;
     if (expired_slot >= 0) {
-        pos = expired_slot;          /* refresh the expired entry in place (D3) */
+        pos = expired_slot;          /* refresh a cold or expired slot in place */
     } else {
         pos = (int) (s_sni_pos % SNI_CACHE_SIZE);
     }
@@ -4498,7 +4490,7 @@ int main(int argc, char *argv[]) {
     s_stats.start_time_ms = mg_millis();
     load_stats(&s);  /* lifetime counters survive restarts */
     load_hist(&s);   /* chart buckets survive restarts (reboot-proof) */
-    sni_cache_load(s.resource_dir);  /* SNI cert cache survives restarts */
+    sni_cache_load(s.resource_dir);  /* Restore hostname slots, not TLS contexts */
     apps_load(s.resource_dir);       /* per-app stats survive restarts */
     qlog_load(s.resource_dir);       /* query log ring survives restarts */
 
