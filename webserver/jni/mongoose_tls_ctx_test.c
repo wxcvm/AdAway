@@ -190,12 +190,13 @@ int main(void) {
 
   struct mg_mgr mgr;
   mg_mgr_init(&mgr);
-  struct mg_connection c1, c2, c3;
+  struct mg_connection c1, c2, c3, c4;
   memset(&c1, 0, sizeof(c1));
   memset(&c2, 0, sizeof(c2));
   memset(&c3, 0, sizeof(c3));
-  c1.mgr = c2.mgr = c3.mgr = &mgr;
-  c1.id = 1; c2.id = 2; c3.id = 3;
+  memset(&c4, 0, sizeof(c4));
+  c1.mgr = c2.mgr = c3.mgr = c4.mgr = &mgr;
+  c1.id = 1; c2.id = 2; c3.id = 3; c4.id = 4;
 
   mg_tls_init(&c1, &first.opts);
   struct mg_tls_opts same_opts = first.opts;
@@ -239,6 +240,14 @@ int main(void) {
   MAIN_CHECK(pair_handshake(&p3) && pair_exchange(&p3));
   mg_tls_free(&c3);
   pair_free(&p3);
+
+  int other_listener = 1;
+  c4.fn_data = &other_listener;
+  mg_tls_init(&c4, &first.opts);
+  MAIN_CHECK(c4.tls != NULL);
+  struct mg_tls *t4 = (struct mg_tls *) c4.tls;
+  MAIN_CHECK(!t4->ctx_shared && t4->ctx != shared_ctx);
+  mg_tls_free(&c4);
 
   double shared_seconds = init_benchmark(&mgr, &first, 1, 300);
   MAIN_CHECK(shared_seconds >= 0.0);
