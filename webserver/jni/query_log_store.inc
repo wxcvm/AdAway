@@ -20,11 +20,6 @@ static uint32_t s_qlog_pos;    /* next slot to write */
 static uint64_t s_qlog_sequence;
 static char s_qlog_generation[33];
 static uint32_t s_qlog_count;  /* valid entries (<= QLOG_MAX) */
-/* Compaction buffer for persistence: only the newest QLOG_PERSIST_MAX entries
-   are written, laid out from slot 0 so the loader rebuilds a contiguous ring. */
-static struct qlog_entry s_qlog_persist[QLOG_PERSIST_MAX];
-static uint8_t s_qlog_persist_family[QLOG_PERSIST_MAX];
-static struct response_log_metadata s_qlog_persist_metadata[QLOG_PERSIST_MAX];
 
 static void qlog_clear(void) {
     s_qlog_sequence = 0;
@@ -158,6 +153,18 @@ static uint32_t qlog_render_page(uint32_t offset, uint32_t limit, char *out, siz
 #define QLOG_MAGIC 0x514C4F47u   /* "QLOG" */
 #define QLOG_MAGIC_V2 0x514C4732u /* "QLG2": legacy records followed by count family bytes */
 #define QLOG_MAGIC_V3 0x514C4733u /* "QLG3": QLG2 layout followed by count metadata records */
+/* The event loop owns the ring throughout a synchronous save. Each logical
+   array is already contiguous except for at most one wrap; write its two
+   spans directly in chronological order without a second copy of the ring. */
+static bool qlog_write_spans(FILE *fp, const void *rows, size_t stride,
+                             uint32_t start, uint32_t count) {
+    const unsigned char *base = rows;
+    uint32_t first = QLOG_MAX - start;
+    if (first > count) first = count;
+    uint32_t second = count - first;
+    return (!first || fwrite(base + (size_t)start * stride, stride, first, fp) == first) &&
+           (!second || fwrite(base, stride, second, fp) == second);
+}
 static void qlog_save(const char *resource_dir) {
     char path[PATH_MAX];
     if (resource_dir == NULL || resource_dir[0] == '\0') return;
@@ -175,20 +182,15 @@ static void qlog_save(const char *resource_dir) {
      */
     uint32_t total = s_qlog_count < QLOG_MAX ? s_qlog_count : QLOG_MAX;
     uint32_t persist = total < QLOG_PERSIST_MAX ? total : QLOG_PERSIST_MAX;
-    for (uint32_t k = 0; k < persist; k++) {
-        uint32_t idx = (s_qlog_pos + QLOG_MAX - persist + k) % QLOG_MAX;
-        s_qlog_persist[k] = s_qlog[idx];
-        s_qlog_persist_family[k] = s_qlog_family[idx];
-        s_qlog_persist_metadata[k] = s_qlog_metadata[idx];
-    }
+    uint32_t start = (s_qlog_pos + QLOG_MAX - persist) % QLOG_MAX;
     uint32_t zero = 0;
     uint32_t magic = QLOG_MAGIC_V3;
     if (fwrite(&magic, sizeof(magic), 1, fp) != 1 ||
         fwrite(&zero, sizeof(zero), 1, fp) != 1 ||
         fwrite(&persist, sizeof(persist), 1, fp) != 1 ||
-        fwrite(s_qlog_persist, sizeof(s_qlog_persist[0]), persist, fp) != persist ||
-        fwrite(s_qlog_persist_family, 1, persist, fp) != persist ||
-        fwrite(s_qlog_persist_metadata, sizeof(s_qlog_persist_metadata[0]), persist, fp) != persist) {
+        !qlog_write_spans(fp, s_qlog, sizeof(s_qlog[0]), start, persist) ||
+        !qlog_write_spans(fp, s_qlog_family, sizeof(s_qlog_family[0]), start, persist) ||
+        !qlog_write_spans(fp, s_qlog_metadata, sizeof(s_qlog_metadata[0]), start, persist)) {
         fclose(fp);
         remove(atomic_tmp);
         return;
