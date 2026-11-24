@@ -159,8 +159,27 @@ static void production_adapter(const char *directory) {
     CHECK(result.allowed && result.update_valid && result.refresh_attempted && result.generation == 3);
     CHECK(repository.reloads == 4);
 
-    /* Same-size atomic replacement must invalidate the fingerprint too. */
+    /* Same-size atomic replacement must invalidate the fingerprint too.
+       On Windows, preserve even the previous file's creation/write times
+       to prove that the underlying file identity detects replacement. */
+#ifdef _WIN32
+    FILETIME created, written;
+    HANDLE previous = CreateFileA(path, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    CHECK(previous != INVALID_HANDLE_VALUE);
+    CHECK(GetFileTime(previous, &created, NULL, &written));
+    CHECK(CloseHandle(previous));
+#endif
     write_file(path, "old.test\n");
+#ifdef _WIN32
+    HANDLE replaced = CreateFileA(path, FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    CHECK(replaced != INVALID_HANDLE_VALUE);
+    CHECK(SetFileTime(replaced, &created, NULL, &written));
+    CHECK(CloseHandle(replaced));
+#endif
     result = da_lookup(&repository, "old.test", directory);
     CHECK(result.allowed && result.update_valid && result.refresh_attempted && result.generation == 4);
     result = da_lookup(&repository, "new.test", directory);
