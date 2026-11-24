@@ -215,8 +215,10 @@
     <string name="compose_settings_cert_install_manual">手动安装</string>
     <string name="compose_settings_light_mode">轻量模式（省内存）</string>
     <string name="compose_settings_light_mode_hint">占用最低：开机拉起服务器后，应用会在退到后台时退出进程（服务器作为独立原生进程继续运行，拦截不受影响），自愈检查从每 5 分钟降为每 6 小时一次。开启常驻通知时本项被忽略；劫持模式始终保留高频检查。</string>
-    <string name="compose_settings_pin_policy">固定证书的应用：改为廉价拒绝</string>
-    <string name="compose_settings_pin_policy_hint">默认关闭。开启后：被检测出证书固定（反复握手失败）的应用，其 CONNECT 请求会直接拒绝而不再做中间人——拦截效果不变，但每次重试只花一行 HTTP，而不是一次 TLS 握手加一张新签证书。开启前实测：单个系统组件就达到约 240 请求/秒且全部被拦截。哪些应用命中会在统计页的应用列表里标注。</string>
+    <string name="pin_policy_saved">策略已保存，服务端将在后续相关请求时读取，尚未确认运行状态。</string>
+    <string name="pin_policy_save_failed">策略保存失败，保留原设置。</string>
+    <string name="compose_settings_pin_policy">TLS 反复失败：快速拒绝 CONNECT</string>
+    <string name="compose_settings_pin_policy_hint">实验性功能，默认关闭。已识别应用在 10 秒窗口内达到 5 次 TLS 失败后，对其 CONNECT 请求进入 10 分钟冷却。握手失败不等于证书固定；此策略不能跳过直接 TLS 连接。</string>
     <string name="compose_settings_allowlist_title">放行名单（跳过拦截）</string>
     <string name="compose_settings_allowlist_warning">⚠️ 名单内 UID 的流量不会被拦截。只用于门户登录等特殊情况，非必要不要添加。</string>
     <string name="compose_settings_allowlist_default">默认条目（门户登录探测，自动维护）</string>
