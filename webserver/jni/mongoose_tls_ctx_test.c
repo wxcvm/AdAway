@@ -198,7 +198,17 @@ int main(void) {
   c1.id = 1; c2.id = 2; c3.id = 3;
 
   mg_tls_init(&c1, &first.opts);
-  mg_tls_init(&c2, &first.opts);
+  struct mg_tls_opts same_opts = first.opts;
+  char *same_cert = (char *) malloc(first.opts.cert.len);
+  char *same_key = (char *) malloc(first.opts.key.len);
+  MAIN_CHECK(same_cert != NULL && same_key != NULL);
+  memcpy(same_cert, first.opts.cert.buf, first.opts.cert.len);
+  memcpy(same_key, first.opts.key.buf, first.opts.key.len);
+  same_opts.cert.buf = same_cert;
+  same_opts.key.buf = same_key;
+  mg_tls_init(&c2, &same_opts);
+  free(same_cert);
+  free(same_key);
   MAIN_CHECK(c1.tls != NULL && c2.tls != NULL);
   struct mg_tls *t1 = (struct mg_tls *) c1.tls;
   struct mg_tls *t2 = (struct mg_tls *) c2.tls;
