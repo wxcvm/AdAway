@@ -113,7 +113,7 @@ static inline struct da_result da_lookup(struct da_repository *repository, const
     struct da_file_stamp stamp;
     if (!da_file_stamp_read(path, &stamp)) {
         result.refresh_attempted = true; /* transient I/O error: retry on the next request */
-        goto done;
+        goto query;
     }
     bool unchanged = repository->checked_stamp_valid &&
         strcmp(repository->checked_path, path) == 0 &&
@@ -146,6 +146,7 @@ static inline struct da_result da_lookup(struct da_repository *repository, const
         }
         free(builder.next.entries);
     }
+query:
     result.allowed = strcmp(repository->path, path) == 0 &&
         dr_query(&repository->rules, host, 1, 1, 0, 0).decision.reason == CORE_ALLOW_EXCEPTION;
 done:
