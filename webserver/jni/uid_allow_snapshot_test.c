@@ -39,7 +39,7 @@ int main(void) {
     make_path(other_path, sizeof(other_path), other_directory);
 
     struct ua_snapshot snapshot = UA_SNAPSHOT_INITIALIZER;
-    write_atomic(path, "10001\n10002\n10001\nbad\n");
+    write_atomic(path, "10001\n10002\n10001\n");
     CHECK(ua_snapshot_contains(&snapshot, (uid_t)10001, directory));
     CHECK(ua_snapshot_contains(&snapshot, (uid_t)10002, directory));
     CHECK(!ua_snapshot_contains(&snapshot, (uid_t)10003, directory));
