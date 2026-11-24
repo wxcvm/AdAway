@@ -238,20 +238,10 @@ fun OverviewScreen(
                         serverStats.totalRequests,
                         Modifier.weight(1f),
                     )
-                    // Compute as floating point to avoid overflowing Long when
-                    // a device has accumulated a very large request history.
-                    val rate = if (serverStats.totalRequests > 0L) {
-                        (serverStats.totalBlocked.toDouble() * 100.0 /
-                            serverStats.totalRequests.toDouble())
-                            .coerceIn(0.0, 100.0)
-                            .toInt()
-                    } else 0
-                    StatTile(
-                        stringResource(R.string.compose_stats_kpi_rate),
-                        rate,
-                        Modifier.weight(1f),
-                        suffix = "%",
-                    )
+                    val rate = serverStats.localBlockPercent
+                    val rateText = rate?.let { String.format(Locale.getDefault(), "%.1f%%", it) } ?: "—"
+                    StatTileText(stringResource(R.string.compose_stats_kpi_rate),
+                        rateText, rateText, Modifier.weight(1f))
                 }
             }
 
@@ -532,6 +522,11 @@ internal fun StatTile(label: String, value: Long, modifier: Modifier = Modifier,
     // Keep large host counters readable in 2- and 3-column phone layouts.
     // TalkBack still announces the exact count, not the abbreviated display.
     val displayValue = if (value >= 100_000L) ChartUtils.compactNumber(value) + suffix else exactValue
+    StatTileText(label, displayValue, exactValue, modifier)
+}
+
+@Composable
+private fun StatTileText(label: String, displayValue: String, exactValue: String, modifier: Modifier) {
     Card(
         modifier = modifier.semantics(mergeDescendants = true) {
             contentDescription = "$label: $exactValue"
