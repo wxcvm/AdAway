@@ -9,6 +9,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
+import android.util.AtomicFile;
 import android.view.ContextThemeWrapper;
 import android.widget.Toast;
 
@@ -605,9 +606,16 @@ public class WebServerUtils {
             // Write back
             java.io.File dir = getResourcePath(context).toFile();
             dir.mkdirs();
-            try (java.io.FileWriter writer = new java.io.FileWriter(
-                    new java.io.File(dir, "allowlist.txt"))) {
-                writer.write(String.join("\n", lines));
+            AtomicFile atomicFile = new AtomicFile(new File(dir, "allowlist.txt"));
+            java.io.FileOutputStream output = null;
+            try {
+                output = atomicFile.startWrite();
+                output.write(String.join("\n", lines).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                atomicFile.finishWrite(output);
+                output = null;
+            } catch (Exception e) {
+                if (output != null) atomicFile.failWrite(output);
+                throw e;
             }
         } catch (Exception e) {
             Timber.w(e, "Failed to ensure captive portal allowlist");
