@@ -23119,6 +23119,8 @@ void mg_tls_ctx_free(struct mg_mgr *mgr) {
 struct mg_tls_ctx {
   SSL_CTX *server_ctx;
   unsigned char server_fingerprint[32];
+  mg_event_handler_t server_fn;
+  void *server_fn_data;
 };
 #endif
 
@@ -23377,9 +23379,13 @@ void mg_tls_init(struct mg_connection *c, const struct mg_tls_opts *opts) {
           shared->server_ctx = ctx;
           memcpy(shared->server_fingerprint, fingerprint,
                  sizeof(shared->server_fingerprint));
+          shared->server_fn = c->fn;
+          shared->server_fn_data = c->fn_data;
         }
       }
       if (shared->server_ctx != NULL &&
+          shared->server_fn == c->fn &&
+          shared->server_fn_data == c->fn_data &&
           memcmp(shared->server_fingerprint, fingerprint,
                  sizeof(shared->server_fingerprint)) == 0) {
         tls->ctx = shared->server_ctx;
