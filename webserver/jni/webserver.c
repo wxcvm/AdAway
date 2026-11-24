@@ -3703,6 +3703,7 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     if (ev == MG_EV_POLL) {
         if (listener_idle_due(c, *(const uint64_t *)ev_data, IDLE_TIMEOUT_MS) &&
             !proxy_busy(c)) c->is_draining = 1;
+        else listener_trim_idle(c, *(const uint64_t *)ev_data);
         return;
     }
     /* Successful response writes are activity, even during a long download.
