@@ -69,6 +69,7 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void)) {
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 #include "mongoose/mongoose.h"
+#include "listener_activity.h"
 #include "listener_arrival_probe.h"
 
 #define THIS_FILE "WebServer"
@@ -1117,10 +1118,6 @@ static uid_t conn_uid_by_tuple(struct mg_connection *c) {
    connection counters are fed from there, so the app's 1 Hz /internal-stats
    polls are not counted as user traffic. */
 #define CONN_REQ_OFFSET (REC_OFFSET + 1)
-/* WebSocket connections are long-lived on purpose (the app's realtime stats
- * stream); they are flagged so the idle drain leaves them alone - the client
- * reconnects by itself when the stream really goes away. */
-#define WS_CONN_OFFSET (REC_OFFSET + 1)
 static void conn_store_uid(struct mg_connection *c, uid_t uid) {
     memcpy(c->data + UID_OFFSET, &uid, sizeof(uid));
 }
@@ -3611,9 +3608,8 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
            accounting block in fn()): the app and the dashboard poll
            /internal-stats once a second, and counting those accept()s made the
            connection totals and the hourly chart look like permanent traffic. */
-        uint64_t t = mg_millis();
-        memcpy(c->data, &t, sizeof(t));
-        c->data[sizeof(t)] = 1;
+        listener_touch(c, mg_millis());
+        c->data[sizeof(uint64_t)] = 1;
 
         /* Per-app: the uid is resolved when the first request arrives
            (the connection is alive and present in /proc then). We just
@@ -3636,13 +3632,15 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
 
     if (ev == MG_EV_CLOSE) {
         /* Drop any in-flight transparent-proxy request of this client. */
-        proxy_drop_for_client(c);
-        /* Unregister from the WS push list. */
-        pthread_mutex_lock(&s_sni_mutex);
-        for (int i = 0; i < WS_PUSH_MAX; i++) {
-            if (ws_clients[i] == c) { ws_clients[i] = NULL; break; }
+        if (s_proxy_active) proxy_drop_for_client(c);
+        /* Only upgraded connections can be registered in the WS list. */
+        if (c->is_websocket) {
+            pthread_mutex_lock(&s_sni_mutex);
+            for (int i = 0; i < WS_PUSH_MAX; i++) {
+                if (ws_clients[i] == c) { ws_clients[i] = NULL; s_ws_pending &= ~(UINT32_C(1) << i); break; }
+            }
+            pthread_mutex_unlock(&s_sni_mutex);
         }
-        pthread_mutex_unlock(&s_sni_mutex);
         if (c->data[sizeof(uint64_t)]) atomic_sub_fetch(&s_active_connections, 1);
         return;
     }
@@ -3650,7 +3648,6 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     /* WebSocket: keep the connection open (client pulls or we push). */
     if (ev == MG_EV_WS_OPEN) {
         /* Register this connection as a push subscriber. */
-        c->data[WS_CONN_OFFSET] = 1;   /* exempt from the idle drain below */
         pthread_mutex_lock(&s_sni_mutex);  /* reuse cache mutex as a cheap lock */
         for (int i = 0; i < WS_PUSH_MAX; i++) {
             if (ws_clients[i] == NULL) {
@@ -3698,16 +3695,19 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
         return;
     }
 
-    /* Idle-timeout enforcement */
-    if (ev == MG_EV_POLL && c->data[sizeof(uint64_t)]) {
-        /* A transparent-proxy request may legitimately take longer than the
-           idle timeout, so it is exempt while it is in flight. */
-        if (c->data[WS_CONN_OFFSET]) return;   /* realtime stats stream: keep alive */
-        if (proxy_busy(c)) return;
-        uint64_t accepted_at; memcpy(&accepted_at, c->data, sizeof(accepted_at));
-        if (mg_millis() - accepted_at > IDLE_TIMEOUT_MS) {
-            c->is_draining = 1; return;
-        }
+    /* The poll event already supplies a shared monotonic timestamp. Only
+       check exceptional in-flight work after the idle threshold is reached. */
+    if (ev == MG_EV_POLL) {
+        if (listener_idle_due(c, *(const uint64_t *)ev_data, IDLE_TIMEOUT_MS) &&
+            !proxy_busy(c)) c->is_draining = 1;
+        return;
+    }
+    /* Successful response writes are activity, even during a long download.
+       Partial request reads do not extend the original idle deadline. */
+    if (ev == MG_EV_WRITE) {
+        if (c->data[sizeof(uint64_t)] && *(const long *)ev_data > 0)
+            listener_touch(c, mg_millis());
+        return;
     }
 
     if (ev != MG_EV_HTTP_MSG) return;
@@ -3716,15 +3716,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
     /* A pipeline may already have an earlier response queued. Observe only the
        response appended while handling this request, never that older status. */
     size_t response_offset = c->send.len;
+    /* Complete requests (including arrival probes) refresh the idle clock. */
+    listener_touch(c, mg_millis());
     if (ap_reply(c, hm)) return;
-
-    /* Keep-alive: the idle timer must measure IDLE time, not the age of the
-     * connection. Without this refresh every connection was drained exactly
-     * IDLE_TIMEOUT_MS after accept, so a browser had to open (and TLS
-     * handshake) a fresh connection for every further request, and a long
-     * download was cut off mid-flight. */
-    uint64_t last_io_ms = mg_millis();
-    memcpy(c->data, &last_io_ms, sizeof(last_io_ms));
 
     /* Custom/LAN response bindings must never expose diagnostics or a forward proxy. */
     bool local_peer = la_loopback_peer(c->rem.addr.ip, c->rem.is_ip6) != 0;
