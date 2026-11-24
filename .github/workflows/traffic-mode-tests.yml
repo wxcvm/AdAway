@@ -189,6 +189,8 @@ jobs:
           "$RUNNER_TEMP/uid-allow-test"
           cc -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/uid_allow_snapshot_test.c -o "$RUNNER_TEMP/uid-allow-asan"
           "$RUNNER_TEMP/uid-allow-asan"
+          cc -std=c11 -O2 -D_GNU_SOURCE -DMG_TLS=0 -Wall -Wextra -Werror -pedantic webserver/jni/listener_activity_test.c -o "$RUNNER_TEMP/listener-activity-test"
+          "$RUNNER_TEMP/listener-activity-test"
           cc -std=c11 -O2 -Wall -Wextra -Werror -pedantic webserver/jni/sni_cache_slot_test.c -o "$RUNNER_TEMP/sni-slot-test"
           "$RUNNER_TEMP/sni-slot-test"
           cc -std=c11 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer webserver/jni/sni_cache_slot_test.c -o "$RUNNER_TEMP/sni-slot-asan"
