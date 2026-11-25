@@ -7,7 +7,7 @@ import timber.log.Timber
 internal const val PREFS_MONITOR = "compose_app_monitor"
 internal const val PREFS_GENERAL = "compose_general"
 
-/** Whether stats should track uid. Default true. */
+/** Whether the active-app list displays uid. Native counters are unaffected. */
 internal fun isAppMonitored(context: Context, uid: Int): Boolean {
     return context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
         .getBoolean("monitor_$uid", true)
@@ -25,41 +25,34 @@ internal fun isAppAllowed(context: Context, uid: Int): Boolean {
         .getBoolean("allow_$uid", false)
 }
 
-internal fun setAppAllowed(context: Context, uid: Int, allowed: Boolean) {
-    context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
-        .edit().putBoolean("allow_$uid", allowed).apply()
-    // 同步写 allowlist.txt 供 webserver 实时读取
-    syncAllowlistFile(context)
+/** The caller serializes writes and executes on an I/O dispatcher. */
+@Synchronized
+internal fun setAppAllowed(context: Context, uid: Int, allowed: Boolean): Boolean {
+    val prefs = context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
+    val defaults = defaultAllowlistUids(context).toSet()
+    if (uid <= 0 || uid in defaults) return false
+    val uids = prefs.all.filterValues { it == true }.keys
+        .filter { it.startsWith("allow_") }
+        .mapNotNull { it.removePrefix("allow_").toIntOrNull() }.toSet()
+    return publishAppExemption(uids, defaults, uid, allowed,
+        publish = { org.adaway.util.WebServerUtils.writeAllowlistFile(context, it) },
+        remember = { prefs.edit().putBoolean("allow_$uid", allowed).apply() })
 }
 
-/** 把所有 allow_<uid>=true 的 uid 写入 webserver 目录 allowlist.txt。 */
-private fun syncAllowlistFile(context: Context) {
-    try {
-        val prefs = context.getSharedPreferences(PREFS_MONITOR, Context.MODE_PRIVATE)
-        val uids = prefs.all
-            .filterKeys { it.startsWith("allow_") }
-            .filterValues { it == true }
-            .keys
-            .mapNotNull { it.removePrefix("allow_").toIntOrNull() }
-            .toMutableSet()
-        /*
-         * Keep the captive-portal defaults in the file.
-         *
-         * This used to write the user's entries only, so flipping any "放行"
-         * switch silently dropped com.android.captiveportallogin and
-         * com.google.android.captiveportallogin (and on ColorOS the Wi-Fi
-         * dialog) until the next server start re-added them. Without their
-         * allowlist entry those components fall back to a blocked-request retry
-         * loop - measured at ~240 requests/second from one of them - so the
-         * "fix" of allowing one app quietly re-created the retry storm.
-         */
-        org.adaway.util.WebServerUtils.CAPTIVE_PORTAL_PACKAGES.forEach { pkg ->
-            runCatching { uids.add(context.packageManager.getPackageUid(pkg, 0)) }
-        }
-        val content = uids.sorted().joinToString("\n")
-        org.adaway.util.WebServerUtils.writeAllowlistFile(context, content)
-    } catch (e: Exception) {
-        Timber.w(e, "Failed to sync allowlist")
+/** Publish before updating the UI preference. A failed native write must leave the preference unchanged. */
+internal fun publishAppExemption(
+    current: Set<Int>, defaults: Set<Int>, uid: Int, allowed: Boolean,
+    publish: (String) -> Unit, remember: () -> Unit,
+): Boolean {
+    if (uid <= 0 || uid in defaults) return false
+    val next = if (allowed) current + uid else current - uid
+    return try {
+        publish((next + defaults).filter { it > 0 }.sorted().joinToString("\n"))
+        remember()
+        true
+    } catch (failure: Exception) {
+        Timber.w(failure, "Failed to publish app exemption")
+        false
     }
 }
 
