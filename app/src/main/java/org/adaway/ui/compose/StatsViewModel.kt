@@ -390,6 +390,11 @@ class StatsViewModel @JvmOverloads constructor(
      * 关闭（用户以为添加成功）。改签名而不是复制一份实现 —— Kotlin 允许把无参 lambda 传给
      * 单参函数类型（忽略 it 即可），所以既有调用点不需要改动。</p>
      */
+    fun restoreRuleBackup(uri: android.net.Uri, onDone: (Boolean) -> Unit) =
+        editLocalRules({
+            org.adaway.model.backup.BackupImporter.importBackup(getApplication<Application>(), uri)
+        }, onDone)
+
     fun addUserRule(host: String, type: Int, redirection: String?, onDone: (Boolean) -> Unit) = editLocalRules({
         val normalized = host.trim().lowercase(java.util.Locale.ROOT).removeSuffix(".")
         val wildcard = normalized.contains('*') || normalized.contains('?')
