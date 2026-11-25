@@ -414,36 +414,46 @@ internal fun ColumnScope.ToolsSettingsSection(viewModel: StatsViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(4.dp))
-                val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-                    if (uri != null) {
-                        val success = org.adaway.util.WebServerUtils.setCustomBlockImage(context, uri)
-                        android.widget.Toast.makeText(
-                            context,
-                            if (success) R.string.pref_webserver_block_image_success
-                            else R.string.pref_webserver_block_image_failed,
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
+                val imageScope = rememberCoroutineScope()
+                var imageBusy by remember { mutableStateOf(false) }
+                fun changeImage(uri: Uri?) {
+                    if (imageBusy) return
+                    imageBusy = true
+                    imageScope.launch {
+                        try {
+                            val message = withContext(Dispatchers.IO) {
+                                val saved = if (uri == null)
+                                    org.adaway.util.WebServerUtils.resetBlockImagesToDefault(context)
+                                else org.adaway.util.WebServerUtils.setCustomBlockImage(context, uri)
+                                when {
+                                    !saved -> R.string.pref_webserver_block_image_failed
+                                    org.adaway.util.WebServerUtils.reloadImages() -> R.string.block_image_reloaded
+                                    else -> R.string.block_image_saved_pending
+                                }
+                            }
+                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                        } finally { imageBusy = false }
                     }
+                }
+                Text(stringResource(R.string.block_image_scope), style = MaterialTheme.typography.bodySmall)
+                val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+                    if (uri != null) changeImage(uri)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = {
                             pickImageLauncher.launch("image/*")
                         },
+                        enabled = !imageBusy,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(stringResource(R.string.compose_settings_block_image_choose))
                     }
                     OutlinedButton(
                         onClick = {
-                            // 恢复默认
-                            org.adaway.util.WebServerUtils.resetBlockImagesToDefault(context)
-                            android.widget.Toast.makeText(
-                                context,
-                                R.string.pref_webserver_block_image_reset_success,
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
+                            changeImage(null)
                         },
+                        enabled = !imageBusy,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text(stringResource(R.string.compose_settings_block_image_reset))
