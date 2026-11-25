@@ -231,6 +231,9 @@
     <string name="compose_settings_allowlist_empty">暂无——在应用监控里把“放行”开关打开的应用会出现在这里。</string>
     <string name="compose_settings_allowlist_uid">UID %1$d</string>
     <string name="compose_settings_allowlist_remove">从放行名单移除</string>
+    <string name="block_image_scope">替换一个占位图槽位，其余内置图片仍随机出现。大图会降采样，仅影响图片应答。</string>
+    <string name="block_image_reloaded">图片已保存，服务器已确认重新加载。</string>
+    <string name="block_image_saved_pending">图片已保存，尚未确认实时重载；下次启动服务器时会读取。</string>
     <string name="compose_settings_block_image_title">拦截占位图</string>
     <string name="compose_settings_block_image_choose">选择自定义图片</string>
     <string name="compose_settings_block_image_reset">恢复默认</string>
