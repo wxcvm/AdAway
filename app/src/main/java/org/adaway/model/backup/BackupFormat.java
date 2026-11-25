@@ -68,6 +68,8 @@ final class BackupFormat {
             hostObject.put(REDIRECT_ATTRIBUTE, redirection);
         }
         hostObject.put(ENABLED_ATTRIBUTE, host.isEnabled());
+        hostObject.put("match_scope", host.getMatchScope());
+        hostObject.put("source_order", host.getSourceOrder());
         return hostObject;
     }
 
@@ -78,6 +80,12 @@ final class BackupFormat {
             host.setRedirection(hostObject.getString(REDIRECT_ATTRIBUTE));
         }
         host.setEnabled(hostObject.getBoolean(ENABLED_ATTRIBUTE));
+        if (hostObject.has("match_scope")) {
+            int scope = hostObject.getInt("match_scope");
+            if (scope < -1 || scope > 2) throw new JSONException("Invalid match scope");
+            host.setMatchScope(scope);
+        }
+        if (hostObject.has("source_order")) host.setSourceOrder(hostObject.getLong("source_order"));
         host.setSourceId(USER_SOURCE_ID);
         return host;
     }

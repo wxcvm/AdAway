@@ -126,13 +126,16 @@
     <string name="compose_stats_mode_allowed">allowed</string>
     <string name="compose_settings_title">Settings</string>
     <string name="compose_settings_apps_title">App monitoring</string>
-    <string name="compose_settings_apps_hint">Choose which apps appear in the per-app statistics</string>
+    <string name="compose_settings_apps_hint">Choose which apps appear in the active-app statistics list. This does not stop native counters or hide other diagnostics.</string>
     <string name="compose_settings_apps_empty">No apps detected yet — browse the web and apps will show up here.</string>
-    <string name="compose_settings_app_allow">Allow</string>
-    <string name="compose_settings_app_allow_explain">Allowed: this app now bypasses blocking entirely. Flip the switch back to undo.</string>
-    <string name="compose_settings_app_allow_hint">Allowed: this app bypasses blocking (flip back to undo)</string>
-    <string name="compose_settings_app_allow_undone">Undone: this app is filtered again</string>
-    <string name="compose_settings_app_monitor">Show in statistics</string>
+    <string name="compose_settings_app_allow">Local exemption</string>
+    <string name="compose_settings_app_allow_explain">Requested local UID exemption. This does not change external AdGuard or DNS rules and does not restore origin content on a response-only listener.</string>
+    <string name="compose_settings_app_allow_hint">Requested local exemption; external filtering remains independent.</string>
+    <string name="compose_settings_app_allow_undone">Requested removal of local exemption.</string>
+    <string name="settings_update_save_failed">Could not confirm the update preference operation. Recheck the setting.</string>
+    <string name="app_exemption_saved">Local exemption saved. Runtime reload is not yet verified; external DNS and AdGuard rules are unchanged.</string>
+    <string name="app_exemption_save_failed">Could not save local exemption, or this UID is not editable.</string>
+    <string name="compose_settings_app_monitor">Show in active list</string>
     <string name="compose_settings_allowlist_title">Allowlist (bypass blocking)</string>
     <string name="compose_settings_debug_title">Debug</string>
     <string name="compose_settings_debug_hint">Crash log and telemetry options</string>
@@ -227,6 +230,9 @@
     <string name="compose_settings_cert_install_manual">Manual install</string>
     <string name="compose_settings_cert_fingerprint">SHA-256 fingerprint</string>
     <string name="compose_settings_cert_export">Export certificate</string>
+    <string name="block_image_scope">Replaces one placeholder slot; other bundled images remain in rotation. Large images are downsampled. Only image responses are affected.</string>
+    <string name="block_image_reloaded">Images saved and server reload acknowledged.</string>
+    <string name="block_image_saved_pending">Images saved; live reload not confirmed. They will be read on the next server start.</string>
     <string name="compose_settings_block_image_title">Block placeholder image</string>
     <string name="compose_settings_block_image_choose">Choose custom image</string>
     <string name="compose_settings_block_image_reset">Reset to default</string>
@@ -429,7 +435,7 @@
     <string name="compose_settings_autostart_bootscript_on">Magisk boot script installed - the server is started from init at boot, no broadcast needed</string>
     <string name="compose_settings_autostart_bootscript_na">Magisk not detected - only the boot broadcast path is available; allow "autostart" in the system settings if the server does not come up</string>
     <string name="compose_settings_keepalive">Keep-alive service</string>
-    <string name="compose_settings_keepalive_hint">Adds a permanent notification; the server is then restarted within seconds instead of waiting for the periodic watchdog</string>
+    <string name="compose_settings_keepalive_hint">Uses a persistent notification and checks roughly every 60 seconds while running; recovery may still be delayed by Android.</string>
     <string name="notification_keepalive_channel_name">Server keep-alive</string>
     <string name="notification_keepalive_channel_description">Permanent notification shown while the keep-alive service runs</string>
     <string name="notification_keepalive_title">ADBlock is watching the server</string>
@@ -684,4 +690,12 @@
     <string name="compose_logs_placeholder_policy">Placeholder policy</string>
     <string name="compose_logs_category_policy">Category response policy</string>
     <string name="compose_logs_rejection_detail">The request was refused by an access check, for example a protected management endpoint, a web Origin, or a pinning policy. These rejections are not counted as ad filtering. Use the recorded path and HTTP status to distinguish this request from other requests to the same host.</string>
+    <string name="backup_document_saved">Backup written to selected document.</string>
+    <string name="backup_rules_restored">Rules saved. Check rule sync/application status; new sources need a sync.</string>
+    <string name="backup_rules_not_saved">Rule import not confirmed; check sync status.</string>
+    <string name="backup_rules_title">Rules and subscriptions</string>
+    <string name="backup_rules_scope">Merge personal rules and source definitions. Existing sources are retained; local file access must be granted again. Sync new sources after importing.</string>
+    <string name="backup_ui_title">Portable UI preferences</string>
+    <string name="backup_ui_scope">Theme and chart preferences only. No listener, certificates, app UID exemptions or server state is restored. Old settings backups can restore the supported UI fields.</string>
+    <string name="backup_ui_restored">UI preferences saved. Reopen the app if the theme is not refreshed.</string>
 </resources>

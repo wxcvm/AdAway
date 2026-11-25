@@ -1564,7 +1564,7 @@ private static String computeSubjectHashOld(Path certFile)
 
     // ── Private helpers ──────────────────────────────────────────
 
-    private static void ensureStaticResources(Context context, Path target) {
+    private static synchronized void ensureStaticResources(Context context, Path target) {
         android.content.res.AssetManager am = context.getAssets();
         try {
             if (!Files.isDirectory(target)) Files.createDirectories(target);
@@ -1695,7 +1695,8 @@ private static String computeSubjectHashOld(Path certFile)
                     return;
                 }
                 try (OutputStream os = Files.newOutputStream(out)) {
-                    bitmap.compress(Bitmap.CompressFormat.WEBP, 85, os);
+                    if (!bitmap.compress(Bitmap.CompressFormat.WEBP, 85, os))
+                        throw new IOException("WebP compression failed for " + assetName);
                 } finally {
                     bitmap.recycle();
                 }
@@ -1718,7 +1719,7 @@ private static String computeSubjectHashOld(Path certFile)
             stream.filter(p -> {
                 String name = p.getFileName().toString();
                 return name.startsWith("img_") && name.endsWith(".webp");
-            }).forEach(result::add);
+            }).sorted().forEach(result::add);
         } catch (IOException e) {
             Timber.w(e, "Failed to list block image slots.");
         }
@@ -1767,60 +1768,89 @@ private static String computeSubjectHashOld(Path certFile)
      *
      * @return true if the image was decoded and written successfully.
      */
-    public static boolean setCustomBlockImage(Context context, Uri imageUri) {
-        Bitmap bitmap;
-        try (InputStream is = context.getContentResolver().openInputStream(imageUri)) {
-            if (is == null) return false;
-            bitmap = BitmapFactory.decodeStream(is);
-        } catch (IOException e) {
-            Timber.e(e, "Failed to read picked block image.");
-            return false;
-        }
-        if (bitmap == null) {
-            Timber.e("Failed to decode picked block image.");
-            return false;
-        }
-        Bitmap.CompressFormat format = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                ? Bitmap.CompressFormat.WEBP_LOSSY
-                : Bitmap.CompressFormat.WEBP;
-        Path resourceDir = getResourcePath(context);
+    public static synchronized boolean setCustomBlockImage(Context context, Uri imageUri) {
+        Bitmap bitmap = null;
         try {
-            if (!Files.isDirectory(resourceDir)) Files.createDirectories(resourceDir);
-            java.util.List<Path> slots = listBlockImageSlots(resourceDir);
-            // Only replace the primary slot so the other default
-            // placeholders keep their visual variety (the native server
-            // picks one image at random per request).
-            Path out = slots.isEmpty() ? resourceDir.resolve("img_00.webp") : slots.get(0);
-            try (OutputStream os = Files.newOutputStream(out)) {
-                bitmap.compress(format, 90, os);
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try (InputStream in = context.getContentResolver().openInputStream(imageUri)) {
+                if (in == null) return false;
+                BitmapFactory.decodeStream(in, null, bounds);
             }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = BlockImageFiles.sampleSize(bounds.outWidth, bounds.outHeight);
+            try (InputStream in = context.getContentResolver().openInputStream(imageUri)) {
+                if (in == null) return false;
+                bitmap = BitmapFactory.decodeStream(in, null, options);
+            }
+            if (bitmap == null) return false;
+            Bitmap.CompressFormat format = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    ? Bitmap.CompressFormat.WEBP_LOSSY : Bitmap.CompressFormat.WEBP;
+            Path dir = getResourcePath(context);
+            Files.createDirectories(dir);
+            java.util.List<Path> slots = listBlockImageSlots(dir);
+            Path out = slots.isEmpty() ? dir.resolve("img_00.webp") : slots.get(0);
+            final Bitmap decoded = bitmap;
+            BlockImageFiles.replace(out, os -> {
+                if (!decoded.compress(format, 90, os)) throw new IOException("WebP compression failed");
+            });
             return true;
-        } catch (IOException e) {
-            Timber.e(e, "Failed to write custom block image.");
+        } catch (IOException | RuntimeException e) {
+            Timber.w(e, "Failed to save custom block image");
             return false;
         } finally {
-            bitmap.recycle();
+            if (bitmap != null) bitmap.recycle();
         }
     }
 
-    /**
-     * Delete the (possibly user-customized) block-placeholder images so
-     * ensureStaticResources() re-extracts the original defaults from the
-     * APK's assets on the next web server start - it only ever copies a
-     * given filename if it's missing, which is what makes both this and
-     * setCustomBlockImage() above work without needing any extra "is this
-     * customized" flag.
+    /** Restore bundled placeholders without touching certificates or test resources.
+     * Stage all defaults before replacing any live file. Each replacement is atomic.
      */
-    public static void resetBlockImagesToDefault(Context context) {
-        Path resourceDir = getResourcePath(context);
-        for (Path slot : listBlockImageSlots(resourceDir)) {
-            try {
-                Files.deleteIfExists(slot);
-            } catch (IOException e) {
-                Timber.w(e, "Failed to delete block image %s for reset.", slot);
+    public static synchronized boolean resetBlockImagesToDefault(Context context) {
+        Path dir = getResourcePath(context);
+        Path staging = null;
+        try {
+            Files.createDirectories(dir);
+            android.content.res.AssetManager assets = context.getAssets();
+            String[] names = assets.list("");
+            if (names == null) return false;
+            staging = Files.createTempDirectory(dir, ".image-reset-");
+            for (String name : names) {
+                if (!BLOCK_IMAGE_ASSET_PATTERN.matcher(name).matches()) continue;
+                inflateBlockImageAsset(assets, name, staging);
+                Path expected = staging.resolve(name.substring(0, name.lastIndexOf('.')) + ".webp");
+                if (!Files.isRegularFile(expected) || Files.size(expected) == 0)
+                    throw new IOException("Could not restore " + name);
+            }
+            java.util.List<Path> defaults = listBlockImageSlots(staging);
+            if (defaults.isEmpty()) return false;
+            java.util.Set<String> keep = new java.util.HashSet<>();
+            for (Path image : defaults) {
+                String name = image.getFileName().toString();
+                Files.move(image, dir.resolve(name), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                keep.add(name);
+            }
+            for (Path slot : listBlockImageSlots(dir)) {
+                if (!keep.contains(slot.getFileName().toString())) Files.deleteIfExists(slot);
+            }
+            final String hash = computeBlockImageAssetsHash(assets, names);
+            BlockImageFiles.replace(dir.resolve(BLOCK_IMAGES_VERSION_FILE),
+                    os -> os.write(hash.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            return true;
+        } catch (IOException | RuntimeException e) {
+            Timber.w(e, "Failed to reset block images");
+            return false;
+        } finally {
+            if (staging != null) {
+                try (java.util.stream.Stream<Path> files = Files.list(staging)) {
+                    for (Path file : (Iterable<Path>) files::iterator) Files.deleteIfExists(file);
+                } catch (IOException e) { Timber.w(e, "Failed to clean staged images"); }
+                try { Files.deleteIfExists(staging); }
+                catch (IOException e) { Timber.w(e, "Failed to clean image staging directory"); }
             }
         }
-        ensureStaticResources(context, resourceDir);
     }
 
     private static void inflateResource(android.content.res.AssetManager am,
