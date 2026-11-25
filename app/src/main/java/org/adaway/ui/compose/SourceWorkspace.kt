@@ -42,17 +42,19 @@ internal fun SourcesWorkspace(sources: List<HostsSource>, enabled: Boolean,
     onToggle: (HostsSource, Boolean) -> Unit, onAddClick: () -> Unit,
     onDelete: (HostsSource) -> Unit, onInspect: (HostsSource) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Card(shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.compose_rules_sources_overview, sources.count { it.isEnabled }, sources.size),
-                    style = MaterialTheme.typography.titleMedium)
+                    style = MaterialTheme.typography.headlineSmall)
                 Text(stringResource(R.string.compose_rules_source_help), style = MaterialTheme.typography.bodySmall)
-                FilledTonalButton(enabled = enabled, onClick = onAddClick) { Text(stringResource(R.string.compose_rules_add_source)) }
+                Button(enabled = enabled, onClick = onAddClick, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.compose_rules_add_source)) }
             }
         }
         if (sources.isEmpty()) Text(stringResource(R.string.compose_rules_sources_empty))
         for (source in sources) key(source.id) {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+            OutlinedCard(shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(SourcePresentation.name(source.label, source.url), Modifier.weight(1f),
@@ -65,7 +67,7 @@ internal fun SourcesWorkspace(sources: List<HostsSource>, enabled: Boolean,
                         else stringResource(R.string.compose_rules_source_size, source.size),
                         style = MaterialTheme.typography.labelMedium)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        OutlinedButton(onClick = { onInspect(source) }) {
+                        TextButton(onClick = { onInspect(source) }) {
                             Text(stringResource(R.string.compose_rules_source_details), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                         }
                         TextButton(enabled = enabled, onClick = { onDelete(source) }) {
