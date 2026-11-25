@@ -15,7 +15,7 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.List
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,11 +56,11 @@ fun MoreScreen(
     onOpenSettings: () -> Unit,
 ) {
     val tools = listOf(
-        MoreAction(R.string.compose_more_logs, R.string.compose_more_logs_desc, Icons.Outlined.Info, onOpenLogs),
+        MoreAction(R.string.compose_more_settings, R.string.compose_more_settings_desc, Icons.Outlined.Settings, onOpenSettings),
+        MoreAction(R.string.compose_more_logs, R.string.compose_more_logs_desc, Icons.Outlined.List, onOpenLogs),
         MoreAction(R.string.compose_more_exempt, R.string.compose_more_exempt_desc, Icons.Outlined.Shield, onOpenExempt),
         MoreAction(R.string.compose_more_overrides, R.string.compose_more_overrides_desc, Icons.Outlined.Public, onOpenOverrides),
         MoreAction(R.string.compose_more_network, R.string.compose_more_network_desc, Icons.Outlined.Dns, onOpenNetwork),
-        MoreAction(R.string.compose_more_settings, R.string.compose_more_settings_desc, Icons.Outlined.Settings, onOpenSettings),
     )
     Scaffold(
         topBar = {

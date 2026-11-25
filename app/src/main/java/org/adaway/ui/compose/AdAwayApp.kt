@@ -19,7 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.outlined.DonutLarge
 import androidx.compose.material.icons.outlined.Menu
-import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.List
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -44,8 +44,8 @@ import androidx.navigation.compose.rememberNavController
 import org.adaway.R
 
 /**
- * Root Compose navigation: Overview, Statistics, Rules, Settings, More.
- * Secondary screens are reachable from More without crowding five primary tabs.
+ * Root Compose navigation: Overview, Statistics, Rules, Logs, More.
+ * Settings and secondary tools remain reachable from More.
  */
 object Destinations {
     const val OVERVIEW = "overview"
@@ -54,7 +54,7 @@ object Destinations {
     const val SETTINGS = "settings"
     const val NETWORK = "network"
     const val MORE = "more"
-    /** Secondary page (not a bottom-bar tab): the full request log. */
+    /** Primary destination: the full request log. */
     const val LOGS = "logs"
     /** Secondary page: per-domain exemptions (解除过滤), reachable from the rules page. */
     const val EXEMPT = "rules/exempt"
@@ -74,7 +74,7 @@ private val destinations = listOf(
     Destination(Destinations.OVERVIEW, R.string.compose_nav_overview, Icons.Filled.Home),
     Destination(Destinations.STATS, R.string.compose_nav_stats, Icons.Outlined.DonutLarge),
     Destination(Destinations.RULES, R.string.compose_nav_rules, Icons.Outlined.Shield),
-    Destination(Destinations.SETTINGS, R.string.compose_nav_settings, Icons.Outlined.Settings),
+    Destination(Destinations.LOGS, R.string.compose_nav_logs, Icons.Outlined.List),
     Destination(Destinations.MORE, R.string.compose_nav_more, Icons.Outlined.Menu),
 )
 
@@ -86,7 +86,6 @@ fun AdAwayApp() {
     // Full-screen secondary workflows already provide their own Back action.
     // Keeping the primary navigation here wastes valuable space on phones.
     val showBottomBar = currentDestination?.route !in setOf(
-        Destinations.LOGS,
         Destinations.NETWORK,
         Destinations.EXEMPT,
         Destinations.OVERRIDES,
@@ -108,9 +107,10 @@ fun AdAwayApp() {
                     val selected = currentDestination?.hierarchy
                         ?.any { it.route == dest.route } == true ||
                         (dest.route == Destinations.MORE && currentDestination?.route in
-                            listOf(Destinations.NETWORK, Destinations.LOGS, Destinations.EXEMPT, Destinations.OVERRIDES))
+                            listOf(Destinations.SETTINGS, Destinations.NETWORK, Destinations.EXEMPT, Destinations.OVERRIDES))
                     NavigationBarItem(
                         selected = selected,
+                        modifier = Modifier.testTag("main-nav-${dest.route}"),
                         onClick = {
                             navController.navigate(dest.route) {
                                 popUpTo(navController.graph.findStartDestination().id) {

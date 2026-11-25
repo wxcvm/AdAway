@@ -2,6 +2,8 @@ package org.adaway.ui.compose
 
 import android.content.Context
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -92,9 +94,15 @@ internal fun ContentResponseSettingsCard(
     }
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.content_scope), style = MaterialTheme.typography.bodyMedium)
-            Text(stringResource(if (edited) R.string.content_status_draft else status),
-                modifier = Modifier.testTag("content-status"), color = MaterialTheme.colorScheme.primary)
+            Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.content_scope), style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(if (edited) R.string.content_status_draft else status),
+                        modifier = Modifier.testTag("content-status"), color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.titleSmall)
+                }
+            }
             // Reserve the progress slot: removing it after IO used to shrink
             // the form by 16dp and clamp a bottom scroll (32px on API30).
             Box(Modifier.fillMaxWidth().height(4.dp)) {
@@ -128,7 +136,7 @@ internal fun ContentResponseSettingsCard(
                         } catch (_: IOException) { status = R.string.content_status_save_failed }
                         finally { busy = false }
                     }
-                }, enabled = !busy, modifier = Modifier.testTag("content-save")) {
+                }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("content-save")) {
                     Text(stringResource(if (edited) R.string.content_save else R.string.content_verify))
                 }
                 // Errors remain visible even while a failed save leaves an unsaved draft.
@@ -149,7 +157,7 @@ internal fun ContentResponseSettingsCard(
 @Composable
 private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Boolean, validCount: Int, rulesExist: Boolean, rulesReadable: Boolean,
                                  onToggle: (String, Boolean) -> Unit, onEditRules: () -> Unit) {
-                Text(stringResource(R.string.content_types_title), style = MaterialTheme.typography.titleMedium)
+                ContentGroupTitle(stringResource(R.string.content_types_title))
                 Text(stringResource(R.string.content_types_hint), style = MaterialTheme.typography.bodySmall)
                 val categories = listOf(
                     "images" to R.string.compose_stats_type_images, "scripts" to R.string.compose_stats_type_scripts,
@@ -162,11 +170,11 @@ private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Bool
                     ContentSwitch(key, stringResource(label), null, current.enabled(key), enabled) { onToggle(key, it) }
                 }
                 HorizontalDivider()
-                Text(stringResource(R.string.content_visible_group), style = MaterialTheme.typography.titleMedium)
+                ContentGroupTitle(stringResource(R.string.content_visible_group))
                 ContentSwitch("visible", stringResource(R.string.compose_settings_visible_reply),
                     stringResource(R.string.compose_settings_visible_reply_hint), current.enabled("visible"), enabled) { onToggle("visible", it) }
                 HorizontalDivider()
-                Text(stringResource(R.string.content_protection_title), style = MaterialTheme.typography.titleMedium)
+                ContentGroupTitle(stringResource(R.string.content_protection_title))
                 Text(stringResource(R.string.content_protection_tradeoff), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 listOf(
@@ -177,7 +185,7 @@ private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Bool
                     ContentSwitch(key, stringResource(label), stringResource(hint), current.enabled(key), enabled) { onToggle(key, it) }
                 }
                 HorizontalDivider()
-                Text(stringResource(R.string.compose_settings_rule_override), style = MaterialTheme.typography.titleMedium)
+                ContentGroupTitle(stringResource(R.string.compose_settings_rule_override))
                 Text(stringResource(R.string.compose_settings_rule_override_hint), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(if (!rulesReadable) stringResource(R.string.content_rules_read_failed)
@@ -196,10 +204,19 @@ private fun ContentPolicyOptions(current: ContentResponseSettings, enabled: Bool
 }
 
 @Composable
+private fun ContentGroupTitle(label: String) {
+    Text(label, style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier.fillMaxWidth()
+            .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp))
+}
+
+@Composable
 private fun ContentSwitch(key: String, title: String, hint: String?, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().testTag("content-toggle-$key")
         .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
-        .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        .padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(title, style = MaterialTheme.typography.bodyMedium)
             if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
