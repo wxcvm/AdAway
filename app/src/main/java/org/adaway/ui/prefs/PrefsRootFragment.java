@@ -160,11 +160,12 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
                      */
                     AppExecutors.getInstance().diskIO().execute(() -> {
                         boolean ok = org.adaway.util.WebServerUtils.setCustomBlockImage(ctx, uri);
+                        boolean reloaded = ok && org.adaway.util.WebServerUtils.reloadImages();
                         AppExecutors.getInstance().mainThread().execute(() ->
                                 android.widget.Toast.makeText(
                                         ctx,
-                                        ok ? R.string.pref_webserver_block_image_success
-                                           : R.string.pref_webserver_block_image_failed,
+                                        !ok ? R.string.pref_webserver_block_image_failed
+                                           : reloaded ? R.string.block_image_reloaded : R.string.block_image_saved_pending,
                                         android.widget.Toast.LENGTH_LONG
                                 ).show()
                         );
@@ -388,11 +389,13 @@ public class PrefsRootFragment extends PreferenceFragmentCompat implements Share
                             this.pickBlockImageLauncher.launch("image/*");
                         } else {
                             AppExecutors.getInstance().diskIO().execute(() -> {
-                                org.adaway.util.WebServerUtils.resetBlockImagesToDefault(ctx);
+                                boolean ok = org.adaway.util.WebServerUtils.resetBlockImagesToDefault(ctx);
+                                boolean reloaded = ok && org.adaway.util.WebServerUtils.reloadImages();
                                 AppExecutors.getInstance().mainThread().execute(() ->
                                         android.widget.Toast.makeText(
                                                 ctx,
-                                                R.string.pref_webserver_block_image_reset_success,
+                                                !ok ? R.string.pref_webserver_block_image_failed
+                                                    : reloaded ? R.string.block_image_reloaded : R.string.block_image_saved_pending,
                                                 android.widget.Toast.LENGTH_SHORT
                                         ).show()
                                 );

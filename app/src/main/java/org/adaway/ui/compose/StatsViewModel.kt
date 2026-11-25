@@ -256,9 +256,30 @@ class StatsViewModel @JvmOverloads constructor(
      * 放行整个应用：与设置页"应用监控"里的放行开关共用同一状态，写进
      * allowlist.txt，服务器随后不再拦截该 uid。
      */
-    fun allowAppForever(uid: Int) {
-        setAppAllowed(getApplication<Application>(), uid, true)
+    private val mutableExemptionBusy = MutableStateFlow(false)
+    val exemptionBusy: StateFlow<Boolean> = mutableExemptionBusy
+
+    fun changeAppExemption(uid: Int, allowed: Boolean, onDone: (Boolean) -> Unit = {}) {
+        if (!mutableExemptionBusy.compareAndSet(false, true)) return
+        viewModelScope.launch {
+            try {
+                val app = getApplication<Application>()
+                val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    setAppAllowed(app, uid, allowed)
+                }
+                android.widget.Toast.makeText(app,
+                    if (ok) org.adaway.R.string.app_exemption_saved
+                    else org.adaway.R.string.app_exemption_save_failed,
+                    android.widget.Toast.LENGTH_LONG).show()
+                if (ok) refreshServerStats()
+                onDone(ok)
+            } finally {
+                mutableExemptionBusy.value = false
+            }
+        }
     }
+
+    fun allowAppForever(uid: Int) = changeAppExemption(uid, true)
 
     /**
      * 把规则库里的 ALLOWED 条目导出成原生读取的 `domain_allowlist.txt`。
@@ -369,6 +390,11 @@ class StatsViewModel @JvmOverloads constructor(
      * 关闭（用户以为添加成功）。改签名而不是复制一份实现 —— Kotlin 允许把无参 lambda 传给
      * 单参函数类型（忽略 it 即可），所以既有调用点不需要改动。</p>
      */
+    fun restoreRuleBackup(uri: android.net.Uri, onDone: (Boolean) -> Unit) =
+        editLocalRules({
+            org.adaway.model.backup.BackupImporter.importBackup(getApplication<Application>(), uri)
+        }, onDone)
+
     fun addUserRule(host: String, type: Int, redirection: String?, onDone: (Boolean) -> Unit) = editLocalRules({
         val normalized = host.trim().lowercase(java.util.Locale.ROOT).removeSuffix(".")
         val wildcard = normalized.contains('*') || normalized.contains('?')

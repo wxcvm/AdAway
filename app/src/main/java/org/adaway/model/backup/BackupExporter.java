@@ -85,10 +85,12 @@ public class BackupExporter {
         ).show();
     }
 
-    static void exportBackup(Context context, Uri backupUri) throws IOException {
+    public static void exportBackup(Context context, Uri backupUri) throws IOException {
         // Open writer on the export file
-        try (OutputStream outputStream = context.getContentResolver().openOutputStream(backupUri);
-             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream))) {
+        OutputStream opened = context.getContentResolver().openOutputStream(backupUri);
+        if (opened == null) throw new IOException("Cannot open backup");
+        try (OutputStream outputStream = opened;
+             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(outputStream, java.nio.charset.StandardCharsets.UTF_8))) {
             JSONObject backup = makeBackup(context);
             writer.write(backup.toString(4));
         } catch (JSONException e) {

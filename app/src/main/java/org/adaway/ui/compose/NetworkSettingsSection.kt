@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /** Category content only. Navigation and saveable scroll keys stay in SettingsScreen. */
 @Composable
@@ -429,6 +430,7 @@ internal fun ColumnScope.NetworkSettingsSection(viewModel: StatsViewModel, actio
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(4.dp))
+            val exemptionBusy by viewModel.exemptionBusy.collectAsStateWithLifecycle()
             val userUids = userAllowedUids(context)
             if (userUids.isEmpty()) {
                 Text(
@@ -456,9 +458,10 @@ internal fun ColumnScope.NetworkSettingsSection(viewModel: StatsViewModel, actio
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        IconButton(onClick = {
-                            setAppAllowed(context, uid, false)
-                            onPreferencesChanged()
+                        IconButton(enabled = !exemptionBusy, onClick = {
+                            viewModel.changeAppExemption(uid, false) {
+                                onPreferencesChanged()
+                            }
                         }) {
                             Icon(
                                 Icons.Outlined.RemoveCircle,

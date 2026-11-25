@@ -126,13 +126,16 @@
     <string name="compose_stats_mode_allowed">放行</string>
     <string name="compose_settings_title">设置</string>
     <string name="compose_settings_apps_title">应用监控</string>
-    <string name="compose_settings_apps_hint">选择要在应用统计中显示的应用</string>
+    <string name="compose_settings_apps_hint">选择在活跃应用统计列表显示哪些应用，不会停止原生计数或隐藏其他诊断。</string>
     <string name="compose_settings_apps_empty">暂未检测到应用——浏览网页后应用会显示在这里。</string>
-    <string name="compose_settings_app_allow">放行</string>
-    <string name="compose_settings_app_allow_explain">已放行：该应用的流量将不再被拦截。把开关拨回去即可撤销。</string>
-    <string name="compose_settings_app_allow_hint">已放行：该应用绕过拦截（拨回开关可撤销）</string>
-    <string name="compose_settings_app_allow_undone">已撤销：该应用重新被拦截</string>
-    <string name="compose_settings_app_monitor">在统计中显示</string>
+    <string name="compose_settings_app_allow">本地豁免</string>
+    <string name="compose_settings_app_allow_explain">已请求本地 UID 豁免，不会修改外部 AdGuard 或 DNS 规则；仅应答监听也无法恢复源站内容。</string>
+    <string name="compose_settings_app_allow_hint">已请求本地豁免；外部过滤仍独立。</string>
+    <string name="compose_settings_app_allow_undone">已请求撤销本地豁免。</string>
+    <string name="settings_update_save_failed">未能确认更新设置操作，请重新检查设置。</string>
+    <string name="app_exemption_saved">本地豁免已保存，尚未验证服务端重载；外部 DNS 和 AdGuard 规则不变。</string>
+    <string name="app_exemption_save_failed">本地豁免保存失败，或此 UID 不可修改。</string>
+    <string name="compose_settings_app_monitor">活跃列表显示</string>
     <string name="compose_settings_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
     <string name="compose_settings_charts_title">统计图表</string>
     <string name="compose_settings_charts_hint">选择要显示的图表和卡片</string>
@@ -228,6 +231,9 @@
     <string name="compose_settings_allowlist_empty">暂无——在应用监控里把“放行”开关打开的应用会出现在这里。</string>
     <string name="compose_settings_allowlist_uid">UID %1$d</string>
     <string name="compose_settings_allowlist_remove">从放行名单移除</string>
+    <string name="block_image_scope">替换一个占位图槽位，其余内置图片仍随机出现。大图会降采样，仅影响图片应答。</string>
+    <string name="block_image_reloaded">图片已保存，服务器已确认重新加载。</string>
+    <string name="block_image_saved_pending">图片已保存，尚未确认实时重载；下次启动服务器时会读取。</string>
     <string name="compose_settings_block_image_title">拦截占位图</string>
     <string name="compose_settings_block_image_choose">选择自定义图片</string>
     <string name="compose_settings_block_image_reset">恢复默认</string>
@@ -429,7 +435,7 @@
     <string name="compose_settings_autostart_bootscript_on">已写入 Magisk 开机脚本：开机由系统直接拉起服务器，不再依赖开机广播</string>
     <string name="compose_settings_autostart_bootscript_na">未检测到 Magisk：只能依赖开机广播，若开机没起来请在系统设置里允许“自启动”</string>
     <string name="compose_settings_keepalive">常驻守护（前台服务）</string>
-    <string name="compose_settings_keepalive_hint">会常驻一条通知；服务器一旦停止，几秒内自动重启（而不是等周期看护的十几分钟）</string>
+    <string name="compose_settings_keepalive_hint">使用常驻通知，服务运行时约每 60 秒检查；实际恢复仍可能受 Android 调度影响。</string>
     <string name="notification_keepalive_channel_name">服务器守护</string>
     <string name="notification_keepalive_channel_description">常驻守护运行期间显示的通知</string>
     <string name="notification_keepalive_title">ADBlock 正在守护服务器</string>
@@ -684,4 +690,12 @@
     <string name="compose_logs_placeholder_policy">占位图策略</string>
     <string name="compose_logs_category_policy">分类应答策略</string>
     <string name="compose_logs_rejection_detail">此请求被访问检查拒绝，例如受保护的管理接口、网页 Origin 或证书锁定策略。这类拒绝不计入广告过滤统计。请结合路径和 HTTP 状态，与同域名的图片等其他请求区分。</string>
+    <string name="backup_document_saved">备份已写入所选文件。</string>
+    <string name="backup_rules_restored">规则已保存，请检查规则同步与应用状态；新订阅需要同步。</string>
+    <string name="backup_rules_not_saved">规则导入未确认，请检查同步状态。</string>
+    <string name="backup_rules_title">规则与订阅</string>
+    <string name="backup_rules_scope">合并个人规则和订阅定义，保留已有订阅；本地文件需重新授权，导入后同步新订阅。</string>
+    <string name="backup_ui_title">可迁移界面偏好</string>
+    <string name="backup_ui_scope">仅主题与图表偏好，不恢复监听、证书、应用 UID 豁免或服务状态。旧设置备份可恢复其中受支持的界面字段。</string>
+    <string name="backup_ui_restored">界面偏好已保存，如主题未刷新请重新打开应用。</string>
 </resources>
