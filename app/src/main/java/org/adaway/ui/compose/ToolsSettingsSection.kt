@@ -115,34 +115,8 @@ internal fun ColumnScope.ToolsSettingsSection(viewModel: StatsViewModel) {
                 )
             }
             Spacer(Modifier.height(8.dp))
-            // 备份/恢复：导出规则+设置到文件，或从文件恢复
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = {
-                        exportBackup(context)
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.compose_settings_backup))
-                }
-                OutlinedButton(
-                    onClick = {
-                        importBackup(context, viewModel) {
-                            // 恢复后重启应用使全部设置生效
-                            val pm = context.packageManager
-                            val launch = pm.getLaunchIntentForPackage(context.packageName)
-                            if (launch != null) {
-                                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                                context.startActivity(launch)
-                            }
-                            kotlin.system.exitProcess(0)
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.compose_settings_restore))
-                }
-            }
+            BackupActions(viewModel)
+
         }
     }
 
@@ -690,114 +664,87 @@ private fun UpdateCheckRow(viewModel: StatsViewModel, currentVersion: String) {
     }
 }
 
-/**
- * 导出备份：把所有偏好（compose_general / compose_app_monitor /
- * compose_webserver）序列化为 JSON 写入 Download/adblock-backup.json，
- * 并提示用户。Android 11+ 通过 MediaStore 写入（无需存储权限）。
- */
-private fun exportBackup(context: Context) {
-    try {
-        val prefsNames = listOf(PREFS_GENERAL, PREFS_MONITOR, "compose_webserver")
-        val json = org.json.JSONObject()
-        prefsNames.forEach { name ->
-            val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-            val section = org.json.JSONObject()
-            prefs.all.forEach { (k, v) ->
-                when (v) {
-                    is Boolean -> section.put(k, v)
-                    is Int -> section.put(k, v)
-                    is Long -> section.put(k, v)
-                    is Float -> section.put(k, v)
-                    is String -> section.put(k, v)
-                    is java.util.Set<*> -> section.put(k, org.json.JSONArray(v.toList()))
-                }
-            }
-            json.put(name, section)
-        }
-        val resolver = context.contentResolver
-        val values = android.content.ContentValues().apply {
-            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, "adblock-backup.json")
-            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/json")
-            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
-        }
-        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        if (uri == null) {
-            Toast.makeText(context, context.getString(R.string.compose_backup_no_slot), Toast.LENGTH_LONG).show()
-            return
-        }
-        resolver.openOutputStream(uri)?.use { out ->
-            out.write(json.toString(2).toByteArray())
-        } ?: throw java.io.IOException("cannot open output stream")
-        Toast.makeText(context, context.getString(R.string.compose_backup_ok), Toast.LENGTH_LONG).show()
-    } catch (e: Exception) {
-        Timber.w(e, "Failed to export backup")
-        Toast.makeText(context, context.getString(R.string.compose_backup_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
-    }
-}
-
-/**
- * 导入备份：用文件选择器挑选 adblock-backup.json，
- * 解析后逐项写回偏好，完成后回调（重启应用使全部生效）。
- */
-private fun importBackup(
-    context: Context,
-    viewModel: StatsViewModel,
-    onDone: () -> Unit,
-) {
-    try {
-        // 通过 MediaStore 查询 Download 中的 adblock-backup.json（scoped storage 兼容）
-        val resolver = context.contentResolver
-        val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(android.provider.MediaStore.MediaColumns._ID)
-        var text: String? = null
-        resolver.query(
-            collection,
-            projection,
-            "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?",
-            arrayOf("adblock-backup.json"),
-            "${android.provider.MediaStore.MediaColumns.DATE_MODIFIED} DESC",
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(0)
-                val uri = android.content.ContentUris.withAppendedId(collection, id)
-                text = resolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-            }
-        }
-        if (text == null) {
-            Toast.makeText(context, context.getString(R.string.compose_backup_none), Toast.LENGTH_LONG).show()
-            return
-        }
-        val json = org.json.JSONObject(text)
-        val prefsNames = listOf(PREFS_GENERAL, PREFS_MONITOR, "compose_webserver")
-        prefsNames.forEach { name ->
-            val section = json.optJSONObject(name) ?: return@forEach
-            val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-            val editor = prefs.edit()
-            // 先清空再写入
-            prefs.all.keys.forEach { editor.remove(it) }
-            val it = section.keys()
-            while (it.hasNext()) {
-                val k = it.next()
-                val v = section.get(k)
-                when (v) {
-                    is Boolean -> editor.putBoolean(k, v)
-                    is Int -> editor.putInt(k, v)
-                    is Long -> editor.putLong(k, v)
-                    is Double -> editor.putInt(k, v.toInt())
-                    is String -> editor.putString(k, v)
-                    is org.json.JSONArray -> {
-                        val list = mutableListOf<String>()
-                        for (i in 0 until v.length()) list.add(v.getString(i))
-                        editor.putStringSet(k, list.toSet())
+@Composable
+private fun BackupActions(viewModel: StatsViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    val exportRules = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            busy = true
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        org.adaway.model.backup.BackupExporter.exportBackup(context, uri)
                     }
-                }
+                    Toast.makeText(context, R.string.backup_document_saved, Toast.LENGTH_LONG).show()
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) {
+                    Timber.w(e, "Rule backup export failed")
+                    Toast.makeText(context, context.getString(R.string.compose_backup_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                } finally { busy = false }
             }
-            editor.apply()
         }
-        Toast.makeText(context, context.getString(R.string.compose_backup_restored), Toast.LENGTH_LONG).show()
-        onDone()
-    } catch (e: Exception) {
-        Timber.w(e, "Failed to import backup")
-        Toast.makeText(context, context.getString(R.string.compose_restore_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+    }
+    val importRules = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            busy = true
+            viewModel.restoreRuleBackup(uri) { saved ->
+                busy = false
+                Toast.makeText(context, if (saved) R.string.backup_rules_restored else R.string.backup_rules_not_saved,
+                    Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    val exportUi = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            busy = true
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        PortableUiBackup.export(context, uri)
+                    }
+                    Toast.makeText(context, R.string.backup_document_saved, Toast.LENGTH_LONG).show()
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) {
+                    Toast.makeText(context, context.getString(R.string.compose_backup_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                } finally { busy = false }
+            }
+        }
+    }
+    val importUi = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            busy = true
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) { PortableUiBackup.restore(context, uri) }
+                    Toast.makeText(context, R.string.backup_ui_restored, Toast.LENGTH_LONG).show()
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) {
+                    Toast.makeText(context, context.getString(R.string.compose_restore_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                } finally { busy = false }
+            }
+        }
+    }
+    Text(stringResource(R.string.backup_rules_title), style = MaterialTheme.typography.titleSmall)
+    Text(stringResource(R.string.backup_rules_scope), style = MaterialTheme.typography.bodySmall)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(enabled = !busy, onClick = { exportRules.launch("adblock-rules.json") }, modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.compose_settings_backup))
+        }
+        OutlinedButton(enabled = !busy, onClick = { importRules.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }, modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.compose_settings_restore))
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    Text(stringResource(R.string.backup_ui_title), style = MaterialTheme.typography.titleSmall)
+    Text(stringResource(R.string.backup_ui_scope), style = MaterialTheme.typography.bodySmall)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(enabled = !busy, onClick = { exportUi.launch("adblock-ui.json") }, modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.compose_settings_backup))
+        }
+        OutlinedButton(enabled = !busy, onClick = { importUi.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }, modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.compose_settings_restore))
+        }
     }
 }
