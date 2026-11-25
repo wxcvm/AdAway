@@ -58,9 +58,6 @@ import androidx.compose.foundation.layout.ColumnScope
 @Composable
 internal fun ColumnScope.AppSettingsSection(viewModel: StatsViewModel, refreshKey: Int, onPreferencesChanged: () -> Unit) {
     val context = LocalContext.current
-    // Only this visible category observes high-frequency server snapshots.
-    val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
-    val apps = serverStats?.apps.orEmpty()
     // ── App monitoring (可折叠) ──
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -102,6 +99,9 @@ internal fun ColumnScope.AppSettingsSection(viewModel: StatsViewModel, refreshKe
                 )
             }
             androidx.compose.animation.AnimatedVisibility(visible = appsExpanded) {
+                // Do not collect high-frequency snapshots while this card is collapsed.
+                val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
+                val apps = serverStats?.apps.orEmpty()
                 Column {
                     Spacer(Modifier.height(8.dp))
                     if (apps.isEmpty()) {
@@ -112,7 +112,8 @@ internal fun ColumnScope.AppSettingsSection(viewModel: StatsViewModel, refreshKe
                         )
                     } else {
                         // Re-read switch states after toggling (refreshKey changes)
-                        apps.sortedByDescending { it.blocked + it.requests }.forEach { app ->
+                        apps.sortedByDescending { it.requests }.forEach { app ->
+                            androidx.compose.runtime.key(app.uid) {
                             val monitored = remember(refreshKey, app.uid) {
                                 isAppMonitored(context, app.uid)
                             }
@@ -209,6 +210,7 @@ internal fun ColumnScope.AppSettingsSection(viewModel: StatsViewModel, refreshKe
                             )
                         }
                     }
+                }
                 }
                 }
             }
