@@ -456,8 +456,8 @@
 
     <!-- Network integration center: current capabilities are intentionally previews. -->
     <string name="compose_nav_network">Network</string>
-    <string name="compose_network_title">Network center</string>
-    <string name="compose_network_status_title">Capture coverage</string>
+    <string name="compose_network_title">Integration diagnostics</string>
+    <string name="compose_network_status_title">Local blocking scope</string>
     <string name="compose_network_status_body">The planned system-wide VPN/TUN capture mode is not yet connected to this screen. Existing Root and hosts filtering continue to use their current controls. A running local server alone does not prove all device traffic is filtered.</string>
     <string name="compose_network_not_active">Global capture not enabled here</string>
     <string name="compose_network_roadmap_heading">Planned integrations</string>
@@ -472,8 +472,8 @@
     <string name="compose_network_https_description">Certificate trust, TLS negotiation and UDP/443 coverage diagnostics without promising all HTTPS can be decrypted.</string>
     <string name="compose_network_recovery_title">Network recovery</string>
     <string name="compose_network_recovery_description">Show ownership of changed routes and restore only this app’s network settings if capture fails.</string>
-    <string name="compose_network_available_heading">Available features</string>
-    <string name="compose_network_available_body">Manage existing blocking and local server settings, rules and statistics through their current pages.</string>
+    <string name="compose_network_available_heading">Manage blocking</string>
+    <string name="compose_network_available_body">Open the existing settings, rules and statistics. These actions do not start a capture service.</string>
     <string name="compose_settings_section_1_title">Blocking &amp; redirection</string>
     <string name="compose_settings_section_1_description">Blocking mode, scoped network tests, AdGuard coexistence and app exceptions</string>
     <string name="compose_settings_section_2_title">Web server &amp; ports</string>
@@ -525,8 +525,8 @@
     <string name="compose_more_exempt_desc">Allow selected domains when the interception method supports exemptions</string>
     <string name="compose_more_overrides">Response overrides</string>
     <string name="compose_more_overrides_desc">Choose custom blocked response behavior for individual domains</string>
-    <string name="compose_more_network">Network center</string>
-    <string name="compose_more_network_desc">Status and future slots for global capture, AdGuard coexistence, DNS and rollback</string>
+    <string name="compose_more_network">Integration diagnostics</string>
+    <string name="compose_more_network_desc">Local blocking controls, AdGuard integration scope and optional roadmap</string>
     <string name="compose_more_settings">All settings</string>
     <string name="compose_more_settings_desc">Blocking preferences, Web server, certificates, storage and appearance</string>
     <string name="compose_more_planned">Coming later · not enabled</string>

@@ -456,8 +456,8 @@
 
     <!-- 网络中心：尚未接入的功能仅做结构预留 -->
     <string name="compose_nav_network">网络</string>
-    <string name="compose_network_title">网络中心</string>
-    <string name="compose_network_status_title">流量接管范围</string>
+    <string name="compose_network_title">联动诊断</string>
+    <string name="compose_network_status_title">本地拦截范围</string>
     <string name="compose_network_status_body">规划中的 VPN/TUN 全局接管尚未接入此页面。现有 Root 与 hosts 过滤仍由原有入口控制。本地服务器正常运行，并不代表设备全部流量都已过滤。</string>
     <string name="compose_network_not_active">此处尚未启用全局接管</string>
     <string name="compose_network_roadmap_heading">计划中的能力</string>
@@ -472,8 +472,8 @@
     <string name="compose_network_https_description">证书信任、TLS 握手和 UDP/443 覆盖检查，不承诺能解密所有 HTTPS 请求。</string>
     <string name="compose_network_recovery_title">网络安全恢复</string>
     <string name="compose_network_recovery_description">显示路由配置归属，接管失败时仅还原本应用修改的网络设置。</string>
-    <string name="compose_network_available_heading">现有功能</string>
-    <string name="compose_network_available_body">已有的拦截模式、服务器设置、规则和统计仍从当前页面入口使用。</string>
+    <string name="compose_network_available_heading">管理拦截服务</string>
+    <string name="compose_network_available_body">直接进入现有设置、规则与统计；打开页面不会启动流量接管。</string>
     <string name="compose_settings_section_1_title">拦截与重定向</string>
     <string name="compose_settings_section_1_description">拦截模式、隔离网络测试、AdGuard 共存和应用放行</string>
     <string name="compose_settings_section_2_title">Web 服务与端口</string>
@@ -525,8 +525,8 @@
     <string name="compose_more_exempt_desc">在支持放行的拦截模式下管理域名豁免</string>
     <string name="compose_more_overrides">按域响应覆盖</string>
     <string name="compose_more_overrides_desc">为不同域名设置拦截后的自定义响应方式</string>
-    <string name="compose_more_network">网络中心</string>
-    <string name="compose_more_network_desc">查看全流量接管、AdGuard 协同、DNS 与回滚的规划状态</string>
+    <string name="compose_more_network">联动诊断</string>
+    <string name="compose_more_network_desc">本地拦截功能入口、AdGuard 联动范围与可展开的后续计划</string>
     <string name="compose_more_settings">全部设置</string>
     <string name="compose_more_settings_desc">拦截选项、Web 服务、证书、备份及外观设置</string>
     <string name="compose_more_planned">后续计划 · 尚未启用</string>
