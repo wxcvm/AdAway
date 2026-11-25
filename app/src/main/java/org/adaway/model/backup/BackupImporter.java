@@ -64,7 +64,7 @@ public final class BackupImporter {
             boolean imported = true;
             try {
                 importBackup(context, backupUri);
-            } catch (IOException e) {
+            } catch (IOException | RuntimeException e) {
                 Timber.e(e, "Failed to import backup.");
                 imported = false;
             }
@@ -82,13 +82,18 @@ public final class BackupImporter {
         ).show();
     }
 
-    static void importBackup(Context context, Uri backupUri) throws IOException {
-        try (InputStream inputStream = context.getContentResolver().openInputStream(backupUri);
-             BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
+    public static void importBackup(Context context, Uri backupUri) throws IOException {
+        InputStream opened = context.getContentResolver().openInputStream(backupUri);
+        if (opened == null) throw new IOException("Cannot open backup");
+        try (InputStream inputStream = opened;
+             BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, java.nio.charset.StandardCharsets.UTF_8))) {
             StringBuilder contentBuilder = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                contentBuilder.append(line);
+            char[] buffer = new char[8192];
+            int read;
+            while ((read = reader.read(buffer)) != -1) {
+                if (contentBuilder.length() + read > 16 * 1024 * 1024)
+                    throw new IOException("Backup exceeds 16 Mi characters");
+                contentBuilder.append(buffer, 0, read);
             }
             JSONObject backupObject = new JSONObject(contentBuilder.toString());
             importBackup(context, backupObject);
@@ -106,10 +111,24 @@ public final class BackupImporter {
         HostsSourceDao hostsSourceDao = database.hostsSourceDao();
         HostListItemDao hostListItemDao = database.hostsListItemDao();
 
-        importSourceBackup(hostsSourceDao, backupObject.getJSONArray(SOURCES_KEY));
-        importListBackup(hostListItemDao, BLOCKED, backupObject.getJSONArray(BLOCKED_KEY));
-        importListBackup(hostListItemDao, ALLOWED, backupObject.getJSONArray(ALLOWED_KEY));
-        importListBackup(hostListItemDao, REDIRECTED, backupObject.getJSONArray(REDIRECTED_KEY));
+        // Validate every section before any database mutation.
+        JSONArray sources = backupObject.getJSONArray(SOURCES_KEY);
+        JSONArray blocked = backupObject.getJSONArray(BLOCKED_KEY);
+        JSONArray allowed = backupObject.getJSONArray(ALLOWED_KEY);
+        JSONArray redirected = backupObject.getJSONArray(REDIRECTED_KEY);
+        for (int n = 0; n < sources.length(); n++) sourceFromJson(sources.getJSONObject(n));
+        for (JSONArray items : new JSONArray[]{blocked, allowed, redirected})
+            for (int n = 0; n < items.length(); n++) hostFromJson(items.getJSONObject(n));
+        database.runInTransaction(() -> {
+            try {
+                importSourceBackup(hostsSourceDao, sources);
+                importListBackup(hostListItemDao, BLOCKED, blocked);
+                importListBackup(hostListItemDao, ALLOWED, allowed);
+                importListBackup(hostListItemDao, REDIRECTED, redirected);
+            } catch (JSONException failure) {
+                throw new IllegalArgumentException("Invalid backup", failure);
+            }
+        });
     }
 
     private static void importSourceBackup(HostsSourceDao hostsSourceDao, JSONArray sources) throws JSONException {
