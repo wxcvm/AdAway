@@ -256,9 +256,30 @@ class StatsViewModel @JvmOverloads constructor(
      * 放行整个应用：与设置页"应用监控"里的放行开关共用同一状态，写进
      * allowlist.txt，服务器随后不再拦截该 uid。
      */
-    fun allowAppForever(uid: Int) {
-        setAppAllowed(getApplication<Application>(), uid, true)
+    private val mutableExemptionBusy = MutableStateFlow(false)
+    val exemptionBusy: StateFlow<Boolean> = mutableExemptionBusy
+
+    fun changeAppExemption(uid: Int, allowed: Boolean, onDone: (Boolean) -> Unit = {}) {
+        if (!mutableExemptionBusy.compareAndSet(false, true)) return
+        viewModelScope.launch {
+            try {
+                val app = getApplication<Application>()
+                val ok = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    setAppAllowed(app, uid, allowed)
+                }
+                android.widget.Toast.makeText(app,
+                    if (ok) org.adaway.R.string.app_exemption_saved
+                    else org.adaway.R.string.app_exemption_save_failed,
+                    android.widget.Toast.LENGTH_LONG).show()
+                if (ok) refreshServerStats()
+                onDone(ok)
+            } finally {
+                mutableExemptionBusy.value = false
+            }
+        }
     }
+
+    fun allowAppForever(uid: Int) = changeAppExemption(uid, true)
 
     /**
      * 把规则库里的 ALLOWED 条目导出成原生读取的 `domain_allowlist.txt`。
