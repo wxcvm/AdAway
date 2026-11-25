@@ -3,6 +3,12 @@ package org.adaway.ui.compose
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -112,7 +118,7 @@ internal fun QueryLogContent(
             }
         }
     LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("query-log-list"), state = listState, contentPadding = PaddingValues(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        verticalArrangement = Arrangement.spacedBy(2.dp)) {
         item {
             QueryLogHeader(filter, onFilter, query, onQuery, uid, onUid, family, onFamily,
                 type, onType, total, retainedTotal, loaded, previousConditions, invalidQuery,
@@ -223,30 +229,47 @@ private fun QueryLogClassification(family: Int?, onFamily: (Int?) -> Unit, type:
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QueryLogRow(entry: QueryLogEntry, onClick: () -> Unit) {
-    val actionColor = when (entry.action) {
-        ACTION_BLOCK, ACTION_REJECT -> MaterialTheme.colorScheme.error
-        ACTION_ALLOW -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.primary
+    val scheme = MaterialTheme.colorScheme
+    val (actionColor, actionIcon) = when (entry.action) {
+        ACTION_BLOCK -> scheme.error to Icons.Outlined.Shield
+        ACTION_REJECT -> scheme.error to Icons.Outlined.Info
+        ACTION_ALLOW -> scheme.tertiary to Icons.Outlined.CheckCircle
+        ACTION_PROXY -> scheme.primary to Icons.Outlined.Public
+        else -> scheme.onSurfaceVariant to Icons.Outlined.Info
     }
-    Surface(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(entry.host.ifEmpty { "-" }, style = MaterialTheme.typography.titleSmall,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(queryActionSummary(entry), style = MaterialTheme.typography.labelMedium, color = actionColor)
-            Text(queryLogHttpStatus(entry.httpStatus), style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.testTag("query-status-${entry.httpStatus}"))
-            Text(queryLogPath(entry), style = MaterialTheme.typography.bodySmall,
-                maxLines = 2, overflow = TextOverflow.Ellipsis, fontFamily = FontFamily.Monospace)
-            Text(queryLogFamily(entry.family), style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(appNameForUid(entry.uid), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(queryLogTime(entry.ts, false), style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Surface(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        shape = RoundedCornerShape(8.dp), color = scheme.surfaceContainerLow) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top) {
+            Box(Modifier.size(34.dp).background(actionColor.copy(alpha = .12f), CircleShape),
+                contentAlignment = Alignment.Center) {
+                Icon(actionIcon, contentDescription = null, tint = actionColor,
+                    modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(entry.host.ifEmpty { "-" }, style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(queryActionSummary(entry), style = MaterialTheme.typography.labelMedium, color = actionColor)
+                    Text(queryLogHttpStatus(entry.httpStatus), style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.testTag("query-status-${entry.httpStatus}"))
+                    Text(queryLogFamily(entry.family), style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant)
+                }
+                Text(queryLogPath(entry), style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis, fontFamily = FontFamily.Monospace)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(appNameForUid(entry.uid), style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(queryLogTime(entry.ts, false), style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                        color = scheme.onSurfaceVariant)
+                }
             }
         }
     }
