@@ -133,6 +133,8 @@
     <string name="compose_settings_app_allow_hint">Requested local exemption; external filtering remains independent.</string>
     <string name="compose_settings_app_allow_undone">Requested removal of local exemption.</string>
     <string name="settings_update_save_failed">Could not confirm the update preference operation. Recheck the setting.</string>
+    <string name="app_exemption_saved">Local exemption saved. Runtime reload is not yet verified; external DNS and AdGuard rules are unchanged.</string>
+    <string name="app_exemption_save_failed">Could not save local exemption, or this UID is not editable.</string>
     <string name="compose_settings_app_monitor">Show in active list</string>
     <string name="compose_settings_allowlist_title">Allowlist (bypass blocking)</string>
     <string name="compose_settings_debug_title">Debug</string>
