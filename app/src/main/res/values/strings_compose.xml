@@ -230,6 +230,9 @@
     <string name="compose_settings_cert_install_manual">Manual install</string>
     <string name="compose_settings_cert_fingerprint">SHA-256 fingerprint</string>
     <string name="compose_settings_cert_export">Export certificate</string>
+    <string name="block_image_scope">Replaces one placeholder slot; other bundled images remain in rotation. Large images are downsampled. Only image responses are affected.</string>
+    <string name="block_image_reloaded">Images saved and server reload acknowledged.</string>
+    <string name="block_image_saved_pending">Images saved; live reload not confirmed. They will be read on the next server start.</string>
     <string name="compose_settings_block_image_title">Block placeholder image</string>
     <string name="compose_settings_block_image_choose">Choose custom image</string>
     <string name="compose_settings_block_image_reset">Reset to default</string>
