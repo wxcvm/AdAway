@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
@@ -32,6 +34,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -65,6 +71,7 @@ fun NetworkCenterScreen(
     onOpenStats: () -> Unit,
     onBack: () -> Unit = {},
 ) {
+    var showRoadmap by rememberSaveable { mutableStateOf(false) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -87,7 +94,7 @@ fun NetworkCenterScreen(
         },
     ) { innerPadding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
+            modifier = Modifier.fillMaxSize().padding(innerPadding).testTag("integration-center-list"),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -127,15 +134,66 @@ fun NetworkCenterScreen(
                 }
             }
             item {
-                Text(
-                    stringResource(R.string.compose_network_roadmap_heading),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.compose_network_available_heading),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            stringResource(R.string.compose_network_available_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // Three full-width, minimum-touch-size actions avoid
+                        // clipped localized text at 320dp and large font scale.
+                        Button(
+                            onClick = onOpenSettings,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("integration-open-settings"),
+                        ) {
+                            Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text(stringResource(R.string.compose_nav_settings))
+                        }
+                        OutlinedButton(
+                            onClick = onOpenRules,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("integration-open-rules"),
+                        ) {
+                            Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(8.dp))
+                            Text(stringResource(R.string.compose_nav_rules))
+                        }
+                        OutlinedButton(
+                            onClick = onOpenStats,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("integration-open-stats"),
+                        ) {
+                            Text(stringResource(R.string.compose_nav_stats))
+                        }
+                    }
+                }
             }
-            items(capabilities, key = { it.title }) { capability ->
+            item(key = "roadmap-toggle") {
+                Card(onClick = { showRoadmap = !showRoadmap },
+                    modifier = Modifier.fillMaxWidth().testTag("integration-roadmap-toggle"),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                    ListItem(
+                        headlineContent = { Text(stringResource(R.string.compose_network_roadmap_heading)) },
+                        supportingContent = { Text(stringResource(R.string.compose_network_planned)) },
+                        trailingContent = {
+                            Icon(if (showRoadmap) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                                contentDescription = null)
+                        },
+                        colors = androidx.compose.material3.ListItemDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    )
+                }
+            }
+            if (showRoadmap) items(capabilities, key = { it.title }) { capability ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("integration-planned-${capability.title}"),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     ),
@@ -161,48 +219,7 @@ fun NetworkCenterScreen(
                     )
                 }
             }
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.compose_network_available_heading),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        Text(
-                            stringResource(R.string.compose_network_available_body),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        // Three full-width, minimum-touch-size actions avoid
-                        // clipped localized text at 320dp and large font scale.
-                        Button(
-                            onClick = onOpenSettings,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        ) {
-                            Icon(Icons.Outlined.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text(stringResource(R.string.compose_nav_settings))
-                        }
-                        OutlinedButton(
-                            onClick = onOpenRules,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        ) {
-                            Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.size(8.dp))
-                            Text(stringResource(R.string.compose_nav_rules))
-                        }
-                        OutlinedButton(
-                            onClick = onOpenStats,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        ) {
-                            Text(stringResource(R.string.compose_nav_stats))
-                        }
-                    }
-                }
-            }
+
         }
     }
 }
