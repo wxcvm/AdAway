@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Info
@@ -461,7 +464,9 @@ private fun UpdateSwitchRow(
     hint: String,
 ) {
     val updateContext = LocalContext.current.applicationContext
-    var checked by remember { mutableStateOf(prefs.getBoolean(key, def)) }
+    var checked by remember(key) { mutableStateOf(prefs.getBoolean(key, def)) }
+    var saving by remember(key) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -478,11 +483,35 @@ private fun UpdateSwitchRow(
         }
         Switch(
             checked = checked,
+            enabled = !saving,
             onCheckedChange = { v ->
-                if (prefs.edit().putBoolean(key, v).commit()) {
-                    checked = v
-                    org.adaway.model.update.ApkUpdateService.preferencesChanged(updateContext)
-                    org.adaway.model.source.SourceUpdateService.preferencesChanged(updateContext)
+                saving = true
+                scope.launch {
+                    try {
+                        val saved = withContext(Dispatchers.IO) {
+                            if (!prefs.edit().putBoolean(key, v).commit()) false
+                            else {
+                                // Only the settings used by the WorkManager request
+                                // itself require rescheduling. Workers read other
+                                // preferences at execution time.
+                                when (key) {
+                                    "updateCheckAppDaily" ->
+                                        org.adaway.model.update.ApkUpdateService.preferencesChanged(updateContext)
+                                    "updateCheckHostsDaily", "updateOnlyOnWifi" ->
+                                        org.adaway.model.source.SourceUpdateService.preferencesChanged(updateContext)
+                                }
+                                true
+                            }
+                        }
+                        checked = prefs.getBoolean(key, def)
+                        if (!saved) Toast.makeText(updateContext, R.string.settings_update_save_failed, Toast.LENGTH_LONG).show()
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        Timber.w(failure, "Update preference operation failed")
+                        checked = prefs.getBoolean(key, def)
+                        Toast.makeText(updateContext, R.string.settings_update_save_failed, Toast.LENGTH_LONG).show()
+                    } finally { saving = false }
                 }
             },
         )
