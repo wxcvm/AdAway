@@ -4,7 +4,7 @@
   <p>Android 系统级广告拦截 · Root 模式 · ARM64</p>
 
   [![Release](https://img.shields.io/github/v/release/wxcvm/AdAway?style=flat-square&color=c62828)](https://github.com/wxcvm/AdAway/releases/latest)
-  [![License](https://img.shields.io/github/license/wxcvm/AdAway?style=flat-square&color=546e7a)](LICENSE)
+  [![License](https://img.shields.io/github/license/wxcvm/AdAway?style=flat-square&color=546e7a)](LICENSE.md)
   [![Fork of](https://img.shields.io/badge/fork%20of-AdAway%2FAdAway-555?style=flat-square)](https://github.com/AdAway/AdAway)
 </div>
 
@@ -50,7 +50,7 @@ cd AdAway
 
 ## 许可证
 
-[GPL-3.0](LICENSE) · 原作者 [AdAway Team](https://github.com/AdAway/AdAway)
+[GPL-3.0-or-later](LICENSE.md) · [第三方授权与待复核事项](THIRD_PARTY_LICENSES.md) · 原作者 [AdAway Team](https://github.com/AdAway/AdAway)
 
 ## Windows 11 端（独立仓库）
 
