@@ -2797,8 +2797,9 @@ app_row_full:
     uint64_t blk = stats_total_blocked();
     uint64_t hs  = s_stats.tls_handshakes;
     uint64_t hits = s_stats.sni_cache_hits;
-    if (blk > req) blk = req;   /* lifetime counters can be inconsistent */
-    double block_rate = req > 0 ? (double)blk * 100.0 / (double)req : 0.0;
+    /* Keep the actual count: legacy clients may still read the bounded rate,
+       but newer clients must be able to identify inconsistent counters. */
+    double block_rate = req > 0 && blk <= req ? (double)blk * 100.0 / (double)req : 0.0;
     double hit_rate   = hs  > 0 ? (double)hits * 100.0 / (double)hs  : 0.0;
     uint64_t daily_peak = 0;
     for (int i = 0; i < DAILY_SLOTS; i++)

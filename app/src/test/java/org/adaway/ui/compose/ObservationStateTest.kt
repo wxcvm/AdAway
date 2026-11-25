@@ -16,6 +16,19 @@ class ObservationStateTest {
     private fun parsed(suffix: String): ServerStats = ServerStats.fromJson(
         JSONObject("""{"uptime_seconds":1,"total_requests":0$suffix}"""))!!
 
+    @Test fun localRatiosNeverMaskMissingOrInconsistentCounters() {
+        assertNull(ServerStats().localBlockPercent)
+        assertEquals(0.0, ServerStats(totalRequests = 10).localBlockPercent)
+        assertEquals(100.0, ServerStats(totalRequests = 10, reportedTotalBlocked = 10).localBlockPercent)
+        val inconsistent = ServerStats(totalRequests = 10, reportedTotalBlocked = 11)
+        assertNull(inconsistent.localBlockPercent)
+        assertTrue(inconsistent.inconsistentRequestCounts)
+        assertEquals(11L, inconsistent.totalBlocked)
+        assertNull(ServerStats(tlsHandshakes = 0).sniCachePercent)
+        assertNull(ServerStats(tlsHandshakes = 10, sniCacheHits = 11).sniCachePercent)
+        assertEquals(40.0, ServerStats(tlsHandshakes = 10, sniCacheHits = 4).sniCachePercent)
+    }
+
     @Test fun missingMalformedAndValidEmptyAreDifferentEvidence() {
         assertEquals(TopHostsRead.MISSING, parsed("").topHostsRead)
         for (bad in listOf("null", "{}", "false", "[{}]", "[null]",

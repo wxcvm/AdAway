@@ -49,7 +49,7 @@
     <string name="compose_stats_title">统计</string>
     <string name="compose_stats_kpi_requests">Web 请求</string>
     <string name="compose_stats_kpi_blocked">本地拦截</string>
-    <string name="compose_stats_kpi_rate">拦截率</string>
+    <string name="compose_stats_kpi_rate">本地拦截比例</string>
     <string name="compose_stats_kpi_certs">证书</string>
     <string name="compose_stats_hosts_list">规则列表</string>
     <string name="compose_stats_blocked_by_type">按类型拦截请求</string>
@@ -191,10 +191,10 @@
     <string name="compose_settings_about_version">版本 %1$s</string>
     <string name="compose_settings_chart_style">柱状图样式</string>
     <string name="compose_settings_realtime">实时更新</string>
-    <string name="compose_settings_realtime_hint">启用 WebSocket 推送统计（比轮询更快）</string>
+    <string name="compose_settings_realtime_hint">前台使用 WebSocket 推送统计，后台暂停观察；轮询仍作为回退方式。</string>
     <string name="compose_settings_chart_lifetime">累计统计</string>
     <string name="compose_settings_chart_lifetime_hint">请求/拦截/连接/证书累计计数</string>
-    <string name="compose_settings_chart_rate">拦截率</string>
+    <string name="compose_settings_chart_rate">本地拦截比例</string>
     <string name="compose_settings_chart_rate_hint">拦截/请求百分比环</string>
     <string name="compose_settings_chart_conn">连接数曲线</string>
     <string name="compose_settings_chart_conn_hint">趋势图中的第三条线</string>
@@ -270,8 +270,8 @@
     <string name="compose_stats_style_area">面积</string>
     <string name="compose_stats_trend_title">请求趋势</string>
     <string name="compose_stats_trend_requests">请求 / 小时</string>
-    <string name="compose_stats_rate_title">拦截率</string>
-    <string name="compose_stats_rate_hint">被拦截请求占总请求的比例</string>
+    <string name="compose_stats_rate_title">本地拦截比例</string>
+    <string name="compose_stats_rate_hint">Web 服务器收到的请求中被拦截应答的比例，不代表整机覆盖率。— 表示暂无有效数据或计数不一致。</string>
     <string name="compose_stats_rate_blocked_of">%1$d / %2$d</string>
     <string name="compose_stats_lifetime_title">累计统计</string>
     <string name="compose_stats_lifetime_hint">本服务器保存的 Web 响应计数；部分运行期机制计数会在服务器重启后重置。</string>
