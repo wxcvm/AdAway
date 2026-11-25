@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -60,186 +61,6 @@ import androidx.compose.ui.platform.testTag
 internal fun ColumnScope.NetworkSettingsSection(viewModel: StatsViewModel, actions: NetworkSettingsActions, onPreferencesChanged: () -> Unit) {
     val context = LocalContext.current
     val state = actions.state
-    // Explicitly opt-in network-path diagnostic. Routes only one
-    // benchmark destination; no default route, DNS or TCP/UDP forwarding.
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                stringResource(R.string.compose_tun_diagnostic_title),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                stringResource(R.string.compose_tun_diagnostic_explanation),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(8.dp))
-            // Re-evaluate on explicit Refresh or a UI action. The OS
-            // notification also provides a persistent Stop control.
-            val diagnosticActive = remember(state.refreshKey) {
-                org.adaway.model.traffic.DiagnosticVpnService.isActive()
-            }
-            val packets = remember(state.refreshKey) {
-                org.adaway.model.traffic.DiagnosticVpnService.getPacketCount()
-            }
-            Text(
-                stringResource(
-                    if (diagnosticActive)
-                        R.string.compose_tun_diagnostic_running
-                    else
-                        R.string.compose_tun_diagnostic_stopped,
-                    packets,
-                ),
-                style = MaterialTheme.typography.labelSmall,
-            )
-            DiagnosticLifecycleActions(
-                active = diagnosticActive,
-                onStart = {
-                        state.scope.launch {
-                            // Root's isEnabled() runs a shell: never do
-                            // this blocking check on the Compose UI thread.
-                            val noConflict = withContext(Dispatchers.IO) {
-                                val owner = org.adaway.model.traffic.AndroidVpnObserver
-                                    .read(context, false)
-                                owner == org.adaway.model.traffic.TrafficModePolicy.VpnOwner.NONE &&
-                                    !org.adaway.model.root.HijackModel.isEnabled()
-                            }
-                            if (!noConflict) {
-                                state.status = context.getString(
-                                    R.string.compose_tun_diagnostic_conflict,
-                                )
-                            } else {
-                                try {
-                                    val consent = android.net.VpnService.prepare(context)
-                                    if (consent == null) {
-                                        org.adaway.model.traffic.DiagnosticVpnService.start(context)
-                                        state.status = context.getString(
-                                            R.string.compose_tun_diagnostic_start_requested,
-                                        )
-                                        state.refreshKey++
-                                    } else {
-                                        actions.consentLauncher.launch(consent)
-                                    }
-                                } catch (exception: RuntimeException) {
-                                    Timber.w(exception, "Diagnostic VPN consent failed")
-                                    state.status = context.getString(
-                                        R.string.compose_tun_diagnostic_start_failed,
-                                    )
-                                }
-                            }
-                        }
-                    },
-                onStop = {
-                        org.adaway.model.traffic.DiagnosticVpnService.stop(context)
-                        state.status = context.getString(R.string.compose_tun_diagnostic_stop_requested)
-                        state.refreshKey++
-                    },
-                onRefresh = { state.refreshKey++ },
-            )
-            DiagnosticTcpActions(diagnosticActive, state.tcpBusy) { ipv6 ->
-                state.tcpBusy = true
-                state.scope.launch {
-                    try {
-                        val result = withContext(Dispatchers.IO) {
-                            org.adaway.model.traffic.DiagnosticVpnService.probeTcp(ipv6)
-                        }
-                        val status = when (result.status) {
-                            org.adaway.model.traffic.DiagnosticTcpSession.Status.OK -> R.string.compose_tcp_ok
-                            org.adaway.model.traffic.DiagnosticTcpSession.Status.CANCELLED -> R.string.compose_tcp_cancelled
-                            org.adaway.model.traffic.DiagnosticTcpSession.Status.TIMEOUT -> R.string.compose_tcp_timeout
-                            org.adaway.model.traffic.DiagnosticTcpSession.Status.REJECTED -> R.string.compose_tcp_rejected
-                            org.adaway.model.traffic.DiagnosticTcpSession.Status.CLEANUP_FAILED -> R.string.compose_tcp_cleanup_failed
-                            org.adaway.model.traffic.DiagnosticTcpSession.Status.UNAVAILABLE -> R.string.compose_tcp_unavailable
-                            else -> R.string.compose_tcp_failed
-                        }
-                        state.status = context.getString(R.string.compose_tcp_result, if (ipv6) "IPv6" else "IPv4",
-                            context.getString(status), result.elapsedMs, result.closed, result.opened, result.protectedSockets, result.stage)
-                        state.refreshKey++
-                    } finally { state.tcpBusy = false }
-                }
-            }
-            TextButton(
-                enabled = diagnosticActive,
-                onClick = {
-                    state.scope.launch {
-                        val ok = withContext(Dispatchers.IO) {
-                            org.adaway.model.traffic.DiagnosticTunProbe.roundTrip()
-                        }
-                        state.status = context.getString(
-                            if (ok) R.string.compose_tun_diagnostic_echo_ok
-                            else R.string.compose_tun_diagnostic_echo_failed,
-                        )
-                        state.refreshKey++
-                    }
-                },
-            ) {
-                Text(stringResource(R.string.compose_tun_diagnostic_test_echo))
-            }
-            DiagnosticRelayActions(diagnosticActive, state.relayBusy) { ipv6 ->
-                state.relayBusy = true
-                state.scope.launch {
-                    try {
-                        val ok = withContext(Dispatchers.IO) {
-                            org.adaway.model.traffic.DiagnosticTunProbe.relayRoundTrip(ipv6)
-                        }
-                        state.status = context.getString(
-                            if (ok) R.string.compose_tun_diagnostic_relay_family_ok
-                            else R.string.compose_tun_diagnostic_relay_family_failed,
-                            if (ipv6) "IPv6" else "IPv4",
-                        )
-                        state.refreshKey++
-                    } finally { state.relayBusy = false }
-                }
-            }
-            for (type in listOf(
-                org.adaway.model.traffic.DiagnosticDnsCodec.TYPE_A,
-                org.adaway.model.traffic.DiagnosticDnsCodec.TYPE_AAAA,
-            )) {
-                TextButton(
-                    enabled = diagnosticActive && !state.dnsBusy,
-                    onClick = {
-                        state.dnsBusy = true
-                        state.scope.launch {
-                            try {
-                                val rcode = withContext(Dispatchers.IO) {
-                                    org.adaway.model.traffic.DiagnosticTunProbe.dnsResponseCode(type)
-                                }
-                                val result = context.getString(
-                                    when (rcode) {
-                                        0 -> R.string.compose_tun_diagnostic_dns_ok
-                                        3 -> R.string.compose_tun_diagnostic_dns_nxdomain
-                                        5 -> R.string.compose_tun_diagnostic_dns_refused
-                                        else -> R.string.compose_tun_diagnostic_dns_failed
-                                    },
-                                )
-                                state.status = context.getString(
-                                    R.string.compose_tun_diagnostic_dns_result,
-                                    if (type == 1) "A" else "AAAA", result,
-                                )
-                                state.refreshKey++
-                            } finally {
-                                state.dnsBusy = false
-                            }
-                        }
-                    },
-                ) {
-                    Text(stringResource(
-                        if (type == 1) R.string.compose_tun_diagnostic_test_dns
-                        else R.string.compose_tun_diagnostic_test_dns_aaaa,
-                    ))
-                }
-            }
-            if (state.status.isNotBlank()) {
-                Text(state.status, style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-
 // ── 拦截模式：127.0.0.1（本机拦截页）/ 0.0.0.0（空路由，可与 AdGuard 等共存）──
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -259,8 +80,22 @@ internal fun ColumnScope.NetworkSettingsSection(viewModel: StatsViewModel, actio
             )
             Spacer(Modifier.height(6.dp))
             // 与 AdGuard 共存：检测到（已安装 + VPN 在跑）就给出可直接照抄的配置
-            val adguardActive = remember {
-                org.adaway.util.AdGuardPresence.shouldSuggest(context)
+            var adguardActive by remember { mutableStateOf(false) }
+            var listenerSuggestion by remember {
+                mutableStateOf(org.adaway.util.AdGuardPresence.listenerSuggestion(
+                    org.adaway.util.WebServerUtils.getListenerSettings(context)))
+            }
+            val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+            DisposableEffect(owner, context) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                        adguardActive = org.adaway.util.AdGuardPresence.shouldSuggest(context)
+                        listenerSuggestion = org.adaway.util.AdGuardPresence.listenerSuggestion(
+                            org.adaway.util.WebServerUtils.getListenerSettings(context))
+                    }
+                }
+                owner.lifecycle.addObserver(observer)
+                onDispose { owner.lifecycle.removeObserver(observer) }
             }
             var adguardDismissed by remember {
                 mutableStateOf(org.adaway.util.AdGuardPresence.isHintDismissed(context))
@@ -280,16 +115,20 @@ internal fun ColumnScope.NetworkSettingsSection(viewModel: StatsViewModel, actio
                         Text(
                             stringResource(
                                 R.string.compose_settings_adguard_steps,
-                                org.adaway.util.AdGuardPresence.suggestedIpv4(),
-                                org.adaway.util.AdGuardPresence.suggestedIpv6(),
+                                listenerSuggestion.ipv4.ifEmpty { stringResource(R.string.adguard_listener_family_disabled) },
+                                listenerSuggestion.ipv6.ifEmpty { stringResource(R.string.adguard_listener_family_disabled) },
                             ),
                             style = MaterialTheme.typography.labelSmall,
                         )
+                        if (!listenerSuggestion.standardPorts) {
+                            Text(stringResource(R.string.adguard_listener_nonstandard),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
                         Spacer(Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             androidx.compose.material3.TextButton(onClick = {
-                                val text = org.adaway.util.AdGuardPresence.suggestedIpv4() +
-                                    " / " + org.adaway.util.AdGuardPresence.suggestedIpv6()
+                                val text = listenerSuggestion.copyText()
                                 val clipboard = context.getSystemService(
                                     android.content.Context.CLIPBOARD_SERVICE,
                                 ) as android.content.ClipboardManager
@@ -629,6 +468,186 @@ internal fun ColumnScope.NetworkSettingsSection(viewModel: StatsViewModel, actio
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Explicitly opt-in network-path diagnostic. Routes only one
+    // benchmark destination; no default route, DNS or TCP/UDP forwarding.
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.compose_tun_diagnostic_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                stringResource(R.string.compose_tun_diagnostic_explanation),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(8.dp))
+            // Re-evaluate on explicit Refresh or a UI action. The OS
+            // notification also provides a persistent Stop control.
+            val diagnosticActive = remember(state.refreshKey) {
+                org.adaway.model.traffic.DiagnosticVpnService.isActive()
+            }
+            val packets = remember(state.refreshKey) {
+                org.adaway.model.traffic.DiagnosticVpnService.getPacketCount()
+            }
+            Text(
+                stringResource(
+                    if (diagnosticActive)
+                        R.string.compose_tun_diagnostic_running
+                    else
+                        R.string.compose_tun_diagnostic_stopped,
+                    packets,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+            )
+            DiagnosticLifecycleActions(
+                active = diagnosticActive,
+                onStart = {
+                        state.scope.launch {
+                            // Root's isEnabled() runs a shell: never do
+                            // this blocking check on the Compose UI thread.
+                            val noConflict = withContext(Dispatchers.IO) {
+                                val owner = org.adaway.model.traffic.AndroidVpnObserver
+                                    .read(context, false)
+                                owner == org.adaway.model.traffic.TrafficModePolicy.VpnOwner.NONE &&
+                                    !org.adaway.model.root.HijackModel.isEnabled()
+                            }
+                            if (!noConflict) {
+                                state.status = context.getString(
+                                    R.string.compose_tun_diagnostic_conflict,
+                                )
+                            } else {
+                                try {
+                                    val consent = android.net.VpnService.prepare(context)
+                                    if (consent == null) {
+                                        org.adaway.model.traffic.DiagnosticVpnService.start(context)
+                                        state.status = context.getString(
+                                            R.string.compose_tun_diagnostic_start_requested,
+                                        )
+                                        state.refreshKey++
+                                    } else {
+                                        actions.consentLauncher.launch(consent)
+                                    }
+                                } catch (exception: RuntimeException) {
+                                    Timber.w(exception, "Diagnostic VPN consent failed")
+                                    state.status = context.getString(
+                                        R.string.compose_tun_diagnostic_start_failed,
+                                    )
+                                }
+                            }
+                        }
+                    },
+                onStop = {
+                        org.adaway.model.traffic.DiagnosticVpnService.stop(context)
+                        state.status = context.getString(R.string.compose_tun_diagnostic_stop_requested)
+                        state.refreshKey++
+                    },
+                onRefresh = { state.refreshKey++ },
+            )
+            DiagnosticTcpActions(diagnosticActive, state.tcpBusy) { ipv6 ->
+                state.tcpBusy = true
+                state.scope.launch {
+                    try {
+                        val result = withContext(Dispatchers.IO) {
+                            org.adaway.model.traffic.DiagnosticVpnService.probeTcp(ipv6)
+                        }
+                        val status = when (result.status) {
+                            org.adaway.model.traffic.DiagnosticTcpSession.Status.OK -> R.string.compose_tcp_ok
+                            org.adaway.model.traffic.DiagnosticTcpSession.Status.CANCELLED -> R.string.compose_tcp_cancelled
+                            org.adaway.model.traffic.DiagnosticTcpSession.Status.TIMEOUT -> R.string.compose_tcp_timeout
+                            org.adaway.model.traffic.DiagnosticTcpSession.Status.REJECTED -> R.string.compose_tcp_rejected
+                            org.adaway.model.traffic.DiagnosticTcpSession.Status.CLEANUP_FAILED -> R.string.compose_tcp_cleanup_failed
+                            org.adaway.model.traffic.DiagnosticTcpSession.Status.UNAVAILABLE -> R.string.compose_tcp_unavailable
+                            else -> R.string.compose_tcp_failed
+                        }
+                        state.status = context.getString(R.string.compose_tcp_result, if (ipv6) "IPv6" else "IPv4",
+                            context.getString(status), result.elapsedMs, result.closed, result.opened, result.protectedSockets, result.stage)
+                        state.refreshKey++
+                    } finally { state.tcpBusy = false }
+                }
+            }
+            TextButton(
+                enabled = diagnosticActive,
+                onClick = {
+                    state.scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            org.adaway.model.traffic.DiagnosticTunProbe.roundTrip()
+                        }
+                        state.status = context.getString(
+                            if (ok) R.string.compose_tun_diagnostic_echo_ok
+                            else R.string.compose_tun_diagnostic_echo_failed,
+                        )
+                        state.refreshKey++
+                    }
+                },
+            ) {
+                Text(stringResource(R.string.compose_tun_diagnostic_test_echo))
+            }
+            DiagnosticRelayActions(diagnosticActive, state.relayBusy) { ipv6 ->
+                state.relayBusy = true
+                state.scope.launch {
+                    try {
+                        val ok = withContext(Dispatchers.IO) {
+                            org.adaway.model.traffic.DiagnosticTunProbe.relayRoundTrip(ipv6)
+                        }
+                        state.status = context.getString(
+                            if (ok) R.string.compose_tun_diagnostic_relay_family_ok
+                            else R.string.compose_tun_diagnostic_relay_family_failed,
+                            if (ipv6) "IPv6" else "IPv4",
+                        )
+                        state.refreshKey++
+                    } finally { state.relayBusy = false }
+                }
+            }
+            for (type in listOf(
+                org.adaway.model.traffic.DiagnosticDnsCodec.TYPE_A,
+                org.adaway.model.traffic.DiagnosticDnsCodec.TYPE_AAAA,
+            )) {
+                TextButton(
+                    enabled = diagnosticActive && !state.dnsBusy,
+                    onClick = {
+                        state.dnsBusy = true
+                        state.scope.launch {
+                            try {
+                                val rcode = withContext(Dispatchers.IO) {
+                                    org.adaway.model.traffic.DiagnosticTunProbe.dnsResponseCode(type)
+                                }
+                                val result = context.getString(
+                                    when (rcode) {
+                                        0 -> R.string.compose_tun_diagnostic_dns_ok
+                                        3 -> R.string.compose_tun_diagnostic_dns_nxdomain
+                                        5 -> R.string.compose_tun_diagnostic_dns_refused
+                                        else -> R.string.compose_tun_diagnostic_dns_failed
+                                    },
+                                )
+                                state.status = context.getString(
+                                    R.string.compose_tun_diagnostic_dns_result,
+                                    if (type == 1) "A" else "AAAA", result,
+                                )
+                                state.refreshKey++
+                            } finally {
+                                state.dnsBusy = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(stringResource(
+                        if (type == 1) R.string.compose_tun_diagnostic_test_dns
+                        else R.string.compose_tun_diagnostic_test_dns_aaaa,
+                    ))
+                }
+            }
+            if (state.status.isNotBlank()) {
+                Text(state.status, style = MaterialTheme.typography.labelSmall)
             }
         }
     }

@@ -168,7 +168,9 @@ internal fun ResponseCheckCard(
                 SelectionContainer { Text(known.describe(), style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.testTag("response-check-report")) }
             }
-            OutlinedButton({ clipboard.setText(AnnotatedString(known.describe())) }) {
+            OutlinedButton({ clipboard.setText(AnnotatedString(
+                if (stale) context.getString(R.string.response_check_stale) + "\n" + known.describe()
+                else known.describe())) }) {
                 Text(stringResource(R.string.response_check_copy))
             }
         }

@@ -106,7 +106,9 @@
     <string name="compose_settings_block_mode_recommended">Optimised (recommended)</string>
     <string name="compose_settings_adguard_title">AdGuard installed and a VPN is active (VPN owner not verified)</string>
     <string name="compose_settings_adguard_steps">Optional DNS-level cooperation: If your AdGuard version supports Custom IP address under DNS protection blocking modes, consider A = %1$s and AAAA = %2$s only when the corresponding local listener is reachable. This affects blocked DNS rules, not every AdGuard filter decision. DNS returns an IP but no port: the local server must actually answer on 80/443 (or have verified port redirection). HTTPS also requires client CA trust, and certificate-pinned apps may fail. Confirm the VPN owner and test the DNS and HTTPS paths before claiming cooperation works.</string>
-    <string name="compose_settings_adguard_copy">Copy the addresses</string>
+    <string name="adguard_listener_family_disabled">Not configured</string>
+    <string name="adguard_listener_nonstandard">Nonstandard listener ports: DNS alone cannot reach them. Verify a separate port redirection before using these addresses.</string>
+    <string name="compose_settings_adguard_copy">Copy candidate addresses</string>
     <string name="compose_settings_adguard_copied">Addresses copied</string>
     <string name="compose_settings_adguard_dismiss">Do not show again</string>
     <string name="compose_stats_app_pin_refused">refused by configured TLS retry policy</string>
