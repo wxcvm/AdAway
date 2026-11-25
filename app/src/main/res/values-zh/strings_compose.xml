@@ -698,4 +698,6 @@
     <string name="backup_ui_title">可迁移界面偏好</string>
     <string name="backup_ui_scope">仅主题与图表偏好，不恢复监听、证书、应用 UID 豁免或服务状态。旧设置备份可恢复其中受支持的界面字段。</string>
     <string name="backup_ui_restored">界面偏好已保存，如主题未刷新请重新打开应用。</string>
+    <string name="compose_overview_web_summary">本地 Web 拦截</string>
+    <string name="compose_overview_shortcuts">快捷入口</string>
 </resources>

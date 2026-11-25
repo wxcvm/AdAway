@@ -16,6 +16,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Surface
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -143,7 +146,7 @@ fun OverviewScreen(
                 .padding(padding)
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // Service status card
@@ -152,9 +155,12 @@ fun OverviewScreen(
                 stateText = blockingState,
             )
 
+            OverviewWebSummary(serverStats, onOpenStats)
             StatsObservationStatus(observation)
+            OverviewSectionTitle(stringResource(R.string.compose_nav_rules))
             AdaptiveHostSummary(blockedCount, allowedCount, redirectCount)
 
+            OverviewSectionTitle(stringResource(R.string.compose_overview_shortcuts))
             // Quick navigation uses the exact existing screens; it doesn't toggle
             // the service or claim that any future capture feature is active.
             OverviewQuickActions(
@@ -221,31 +227,73 @@ fun OverviewScreen(
                 },
             )
 
-            // Keep optional server details below the primary control.
-            // Web server quick stats row（利用空位：证书/请求/拦截率）
-            if (serverStats != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatTile(
-                        stringResource(R.string.compose_ws_control_certs),
-                        serverStats.sniCertsIssued,
-                        Modifier.weight(1f),
-                    )
-                    StatTile(
-                        stringResource(R.string.compose_stats_kpi_requests),
-                        serverStats.totalRequests,
-                        Modifier.weight(1f),
-                    )
-                    val rate = serverStats.localBlockPercent
-                    val rateText = rate?.let { String.format(Locale.getDefault(), "%.1f%%", it) } ?: "—"
-                    StatTileText(stringResource(R.string.compose_stats_kpi_rate),
-                        rateText, rateText, Modifier.weight(1f))
+
+        }
+    }
+}
+
+@Composable
+private fun OverviewSectionTitle(label: String) {
+    Text(label, style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(top = 6.dp))
+}
+
+/** One local-response dashboard, not a device-wide interception percentage. */
+@Composable
+internal fun OverviewWebSummary(stats: ServerStats?, onOpenStats: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val ratio = stats?.localBlockPercent
+    val rateText = ratio?.let { String.format(Locale.getDefault(), "%.1f%%", it) } ?: "—"
+    fun count(value: Long?) = value?.let { String.format(Locale.getDefault(), "%,d", it) } ?: "—"
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("overview-web-summary"),
+        colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainer),
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.compose_overview_web_summary), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.compose_stats_kpi_blocked), color = scheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelLarge)
+            Text(count(stats?.totalBlocked), style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold, color = scheme.primary,
+                modifier = Modifier.testTag("overview-blocked-count"))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.compose_stats_kpi_rate), Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium)
+                Text(rateText, style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.testTag("overview-local-rate"))
+            }
+            if (ratio != null) {
+                Canvas(Modifier.fillMaxWidth().height(10.dp).testTag("overview-local-share")) {
+                    val corner = androidx.compose.ui.geometry.CornerRadius(size.height / 2)
+                    drawRoundRect(scheme.surfaceContainerHighest, cornerRadius = corner)
+                    if (ratio > 0) drawRoundRect(scheme.primary,
+                        size = androidx.compose.ui.geometry.Size(size.width * (ratio / 100).toFloat(), size.height),
+                        cornerRadius = corner)
                 }
             }
-
-
+            HorizontalDivider(color = scheme.outlineVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.compose_stats_kpi_requests), style = MaterialTheme.typography.labelMedium)
+                    Text(count(stats?.totalRequests), style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.testTag("overview-request-count"))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.compose_ws_control_certs), style = MaterialTheme.typography.labelMedium)
+                    Text(count(stats?.sniCertsIssued), style = MaterialTheme.typography.titleLarge)
+                }
+            }
+            Text(stringResource(R.string.compose_stats_scope), style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant)
+            if (stats?.inconsistentRequestCounts == true) {
+                Text(stringResource(R.string.compose_stats_inconsistent_history),
+                    style = MaterialTheme.typography.bodySmall, color = scheme.error)
+            }
+            TextButton(onClick = onOpenStats, modifier = Modifier.align(Alignment.End)) {
+                Text(stringResource(R.string.compose_nav_stats))
+            }
         }
     }
 }
@@ -441,7 +489,7 @@ internal fun StatusCard(running: Boolean, stateText: String) {
             contentColor = contentColor,
         ),
     ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),

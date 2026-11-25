@@ -4,6 +4,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.runtime.mutableStateOf
 import org.adaway.ui.compose.theme.AdAwayTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -36,4 +38,20 @@ class OverviewQuickActionsUiTest {
             assertEquals(1, logs)
         }
     }
+    @Test
+    fun localOverviewDistinguishesUnknownValidAndInconsistentCounters() {
+        val stats = mutableStateOf<ServerStats?>(null)
+        compose.setContent {
+            AdAwayTheme(dynamicColor = false) { OverviewWebSummary(stats.value) {} }
+        }
+        compose.onNodeWithTag("overview-local-rate").assertTextEquals("—")
+        compose.onNodeWithTag("overview-local-share").assertDoesNotExist()
+        compose.runOnIdle { stats.value = ServerStats(totalRequests = 8, reportedTotalBlocked = 2) }
+        compose.onNodeWithTag("overview-blocked-count").assertTextEquals("2")
+        compose.onNodeWithTag("overview-local-share").assertExists()
+        compose.runOnIdle { stats.value = ServerStats(totalRequests = 1, reportedTotalBlocked = 2) }
+        compose.onNodeWithTag("overview-local-rate").assertTextEquals("—")
+        compose.onNodeWithTag("overview-local-share").assertDoesNotExist()
+    }
+
 }

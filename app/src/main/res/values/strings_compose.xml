@@ -698,4 +698,6 @@
     <string name="backup_ui_title">Portable UI preferences</string>
     <string name="backup_ui_scope">Theme and chart preferences only. No listener, certificates, app UID exemptions or server state is restored. Old settings backups can restore the supported UI fields.</string>
     <string name="backup_ui_restored">UI preferences saved. Reopen the app if the theme is not refreshed.</string>
+    <string name="compose_overview_web_summary">Local Web blocking</string>
+    <string name="compose_overview_shortcuts">Quick access</string>
 </resources>
