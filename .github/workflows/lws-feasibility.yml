@@ -1,0 +1,141 @@
+name: Isolated LWS feasibility
+on:
+  pull_request:
+    branches: [master]
+    paths: ['tools/lws-spike/**', 'docs/lws-feasibility.md', '.github/workflows/lws-feasibility.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: lws-spike-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  host:
+    name: Pinned Linux TLS and sanitizers
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/spike-openssl/install
+          key: lws-spike-linux-openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb-v1
+      - name: Build exact baseline crypto, never system install
+        run: bash tools/lws-spike/build-openssl-host.sh "$RUNNER_TEMP/spike-openssl"
+      - name: Build and run actual processes
+        run: |
+          mkdir -p evidence
+          python3 -m pip install -r tools/lws-spike/tests/requirements.txt
+          python3 -m unittest discover -s tools/lws-spike/tests -p 'test_*.py'
+          python3 tools/lws-spike/build.py --directory "$RUNNER_TEMP/lws-host" --openssl "$RUNNER_TEMP/spike-openssl/install" > evidence/build.log 2>&1
+          image="$RUNNER_TEMP/lws-host/inputs/fixture/app/src/main/assets/img_01.webp"
+          for backend in lws mongoose; do
+            python3 tools/lws-spike/tests/correctness.py --binary "$RUNNER_TEMP/lws-host/build/spike_$backend" --image "$image" --output "evidence/$backend"
+            python3 tools/lws-spike/tests/native_probe.py --binary "$RUNNER_TEMP/lws-host/build/spike_$backend" --probe "$RUNNER_TEMP/lws-host/build/spike_probe" --image "$image" --output "evidence/native-$backend"
+          done
+          python3 tools/lws-spike/tests/compare.py evidence/lws/correctness.json evidence/mongoose/correctness.json evidence/http-comparison.json
+          cp "$RUNNER_TEMP/lws-host/build-evidence.json" evidence/
+      - name: Rebuild and run ASan and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          cmake -S tools/lws-spike -B "$RUNNER_TEMP/lws-asan" -DLWS_SOURCE="$RUNNER_TEMP/lws-host/inputs/lws-source" -DMONGOOSE_SOURCE="$RUNNER_TEMP/lws-host/inputs/fixture/webserver/jni/mongoose" -DOPENSSL_ROOT_DIR="$RUNNER_TEMP/spike-openssl/install" -DCMAKE_C_FLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined' > evidence/asan-build.log 2>&1
+          cmake --build "$RUNNER_TEMP/lws-asan" --parallel 4 >> evidence/asan-build.log 2>&1
+          for backend in lws mongoose; do
+            python3 tools/lws-spike/tests/correctness.py --binary "$RUNNER_TEMP/lws-asan/spike_$backend" --image "$RUNNER_TEMP/lws-host/inputs/fixture/app/src/main/assets/img_01.webp" --output "evidence/asan-$backend"
+          done
+          python3 tools/lws-spike/tests/compare.py evidence/asan-lws/correctness.json evidence/asan-mongoose/correctness.json evidence/asan-comparison.json
+      - name: Separate unchanged production-source reference (not a paired result)
+        run: |
+          test "$(git rev-parse HEAD:webserver/jni)" = e0c8408c6369c01e28069fdc073ec6fefd378681
+          cmake -S tools/lws-spike -B "$RUNNER_TEMP/lws-host/build" -DSPIKE_PRODUCTION_SOURCE="$GITHUB_WORKSPACE/webserver/jni" > evidence/production-build.log 2>&1
+          cmake --build "$RUNNER_TEMP/lws-host/build" --target spike_production_reference --parallel 4 >> evidence/production-build.log 2>&1
+          python3 tools/lws-spike/tests/production_reference.py --binary "$RUNNER_TEMP/lws-host/build/spike_production_reference" --image "$RUNNER_TEMP/lws-host/inputs/fixture/app/src/main/assets/img_01.webp" --output evidence/production-reference
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lws-linux-evidence
+          path: |
+            evidence/**/*.json
+            evidence/**/*.log
+          if-no-files-found: warn
+  android:
+    name: Native ${{ matrix.abi }} API ${{ matrix.runtime }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {abi: arm64-v8a, platform: 30, runtime: 0}
+          - {abi: riscv64, platform: 35, runtime: 0}
+          - {abi: x86_64, platform: 30, runtime: 30}
+          - {abi: x86_64, platform: 30, runtime: 35}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/cache@v4
+        with:
+          path: webserver/build/official-openssl/${{ matrix.abi }}
+          key: official-openssl-${{ matrix.abi }}-ndk28-${{ runner.os }}-${{ hashFiles('webserver/scripts/build-official-openssl.sh') }}
+      - name: Build standalone native probes, not APKs
+        env:
+          ANDROID_ABI: ${{ matrix.abi }}
+        run: |
+          mkdir -p evidence
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;28.1.13356709'
+          export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/28.1.13356709"
+          bash webserver/scripts/build-official-openssl.sh > evidence/openssl-build.log 2>&1
+          python3 tools/lws-spike/build.py --directory "$RUNNER_TEMP/lws-android" --openssl "$GITHUB_WORKSPACE/webserver/build/official-openssl/$ANDROID_ABI" --define "CMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" --define "ANDROID_ABI=$ANDROID_ABI" --define 'ANDROID_PLATFORM=android-${{ matrix.platform }}' > evidence/build.log 2>&1
+          cp "$RUNNER_TEMP/lws-android/build-evidence.json" evidence/
+          "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -h "$RUNNER_TEMP/lws-android/build/spike_lws" > evidence/elf.log
+      - name: Enable disposable emulator KVM
+        if: matrix.runtime != 0
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Real IPv4 and IPv6 clients inside Android
+        if: matrix.runtime != 0
+        uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed
+        with:
+          api-level: ${{ matrix.runtime }}
+          arch: x86_64
+          script: python3 tools/lws-spike/tests/android-runtime.py --build "$RUNNER_TEMP/lws-android/build" --image "$RUNNER_TEMP/lws-android/inputs/fixture/app/src/main/assets/img_01.webp" --output evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lws-android-${{ matrix.abi }}-api-${{ matrix.runtime }}
+          path: |
+            evidence/*.json
+            evidence/*.log
+          if-no-files-found: warn
+
+  performance:
+    name: Paired Linux performance (no migration auto-switch)
+    needs: host
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/spike-openssl/install
+          key: lws-spike-linux-openssl-45e844fa2a14ec92d146bd8f5778ac130b6625fb-v1
+      - name: Build the same pinned backends
+        run: |
+          mkdir -p evidence
+          bash tools/lws-spike/build-openssl-host.sh "$RUNNER_TEMP/spike-openssl" > evidence/openssl-build.log 2>&1
+          python3 tools/lws-spike/build.py --directory "$RUNNER_TEMP/lws-perf" --openssl "$RUNNER_TEMP/spike-openssl/install" > evidence/build.log 2>&1
+          python3 -m pip install -r tools/lws-spike/tests/requirements.txt
+      - name: Alternate five paired rounds with identical payloads and test logs
+        run: python3 tools/lws-spike/tests/benchmark.py --build "$RUNNER_TEMP/lws-perf/build" --image "$RUNNER_TEMP/lws-perf/inputs/fixture/app/src/main/assets/img_01.webp" --output evidence/performance > evidence/performance.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lws-linux-paired-performance
+          path: |
+            evidence/**/*.json
+            evidence/**/*.log
+          if-no-files-found: warn
