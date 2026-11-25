@@ -185,7 +185,7 @@ fun StatisticsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             // Server counters and local rule counts describe different things.
             if (serverStats != null) {
-                if (serverStats.categorizedBlocked > serverStats.totalBlocked) {
+                if (serverStats.inconsistentRequestCounts || serverStats.categorizedBlocked > serverStats.totalBlocked) {
                     Text(stringResource(R.string.compose_stats_inconsistent_history),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
@@ -322,10 +322,7 @@ fun StatisticsScreen(
  */
 @Composable
 private fun KpiCardRow(stats: ServerStats) {
-    val rate = if (stats.totalRequests > 0L) {
-        (stats.totalBlocked.toDouble() / stats.totalRequests.toDouble() * 100.0)
-            .coerceIn(0.0, 100.0)
-    } else 0.0
+    val rate = stats.localBlockPercent
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -358,8 +355,8 @@ private fun KpiCardRow(stats: ServerStats) {
 }
 
 @Composable
-private fun BlockRateRing(rate: Double) {
-    val rateText = String.format(Locale.getDefault(), "%.1f%%", rate)
+private fun BlockRateRing(rate: Double?) {
+    val rateText = rate?.let { String.format(Locale.getDefault(), "%.1f%%", it) } ?: "—"
     val rateLabel = stringResource(R.string.compose_stats_kpi_rate)
     Box(
         modifier = Modifier
@@ -387,7 +384,7 @@ private fun BlockRateRing(rate: Double) {
             drawArc(
                 color = arcFg,
                 startAngle = -90f,
-                sweepAngle = (rate / 100.0 * 360.0).toFloat().coerceIn(0f, 360f),
+                sweepAngle = ((rate ?: 0.0) / 100.0 * 360.0).toFloat(),
                 useCenter = false,
                 topLeft = Offset(inset, inset),
                 size = arcSize,
@@ -773,11 +770,11 @@ private fun ServerDetailsCard(stats: ServerStats) {
             // 新增指标：拦截率 / TLS 会话复用率 / 运行天数 / 每日峰值
             DetailRow(
                 stringResource(R.string.compose_stats_block_rate),
-                String.format(Locale.US, "%.1f%%", stats.blockRate),
+                stats.localBlockPercent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
             )
             DetailRow(
                 stringResource(R.string.compose_stats_sni_hit_rate),
-                String.format(Locale.US, "%.1f%%", stats.sniHitRate),
+                stats.sniCachePercent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
             )
             DetailRow(
                 stringResource(R.string.compose_stats_uptime_days),
@@ -1353,9 +1350,8 @@ private fun smoothPath(points: List<Offset>): androidx.compose.ui.graphics.Path 
  * 中心大字显示百分比，下方显示 拦截/请求 计数。
  */
 private fun BlockRateCard(stats: ServerStats) {
-    val total = stats.totalRequests.coerceAtLeast(1L)
-    val rate = (stats.totalBlocked.toDouble() / total.toDouble())
-        .toFloat().coerceIn(0f, 1f)
+    val percent = stats.localBlockPercent
+    val rate = ((percent ?: 0.0) / 100.0).toFloat()
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -1388,7 +1384,7 @@ private fun BlockRateCard(stats: ServerStats) {
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    String.format(Locale.US, "%.1f%%", rate * 100f),
+                    percent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
                     style = MaterialTheme.typography.headlineSmall.copy(
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.SemiBold,

@@ -173,6 +173,12 @@ data class ServerStats(
     val reportedTotalBlocked: Long? = null,
 ) {
     val totalBlocked: Long get() = reportedTotalBlocked ?: categorizedBlocked
+    /** Local Web response share, not whole-device blocking coverage. */
+    val localBlockPercent: Double? get() = if (totalRequests > 0 && totalBlocked in 0..totalRequests)
+        totalBlocked.toDouble() * 100.0 / totalRequests.toDouble() else null
+    val inconsistentRequestCounts: Boolean get() = totalRequests < 0 || totalBlocked < 0 || totalBlocked > totalRequests
+    val sniCachePercent: Double? get() = if (tlsHandshakes > 0 && sniCacheHits in 0..tlsHandshakes)
+        sniCacheHits.toDouble() * 100.0 / tlsHandshakes.toDouble() else null
     val uncategorizedBlocked: Long get() = (totalBlocked - categorizedBlocked).coerceAtLeast(0)
     val categorizedBlocked: Long
         get() = blockedImages + blockedScripts + blockedStyles + blockedFonts +
