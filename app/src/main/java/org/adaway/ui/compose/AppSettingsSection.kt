@@ -102,6 +102,8 @@ internal fun ColumnScope.AppSettingsSection(viewModel: StatsViewModel, refreshKe
                 // Do not collect high-frequency snapshots while this card is collapsed.
                 val serverStats by viewModel.serverStats.collectAsStateWithLifecycle()
                 val apps = serverStats?.apps.orEmpty()
+                val exemptionBusy by viewModel.exemptionBusy.collectAsStateWithLifecycle()
+                val defaults = remember(context) { defaultAllowlistUids(context).toSet() }
                 Column {
                     Spacer(Modifier.height(8.dp))
                     if (apps.isEmpty()) {
@@ -118,7 +120,7 @@ internal fun ColumnScope.AppSettingsSection(viewModel: StatsViewModel, refreshKe
                                 isAppMonitored(context, app.uid)
                             }
                             val allowed = remember(refreshKey, app.uid) {
-                                isAppAllowed(context, app.uid)
+                                app.uid in defaults || isAppAllowed(context, app.uid)
                             }
                     Row(
                         modifier = Modifier
@@ -152,32 +154,10 @@ internal fun ColumnScope.AppSettingsSection(viewModel: StatsViewModel, refreshKe
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Switch(
                                 checked = allowed,
-                                onCheckedChange = { v ->
-                                    setAppAllowed(context, app.uid, v)
-                                    onPreferencesChanged()
-                                    val sp = context.getSharedPreferences(
-                                        PREFS_GENERAL,
-                                        Context.MODE_PRIVATE,
-                                    )
-                                    if (v) {
-                                        Toast.makeText(
-                                            context,
-                                            context.getString(
-                                                if (sp.getBoolean("app_allow_explained", false)) {
-                                                    R.string.compose_settings_app_allow_hint
-                                                } else {
-                                                    R.string.compose_settings_app_allow_explain
-                                                },
-                                            ),
-                                            Toast.LENGTH_LONG,
-                                        ).show()
-                                        sp.edit().putBoolean("app_allow_explained", true).apply()
-                                    } else {
-                                        Toast.makeText(
-                                            context,
-                                            context.getString(R.string.compose_settings_app_allow_undone),
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
+                                enabled = !exemptionBusy && app.uid > 0 && app.uid !in defaults,
+                                onCheckedChange = { value ->
+                                    viewModel.changeAppExemption(app.uid, value) {
+                                        onPreferencesChanged()
                                     }
                                 },
                             )
