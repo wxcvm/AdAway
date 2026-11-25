@@ -690,4 +690,12 @@
     <string name="compose_logs_placeholder_policy">Placeholder policy</string>
     <string name="compose_logs_category_policy">Category response policy</string>
     <string name="compose_logs_rejection_detail">The request was refused by an access check, for example a protected management endpoint, a web Origin, or a pinning policy. These rejections are not counted as ad filtering. Use the recorded path and HTTP status to distinguish this request from other requests to the same host.</string>
+    <string name="backup_document_saved">Backup written to selected document.</string>
+    <string name="backup_rules_restored">Rules saved. Check rule sync/application status; new sources need a sync.</string>
+    <string name="backup_rules_not_saved">Rule import not confirmed; check sync status.</string>
+    <string name="backup_rules_title">Rules and subscriptions</string>
+    <string name="backup_rules_scope">Merge personal rules and source definitions. Existing sources are retained; local file access must be granted again. Sync new sources after importing.</string>
+    <string name="backup_ui_title">Portable UI preferences</string>
+    <string name="backup_ui_scope">Theme and chart preferences only. No listener, certificates, app UID exemptions or server state is restored. Old settings backups can restore the supported UI fields.</string>
+    <string name="backup_ui_restored">UI preferences saved. Reopen the app if the theme is not refreshed.</string>
 </resources>
