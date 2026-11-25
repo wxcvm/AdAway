@@ -106,7 +106,9 @@
     <string name="compose_settings_block_mode_recommended">Optimised (recommended)</string>
     <string name="compose_settings_adguard_title">AdGuard installed and a VPN is active (VPN owner not verified)</string>
     <string name="compose_settings_adguard_steps">Optional DNS-level cooperation: If your AdGuard version supports Custom IP address under DNS protection blocking modes, consider A = %1$s and AAAA = %2$s only when the corresponding local listener is reachable. This affects blocked DNS rules, not every AdGuard filter decision. DNS returns an IP but no port: the local server must actually answer on 80/443 (or have verified port redirection). HTTPS also requires client CA trust, and certificate-pinned apps may fail. Confirm the VPN owner and test the DNS and HTTPS paths before claiming cooperation works.</string>
-    <string name="compose_settings_adguard_copy">Copy the addresses</string>
+    <string name="adguard_listener_family_disabled">Not configured</string>
+    <string name="adguard_listener_nonstandard">Nonstandard listener ports: DNS alone cannot reach them. Verify a separate port redirection before using these addresses.</string>
+    <string name="compose_settings_adguard_copy">Copy candidate addresses</string>
     <string name="compose_settings_adguard_copied">Addresses copied</string>
     <string name="compose_settings_adguard_dismiss">Do not show again</string>
     <string name="compose_stats_app_pin_refused">refused by configured TLS retry policy</string>
@@ -208,8 +210,10 @@
     <string name="compose_settings_ws_bind">LAN access</string>
     <string name="compose_settings_light_mode">Low-power background mode</string>
     <string name="compose_settings_light_mode_hint">After a successful boot start, the background app may exit while the native server continues running. Scheduled recovery checks change from about 5 minutes (15-minute backup) to 6 hours. Android may defer checks. Keep-alive and hijack mode retain frequent recovery checks; keep-alive also prevents process exit. Does not change native filtering or response policies.</string>
-    <string name="compose_settings_pin_policy">Apps that pin certificates: refuse cheaply</string>
-    <string name="compose_settings_pin_policy_hint">Off by default. When on, an app detected pinning certificates (repeated failed handshakes) has its CONNECT requests refused without interception: it stays blocked, but each retry costs one line of HTTP instead of a TLS handshake plus a signed certificate. Measured before this option: one system component alone reached ~240 requests/second, all blocked. The app list shows which apps are affected.</string>
+    <string name="pin_policy_saved">Policy saved; server reloads on a subsequent relevant request. Runtime confirmation unavailable.</string>
+    <string name="pin_policy_save_failed">Could not save policy; previous setting retained.</string>
+    <string name="compose_settings_pin_policy">Repeated TLS failures: fast CONNECT refusal</string>
+    <string name="compose_settings_pin_policy_hint">Experimental, off by default. Five TLS failures for a known app in a 10-second window trigger a 10-minute cooldown for its CONNECT requests. Failures do not prove certificate pinning. Direct TLS connections are not avoided by this policy.</string>
     <string name="compose_settings_ws_bind_all">Listening on all interfaces</string>
     <string name="compose_settings_ws_bind_loop">Loopback only</string>
     <string name="compose_settings_ws_http_port">HTTP port</string>
@@ -401,15 +405,15 @@
     <string name="compose_logs_export_failed">Export failed: %1$s</string>
     <string name="compose_logs_load_more">Load older entries (showing %1$d of %2$d)</string>
     <string name="compose_settings_visible_reply">Visible-content placeholder</string>
-    <string name="compose_settings_visible_reply_hint">Also answer blocked pages and iframes with the placeholder image, so the page shows a visible placeholder instead of collapsing. Off by default; while off, behaviour is unchanged.</string>
-    <string name="compose_settings_dedup">Request de-duplication</string>
-    <string name="compose_settings_dedup_hint">Repeated requests from the same app to the same host within one second receive empty HTTP 204 replies, including different resource paths. This can hide placeholders or change resource responses. Off by default; it is a load-shedding policy, not content caching.</string>
+    <string name="compose_settings_visible_reply_hint">For blocked pages and embedded content, prefer a visible image when the request reaches the destination-header classifier. The normal fallback can also show an image. Off by default.</string>
+    <string name="compose_settings_dedup">Same-host burst suppression</string>
+    <string name="compose_settings_dedup_hint">For a known app, repeated blocked requests to the same host within one second receive empty 204 replies, even for different paths. Can hide placeholders; off by default.</string>
     <string name="compose_settings_retry_guard">Retry-storm guard</string>
-    <string name="compose_settings_retry_guard_hint">If one app hits the same host more than 40 times in 10 seconds, fast-fail it for 30 seconds and log it, then probe again. Off by default.</string>
+    <string name="compose_settings_retry_guard_hint">For a known app, 40 blocked requests to one host in 10 seconds trigger a 30-second cooldown. Subsequent replies are empty 204. Off by default.</string>
     <string name="compose_settings_cache_reuse">Old response shortcut retired</string>
     <string name="compose_settings_cache_reuse_hint">The old option replaced repeated responses with empty HTTP 204 replies instead of reusing their content. It is now ignored, including saved settings, so it cannot turn placeholders into empty replies. Request deduplication and retry protection remain separate options.</string>
     <string name="compose_settings_circuit_breaker">Per-host circuit breaker</string>
-    <string name="compose_settings_circuit_breaker_hint">If a host gets fast-failed more than 60 times in 10 seconds by any app, fast-fail it for 20 seconds. Complements the retry guard, which only looks at one app. Off by default.</string>
+    <string name="compose_settings_circuit_breaker_hint">60 blocked-response requests to one host in 10 seconds across apps trigger a 20-second cooldown. Subsequent replies are empty 204. Off by default.</string>
     <string name="compose_settings_rule_override">Per-host response override</string>
     <string name="compose_settings_rule_override_hint">Answer specific hosts with a chosen status code (403 / 404 / 410 / 503 / 204 / 200) instead of the default placeholder. The request is still blocked. Off by default; while off, the rule file is not even read.</string>
     <string name="compose_stats_app_rate">Requests per second</string>
@@ -650,7 +654,9 @@
     <string name="content_types_title">Response categories</string>
     <string name="content_types_hint">On: use the category policy (for example a placeholder image, empty script or JSON). Off: answer matching requests with an empty HTTP 204. This does not allow the domain. Categories may already use 204.</string>
     <string name="content_type_structures">Structured assets (XML / text / WASM)</string>
-    <string name="content_protection_title">Response behaviour and retry protection</string>
+    <string name="content_visible_group">Placeholder behaviour</string>
+    <string name="content_protection_tradeoff">Keep these off unless repeated blocked requests cause load. They change response content, not blocking coverage, and may not stop client retries.</string>
+    <string name="content_protection_title">Advanced load shedding</string>
     <string name="content_rules_hint">Each line: domain = status. Up to 64 rules; ASCII domains shorter than 128 characters. Status: 204, 403, 404, 410, 503 or 200. Non-204 overrides return a short plain-text block message. A domain matches itself and subdomains at label boundaries; first matching line wins. Paths, wildcards and filter conditions are rejected. Changes HTTP replies only, not DNS blocking rules.</string>
     <string name="content_rules_legacy">Saved text contains legacy or unsupported syntax. Correct it in the editor before enabling or saving these settings.</string>
     <string name="content_rules_count">%1$d / 64 saved domain response rules. With no rules, the override cannot be enabled.</string>

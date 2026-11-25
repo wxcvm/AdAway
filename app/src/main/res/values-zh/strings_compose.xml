@@ -106,7 +106,9 @@
     <string name="compose_settings_block_mode_recommended">优化（推荐）</string>
     <string name="compose_settings_adguard_title">已安装 AdGuard 且检测到 VPN（尚无法确认 VPN 归属）</string>
     <string name="compose_settings_adguard_steps">可选的 DNS 层协同：如果当前 AdGuard 版本支持在 DNS 保护的阻断模式中设置“自定义 IP 地址”，可考虑将 A 应答设为 %1$s、AAAA 应答设为 %2$s，但必须确认本地服务实际可达且分别支持 IPv4/IPv6。这只适用于被 DNS 规则拦截的域名，不代表 AdGuard 的全部拦截请求都会转交。DNS 不携带端口，服务器必须实际接收 80/443（或已验证的端口重定向）；HTTPS 还需要客户端信任 CA，证书固定的应用仍可能拒绝。请先确认 VPN 归属，并分别测试 DNS 与 HTTPS 后再判断协同是否生效。</string>
-    <string name="compose_settings_adguard_copy">复制这两个地址</string>
+    <string name="adguard_listener_family_disabled">未配置</string>
+    <string name="adguard_listener_nonstandard">当前监听并非标准端口；仅设置 DNS 地址无法到达这些端口。使用前须验证独立的端口重定向。</string>
+    <string name="compose_settings_adguard_copy">复制候选地址</string>
     <string name="compose_settings_adguard_copied">地址已复制</string>
     <string name="compose_settings_adguard_dismiss">不再提示</string>
     <string name="compose_stats_app_pin_refused">按已配置的 TLS 重试策略拒绝</string>
@@ -215,8 +217,10 @@
     <string name="compose_settings_cert_install_manual">手动安装</string>
     <string name="compose_settings_light_mode">低功耗后台模式</string>
     <string name="compose_settings_light_mode_hint">开机启动成功后，后台应用进程可退出，原生服务器继续运行。自愈检查由约 5 分钟（15 分钟兜底）调整为 6 小时；系统可能延迟执行。常驻守护和劫持模式保留高频检查，常驻守护同时阻止进程退出。不改变原生拦截或响应策略。</string>
-    <string name="compose_settings_pin_policy">固定证书的应用：改为廉价拒绝</string>
-    <string name="compose_settings_pin_policy_hint">默认关闭。开启后：被检测出证书固定（反复握手失败）的应用，其 CONNECT 请求会直接拒绝而不再做中间人——拦截效果不变，但每次重试只花一行 HTTP，而不是一次 TLS 握手加一张新签证书。开启前实测：单个系统组件就达到约 240 请求/秒且全部被拦截。哪些应用命中会在统计页的应用列表里标注。</string>
+    <string name="pin_policy_saved">策略已保存，服务端将在后续相关请求时读取，尚未确认运行状态。</string>
+    <string name="pin_policy_save_failed">策略保存失败，保留原设置。</string>
+    <string name="compose_settings_pin_policy">TLS 反复失败：快速拒绝 CONNECT</string>
+    <string name="compose_settings_pin_policy_hint">实验性功能，默认关闭。已识别应用在 10 秒窗口内达到 5 次 TLS 失败后，对其 CONNECT 请求进入 10 分钟冷却。握手失败不等于证书固定；此策略不能跳过直接 TLS 连接。</string>
     <string name="compose_settings_allowlist_title">放行名单（跳过拦截）</string>
     <string name="compose_settings_allowlist_warning">⚠️ 名单内 UID 的流量不会被拦截。只用于门户登录等特殊情况，非必要不要添加。</string>
     <string name="compose_settings_allowlist_default">默认条目（门户登录探测，自动维护）</string>
@@ -411,13 +415,13 @@
     <string name="compose_settings_cache_reuse">旧版响应快捷路径已停用</string>
     <string name="compose_settings_cache_reuse_hint">旧选项会把重复请求的原响应替换为空 HTTP 204，并未复用内容。现已忽略此选项和旧设置，避免占位图因此变空；请求去重和重试保护仍是独立选项。</string>
     <string name="compose_settings_circuit_breaker">按域熔断</string>
-    <string name="compose_settings_circuit_breaker_hint">任意应用在 10 秒内让同一个域被快速失败超过 60 次时，对该域快速失败 20 秒。与「重试风暴护栏」互补 —— 护栏只看单个应用。默认关闭。</string>
-    <string name="compose_settings_dedup">请求去重</string>
-    <string name="compose_settings_dedup_hint">同一应用在一秒内重复请求同一域名时，其余请求返回空 HTTP 204，包括不同资源路径；这可能让占位图变空或改变资源响应。默认关闭，属于降载策略，不是内容缓存。</string>
+    <string name="compose_settings_circuit_breaker_hint">跨应用对同一域在 10 秒内达到 60 次待拦截应答，触发 20 秒冷却，后续返回空 204。默认关闭。</string>
+    <string name="compose_settings_dedup">同域突发请求降载</string>
+    <string name="compose_settings_dedup_hint">已识别应用在 1 秒内反复请求同一被拦域名时，后续返回空 204，不区分路径。可能使占位图消失。默认关闭。</string>
     <string name="compose_settings_retry_guard">重试风暴护栏</string>
-    <string name="compose_settings_retry_guard_hint">同一个应用在 10 秒内对同一个域超过 40 次就判为风暴，随后 30 秒快速失败并记日志，之后自动恢复探测。默认关闭。</string>
+    <string name="compose_settings_retry_guard_hint">已识别应用在 10 秒内对同一域达到 40 次待拦截应答，触发 30 秒冷却，后续返回空 204。默认关闭。</string>
     <string name="compose_settings_visible_reply">可见型占位</string>
-    <string name="compose_settings_visible_reply_hint">页面本身或 iframe 被拦时也返回占位图，页面不会整片塌陷而是显示一个可见的占位。默认关闭；关闭时行为与之前完全一致。</string>
+    <string name="compose_settings_visible_reply_hint">进入资源用途识别流程的被拦页面或嵌入内容优先返回可见占位图；普通兜底也可能返回图片。默认关闭。</string>
     <string name="compose_exempt_effective_note">这里"解除过滤"的真实效果：本服务器不再拦截该域名（回 204 No Content）。在"AdGuard 把拦截 IP 指向本服务器"的部署里，服务器拿不到真实内容，所以要让该域真正可用，还需要在 AdGuard 侧同步豁免。以前那种伪造的成功响应已经去掉了。</string>
     <string name="compose_settings_autostart_battery_button">电池优化设置</string>
     <string name="compose_settings_autostart_retry">重新启动服务器</string>
@@ -650,7 +654,9 @@
     <string name="content_types_title">分类响应</string>
     <string name="content_types_hint">开启：使用相应类别的策略（例如占位图、空脚本或 JSON）；关闭：该类请求返回空 HTTP 204，并非放行域名。部分类别本来就使用 204。</string>
     <string name="content_type_structures">结构化资源（XML／文本／WASM）</string>
-    <string name="content_protection_title">应答行为与重试保护</string>
+    <string name="content_visible_group">占位显示</string>
+    <string name="content_protection_tradeoff">仅在被拦请求反复造成负载时考虑开启。这些策略改变响应内容，不提高拦截覆盖率，也不保证客户端停止重试。</string>
+    <string name="content_protection_title">高级降载策略</string>
     <string name="content_rules_hint">每行：域名 = 状态码。最多 64 条，ASCII 域名须短于 128 字符；支持 204、403、404、410、503、200（非 204 状态返回简短的纯文本拦截提示）。域名匹配自身及标签边界上的子域，按顺序取第一条命中。拒绝路径、通配和过滤条件。只改变 HTTP 应答，不改变 DNS 拦截规则。</string>
     <string name="content_rules_legacy">已保存文本包含旧格式或不支持的语法，请先在编辑器中修正，再启用或保存设置。</string>
     <string name="content_rules_count">已保存 %1$d／64 条按域响应。没有规则时不能启用覆盖。</string>

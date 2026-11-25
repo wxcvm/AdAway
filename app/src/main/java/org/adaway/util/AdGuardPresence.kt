@@ -48,16 +48,20 @@ object AdGuardPresence {
     /** 是否值得显示提示：两者都成立。 */
     fun shouldSuggest(context: Context): Boolean = isInstalled(context) && isVpnActive(context)
 
-    /**
-     * 建议填进 AdGuard「自定义 IP」的 IPv4。
-     *
-     * <p>AdGuard 与本应用同机，所以回环地址始终可达；如果服务器改成了监听全部接口
-     * （供同一局域网内别的设备使用），把这里换成局域网地址即可——提示语里写了这一点。</p>
-     */
-    fun suggestedIpv4(): String = "127.0.0.1"
+    /** Saved listener candidates, not proof of reachability or active DNS filtering. */
+    data class ListenerSuggestion(val ipv4: String, val ipv6: String, val standardPorts: Boolean) {
+        fun copyText(): String = listOfNotNull(
+            ipv4.takeIf { it.isNotEmpty() }?.let { "A = $it" },
+            ipv6.takeIf { it.isNotEmpty() }?.let { "AAAA = $it" },
+        ).joinToString("\n")
+    }
 
-    /** 建议填进 AdGuard「自定义 IP」的 IPv6。 */
-    fun suggestedIpv6(): String = "::1"
+    fun listenerSuggestion(settings: ListenerSettings): ListenerSuggestion =
+        ListenerSuggestion(
+            if (ListenerSettings.isAnyAddress(settings.ipv4)) "127.0.0.1" else settings.ipv4,
+            if (ListenerSettings.isAnyAddress(settings.ipv6)) "::1" else settings.ipv6,
+            settings.http == 80 && settings.https == 443,
+        )
 
     /** 用户是否已经点过「不再提示」。 */
     fun isHintDismissed(context: Context): Boolean =

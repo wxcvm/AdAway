@@ -1183,7 +1183,10 @@ static void pin_policy_reload(const char *resource_dir) {
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/%s", resource_dir, PIN_POLICY_FILE);
     FILE *fp = fopen(path, "r");
-    if (!fp) return;
+    if (!fp) {
+        if (errno == ENOENT) { strcpy(s_pin_mode, "off"); s_pin_bypass_count = 0; }
+        return;
+    }
     char line[64];
     while (fgets(line, sizeof(line), fp) != NULL) {
         char *eq = strchr(line, '=');
@@ -1199,6 +1202,7 @@ static void pin_policy_reload(const char *resource_dir) {
         }
     }
     fclose(fp);
+    if (strcmp(s_pin_mode, "deny") != 0) s_pin_bypass_count = 0;
 }
 
 static bool pin_mode_deny(void) { return strcmp(s_pin_mode, "deny") == 0; }
@@ -1206,7 +1210,7 @@ static bool pin_mode_deny(void) { return strcmp(s_pin_mode, "deny") == 0; }
 /* Is this uid currently refused without interception? */
 static bool pin_uid_bypassed(uid_t uid) {
     /* 判定逻辑在 pin_window.h 里（有宿主测试）；这里的结构体字段与原来的匿名结构体一致。 */
-    return pin_bypass_hit(s_pin_bypass, s_pin_bypass_count,
+    return pin_mode_deny() && pin_bypass_hit(s_pin_bypass, s_pin_bypass_count,
                           (unsigned int) uid, mg_millis());
 }
 
@@ -1225,11 +1229,8 @@ static void pin_note_tls_failure(uid_t uid, const char *resource_dir) {
                                            now, PIN_FAIL_WINDOW_MS);
     if (!pin_fail_window_reached(a->tls_fail_win, PIN_FAIL_THRESHOLD)) return;
     /* Detected: refuse this uid without interception for the cooldown. */
-    if (s_pin_bypass_count < APP_STATS_MAX) {
-        s_pin_bypass[s_pin_bypass_count].uid = uid;
-        s_pin_bypass[s_pin_bypass_count].until_ms = pin_bypass_until(now, PIN_BYPASS_MS);
-        s_pin_bypass_count++;
-    }
+    if (!pin_bypass_record(s_pin_bypass, &s_pin_bypass_count, APP_STATS_MAX,
+                           (unsigned int)uid, now, pin_bypass_until(now, PIN_BYPASS_MS))) return;
     LOG_WARN("pin: uid %d fails TLS handshakes (%u in %us) - refusing its "
              "CONNECT requests without interception for %us (policy=%s)",
              (int)uid, (unsigned)a->tls_fail_win, PIN_FAIL_WINDOW_MS / 1000u,
@@ -2027,8 +2028,8 @@ static bool f5_guard_tripped(uid_t uid, uint32_t hh) {
 }
 
 /* ============ F5 续：按域熔断（独立开关，默认关） ============
-   circuit_breaker：同一域（不限 uid）在 10s 内被快速失败超过 60 次 → 判定为
-     "这个域在当前客户端上已成死循环"，随后 20s 内对该域的请求直接快速失败。
+   circuit_breaker：同一域（不限 uid）在 10s 窗口内收到 60 次待拦截应答请求 → 判定为
+     "这个域出现高频拦截应答"，随后 20s 内对该域的请求直接返回空 204。
      与 retry_guard 的区别：retry_guard 看的是"单个应用 × 单个域"，熔断看的是"整个域"。
    The former cache_reuse path is retired: it never cached a response, and
    replaced image/script/style responses with empty 204s. Legacy config keys
@@ -2223,17 +2224,17 @@ static bool reply_blocked_by_type(struct mg_connection *c, struct mg_http_messag
                 return deny_status(&s_f5_override_hits, c, ov);
             }
         }
-        if (cfg_breaker && f5_breaker_tripped(f5_hh, f5_now)) {
+        if (cfg_breaker && f5_host[0] && f5_breaker_tripped(f5_hh, f5_now)) {
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
             return deny_fast(&s_f5_breaker_hits, c);
         }
-        if (cfg_guard && f5_guard_tripped(f5_uid, f5_hh)) {
+        if (cfg_guard && f5_host[0] && f5_uid != (uid_t)-1 && f5_guard_tripped(f5_uid, f5_hh)) {
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
             return deny_fast(&s_f5_guard_hits, c);
         }
-        if (cfg_dedup && f5_dedup_hit(f5_uid, f5_hh)) {
+        if (cfg_dedup && f5_host[0] && f5_uid != (uid_t)-1 && f5_dedup_hit(f5_uid, f5_hh)) {
             s_last_type = LT_STRUCT;
             s_last_mode = RB_DENY;
             return deny_fast(&s_f5_dedup_hits, c);
@@ -3976,7 +3977,9 @@ static void fn(struct mg_connection *c, int ev, void *ev_data) {
      * anyway. The app is refused exactly as before - the retry just stops
      * costing a handshake plus a certificate every time.
      */
-    if (pin_mode_deny() && pin_uid_bypassed(chk_uid) && hm->method.len == 7 &&
+    if (hm->method.len == 7 && memcmp(hm->method.buf, "CONNECT", 7) == 0)
+        pin_policy_reload(s->resource_dir);
+    if (pin_uid_bypassed(chk_uid) && hm->method.len == 7 &&
         memcmp(hm->method.buf, "CONNECT", 7) == 0) {
         LOG_WARN("pin: refusing CONNECT from uid %d without interception", (int)chk_uid);
         mg_http_reply(c, 403, "Content-Type: text/plain\r\nCache-Control: no-store\r\n",

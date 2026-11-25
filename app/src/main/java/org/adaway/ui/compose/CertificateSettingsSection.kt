@@ -16,6 +16,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +87,10 @@ internal fun ColumnScope.CertificateSettingsSection(viewModel: StatsViewModel, c
                     org.adaway.util.WebServerUtils.getPinPolicyMode(context) == "deny",
                 )
             }
+            LaunchedEffect(certificateActionBusy) {
+                if (!certificateActionBusy)
+                    pinDeny = org.adaway.util.WebServerUtils.getPinPolicyMode(context) == "deny"
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -103,12 +108,18 @@ internal fun ColumnScope.CertificateSettingsSection(viewModel: StatsViewModel, c
                 }
                 Switch(
                     checked = pinDeny,
+                    enabled = !certificateActionBusy,
                     onCheckedChange = { v ->
-                        pinDeny = v
-                        org.adaway.util.WebServerUtils.setPinPolicyMode(
-                            context,
-                            if (v) "deny" else "off",
-                        )
+                        val app = context.applicationContext
+                        viewModel.certificateAction.run(action = {
+                            withContext(Dispatchers.IO) {
+                                org.adaway.util.WebServerUtils.setPinPolicyMode(app, if (v) "deny" else "off")
+                            }
+                        }, onResult = { saved ->
+                            if (saved) pinDeny = v
+                            Toast.makeText(app, if (saved) R.string.pin_policy_saved else R.string.pin_policy_save_failed,
+                                Toast.LENGTH_LONG).show()
+                        })
                     },
                 )
             }

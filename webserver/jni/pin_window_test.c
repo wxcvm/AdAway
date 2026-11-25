@@ -58,6 +58,17 @@ int main(void) {
     expect_u64("until = now + ms", pin_bypass_until(1000u, 600000u), 601000u);
     expect_u64("ms=0 时 until = now", pin_bypass_until(1234u, 0u), 1234u);
 
+    struct pin_bypass_entry table[2] = {0};
+    int used = 0;
+    expect_bool("record first", pin_bypass_record(table, &used, 2, 1, 100, 200), true);
+    expect_bool("record second", pin_bypass_record(table, &used, 2, 2, 100, 300), true);
+    expect_bool("full active table", pin_bypass_record(table, &used, 2, 3, 199, 400), false);
+    expect_bool("reuse expired slot", pin_bypass_record(table, &used, 2, 3, 200, 400), true);
+    expect_bool("renew same uid", pin_bypass_record(table, &used, 2, 3, 400, 500), true);
+    expect_u32("bounded slot count", (unsigned int)used, 2u);
+    expect_bool("expired uid gone", pin_bypass_hit(table, used, 1, 201), false);
+    expect_bool("renewed uid active", pin_bypass_hit(table, used, 3, 499), true);
+
     printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

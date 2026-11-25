@@ -537,11 +537,22 @@ public class WebServerUtils {
      * @param context The application context.
      * @param mode    {@code "off"} or {@code "deny"}.
      */
-    public static void setPinPolicyMode(Context context, String mode) {
+    public static synchronized boolean setPinPolicyMode(Context context, String mode) {
         String value = "deny".equals(mode) ? "deny" : "off";
-        context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
-                .edit().putString(PIN_POLICY_MODE, value).apply();
-        syncPinPolicyFile(context);
+        try {
+            writePinPolicyFile(context, value);
+            context.getSharedPreferences(PREFS_WS, Context.MODE_PRIVATE)
+                    .edit().putString(PIN_POLICY_MODE, value).apply();
+            return true;
+        } catch (IOException exception) {
+            Timber.w(exception, "Failed to publish pin policy");
+            return false;
+        }
+    }
+
+    private static void writePinPolicyFile(Context context, String mode) throws IOException {
+        File file = getResourcePath(context).resolve("pin_policy.txt").toFile();
+        org.adaway.model.source.AtomicRuleFile.write(file, writer -> writer.write("mode=" + mode + "\n"));
     }
 
     /**
@@ -549,18 +560,11 @@ public class WebServerUtils {
      *
      * @param context The application context.
      */
-    public static void syncPinPolicyFile(Context context) {
+    public static synchronized void syncPinPolicyFile(Context context) {
         try {
-            java.io.File dir = getResourcePath(context).toFile();
-            if (!dir.exists()) {
-                dir.mkdirs();
-            }
-            try (java.io.FileWriter writer = new java.io.FileWriter(
-                    new java.io.File(dir, "pin_policy.txt"), false)) {
-                writer.write("mode=" + getPinPolicyMode(context) + "\n");
-            }
-        } catch (Throwable throwable) {
-            Timber.w(throwable, "Failed to write pin_policy.txt");
+            writePinPolicyFile(context, getPinPolicyMode(context));
+        } catch (IOException exception) {
+            Timber.w(exception, "Failed to write pin_policy.txt");
         }
     }
 
