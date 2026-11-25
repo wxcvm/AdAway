@@ -133,6 +133,8 @@
     <string name="compose_settings_app_allow_hint">已请求本地豁免；外部过滤仍独立。</string>
     <string name="compose_settings_app_allow_undone">已请求撤销本地豁免。</string>
     <string name="settings_update_save_failed">未能确认更新设置操作，请重新检查设置。</string>
+    <string name="app_exemption_saved">本地豁免已保存，尚未验证服务端重载；外部 DNS 和 AdGuard 规则不变。</string>
+    <string name="app_exemption_save_failed">本地豁免保存失败，或此 UID 不可修改。</string>
     <string name="compose_settings_app_monitor">活跃列表显示</string>
     <string name="compose_settings_app_sub">%1$d 连接 · %2$d 请求 · %3$d 拦截</string>
     <string name="compose_settings_charts_title">统计图表</string>
