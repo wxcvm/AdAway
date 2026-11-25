@@ -70,17 +70,9 @@ internal fun ColumnScope.WebServerSettingsSection() {
                     onCheckedChange = { v ->
                         lightMode = v
                         setLightMode(context, v)
-                        // Apply the cadence change immediately: light mode
-                        // switches the recovery check between 6 h and the
-                        // 5 min / 15 min pair.
-                        org.adaway.broadcast.ServerWatchdogWorker.ensureScheduled(context)
-                        if (!v) {
-                            // Leaving light mode: make sure it is running.
-                            // startWebServer 会走 root shell，放到后台线程执行。
-                            Thread {
-                                org.adaway.util.WebServerUtils.startWebServer(context)
-                            }.start()
-                        }
+                        // Let the watchdog respect the configured server-enabled
+                        // state instead of unconditionally starting the server.
+                        org.adaway.broadcast.ServerWatchdogWorker.scheduleImmediateCheck(context)
                     },
                 )
             }

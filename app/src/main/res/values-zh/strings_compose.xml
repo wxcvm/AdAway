@@ -218,8 +218,8 @@
     <string name="compose_settings_cert_trust_ok">CA 已写入系统信任库</string>
     <string name="compose_settings_cert_trust_fail">安装失败：未写入系统信任库，请改用手动安装</string>
     <string name="compose_settings_cert_install_manual">手动安装</string>
-    <string name="compose_settings_light_mode">轻量模式（省内存）</string>
-    <string name="compose_settings_light_mode_hint">占用最低：开机拉起服务器后，应用会在退到后台时退出进程（服务器作为独立原生进程继续运行，拦截不受影响），自愈检查从每 5 分钟降为每 6 小时一次。开启常驻通知时本项被忽略；劫持模式始终保留高频检查。</string>
+    <string name="compose_settings_light_mode">低功耗后台模式</string>
+    <string name="compose_settings_light_mode_hint">开机启动成功后，后台应用进程可退出，原生服务器继续运行。自愈检查由约 5 分钟（15 分钟兜底）调整为 6 小时；系统可能延迟执行。常驻守护和劫持模式保留高频检查，常驻守护同时阻止进程退出。不改变原生拦截或响应策略。</string>
     <string name="pin_policy_saved">策略已保存，服务端将在后续相关请求时读取，尚未确认运行状态。</string>
     <string name="pin_policy_save_failed">策略保存失败，保留原设置。</string>
     <string name="compose_settings_pin_policy">TLS 反复失败：快速拒绝 CONNECT</string>

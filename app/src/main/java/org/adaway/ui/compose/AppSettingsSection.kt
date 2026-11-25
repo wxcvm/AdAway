@@ -360,6 +360,7 @@ internal fun ColumnScope.AppSettingsSection(viewModel: StatsViewModel, refreshKe
                         } else {
                             org.adaway.broadcast.ServerKeepAliveService.stop(context)
                         }
+                        org.adaway.broadcast.ServerWatchdogWorker.scheduleImmediateCheck(context)
                     },
                 )
             }
